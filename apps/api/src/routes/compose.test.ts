@@ -256,3 +256,93 @@ test('автосохранение нового письма с ключом о�
     await app.close();
   }
 });
+
+/**
+ * Черновик обязан сохраняться с недописанным адресом.
+ *
+ * Найдено в настоящей работе: человек набирает «ирин», срабатывает
+ * автосохранение — и сервер отвечает «Некорректные данные запроса». То есть
+ * черновик не сохранялся почти всё время, пока письмо пишется. Схема запроса
+ * требовала правильный адрес там, где по смыслу его ещё нет: черновик — это
+ * ровно то, что имеет право быть недописанным.
+ *
+ * Хуже того, окно написания на эту ошибку отказывалось закрываться, а до
+ * исправления крестика — молча уничтожало письмо.
+ */
+test('черновик сохраняется с недописанным адресом получателя', async () => {
+  const client = new FakeClient();
+  const app = await buildTestApp(client, testConfig());
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/drafts',
+      payload: {
+        to: [{ name: null, address: 'ирин' }],
+        cc: [{ name: null, address: 'ivan@' }],
+        bcc: [],
+        subject: 'Ещё пишу',
+        bodyHtml: '<p>черновик</p>',
+        attachmentIds: [],
+      },
+    });
+    assert.equal(res.statusCode, 200, `тело ответа: ${res.body.slice(0, 200)}`);
+    assert.equal(res.json().ok, true);
+    assert.equal(client.drafts.size, 1);
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * А отправить на такой адрес нельзя — и отказ должен НАЗЫВАТЬ адрес и поле.
+ * Прежний общий текст «Некорректные данные запроса» не говорил ни что не так,
+ * ни где именно.
+ */
+test('отправка на недописанный адрес отвергается с указанием адреса и поля', async () => {
+  const client = new FakeClient();
+  const app = await buildTestApp(client, testConfig());
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: {
+        to: [{ name: null, address: 'ирин' }],
+        cc: [],
+        bcc: [],
+        subject: 'Тема',
+        bodyHtml: '<p>текст</p>',
+        attachmentIds: [],
+      },
+    });
+    assert.equal(res.statusCode, 400);
+    const body = res.json() as { error: string; message: string };
+    assert.equal(body.error, 'BAD_REQUEST');
+    assert.match(body.message, /ирин/, 'в тексте должен быть сам адрес');
+    assert.match(body.message, /Кому/, 'и поле, в котором он стоит');
+  } finally {
+    await app.close();
+  }
+});
+
+test('неверный адрес в копии называет именно поле «Копия»', async () => {
+  const client = new FakeClient();
+  const app = await buildTestApp(client, testConfig());
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: {
+        to: [{ name: null, address: 'ok@mail.local' }],
+        cc: [{ name: null, address: 'petya' }],
+        bcc: [],
+        subject: 'Тема',
+        bodyHtml: '<p>текст</p>',
+        attachmentIds: [],
+      },
+    });
+    assert.equal(res.statusCode, 400);
+    assert.match((res.json() as { message: string }).message, /Копия/);
+  } finally {
+    await app.close();
+  }
+});

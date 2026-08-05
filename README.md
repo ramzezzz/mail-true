@@ -39,6 +39,9 @@ bash infra/test-fts-quota.sh   # поиск и квоты         39 из 39
 bash infra/test-antispam.sh    # антиспам              39 из 39
 bash infra/test-spam-rule.sh   # правила и антиспам     5 из 5
 bash infra/test-sieve-forward.sh  # пересылка правилом  6 из 6
+bash infra/test-sieve-compiles.sh # личный файл правил собирается  10 из 10
+bash infra/test-failure-visible.sh # отказ части системы виден     22 из 22
+bash infra/test-queue-survives.sh # письмо переживает отказ Dovecot
 node infra/test-long-folder.mjs   # длинные имена папок 14 из 14
 node infra/test-list-freshness.mjs  # свежесть списка писем
 ```

@@ -239,7 +239,20 @@ export class SieveStore {
     }
     await rm(tmpSieve, { force: true });
     await rm(tmpBin, { force: true });
-    return { activePath, compiled: !compilerMissing, compilerOutput: res.stderr.trim() };
+    if (compilerMissing) {
+      // Честный ответ вместо «spawn sievec ENOENT»: правила записаны, но
+      // проверить их этим окружением нечем. Разница важна — «не проверили»
+      // и «в скрипте ошибка» лечатся по-разному.
+      return {
+        activePath,
+        compiled: false,
+        compilerOutput:
+          'Правила записаны, но проверить их не удалось: рядом нет компилятора Sieve (sievec). ' +
+          'Скрипт соберёт сам Dovecot при первой доставке; ошибка в нём будет видна ' +
+          'только в .dovecot.sieve.log внутри ящика',
+      };
+    }
+    return { activePath, compiled: true, compilerOutput: res.stderr.trim() };
   }
 
   /** Читает действующий скрипт (для показа «что лежит в ящике»). */

@@ -28,9 +28,22 @@ import type { MailSession } from '../types.js';
 import type { UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
 
-const addressSchema = z.object({
+/**
+ * Адрес в письме, которое ЕЩЁ ПИШУТ.
+ *
+ * Проверки на правильность адреса здесь намеренно нет. Черновик — это ровно
+ * то, что имеет право быть недописанным: человек набирает «ирин», в этот
+ * момент срабатывает автосохранение, и сервер отвечал «Некорректные данные
+ * запроса». То есть черновик не сохранялся почти всё время, пока письмо
+ * пишется, — а окно написания при этом показывало ошибку и отказывалось
+ * закрываться.
+ *
+ * Правильность адреса проверяется при ОТПРАВКЕ, и там об этом говорится
+ * человеческим языком, с указанием самого адреса.
+ */
+const draftAddressSchema = z.object({
   name: z.string().max(200).nullable(),
-  address: z.string().trim().email().max(320),
+  address: z.string().trim().max(320),
 });
 
 /** Схема DraftPayload из packages/shared. */
@@ -42,9 +55,9 @@ const draftPayloadSchema = z.object({
    * сохранений относятся к одному письму, а не к разным.
    */
   draftKey: z.string().min(1).max(100).optional(),
-  to: z.array(addressSchema).max(100),
-  cc: z.array(addressSchema).max(100),
-  bcc: z.array(addressSchema).max(100),
+  to: z.array(draftAddressSchema).max(100),
+  cc: z.array(draftAddressSchema).max(100),
+  bcc: z.array(draftAddressSchema).max(100),
   subject: z.string().max(1000),
   bodyHtml: z.string().max(10 * 1024 * 1024),
   attachmentIds: z.array(z.string().min(1).max(100)).max(50),
@@ -102,6 +115,42 @@ async function composeRaw(
 
 function allRecipients(payload: DraftBody): string[] {
   return [...payload.to, ...payload.cc, ...payload.bcc].map((a) => a.address);
+}
+
+/**
+ * Простая проверка адреса: есть ли собака, что-то до неё, точка после неё.
+ *
+ * Нарочно не строгая по RFC — задача не отсеять экзотику, а поймать
+ * недописанное («ирин», «ivan@») и явную опечатку. Всё остальное отвергнет
+ * почтовый сервер получателя, и об этом мы сообщим отдельно.
+ */
+function looksLikeAddress(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(value);
+}
+
+/**
+ * Отправлять можно только на адреса, похожие на адреса.
+ *
+ * Раньше это делала схема запроса, и человек получал «Некорректные данные
+ * запроса» — из чего непонятно ни что не так, ни в каком поле. Теперь в
+ * сообщении назван сам адрес, а поля перечислены по-русски.
+ */
+function checkSendableAddresses(payload: DraftBody): void {
+  const fields: Array<[string, MailAddress[]]> = [
+    ['«Кому»', payload.to],
+    ['«Копия»', payload.cc],
+    ['«Скрытая копия»', payload.bcc],
+  ];
+  for (const [label, list] of fields) {
+    for (const item of list) {
+      if (looksLikeAddress(item.address)) continue;
+      const shown = item.address.trim() === '' ? '(пусто)' : item.address;
+      throw new BadRequestError(
+        `В поле ${label} это не похоже на адрес почты: «${shown}». ` +
+          'Адрес выглядит так: имя@домен.ру',
+      );
+    }
+  }
 }
 
 function megabytes(bytes: number): string {
@@ -196,6 +245,10 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     if (payload.to.length === 0 && payload.cc.length === 0 && payload.bcc.length === 0) {
       throw new BadRequestError('Не указан ни один получатель');
     }
+    // Правильность адресов проверяется здесь, а не схемой запроса: схема
+    // отвечает общим «Некорректные данные запроса», из которого человеку
+    // непонятно ни что не так, ни где. Здесь можно назвать сам адрес.
+    checkSendableAddresses(payload);
 
     const raw = await composeRaw(payload, session.email, uploads);
 
