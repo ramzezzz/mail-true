@@ -4,7 +4,11 @@
 protocols = imap pop3 lmtp
 listen = *
 
-log_path = /dev/stdout
+# Журнал — в файл общего тома; в stdout контейнера его переливает tail
+# (см. entrypoint.sh), поэтому `docker compose logs dovecot` работает
+# по-прежнему. Файл нужен админке: сокета Docker у сервера приложения нет,
+# а раздел «Журналы» обязан показывать и доставку, и ошибки IMAP.
+log_path = /var/log/mail/dovecot.log
 auth_verbose = yes
 mail_debug = no
 

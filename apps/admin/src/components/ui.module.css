@@ -150,6 +150,11 @@
   border: 1px solid var(--mt-admin-border);
   border-radius: var(--mt-admin-radius);
   padding: 12px;
+  transition: border-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.tile:hover {
+  border-color: var(--mt-color-text-secondary);
 }
 
 .tileValue {

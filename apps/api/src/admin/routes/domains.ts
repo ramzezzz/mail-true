@@ -211,11 +211,21 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       const row = await ctx.db.findDomainById(id);
       if (!row) throw new NotFoundError('Домен не найден');
 
+      // Спрашиваем ВНЕШНИЕ резольверы, а не свой unbound: вопрос стоит
+      // «видит ли наши записи остальной интернет», а свой резольвер
+      // показал бы то, что мы сами себе прописали. См. admin/dns.ts.
+      const servers = ctx.config.DNS_CHECK_RESOLVERS.split(',')
+        .map((s) => s.trim())
+        .filter((s) => s !== '');
       const report = await checkDomainDns(row.name, {
         mailHostname: host,
         publicIpv4: ctx.config.MAIL_PUBLIC_IPV4,
         dkimSelector: row.dkim_selector ?? 'mail',
         dkimPublicKey: row.dkim_public_key,
+        imapsPort: ctx.config.IMAPS_PORT,
+        submissionPort: ctx.config.SUBMISSION_PORT,
+        pop3sPort: ctx.config.POP3S_PORT,
+        servers: servers.length > 0 ? servers : undefined,
       });
       await ctx.db.saveDnsStatus(id, report, report.overall);
       await audit(ctx, request, {

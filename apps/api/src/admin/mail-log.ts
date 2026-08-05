@@ -1,0 +1,447 @@
+/**
+ * Разбор журналов почтового стека.
+ *
+ * Источники и их вид:
+ *
+ *   postfix  — postlogd, syslog-подобная строка:
+ *     `Aug  5 20:30:01 mail postfix/lmtp[42]: 4c2w: to=<a@b>, ... status=sent (…)`
+ *   dovecot  — свой формат с явной пометкой важности:
+ *     `Aug 05 20:30:01 lmtp(a@b)<42><sid>: Error: …`
+ *   api      — pino, по объекту JSON на строку:
+ *     `{"level":50,"time":1712345678901,"msg":"…"}`
+ *
+ * Здесь только чистые функции над строками: ни файлов, ни сети, ни базы.
+ * Ровно поэтому разбор проверяется без стенда, а стенд нужен только чтобы
+ * убедиться, что строки именно такие.
+ *
+ * ВАЖНО про год. В syslog-строке года нет — это свойство формата, а не
+ * недосмотр. Год берётся от «сейчас», и если получившаяся дата оказалась
+ * заметно в будущем, значит строка от прошлого года (31 декабря → 1 января).
+ * Без этой поправки вся история за новогоднюю ночь уезжала бы на год вперёд
+ * и не показывалась бы никогда.
+ */
+
+/** Уровень важности — общий для всех источников, четыре ступени. */
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug';
+
+/** Какой службы журнал. */
+export type LogSource = 'postfix' | 'dovecot' | 'api';
+
+export const LOG_LEVELS: readonly LogLevel[] = ['error', 'warn', 'info', 'debug'];
+export const LOG_SOURCES: readonly LogSource[] = ['postfix', 'dovecot', 'api'];
+
+/** Порядок ступеней: выбранный уровень показывает себя и всё, что важнее. */
+const LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+};
+
+/** Входит ли уровень строки в выбранный порог («предупреждения и хуже»). */
+export function levelAtLeast(level: LogLevel, threshold: LogLevel): boolean {
+  return LEVEL_ORDER[level] <= LEVEL_ORDER[threshold];
+}
+
+export function isLogLevel(value: unknown): value is LogLevel {
+  return typeof value === 'string' && (LOG_LEVELS as readonly string[]).includes(value);
+}
+
+export function isLogSource(value: unknown): value is LogSource {
+  return typeof value === 'string' && (LOG_SOURCES as readonly string[]).includes(value);
+}
+
+/** Разобранная строка журнала. */
+export interface LogEntry {
+  source: LogSource;
+  level: LogLevel;
+  /** Время события; null — в строке его не было (продолжение стека и т.п.). */
+  at: Date | null;
+  /** Кто сказал: smtpd, lmtp, imap, qmgr… Пусто, если не определилось. */
+  component: string;
+  /** Идентификатор письма в очереди, если строка про конкретное письмо. */
+  queueId: string | null;
+  /** Текст без служебной шапки — то, что человек читает. */
+  text: string;
+}
+
+const MONTHS: Readonly<Record<string, number>> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+};
+
+/**
+ * Время из syslog-подобной метки («Aug  5 20:30:01», «Aug 05 20:30:01»).
+ * Год подставляется от `now` с поправкой на переход через новый год.
+ *
+ * Пояса в метке тоже нет. Считаем её временем ТОГО ЖЕ пояса, в котором
+ * живёт сервер приложения: и он, и Postfix — контейнеры одного стека, у
+ * обоих пояс по умолчанию UTC, и разъехаться они могут только если кто-то
+ * задаст TZ одному из них. Никакой догадки лучше здесь не существует:
+ * в строке журнала данных о поясе просто нет.
+ */
+export function parseSyslogTime(month: string, day: string, time: string, now: Date): Date | null {
+  const m = MONTHS[month.slice(0, 3).toLowerCase()];
+  if (m === undefined) return null;
+  const [hh, mm, ss] = time.split(':').map((part) => Number(part));
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
+  const at = new Date(now.getFullYear(), m, Number(day), hh, mm, ss);
+  // Дата «в будущем» больше чем на сутки — это прошлый год. Сутки запаса,
+  // а не ноль: часы контейнера и часы машины расходятся на секунды, и без
+  // запаса свежая запись иногда объявлялась бы прошлогодней.
+  if (at.getTime() - now.getTime() > 24 * 3600 * 1000) {
+    at.setFullYear(at.getFullYear() - 1);
+  }
+  return at;
+}
+
+/* ------------------------------------------------------------------ */
+/* Postfix                                                              */
+/* ------------------------------------------------------------------ */
+
+// Aug  5 20:30:01 mail postfix/lmtp[42]: текст
+//
+// Служба бывает составной: `postfix/submission/smtpd` — это smtpd, поднятый
+// на порту 587. Косая черта в имени поэтому разрешена: без неё разбор
+// спотыкался ровно на подаче почты от пользователей, то есть на самом
+// частом на этом сервере событии.
+const POSTFIX_LINE =
+  /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})\s+(\S+)\s+(?:postfix\/)?([\w./-]+?)(?:\[(\d+)\])?:\s?([\s\S]*)$/;
+
+/** Идентификатор письма в начале текста: `4c2wKp1Vt2z: to=<…>`. */
+const QUEUE_ID_PREFIX = /^([A-Za-z0-9]{5,32}):\s/;
+
+/**
+ * Важность строки Postfix.
+ *
+ * У Postfix нет поля уровня — важность приходится выводить из текста, и
+ * это сознательное решение о том, что человек считает бедой:
+ *
+ *   * `status=bounced` / `expired` — письмо НЕ дойдёт никогда. Ошибка.
+ *   * `status=deferred` — письмо ещё дойдёт, но что-то не так. Предупреждение.
+ *   * `reject` на приёме — чужое письмо не приняли. Тоже предупреждение:
+ *     на живом сервере это ежеминутная норма (спам), и красить её в ошибку
+ *     значит утопить настоящие ошибки.
+ *   * `fatal`, `panic` — сломался сам сервер. Ошибка.
+ */
+export function postfixLevel(text: string): LogLevel {
+  const lower = text.toLowerCase();
+  if (/\b(fatal|panic):/.test(lower)) return 'error';
+  if (/\bstatus=(bounced|expired)\b/.test(lower)) return 'error';
+  if (/\berror:/.test(lower)) return 'error';
+  if (/\bstatus=deferred\b/.test(lower)) return 'warn';
+  if (/\bwarning:/.test(lower)) return 'warn';
+  if (/\b(reject|refused|denied|timeout|lost connection|too many errors)\b/.test(lower)) {
+    return 'warn';
+  }
+  return 'info';
+}
+
+/* ------------------------------------------------------------------ */
+/* Dovecot                                                              */
+/* ------------------------------------------------------------------ */
+
+// Aug 05 20:30:01 lmtp(a@b)<42><sid>: Error: текст
+const DOVECOT_LINE =
+  /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})\s+([^:]*?):\s*(?:(Fatal|Panic|Error|Warning|Info|Debug):\s*)?([\s\S]*)$/;
+
+const DOVECOT_LEVELS: Readonly<Record<string, LogLevel>> = {
+  fatal: 'error',
+  panic: 'error',
+  error: 'error',
+  warning: 'warn',
+  info: 'info',
+  debug: 'debug',
+};
+
+/* ------------------------------------------------------------------ */
+/* Сервер приложения (pino)                                             */
+/* ------------------------------------------------------------------ */
+
+/** Числовые уровни pino сводим к четырём ступеням. */
+export function pinoLevel(level: number): LogLevel {
+  if (level >= 50) return 'error';
+  if (level >= 40) return 'warn';
+  if (level >= 30) return 'info';
+  return 'debug';
+}
+
+/* ------------------------------------------------------------------ */
+/* Общий разбор                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Разбирает одну строку журнала.
+ *
+ * Не разобранная строка НЕ выбрасывается: она отдаётся как есть с уровнем
+ * info. Молча терять строки в журнале нельзя — именно непонятная строка
+ * чаще всего и оказывается той, ради которой журнал открыли.
+ */
+export function parseLogLine(source: LogSource, line: string, now: Date = new Date()): LogEntry {
+  if (source === 'api') return parseApiLine(line, now);
+  if (source === 'dovecot') return parseDovecotLine(line, now);
+  return parsePostfixLine(line, now);
+}
+
+function parsePostfixLine(line: string, now: Date): LogEntry {
+  const m = POSTFIX_LINE.exec(line);
+  if (!m) {
+    return { source: 'postfix', level: 'info', at: null, component: '', queueId: null, text: line };
+  }
+  const [, month, day, time, , component, , rest] = m;
+  const queue = QUEUE_ID_PREFIX.exec(rest);
+  return {
+    source: 'postfix',
+    level: postfixLevel(rest),
+    at: parseSyslogTime(month!, day!, time!, now),
+    component: component ?? '',
+    queueId: queue ? queue[1]! : null,
+    text: rest ?? '',
+  };
+}
+
+function parseDovecotLine(line: string, now: Date): LogEntry {
+  const m = DOVECOT_LINE.exec(line);
+  if (!m) {
+    return { source: 'dovecot', level: 'info', at: null, component: '', queueId: null, text: line };
+  }
+  const [, month, day, time, who, marker, rest] = m;
+  const level = marker ? (DOVECOT_LEVELS[marker.toLowerCase()] ?? 'info') : 'info';
+  // «lmtp(user@dom)<pid><sid>» → «lmtp»: в колонке нужен вид службы,
+  // а кто и в какой сессии — уже в тексте.
+  const component = (who ?? '').replace(/[(<].*$/, '').trim();
+  return {
+    source: 'dovecot',
+    level,
+    at: parseSyslogTime(month!, day!, time!, now),
+    component,
+    queueId: null,
+    text: who && !marker ? `${who}: ${rest}` : `${who ? `${who}: ` : ''}${rest ?? ''}`,
+  };
+}
+
+function parseApiLine(line: string, now: Date): LogEntry {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('{')) {
+    return { source: 'api', level: 'info', at: null, component: '', queueId: null, text: line };
+  }
+  try {
+    const obj = JSON.parse(trimmed) as Record<string, unknown>;
+    const level = typeof obj.level === 'number' ? pinoLevel(obj.level) : 'info';
+    const at = typeof obj.time === 'number' ? new Date(obj.time) : null;
+    const msg = typeof obj.msg === 'string' ? obj.msg : '';
+    // Остальные поля записи — это и есть подробности (err, url, ящик),
+    // ради которых в журнал и смотрят. Складываем их в хвост строки,
+    // выкидывая служебные, одинаковые у каждой записи.
+    const extras = Object.entries(obj)
+      .filter(([key]) => !['level', 'time', 'pid', 'hostname', 'msg'].includes(key))
+      .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
+      .join(' ');
+    return {
+      source: 'api',
+      level,
+      at,
+      component: typeof obj.component === 'string' ? obj.component : 'api',
+      queueId: null,
+      text: extras ? `${msg} ${extras}` : msg,
+    };
+  } catch {
+    return { source: 'api', level: 'info', at: now, component: '', queueId: null, text: line };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* События доставки (история обработанных писем)                        */
+/* ------------------------------------------------------------------ */
+
+export type FlowStatus = 'sent' | 'deferred' | 'bounced' | 'expired' | 'rejected' | 'held';
+export type FlowDirection = 'in' | 'out' | 'unknown';
+
+/** Одна попытка доставки одному адресату — строка истории. */
+export interface FlowEvent {
+  occurredAt: Date;
+  queueId: string | null;
+  direction: FlowDirection;
+  status: FlowStatus;
+  sender: string | null;
+  recipient: string | null;
+  relay: string | null;
+  delaySeconds: number | null;
+  sizeBytes: number | null;
+  dsn: string | null;
+  reason: string | null;
+  component: string;
+}
+
+/** То, что известно о письме из строки `from=…, size=…` до попыток доставки. */
+export interface QueueMeta {
+  sender: string | null;
+  sizeBytes: number | null;
+}
+
+const STATUS_MAP: Readonly<Record<string, FlowStatus>> = {
+  sent: 'sent',
+  deferred: 'deferred',
+  bounced: 'bounced',
+  expired: 'expired',
+  'undeliverable': 'bounced',
+};
+
+/** Достаёт значение поля `key=…` из хвоста строки Postfix. */
+function field(text: string, key: string): string | null {
+  const m = new RegExp(`(?:^|[\\s,])${key}=([^,]*)`).exec(text);
+  if (!m) return null;
+  return m[1]!.trim() || null;
+}
+
+/** Снимает угловые скобки с адреса и приводит к нижнему регистру. */
+function address(raw: string | null): string | null {
+  if (raw === null) return null;
+  const clean = raw.replace(/^<|>$/g, '').trim();
+  if (clean === '' ) return null;
+  return clean.toLowerCase();
+}
+
+/**
+ * Направление письма.
+ *
+ * Определяется транспортом, а не адресом: адрес врёт (алиас, пересылка,
+ * ящик на чужом домене), транспорт — нет. lmtp — это доставка в наши
+ * ящики через Dovecot, smtp — отправка наружу. Всё прочее честно
+ * называется неизвестным, а не угадывается.
+ */
+export function directionOf(component: string, relay: string | null): FlowDirection {
+  // У составных имён («submission/smtpd») значение несёт последняя часть.
+  const service = component.split('/').pop() ?? component;
+  if (service === 'lmtp' || service === 'virtual' || service === 'local') return 'in';
+  if (service === 'smtp' || service === 'relay') return 'out';
+  if (relay && /:24\b/.test(relay)) return 'in';
+  return 'unknown';
+}
+
+/**
+ * Достаёт событие доставки из разобранной строки Postfix.
+ *
+ * `meta` — то, что запомнено по этому письму из более ранней строки
+ * `from=…, size=…`: в строке о доставке отправителя нет, а показать его
+ * надо. Если письмо пришло в разбор без начала (журнал провернулся ровно
+ * между строками), отправитель останется пустым — это честнее, чем
+ * подставить чужого.
+ */
+export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowEvent | null {
+  if (entry.source !== 'postfix' || entry.at === null) return null;
+  const text = entry.text;
+
+  // Отказ на приёме: очереди у такого письма нет вовсе.
+  if (/^NOQUEUE:\s*reject:/.test(text) || /\breject:\s/.test(text)) {
+    const to = address(field(text, 'to'));
+    const from = address(field(text, 'from'));
+    if (to === null && from === null) return null;
+    const reasonMatch = /reject:\s*(.*?)(?:;\s*from=|$)/.exec(text);
+    return {
+      occurredAt: entry.at,
+      queueId: entry.queueId,
+      direction: 'in',
+      status: 'rejected',
+      sender: from,
+      recipient: to,
+      relay: null,
+      delaySeconds: null,
+      sizeBytes: null,
+      dsn: /\b([45]\.\d\.\d)\b/.exec(text)?.[1] ?? null,
+      reason: reasonMatch?.[1]?.trim().slice(0, 500) ?? text.slice(0, 500),
+      component: entry.component,
+    };
+  }
+
+  const status = field(text, 'status');
+  const to = field(text, 'to');
+  if (status === null || to === null) return null;
+  const statusWord = status.split(/\s+/)[0]!.toLowerCase();
+  const mapped = STATUS_MAP[statusWord];
+  if (!mapped) return null;
+
+  const relay = field(text, 'relay');
+  const delayRaw = field(text, 'delay');
+  const delay = delayRaw === null ? null : Number(delayRaw);
+  // Текст в скобках в самом конце — это ответ принимающей стороны,
+  // ровно то, что человек ищет, когда спрашивает «почему не дошло».
+  const reason = /\(([\s\S]*)\)\s*$/.exec(text)?.[1] ?? null;
+
+  return {
+    occurredAt: entry.at,
+    queueId: entry.queueId,
+    direction: directionOf(entry.component, relay),
+    status: mapped,
+    sender: meta?.sender ?? null,
+    recipient: address(to),
+    relay,
+    delaySeconds: delay !== null && Number.isFinite(delay) ? delay : null,
+    sizeBytes: meta?.sizeBytes ?? null,
+    dsn: field(text, 'dsn'),
+    reason: reason === null ? null : reason.slice(0, 500),
+    component: entry.component,
+  };
+}
+
+/**
+ * Достаёт из строки сведения о письме, которые дальше пригодятся его
+ * попыткам доставки: `4c2w: from=<a@b>, size=1234, nrcpt=1 (queue active)`.
+ */
+export function toQueueMeta(entry: LogEntry): QueueMeta | null {
+  if (entry.source !== 'postfix' || entry.queueId === null) return null;
+  const from = field(entry.text, 'from');
+  if (from === null) return null;
+  const size = field(entry.text, 'size');
+  const sizeNumber = size === null ? null : Number(size);
+  return {
+    sender: address(from),
+    sizeBytes: sizeNumber !== null && Number.isFinite(sizeNumber) ? sizeNumber : null,
+  };
+}
+
+/** Строка `4c2w: removed` — письмо ушло из очереди, помнить о нём больше нечего. */
+export function isQueueRemoval(entry: LogEntry): boolean {
+  return entry.source === 'postfix' && entry.queueId !== null && /:\s*removed\s*$/.test(entry.text);
+}
+
+/**
+ * Ограниченная память об отправителях писем, ещё лежащих в очереди.
+ *
+ * Почему с пределом. Строка `from=` приходит раз, строк `to=` бывает
+ * много и позже — между ними письмо может пролежать в очереди сутки.
+ * Помнить всё без предела нельзя: на сервере с рассылками эта память
+ * росла бы вместе с очередью и однажды съела бы кучу процесса. Предел
+ * вытесняет самое старое; худшее следствие — у очень старого письма
+ * не покажется отправитель.
+ */
+export class QueueMetaCache {
+  private readonly items = new Map<string, QueueMeta>();
+
+  constructor(private readonly limit = 20_000) {}
+
+  set(queueId: string, meta: QueueMeta): void {
+    // Перевставка двигает запись в конец: так вытесняется именно
+    // давно не встречавшееся, а не давно заведённое.
+    this.items.delete(queueId);
+    this.items.set(queueId, meta);
+    while (this.items.size > this.limit) {
+      const oldest = this.items.keys().next();
+      if (oldest.done) break;
+      this.items.delete(oldest.value);
+    }
+  }
+
+  get(queueId: string | null): QueueMeta | undefined {
+    if (queueId === null) return undefined;
+    return this.items.get(queueId);
+  }
+
+  delete(queueId: string): void {
+    this.items.delete(queueId);
+  }
+
+  get size(): number {
+    return this.items.size;
+  }
+}

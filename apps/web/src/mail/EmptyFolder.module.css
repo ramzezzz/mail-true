@@ -1,0 +1,85 @@
+/*
+ * Экран пустой папки. Занимает всё свободное место страницы и центрирует
+ * содержимое по обеим осям — раньше строка «В этой папке пока пусто» висела
+ * у верхнего края контейнера высотой 838px.
+ */
+
+.root {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 24px;
+  text-align: center;
+  animation: emptyShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+@keyframes emptyShow {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.art {
+  display: block;
+  margin-bottom: 16px;
+}
+
+/* Лист письма — фон карточки с тонкой рамкой */
+.artSheet {
+  fill: var(--mt-color-background-content);
+  stroke: var(--mt-color-separator-primary);
+  stroke-width: 2;
+}
+
+.artLines {
+  stroke: var(--mt-color-separator-primary);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+/* Корпус конверта — акцент темы, приглушённый */
+.artBody {
+  fill: var(--mt-color-background-accent-tint-alpha, var(--mt-color-background-secondary));
+  stroke: var(--mt-color-icon-tertiary);
+  stroke-width: 2;
+}
+
+.artFold {
+  stroke: var(--mt-color-icon-tertiary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--mt-font-h2-size, 20px);
+  line-height: var(--mt-font-h2-line-height, 26px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-color-text-primary);
+}
+
+.hint {
+  margin: 0;
+  max-width: 340px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  color: var(--mt-color-text-secondary);
+}
+
+@media (max-width: 600px) {
+  .art {
+    width: 120px;
+    height: 90px;
+  }
+}

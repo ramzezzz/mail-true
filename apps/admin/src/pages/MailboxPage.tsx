@@ -1,25 +1,28 @@
 /**
- * Вход администратора в ящик пользователя.
+ * Чтение ящика пользователя администратором.
  *
- * Причина указывается ДО входа, сеанс помечен плашкой, отправка писем
- * недоступна — в этом режиме API её просто не предоставляет.
+ * Входят сюда кнопкой «Войти в ящик» из списка ящиков — там адрес уже
+ * известен, и причина спрашивается прямо в строке списка. Отдельного
+ * пункта меню у страницы нет: искать нужный адрес заново не нужно.
+ *
+ * Сеанс помечен плашкой, отправка писем недоступна — в этом режиме API
+ * её просто не предоставляет.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Button } from '@web/components';
 import { api, ApiError } from '../api/client';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
-import { ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
+import { ErrorNotice, Notice, Panel } from '../components/ui';
 import { formatBytes, formatDateTime } from '../lib/format';
 import { folderTitle, isServiceFolder } from '../lib/folderNames';
 
 export function MailboxPage() {
   const { session } = useSession();
   const queryClient = useQueryClient();
-  const [email, setEmail] = useState('');
-  const [reason, setReason] = useState('');
   const [path, setPath] = useState('INBOX');
   const [openUid, setOpenUid] = useState<number | null>(null);
 
@@ -37,15 +40,6 @@ export function MailboxPage() {
   });
 
   const active = current.data ?? null;
-
-  const enter = useMutation({
-    mutationFn: () => api.mailboxEnter(email.trim().toLowerCase(), reason.trim()),
-    onSuccess: () => {
-      setPath('INBOX');
-      setOpenUid(null);
-      void queryClient.invalidateQueries({ queryKey: ['mailbox-session'] });
-    },
-  });
 
   const leave = useMutation({
     mutationFn: () => api.mailboxLeave(),
@@ -76,7 +70,7 @@ export function MailboxPage() {
   if (!session?.masterAccess) {
     return (
       <>
-        <PageTitle title="Вход в ящик" />
+        <PageTitle title="Ящик пользователя" />
         <Notice tone="error">
           Служебный доступ Dovecot не настроен, поэтому войти в чужой ящик нельзя.
           <br />
@@ -89,47 +83,22 @@ export function MailboxPage() {
     );
   }
 
+  // Сеанса нет — сюда попали по прямой ссылке или после выхода из ящика.
+  // Вход начинается в списке ящиков: там адрес уже известен.
   if (!active) {
     return (
       <>
-        <PageTitle
-          title="Вход в ящик"
-          subtitle="Открыть ящик пользователя, не зная его пароля. Причина обязательна и попадает в журнал."
-        />
-        <Panel title="Начать сеанс">
-          <ErrorNotice error={enter.error} />
-          <Field label="Адрес ящика">
-            <input
-              className="mt-input mt-mono"
-              placeholder="ivan@mail.local"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </Field>
-          <Field
-            label="Причина входа"
-            hint="Обязательное поле. Владелец ящика увидит эту запись в своей истории действий."
-          >
-            <input
-              className="mt-input"
-              placeholder="Обращение №1234: письмо не пришло, проверяем доставку"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </Field>
-          <Notice tone="info">
-            Отправлять письма от имени пользователя в этом режиме нельзя. Флаг «прочитано»
-            при просмотре не ставится — следов в ящике не остаётся.
-          </Notice>
-          <Toolbar>
-            <ToolbarSpacer />
-            <Button
-              disabled={email.trim() === '' || reason.trim().length < 5 || enter.isPending}
-              onClick={() => enter.mutate()}
-            >
-              {enter.isPending ? 'Входим…' : 'Войти в ящик'}
+        <PageTitle title="Ящик пользователя" />
+        <Notice tone="info">
+          Сейчас вы не в чужом ящике. Войти в него можно кнопкой «Войти в ящик» в строке
+          нужного ящика — в разделе «Пользователи».
+        </Notice>
+        <Panel>
+          <Link to="/users">
+            <Button mode="secondary" size="s">
+              К списку ящиков
             </Button>
-          </Toolbar>
+          </Link>
         </Panel>
       </>
     );
@@ -137,15 +106,15 @@ export function MailboxPage() {
 
   return (
     <>
-      <PageTitle title="Вход в ящик" />
+      <PageTitle title={`Ящик ${active.mailboxEmail}`} />
 
       <Notice tone="error">
         <strong>Вы вошли как администратор в ящик {active.mailboxEmail}.</strong>
         <br />
         Причина: {active.reason}. Начало сеанса: {formatDateTime(active.startedAt)}.
         Отправка писем запрещена.{' '}
-        <Button mode="secondary" size="s" onClick={() => leave.mutate()}>
-          Выйти из ящика
+        <Button mode="secondary" size="s" disabled={leave.isPending} onClick={() => leave.mutate()}>
+          {leave.isPending ? 'Выходим…' : 'Выйти из ящика'}
         </Button>
       </Notice>
 

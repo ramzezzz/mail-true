@@ -49,8 +49,16 @@ describe('контраст каждой темы (WCAG AA)', () => {
         expect(contrastRatio(t.onAccent, t.accent)).toBeGreaterThanOrEqual(4.5);
       });
 
-      it('акцент и текст на подложке выбранной строки ≥ 4.5:1', () => {
-        expect(contrastRatio(t.accent, t.selection)).toBeGreaterThanOrEqual(4.5);
+      /*
+       * На выделенной строке акцентом покрашены только НЕтекстовые вещи —
+       * точка непрочитанного и заливка чекбокса, а им WCAG (1.4.11) требует
+       * 3:1, не 4.5:1. Пока подложка была светлым тоном акцента, разница не
+       * замечалась; на нейтральной мейловой #EBECEF синий даёт 4.39:1 —
+       * ровно как у самого mail.ru (#0077FF на #EBECEF даёт 4.16:1).
+       * Текст на ней по-прежнему обязан брать полные 4.5:1.
+       */
+      it('значки на подложке выделенной строки ≥ 3:1, текст ≥ 4.5:1', () => {
+        expect(contrastRatio(t.accent, t.selection)).toBeGreaterThanOrEqual(3);
         expect(contrastRatio(t.textPrimary, t.selection)).toBeGreaterThanOrEqual(4.5);
       });
 
@@ -73,7 +81,25 @@ describe('реестр тем и themes.css не разъехались', () => 
 
   it('акцент светлой темы — фирменный True Blue в базовом блоке', () => {
     expect(themesCss).toMatch(/--mt-accent:\s*#006ec6/u);
-    expect(themesCss).toMatch(/--mt-accent-selection:\s*#e7f1fb/u);
+  });
+
+  /**
+   * Выделение строки списка у mail.ru нейтрально-серое при любой теме
+   * (#EBECEF, пипетка по research/mailru/10-selection.png). Раньше базовый
+   * блок держал светлый тон акцента #E7F1FB, и каждая цветная тема
+   * переопределяла его своим — выделение было голубым, зелёным, лиловым.
+   */
+  it('подложка выделенной строки — нейтральная и своя только у тёмной темы', () => {
+    expect(themesCss).toMatch(/--mt-list-selection:\s*#ebecef/u);
+    expect(themesCss).not.toMatch(/--mt-accent-selection/u);
+    for (const id of ['emerald', 'violet', 'coral', 'lagoon', 'sunset']) {
+      expect(themeBlock(id), `${id}: своей подложки выделения быть не должно`).not.toContain(
+        '--mt-list-selection',
+      );
+    }
+    expect(themeBlock('dark')).toContain(`--mt-list-selection: ${
+      THEMES.find((t) => t.id === 'dark')!.selection
+    }`);
   });
 
   it('цветные темы и тёмная переопределяют акцент значениями реестра', () => {
@@ -83,7 +109,6 @@ describe('реестр тем и themes.css не разъехались', () => 
       expect(block, `${t.id}: акцент`).toContain(`--mt-accent: ${t.accent}`);
       expect(block, `${t.id}: hover`).toContain(`--mt-accent-hover: ${t.accentHover}`);
       expect(block, `${t.id}: press`).toContain(`--mt-accent-press: ${t.accentPress}`);
-      expect(block, `${t.id}: selection`).toContain(`--mt-accent-selection: ${t.selection}`);
     }
   });
 
@@ -94,7 +119,7 @@ describe('реестр тем и themes.css не разъехались', () => 
       '--mt-color-text-link: var(--mt-accent)',
       '--mt-color-icon-accent: var(--mt-accent)',
       '--mt-mail-color-icon-unread: var(--mt-accent)',
-      '--mt-mail-color-list-letter-background-press: var(--mt-accent-selection)',
+      '--mt-mail-color-list-letter-background-press: var(--mt-list-selection)',
     ]) {
       expect(themesCss).toContain(token);
     }

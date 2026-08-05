@@ -1,46 +1,329 @@
-/* Вход в админку: отдельная страница, ничего кроме формы. */
+/*
+ * Вход в панель управления.
+ *
+ * Устройство то же, что у входа в почту: тёмный фон с созвездием, проволочный
+ * глобус слева, светлая карточка справа, ни одной растровой картинки. Гамма
+ * другая — графит и бирюза вместо синего неба: администратор должен видеть,
+ * что открыл панель управления, а не почту.
+ *
+ * Все цвета приходят переменными из login/loginPalette.ts. Числа здесь не
+ * пишем: иначе на странице оказался бы цвет, контраст которого никто не считал.
+ */
 
-.screen {
+.page {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: radial-gradient(
+    120% 120% at 42% 44%,
+    var(--mt-adm-login-bg-center, #16222a) 0%,
+    var(--mt-adm-login-bg-middle, #101a21) 55%,
+    var(--mt-adm-login-bg-edge, #0b1218) 100%
+  );
+  color: var(--mt-adm-login-footer, #9db8c1);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* Мягкие размытые пятна — глубина фона за созвездием */
+.hazeTeal,
+.hazeSteel {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.45;
+  z-index: 1;
+  pointer-events: none;
+}
+.hazeTeal {
+  width: 22rem;
+  height: 22rem;
+  left: 20%;
+  top: 30%;
+  background: radial-gradient(circle, rgba(15, 106, 114, 0.55), transparent 70%);
+  animation: mtDrift1 18s ease-in-out infinite;
+}
+.hazeSteel {
+  width: 13rem;
+  height: 13rem;
+  left: 27%;
+  top: 24%;
+  background: radial-gradient(circle, rgba(143, 179, 189, 0.32), transparent 70%);
+  animation: mtDrift2 22s ease-in-out infinite;
+}
+
+/* --- Карточка входа --------------------------------------------------- */
+
+.panel {
+  position: absolute;
+  z-index: 3;
+  right: 7%;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  padding: 24px;
-  background: var(--mt-color-background-secondary);
 }
 
 .card {
-  width: 100%;
-  max-width: 360px;
-  background: var(--mt-admin-surface);
-  border: 1px solid var(--mt-admin-border);
-  border-radius: var(--mt-size-card-border-radius, 12px);
-  padding: 24px;
+  position: relative;
+  width: 24rem;
+  max-width: 92vw;
+  background: var(--mt-adm-login-card, #fff);
+  border-radius: 12px;
+  box-shadow: 0 1.5rem 3.5rem rgba(3, 12, 16, 0.55);
+  padding: 2.2rem 2.2rem 1.8rem;
+  color: var(--mt-adm-login-ink, #111a1f);
+  animation: mtCardIn 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s both;
+}
+
+/* Марка панели: значок-щит и слово — вместо логотипа почты */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.9rem;
+  color: var(--mt-adm-login-accent, #0f6a72);
+}
+.brandMark {
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: none;
+}
+.brandName {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .title {
-  margin: 0 0 4px;
-  font-size: var(--mt-font-title2-size, 20px);
+  margin: 0 0 0.3rem;
+  font-size: 1.35rem;
+  line-height: 1.3;
   font-weight: 600;
+  color: var(--mt-adm-login-ink, #111a1f);
+}
+.subtitle {
+  margin: 0 0 1.5rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--mt-adm-login-ink-muted, #4c5c66);
 }
 
-.subtitle {
-  margin: 0 0 20px;
-  color: var(--mt-color-text-secondary);
-}
+/* --- Поля с подчёркиванием -------------------------------------------- */
 
 .field {
-  margin-bottom: 12px;
+  margin-bottom: 1.2rem;
+}
+.label {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--mt-adm-login-ink-muted, #4c5c66);
+  margin-bottom: 0.15rem;
+}
+.uline {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--mt-color-separator-primary, #dfe4ea);
+  transition: border-color var(--mt-anim-duration-m, 200ms) var(--mt-anim-easing-default, ease);
+}
+.uline:focus-within {
+  border-color: var(--mt-adm-login-accent, #0f6a72);
+}
+.input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  padding: 0.55rem 0.1rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: inherit;
+}
+.input::placeholder {
+  color: #8a99a1;
+}
+
+.ulineBtn {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--mt-adm-login-ink-muted, #4c5c66);
+  opacity: 0.65;
+  transition:
+    opacity var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease),
+    background var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease);
+}
+.ulineBtn svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+.ulineBtn:hover {
+  opacity: 1;
+  background: rgba(15, 106, 114, 0.08);
+}
+.ulineBtn:focus-visible {
+  opacity: 1;
+  outline: var(--mt-focus-ring-width, 2px) solid var(--mt-adm-login-accent, #0f6a72);
+  outline-offset: var(--mt-focus-ring-offset, 2px);
+}
+
+/* Подсказка про Caps Lock: частая причина «пароль не подходит» */
+.caps {
+  margin: 0.35rem 0 0;
+  font-size: 0.76rem;
+  color: #8a4b00;
 }
 
 .error {
-  margin-bottom: 12px;
-  color: var(--mt-color-text-negative);
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--mt-adm-login-danger-surface, #fdecec);
+  color: var(--mt-adm-login-danger, #8c1d18);
+  font-size: 0.85rem;
 }
 
-.footnote {
-  margin-top: 16px;
-  color: var(--mt-color-text-secondary);
-  font-size: 12px;
-  line-height: 16px;
+.hint {
+  margin: 1.1rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--mt-adm-login-ink-muted, #4c5c66);
+}
+.hint code {
+  font-family: var(--mt-admin-font-mono);
+  font-size: 0.72rem;
+  /* Переносим по границам слов: break-all резал «<пароль>» посередине. */
+  overflow-wrap: break-word;
+}
+
+/* --- Подвал ------------------------------------------------------------ */
+
+.footer {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 1.4rem;
+  text-align: center;
+  color: var(--mt-adm-login-footer, #9db8c1);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  padding: 0 1rem;
+  animation: mtFadeUp 0.9s ease 0.3s both;
+}
+.footer p {
+  margin: 0;
+}
+
+/* --- Движение ----------------------------------------------------------- */
+
+/*
+ * Карточка выезжает вбок, и только вбок: по вертикали её уже центрирует
+ * .panel. Сдвиг на -50% ещё и здесь поднимал карточку на половину её
+ * высоты — верх с маркой уезжал за край экрана.
+ */
+@keyframes mtCardIn {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes mtFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes mtDrift1 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(30px, -20px);
+  }
+}
+@keyframes mtDrift2 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-24px, 26px);
+  }
+}
+
+/* Движение гасим, но всё остаётся на своих местах и видимым. */
+@media (prefers-reduced-motion: reduce) {
+  .hazeTeal,
+  .hazeSteel {
+    animation: none;
+  }
+  .card,
+  .footer {
+    animation-duration: 0.001s;
+  }
+}
+
+/* Узкий экран: карточка встаёт по центру. */
+@media (max-width: 1024px) {
+  .panel {
+    right: 50%;
+    transform: translate(50%, -50%);
+  }
+}
+
+@media (max-width: 680px) {
+  .hazeTeal,
+  .hazeSteel {
+    display: none;
+  }
+  .panel {
+    /*
+     * Именно relative, а не static: слой (z-index) действует только на
+     * позиционированный элемент. При static карточка теряет свой слой, и
+     * точки фона рисуются ПОВЕРХ неё — прямо по полям ввода.
+     */
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 1.25rem 1rem 7rem;
+    justify-content: center;
+  }
+  .card {
+    width: 100%;
+    max-width: 26rem;
+    padding: 1.75rem 1.5rem 1.5rem;
+    animation: mtFadeUp 0.6s ease both;
+  }
+  /* Палец не мышь: на телефоне кнопки в полях вырастают до 44×44. */
+  .ulineBtn {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+  .footer {
+    font-size: 0.72rem;
+    bottom: 1rem;
+  }
 }

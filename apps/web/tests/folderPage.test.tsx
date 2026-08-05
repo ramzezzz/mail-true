@@ -123,25 +123,27 @@ afterEach(() => {
 });
 
 describe('подгрузка писем', () => {
-  it('после первой сотни из 187 показывает счётчик и «Показать ещё»', async () => {
+  it('после первой сотни из 187 предлагает «Показать ещё» и не считает вслух', async () => {
     vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
     render();
-    await waitFor(() => text().includes('Показано 100 из 187'), 'счётчик загруженных');
-    expect(button('Показать ещё')).toBeDefined();
+    await waitFor(() => Boolean(button('Показать ещё')), 'кнопку подгрузки');
+    // Подписи «Показано 100 из 187» под списком у mail.ru нет ни в каком виде
+    expect(text()).not.toContain('Показано');
   });
 
   it('по нажатию догружает остальные 87 писем', async () => {
     const getMessages = serverPages();
     vi.spyOn(api, 'getMessages').mockImplementation(getMessages);
     render();
-    await waitFor(() => text().includes('Показано 100 из 187'), 'первую страницу');
+    await waitFor(() => Boolean(button('Показать ещё')), 'первую страницу');
 
     act(() => button('Показать ещё')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await waitFor(() => text().includes('Показано 187 из 187'), 'вторую страницу');
+    // Догрузили всё — кнопки больше нет, а подпись выделения перестала
+    // оговариваться числом загруженных
+    await waitFor(() => !button('Показать ещё'), 'вторую страницу');
 
     // Вторая страница запрошена именно со смещением 100
     expect(getMessages.mock.calls.some(([q]) => q.offset === 100)).toBe(true);
-    expect(button('Показать ещё')).toBeUndefined();
   });
 
   it('пока загружено не всё, кнопка выделения говорит правду', async () => {
@@ -150,7 +152,7 @@ describe('подгрузка писем', () => {
     await waitFor(() => text().includes('Выделить загруженные (100 из 187)'), 'честную подпись');
 
     act(() => button('Показать ещё')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await waitFor(() => text().includes('Показано 187 из 187'), 'вторую страницу');
+    await waitFor(() => !button('Показать ещё'), 'вторую страницу');
     expect(text()).toContain('Выделить все');
     expect(text()).not.toContain('Выделить загруженные');
   });
@@ -167,7 +169,10 @@ describe('ошибка загрузки списка', () => {
 
     getMessages.mockImplementation(serverPages());
     act(() => button('Повторить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    await waitFor(() => text().includes('Показано 100 из 187'), 'список после повтора');
+    await waitFor(
+      () => text().includes('Выделить загруженные (100 из 187)'),
+      'список после повтора',
+    );
   });
 });
 
@@ -178,7 +183,7 @@ describe('отказ мутации', () => {
       new ApiError(503, '/api/messages/move', 'Сервер недоступен'),
     );
     render();
-    await waitFor(() => text().includes('Показано 100 из 187'), 'список');
+    await waitFor(() => text().includes('Выделить загруженные (100 из 187)'), 'список');
 
     // выделяем письмо и жмём «Удалить» (это перемещение в корзину)
     act(() => useUiStore.getState().selectMany(['inbox:1']));

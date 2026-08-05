@@ -1,8 +1,9 @@
 /**
  * Виртуализированный список писем (@tanstack/react-virtual).
- * Повторяет строку .llc mail.ru: высота 48px (компактный режим — 40px/13px),
- * колонка точки непрочитанного 32px, аватар 32×32 с чекбоксом при наведении,
- * отправитель 22%, флажок 24px, тема+сниппет, значки, дата 44px.
+ * Повторяет строку .llc mail.ru (метрики — research/mailru/row-anatomy.json):
+ * высота 48px (компактный режим — 40px/13px), колонка точки непрочитанного
+ * 28px, аватар 32×32 с чекбоксом при наведении, отправитель 22%, флажок 24px,
+ * тема+сниппет (со счётчиком цепочки перед темой), значки, дата 44px.
  * Группировка по периодам: «Сегодня», «Вчера», «Неделя», «Июль 2026».
  */
 
@@ -18,7 +19,7 @@ import { setDragMessages } from '../lib/dragMessages';
 import { HOTKEY_SCOPE_ATTR, HOTKEY_SCOPE_LIST } from '../lib/hotkeys';
 import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
-import { IconAttach, IconFlag, IconShield } from './icons';
+import { IconAttach, IconFlagFilled, IconShield } from './icons';
 import styles from './MessageList.module.css';
 
 export type ListRow =
@@ -169,23 +170,31 @@ function Row({
         </span>
       </span>
 
-      {/* Отправитель, 22% (+ счётчик писем в цепочке) */}
+      {/* Отправитель, 22% */}
       <span className={styles.correspondent}>
         <span className={styles.correspondentName}>{senderName(message)}</span>
-        {threadCount > 1 && <span className={styles.threadCount}>{threadCount}</span>}
       </span>
 
-      {/* Флажок «важное», 24px */}
+      {/* Флажок «важное», 24px — красная закладка-лента */}
       <span className={styles.flagCell}>
         {message.flags.flagged && (
           <span className={styles.flagIcon} title="Важное">
-            <IconFlag />
+            <IconFlagFilled />
           </span>
         )}
       </span>
 
-      {/* Тема + сниппет */}
+      {/*
+        Тема + сниппет. Счётчик писем в цепочке — пилюля ПЕРЕД темой, в её же
+        колонке: ровно так у mail.ru (01-inbox.png, колонка темы x=588, пилюля
+        588…616, тема с 627). Раньше он стоял после имени отправителя.
+      */}
       <span className={styles.title}>
+        {threadCount > 1 && (
+          <span className={styles.threadCount} title={`Писем в переписке: ${threadCount}`}>
+            {threadCount}
+          </span>
+        )}
         <span className={styles.subject}>{message.subject || '(без темы)'}</span>
         <span className={styles.snippet}>{message.snippet}</span>
       </span>

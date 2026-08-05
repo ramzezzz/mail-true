@@ -148,8 +148,8 @@
 }
 .ulineBtn:focus-visible {
   opacity: 1;
-  outline: 2px solid var(--mt-color-background-accent, #006ec6);
-  outline-offset: 2px;
+  outline: var(--mt-focus-ring-width, 2px) solid var(--mt-focus-ring-color, #006ec6);
+  outline-offset: var(--mt-focus-ring-offset, 2px);
 }
 
 /* Подсказка про Caps Lock: частая причина «пароль не подходит» */
@@ -209,8 +209,8 @@
   transform: rotate(45deg) scale(1);
 }
 .check input:focus-visible + .checkBox {
-  outline: 2px solid var(--mt-color-background-accent, #006ec6);
-  outline-offset: 2px;
+  outline: var(--mt-focus-ring-width, 2px) solid var(--mt-focus-ring-color, #006ec6);
+  outline-offset: var(--mt-focus-ring-offset, 2px);
 }
 
 .error {

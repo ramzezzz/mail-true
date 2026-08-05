@@ -77,22 +77,54 @@ export interface AliasPage {
 
 export type DnsStatus = 'ok' | 'warn' | 'fail' | 'unknown';
 
+/**
+ * Вывод по записи. Отличается от статуса тем, что различает «записи нет»
+ * и «запись есть, но не та»: у первого лечение — завести запись,
+ * у второго — исправить значение.
+ */
+export type DnsVerdict = 'ok' | 'missing' | 'mismatch' | 'warn' | 'unreachable';
+
+/** Разделы, на которые поделены записи (как в docs/install.md). */
+export type DnsGroup = 'core' | 'web' | 'client';
+
 export interface DnsCheck {
-  id: 'mx' | 'spf' | 'dkim' | 'dmarc' | 'ptr' | 'autoconfig' | 'autodiscover';
+  id: string;
+  group: DnsGroup;
   title: string;
+  /** Зачем нужна запись. */
   purpose: string;
+  /** Что сломается, если её нет. */
+  impact: string;
   recordName: string;
   recordType: string;
+  /** Готовое значение для копирования. */
   expected: string;
+  /** Можно ли скопировать значение к регистратору (у PTR — нельзя). */
+  copyable: boolean;
+  /** Что опубликовано на самом деле. */
   actual: string[];
   status: DnsStatus;
+  verdict: DnsVerdict;
+  /** В чём именно расхождение. */
+  diff: string | null;
+  /** Как исправить. */
   hint: string;
+  required: boolean;
+  /** Какой резольвер ответил. */
+  askedVia: string | null;
+}
+
+export interface DnsResolverInfo {
+  servers: string[];
+  answeredBy: string[];
+  reachable: boolean;
 }
 
 export interface DnsReport {
   domain: string;
   checkedAt: string;
   overall: DnsStatus;
+  resolver: DnsResolverInfo;
   checks: DnsCheck[];
 }
 
@@ -212,6 +244,8 @@ export interface ImportPreview {
   invalidCount: number;
   domains: string[];
   hasHeader: boolean;
+  /** Квота, доставшаяся строкам без своей колонки `quota`. */
+  defaultQuotaBytes: number;
   /** Будут ли на самом деле создаваться новые домены (право проверено). */
   allowNewDomains: boolean;
   /** Просили создавать домены, но роль не позволяет — показываем прямо. */

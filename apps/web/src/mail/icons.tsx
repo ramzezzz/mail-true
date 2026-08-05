@@ -32,7 +32,14 @@ export const IconReplyAll = (p: IconProps = {}) => <BrandIcon name="reply-all" {
 export const IconForward = (p: IconProps = {}) => <BrandIcon name="forward" {...p} />;
 export const IconMailRead = (p: IconProps = {}) => <BrandIcon name="read" {...p} />;
 export const IconMailUnread = (p: IconProps = {}) => <BrandIcon name="unread" {...p} />;
+/**
+ * «Важное» — закладка-лента, как у mail.ru (research/mailru/01-inbox.png:
+ * красная лента 14×13 в колонке флажка, цвет #FC2C38). Контурная — в меню
+ * и на панели («Пометить флажком»), сплошная — в строке уже помеченного
+ * письма.
+ */
 export const IconFlag = (p: IconProps = {}) => <BrandIcon name="important" {...p} />;
+export const IconFlagFilled = (p: IconProps = {}) => <BrandIcon name="important-filled" {...p} />;
 export const IconLabel = (p: IconProps = {}) => <BrandIcon name="label" {...p} />;
 export const IconAttach = (p: IconProps = {}) => <BrandIcon name="attach" {...p} />;
 export const IconPrint = (p: IconProps = {}) => <BrandIcon name="print" {...p} />;
@@ -146,6 +153,123 @@ export const IconEvent = (p: IconProps = {}) =>
     ['M5 6.5h14a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1Z', 'M8 4v3.5', 'M16 4v3.5', 'M4 10.5h16'],
     p,
   );
+
+/* --- Панель форматирования письма (в спрайте таких значков нет) --------
+ *
+ * Раньше эти кнопки были подписаны юникодными глифами («⇤ ↔ •• 1. ↶ ↷»,
+ * эмодзи 🔗 и 🙂, комбинирующий «A̶»): рядом стояли знаки трёх разных
+ * оптических плотностей, а два из них ещё и цветные. У mail.ru
+ * (research/mailru/03-compose.png) вся полоса — один набор одноцветных
+ * штриховых значков. Здесь они нарисованы в стилистике спрайта:
+ * сетка 24×24, штрих 1.8, currentColor.
+ */
+
+export const IconAlignLeft = (p: IconProps = {}) =>
+  stroke(['M4 6.5h16', 'M4 11h10', 'M4 15.5h16', 'M4 20h10'], p);
+
+export const IconAlignCenter = (p: IconProps = {}) =>
+  stroke(['M4 6.5h16', 'M7 11h10', 'M4 15.5h16', 'M7 20h10'], p);
+
+export const IconAlignRight = (p: IconProps = {}) =>
+  stroke(['M4 6.5h16', 'M10 11h10', 'M4 15.5h16', 'M10 20h10'], p);
+
+/** Маркированный список. */
+export const IconListBulleted = (p: IconProps = {}) => (
+  <svg
+    width={p.size ?? 16}
+    height={p.size ?? 16}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M9 6.5h11" />
+    <path d="M9 12h11" />
+    <path d="M9 17.5h11" />
+    <circle cx="4.6" cy="6.5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="4.6" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="4.6" cy="17.5" r="1.4" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+/** Нумерованный список. */
+export const IconListNumbered = (p: IconProps = {}) => (
+  <svg
+    width={p.size ?? 16}
+    height={p.size ?? 16}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M9 6.5h11" />
+    <path d="M9 12h11" />
+    <path d="M9 17.5h11" />
+    <path d="M3.4 4.6l1.4-.8V8" strokeWidth="1.4" />
+    <path d="M3.4 10.6a1.4 1.4 0 1 1 2.3 1.1L3.4 14h2.6" strokeWidth="1.4" />
+    <path d="M3.5 15.9h2.4l-1.5 1.8a1.4 1.4 0 1 1-1 2.4" strokeWidth="1.4" />
+  </svg>
+);
+
+export const IconUndo = (p: IconProps = {}) =>
+  stroke(['M4.5 9.5h9.8a4.7 4.7 0 0 1 0 9.4H8.5', 'M8 5.5 4 9.5l4 4'], p);
+
+export const IconRedo = (p: IconProps = {}) =>
+  stroke(['M19.5 9.5H9.7a4.7 4.7 0 0 0 0 9.4h5.8', 'M16 5.5l4 4-4 4'], p);
+
+/** Вставить ссылку — звено цепи, одним цветом (было цветное эмодзи 🔗). */
+export const IconLink = (p: IconProps = {}) =>
+  stroke(
+    [
+      'M10.2 13.8a3.6 3.6 0 0 0 5.1 0l3-3a3.6 3.6 0 0 0-5.1-5.1l-1.4 1.4',
+      'M13.8 10.2a3.6 3.6 0 0 0-5.1 0l-3 3a3.6 3.6 0 0 0 5.1 5.1l1.4-1.4',
+    ],
+    p,
+  );
+
+/** Вставить смайлик (было нативное 🙂 в `select`). */
+export const IconEmoji = (p: IconProps = {}) => (
+  <svg
+    width={p.size ?? 16}
+    height={p.size ?? 16}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M8.6 14.2a4.2 4.2 0 0 0 6.8 0" />
+    <circle cx="9.2" cy="9.8" r="1.1" fill="currentColor" stroke="none" />
+    <circle cx="14.8" cy="9.8" r="1.1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+/** Очистить форматирование — ластик (был комбинирующий символ «A̶»). */
+export const IconClearFormat = (p: IconProps = {}) =>
+  stroke(['M9.4 19.5 4.6 14.7a1.4 1.4 0 0 1 0-2l7.7-7.7a1.4 1.4 0 0 1 2 0l4.8 4.8a1.4 1.4 0 0 1 0 2l-8.4 8.4', 'M8.5 9.5l6.8 6.8', 'M9.4 19.5H20'], p);
+
+/** Начертание («Tt» у mail.ru) — выбор гарнитуры. */
+export const IconFontFamily = (p: IconProps = {}) => (
+  <svg
+    width={p.size ?? 16}
+    height={p.size ?? 16}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <path d="M3.2 18.4 8 5.6h2.1l4.8 12.8h-2.05l-1.24-3.46H6.49L5.25 18.4H3.2Zm3.9-5.2h3.9L9.05 7.8 7.1 13.2Z" />
+    <path d="M17.6 18.55c-1.3 0-1.95-.72-1.95-2.05v-5.1h-1.4V9.75h1.4V7.4h1.9v2.35h2.05v1.65H17.55v4.85c0 .43.2.63.62.63h1.43v1.67H17.6Z" />
+  </svg>
+);
 
 /* --- Помощник на основе ИИ (в спрайте таких значков нет) --------------- */
 

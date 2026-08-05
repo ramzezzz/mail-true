@@ -13,7 +13,10 @@
   gap: 4px;
   min-height: 48px;
   flex-shrink: 0;
-  padding: 0 12px 0 8px;
+  /* Отступ слева 16px: у mail.ru «Выделить все» начинается на x=248 при
+     колонке, начинающейся на 232 (research/mailru/header-toolbar.json).
+     Сами строки списка при этом идут в край — им поля не полагается. */
+  padding: 0 12px 0 16px;
 }
 
 .spacer {

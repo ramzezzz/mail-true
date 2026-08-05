@@ -4,21 +4,29 @@
   gap: 16px;
 }
 
+/*
+ * Отдельная белая карточка на сером фоне страницы — как у mail.ru
+ * (research/mailru/04-settings.png: фон #F6F7F8, карточки #FFFFFF, рамок нет).
+ * Раньше карточки лежали внутри одного большого белого контейнера и
+ * различались только рамкой 1px — белое на белом в клеточку.
+ */
 .card {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 20px;
-  border: 1px solid var(--mt-color-separator-primary);
+  border: none;
   border-radius: var(--mt-size-card-border-radius, 16px);
   background: var(--mt-settings-card-bg);
   color: var(--mt-color-text-primary);
   text-decoration: none;
-  transition: border-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
 .card:hover {
-  border-color: var(--mt-color-stroke-accent);
+  box-shadow: 0 2px 12px rgba(0, 16, 61, 0.12);
 }
 
 .cardTitle {

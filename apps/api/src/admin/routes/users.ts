@@ -15,12 +15,19 @@ import { ConflictError } from '../errors.js';
 import { buildAuditRecord, type AuditInput } from '../audit.js';
 import { audit, currentAdmin, originOf, requireAdmin } from '../guard.js';
 import { dovecotHash, generatePassword } from '../passwords.js';
-import { parseUserImport } from '../csv.js';
+import { nulByteProblem, parseUserImport } from '../csv.js';
+import { addressProblem, displayNameLengthProblem } from '../address-limits.js';
 import { packResult, unpackResult, type ImportJobResult } from '../import-jobs.js';
 import { quarantineMaildir } from '../mailbox-cleanup.js';
 import { isUndefinedTable, type ImportJobRow, type MailUserRow } from '../db.js';
 
-const emailSchema = z.string().trim().toLowerCase().email().max(255);
+/**
+ * Форму и длину адреса здесь НЕ проверяем — этим занимается
+ * address-limits.ts, и он объясняет отказ словами. У zod на всё про всё
+ * одна общая фраза «Некорректные данные запроса»: из неё не видно ни что
+ * не так, ни где. Особенно это било по кириллице — самой частой опечатке.
+ */
+const emailSchema = z.string().trim().toLowerCase().min(1).max(1024);
 
 const listQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
@@ -34,7 +41,8 @@ const listQuerySchema = z.object({
 const createSchema = z.object({
   email: emailSchema,
   password: z.string().min(8).max(1024).optional(),
-  displayName: z.string().trim().max(255).optional(),
+  // См. пояснение к emailSchema: предел здесь грубый, настоящий — ниже.
+  displayName: z.string().trim().max(1024).optional(),
   quotaBytes: z.coerce.number().int().min(0).optional(),
   active: z.boolean().default(true),
   /** Создать домен, если его ещё нет (право domains.write проверяется отдельно). */
@@ -42,7 +50,7 @@ const createSchema = z.object({
 });
 
 const patchSchema = z.object({
-  displayName: z.string().trim().max(255).nullable().optional(),
+  displayName: z.string().trim().max(1024).nullable().optional(),
   quotaBytes: z.coerce.number().int().min(0).optional(),
   active: z.boolean().optional(),
 });
@@ -149,6 +157,13 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     const body = createSchema.parse(request.body);
     const admin = currentAdmin(request);
 
+    // Форма и длина — до всего остального: незачем ходить в базу за
+    // адресом, который всё равно не примут.
+    const bad =
+      addressProblem(body.email) ??
+      (body.displayName === undefined ? null : displayNameLengthProblem(body.displayName));
+    if (bad) throw new BadRequestError(bad);
+
     const existing = await ctx.db.findMailUserByEmail(body.email);
     if (existing) throw new ConflictError(`Ящик ${body.email} уже существует`);
 
@@ -191,6 +206,10 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     async (request) => {
       const id = Number(request.params.id);
       const body = patchSchema.parse(request.body);
+      if (body.displayName !== undefined && body.displayName !== null) {
+        const tooLong = displayNameLengthProblem(body.displayName);
+        if (tooLong) throw new BadRequestError(tooLong);
+      }
       const before = await ctx.db.findMailUserById(id);
       if (!before) throw new NotFoundError('Ящик не найден');
 
@@ -416,6 +435,11 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     allowNewDomains: boolean,
     defaultQuotaBytes: number | undefined,
   ): Promise<ReturnType<typeof parseUserImport>> {
+    // Нулевой байт база не примет ни в одном поле: отказываем сразу и
+    // словами, а не 500-м посреди импорта.
+    const nul = nulByteProblem(csv);
+    if (nul) throw new BadRequestError(nul);
+
     const domains = await ctx.db.listDomains();
     const knownDomains = domains.map((d) => d.name);
     // Сначала разбираем без сведений о занятых адресах, чтобы узнать,
@@ -430,6 +454,18 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     });
   }
 
+  /* --- импорт: значения по умолчанию -------------------------------- */
+  /**
+   * Квота, которая достанется строкам без своей колонки `quota`.
+   * Интерфейс обязан показать это число ДО импорта: раньше оно жило только
+   * в ADMIN_DEFAULT_QUOTA_BYTES и человеку было неоткуда о нём узнать.
+   */
+  app.get(
+    '/users/import/defaults',
+    { preHandler: requireAdmin(app, 'users.write') },
+    async () => ({ defaultQuotaBytes: ctx.config.ADMIN_DEFAULT_QUOTA_BYTES }),
+  );
+
   /* --- импорт: предварительный показ ------------------------------- */
   app.post(
     '/users/import/preview',
@@ -443,6 +479,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       return {
         ...preview,
         rows: preview.rows.map((r) => ({ ...r, password: undefined, hasPassword: r.password !== null })),
+        /** Квота, доставшаяся строкам без своей, — ровно та, что применится. */
+        defaultQuotaBytes: body.defaultQuotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
         /** Будут ли создаваться новые домены на самом деле. */
         allowNewDomains,
         /**

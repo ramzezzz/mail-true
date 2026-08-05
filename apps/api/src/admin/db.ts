@@ -697,6 +697,18 @@ export class AdminDb {
     );
   }
 
+  /**
+   * Куда ведёт алиас с таким исходным адресом. Нужен проверке связности:
+   * по нему разматывается цепочка перенаправлений и ищется кольцо.
+   */
+  async aliasTargetOf(source: string): Promise<string | null> {
+    const res = await this.pool.query<{ destination: string }>(
+      `SELECT destination FROM virtual_aliases WHERE lower(source) = lower($1) AND active LIMIT 1`,
+      [source],
+    );
+    return res.rows[0]?.destination ?? null;
+  }
+
   async listAliases(filters: {
     search?: string | undefined;
     domainId?: number | undefined;

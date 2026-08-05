@@ -45,16 +45,24 @@ describe('canAny', () => {
 });
 
 describe('меню', () => {
-  it('роль «только чтение» не видит раздел входа в чужой ящик', () => {
+  it('роль «только чтение» видит список ящиков и журнал', () => {
     const titles = visibleNav(READONLY).map((i) => i.title);
     expect(titles).toContain('Пользователи');
     expect(titles).toContain('Журнал аудита');
-    expect(titles).not.toContain('Вход в ящик');
   });
 
-  it('роль «управление пользователями» видит вход в ящик', () => {
+  it('первый раздел называется «Дашборд», а не «Сводка»', () => {
+    const titles = visibleNav(OWNER).map((i) => i.title);
+    expect(titles[0]).toBe('Дашборд');
+    expect(titles).not.toContain('Сводка');
+  });
+
+  it('отдельного пункта «Вход в ящик» в меню нет — входят кнопкой в списке', () => {
+    // Даже у роли с правом входа: адрес известен из строки списка,
+    // искать его заново в отдельном разделе не нужно.
     const titles = visibleNav(USER_MANAGER).map((i) => i.title);
-    expect(titles).toContain('Вход в ящик');
+    expect(titles).not.toContain('Вход в ящик');
+    expect(NAV_ITEMS.map((i) => i.to)).not.toContain('/mailbox');
   });
 
   it('полный доступ видит все пункты', () => {

@@ -48,10 +48,10 @@ export function hasMore(pages: readonly PageLike[]): boolean {
   return nextPageOffset(pages) !== undefined;
 }
 
-/** Подпись под списком: «Показано 100 из 187». */
-export function loadedLabel(loaded: number, total: number): string {
-  return `Показано ${loaded} из ${total}`;
-}
+/*
+ * Подписи «Показано 100 из 187» здесь больше нет: такого элемента у mail.ru
+ * не существует, и из списка она убрана вместе с ней самой.
+ */
 
 /**
  * Подпись кнопки «Выделить все».

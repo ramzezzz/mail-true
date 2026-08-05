@@ -21,12 +21,13 @@ import { Button } from '../components';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { actionErrorText, errorText } from '../lib/errorText';
 import { serializeRulePrefill } from '../lib/filterRules';
-import { loadedLabel, selectAllLabel } from '../lib/paging';
+import { selectAllLabel } from '../lib/paging';
 import { hotkeyFor } from '../lib/hotkeys';
 import { useGeneralPreferences } from '../settings/generalSettings';
 import { searchUrlFor } from '../search/searchParams';
 import { ListSkeleton } from '../mail/ListSkeleton';
 import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from '../mail/ContextMenu';
+import { EmptyFolder } from '../mail/EmptyFolder';
 import {
   IconArchive,
   IconCheckAll,
@@ -289,13 +290,17 @@ export function FolderPage() {
   ]);
 
   const otherFolders = (folders ?? []).filter((f) => f.id !== folderId);
+  const currentFolder = (folders ?? []).find((f) => f.id === folderId);
   const allIds = useMemo(() => messages.map((m) => m.id), [messages]);
+  /** Список загружен и в нём нет ни одного письма. */
+  const emptyFolder = !page.isPending && !page.isError && messages.length === 0;
 
   return (
     <div className={styles.page}>
       <ListToolbar
         selectedCount={selectedIds.size}
         selectAllLabel={selectAllLabel(page.loaded, page.total)}
+        emptyFolder={emptyFolder}
         filter={filter}
         onFilterChange={setFilter}
         folders={otherFolders}
@@ -340,7 +345,7 @@ export function FolderPage() {
       )}
 
       {!page.isPending && !page.isError && messages.length === 0 && (
-        <div className={styles.centered}>В этой папке пока пусто</div>
+        <EmptyFolder role={currentFolder?.role ?? folderId} />
       )}
 
       {messages.length > 0 && (
@@ -359,17 +364,20 @@ export function FolderPage() {
         />
       )}
 
-      {/* Подвал списка: сколько показано и кнопка «Показать ещё».
-          Кнопка нужна и при подгрузке по прокрутке — на случай, когда
-          прокручивать нечего (короткое окно, мышь без колеса). */}
-      {messages.length > 0 && (page.hasMore || page.total > 0) && (
+      {/*
+        Подвал списка — только кнопка «Показать ещё» и только пока есть что
+        показывать. Она нужна и при подгрузке по прокрутке: бывает, что
+        прокручивать нечего (короткое окно, мышь без колеса).
+
+        Подписи «Показано 11 из 11» здесь больше нет: у mail.ru такого
+        элемента не существует ни в каком виде, а на догруженном до конца
+        списке она к тому же сообщала ровно ничего.
+      */}
+      {messages.length > 0 && page.hasMore && (
         <div className={styles.listFooter}>
-          <span className={styles.listFooterCount}>{loadedLabel(page.loaded, page.total)}</span>
-          {page.hasMore && (
-            <Button mode="secondary" onClick={loadMore} disabled={page.isLoadingMore}>
-              {page.isLoadingMore ? 'Загружаем…' : 'Показать ещё'}
-            </Button>
-          )}
+          <Button mode="secondary" onClick={loadMore} disabled={page.isLoadingMore}>
+            {page.isLoadingMore ? 'Загружаем…' : 'Показать ещё'}
+          </Button>
         </div>
       )}
 

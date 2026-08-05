@@ -23,7 +23,7 @@ export function OverviewPage() {
   return (
     <>
       <PageTitle
-        title="Сводка"
+        title="Дашборд"
         subtitle="Состояние сервисов, объёмы и последние действия администраторов"
       />
 

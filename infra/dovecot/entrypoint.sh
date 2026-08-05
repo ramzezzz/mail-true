@@ -40,4 +40,30 @@ chmod 400 /etc/dovecot/master-users
 mkdir -p /var/mail/vhosts /var/mail/index
 chown vmail:vmail /var/mail/vhosts /var/mail/index
 
+# ------------------------------------------------------------------
+# Журнал: файл в общем томе И stdout контейнера одновременно.
+# Причина та же, что у Postfix (см. infra/postfix/entrypoint.sh): админке
+# нужен файл, людям и проверкам стенда — `docker compose logs dovecot`.
+# Своей ротации у Dovecot нет, поэтому проворачиваем сами и говорим
+# `doveadm log reopen` — без него запись продолжилась бы в переименованный
+# файл, а новый остался бы пустым.
+# ------------------------------------------------------------------
+DOVELOG=/var/log/mail/dovecot.log
+DOVELOG_MAX_BYTES=${DOVECOT_LOG_MAX_BYTES:-33554432}
+mkdir -p /var/log/mail
+chmod 1777 /var/log/mail 2>/dev/null || true
+touch "$DOVELOG"
+chmod 644 "$DOVELOG"
+tail -n 0 -F "$DOVELOG" &
+(
+    while true; do
+        sleep 60
+        SIZE=$(stat -c %s "$DOVELOG" 2>/dev/null || echo 0)
+        if [ "$SIZE" -gt "$DOVELOG_MAX_BYTES" ]; then
+            mv -f "$DOVELOG" "$DOVELOG.1"
+            doveadm log reopen >/dev/null 2>&1 || true
+        fi
+    done
+) &
+
 exec dovecot -F

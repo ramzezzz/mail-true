@@ -15,46 +15,173 @@
   display: flex;
   align-items: center;
   gap: var(--mt-admin-gap);
-  padding: 0 var(--mt-admin-gap);
+  padding: 0 var(--mt-admin-gap) 0 0;
   background: var(--mt-admin-surface);
   border-bottom: 1px solid var(--mt-admin-border);
 }
 
+/* --- Логотип ---------------------------------------------------------- */
+
+/*
+ * Зона логотипа шириной с левое меню: её правая граница продолжает границу
+ * колонки, и вертикальная линия идёт от шапки до низа экрана одной чертой.
+ */
 .brand {
-  font-weight: 600;
-  font-size: var(--mt-font-headline-size, 15px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* Не stretch: иначе картинка растягивается на всю ширину зоны,
+     а высота остаётся 22px — логотип расплющивается по горизонтали. */
+  align-items: flex-start;
+  gap: 2px;
+  flex: none;
+  width: var(--mt-admin-sidebar-width);
+  height: 100%;
+  /* 18px — левый край текста пунктов меню: логотип и меню на одной линии */
+  padding-left: 18px;
+  border-right: 1px solid var(--mt-admin-border);
+  color: inherit;
+  transition: opacity var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.brandMuted {
+.brand:hover {
+  text-decoration: none;
+  opacity: 0.8;
+}
+
+.brand:active {
+  opacity: 0.65;
+}
+
+.brandLogoLight,
+.brandLogoDark,
+.brandMark {
+  height: 22px;
+  width: auto;
+  display: block;
+}
+
+/* Тёмное начертание включается там, где шапка тёмная */
+.brandLogoDark,
+.brandMark {
+  display: none;
+}
+
+:global([data-theme='dark']) .brandLogoLight {
+  display: none;
+}
+
+:global([data-theme='dark']) .brandLogoDark {
+  display: block;
+}
+
+/* Подпись: это панель управления, а не почта */
+.brandKicker {
+  font-size: 11px;
+  line-height: 13px;
+  letter-spacing: 0.02em;
   color: var(--mt-color-text-secondary);
-  font-weight: 400;
+  white-space: nowrap;
 }
 
 .spacer {
   flex: 1 1 auto;
 }
 
-.who {
+/* --- Блок администратора справа --------------------------------------- */
+
+.account {
   display: flex;
   align-items: center;
-  gap: var(--mt-admin-gap-s);
-  color: var(--mt-color-text-secondary);
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 12px 4px 4px;
+  border-radius: 999px;
+  background: var(--mt-color-background-secondary);
 }
 
-.whoLogin {
-  color: var(--mt-color-text-primary);
-  font-weight: 500;
+.accountAvatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--mt-color-background-accent);
+  color: var(--mt-color-text-contrast, #fff);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
 }
+
+.accountText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.accountLogin {
+  font-weight: 500;
+  line-height: 15px;
+  color: var(--mt-color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountRole {
+  font-size: 11px;
+  line-height: 13px;
+  color: var(--mt-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headerSep {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  background: var(--mt-admin-border);
+}
+
+.logout {
+  flex: none;
+}
+
+/* --- Левое меню -------------------------------------------------------- */
 
 .sidebar {
   grid-area: sidebar;
+  position: relative;
   background: var(--mt-admin-surface);
   border-right: 1px solid var(--mt-admin-border);
   padding: var(--mt-admin-gap) 8px;
   overflow-y: auto;
 }
 
+/*
+ * Подложка выделения — одна на всё меню. Пункты её не рисуют: она переезжает
+ * на новый пункт переходом transform, поэтому выделение сдвигается, а не
+ * мигает. Размер приходит из разметки (SidebarNav), здесь только вид и ход.
+ */
+.navPointer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-accent-themed-alpha);
+  pointer-events: none;
+  transition:
+    transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),
+    width var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),
+    height var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
 .navLink {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -63,17 +190,25 @@
   padding: 0 10px;
   border-radius: var(--mt-admin-radius);
   color: var(--mt-color-text-primary);
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.navLink:hover {
+/* Активный пункт из наведения исключён: серая подложка закрыла бы переехавшую */
+.navLink:hover:not(.navLinkActive) {
   background: var(--mt-color-background-secondary);
   text-decoration: none;
 }
 
+.navLink:active:not(.navLinkActive) {
+  background: var(--mt-color-background-tertiary, var(--mt-color-background-secondary));
+}
+
 .navLinkActive {
-  background: var(--mt-color-background-accent-themed-alpha);
   color: var(--mt-color-text-link);
   font-weight: 500;
+  text-decoration: none;
 }
 
 .navStub {
@@ -85,6 +220,36 @@
   grid-area: content;
   padding: var(--mt-admin-gap);
   overflow: auto;
+}
+
+/* Хлебные крошки над заголовком страницы */
+.crumbs {
+  margin: 0 0 8px;
+}
+
+.crumbsList {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crumbSep {
+  color: var(--mt-color-text-secondary);
+}
+
+.crumbCurrent {
+  color: var(--mt-color-text-secondary);
 }
 
 .pageTitle {
@@ -115,4 +280,74 @@
   align-items: center;
   justify-content: center;
   height: 100%;
+}
+
+/*
+ * Узкий экран: админкой пользуются и с телефона, когда что-то сломалось
+ * в дороге. Боковое меню в 216px забирало больше половины ширины, поэтому
+ * на узких экранах оно ложится под шапку горизонтальной лентой с прокруткой,
+ * а содержимое получает всю ширину.
+ */
+@media (max-width: 720px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--mt-admin-header-height) auto 1fr;
+    grid-template-areas:
+      'header'
+      'sidebar'
+      'content';
+  }
+
+  .sidebar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--mt-admin-border);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .navLink {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* Подложка выделения едет и вбок: SidebarNav снимает обе координаты,
+     поэтому в горизонтальной ленте она встаёт на пункт так же точно. */
+
+  .header {
+    gap: var(--mt-admin-gap-s);
+    padding: 0 var(--mt-admin-gap-s);
+  }
+
+  /* Зона логотипа шириной с меню съедала полшапки — остаётся один знак */
+  .brand {
+    width: auto;
+    padding-left: 0;
+    border-right: none;
+  }
+
+  .brandLogoLight,
+  .brandLogoDark {
+    display: none;
+  }
+
+  .brandMark,
+  :global([data-theme='dark']) .brandMark {
+    display: block;
+  }
+
+  .brandKicker {
+    display: none;
+  }
+
+  /* Роль администратора под логином — первое, чем можно пожертвовать */
+  .accountRole {
+    display: none;
+  }
+
+  .content {
+    padding: var(--mt-admin-gap-s);
+  }
 }

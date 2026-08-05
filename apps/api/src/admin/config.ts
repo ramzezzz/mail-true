@@ -19,6 +19,9 @@
  *   RSPAMD_HOST / RSPAMD_CONTROLLER_PORT / RSPAMD_PASSWORD
  *                                      антиспам и проверка подписи исходящих
  *   RESOLVER_IP                        свой резольвер (unbound) для сводки
+ *   DNS_CHECK_RESOLVERS                у кого спрашивать DNS при проверке домена
+ *   IMAPS_PORT / SUBMISSION_PORT / POP3S_PORT
+ *                                      порты в SRV-записях автонастройки
  */
 import { z } from 'zod';
 
@@ -55,6 +58,21 @@ export const adminEnvSchema = z.object({
   RSPAMD_PASSWORD: z.string().default(''),
   RESOLVER_IP: z.string().default(''),
 
+  /**
+   * У кого спрашивать DNS при проверке домена (через запятую).
+   *
+   * НЕ у своего unbound и не у системного резольвера контейнера: вопрос
+   * стоит «видит ли наши записи остальной интернет», а свой резольвер
+   * покажет то, что мы сами себе прописали. Пусто — публичные резольверы
+   * по умолчанию (см. PUBLIC_RESOLVERS в admin/dns.ts).
+   */
+  DNS_CHECK_RESOLVERS: z.string().default(''),
+
+  /** Порты почтовых служб — в SRV-записи автонастройки. */
+  IMAPS_PORT: intVar(993, 1, 65535),
+  SUBMISSION_PORT: intVar(587, 1, 65535),
+  POP3S_PORT: intVar(995, 1, 65535),
+
   /** Квота нового ящика по умолчанию, байт (1 ГиБ). */
   ADMIN_DEFAULT_QUOTA_BYTES: intVar(1024 * 1024 * 1024, 0),
 
@@ -84,6 +102,35 @@ export const adminEnvSchema = z.object({
    */
   ADMIN_SESSION_SECRET: z.string().default(''),
   SESSION_SECRET: z.string().default(''),
+
+  /* ----------------------------------------------------------------
+   * Раздел «Почтовый поток»: очередь и журналы.
+   *
+   * Ни очередь, ни журналы служб не доступны серверу приложения сами по
+   * себе. Сокет Docker — не вариант: он даёт права root на всей машине,
+   * и платить эту цену за показ очереди нельзя. Поэтому:
+   *
+   *   очередь  — посредник ВНУТРИ контейнера postfix, рядом с очередью
+   *              (infra/postfix/queue-agent.pl), общий секрет;
+   *   журналы  — общий том, куда postfix, dovecot и сам сервер приложения
+   *              пишут файлы (том maillogs в docker-compose.yml).
+   *
+   * Пустой MAIL_QUEUE_AGENT_URL или пустой QUEUE_AGENT_TOKEN означают
+   * «очередь недоступна», и админка честно скажет это словами вместо
+   * того, чтобы показать пустую таблицу.
+   * ---------------------------------------------------------------- */
+  MAIL_QUEUE_AGENT_URL: z.string().default(''),
+  QUEUE_AGENT_TOKEN: z.string().default(''),
+
+  /** Каталог общего тома с журналами. Пусто — раздел журналов недоступен. */
+  MAIL_LOG_DIR: z.string().default('/var/log/mail'),
+
+  /** Как часто сборщик заглядывает в журнал Postfix, секунды. 0 — не собирать. */
+  MAIL_FLOW_INTERVAL_SECONDS: intVar(5, 0, 3600),
+  /** Сколько суток хранить разобранную историю доставки. */
+  MAIL_FLOW_RETENTION_DAYS: intVar(14, 0, 3650),
+  /** Потолок числа строк истории: защита диска от ночной рассылки. */
+  MAIL_FLOW_MAX_ROWS: intVar(500_000, 0, 100_000_000),
 });
 
 export type AdminEnv = z.infer<typeof adminEnvSchema>;

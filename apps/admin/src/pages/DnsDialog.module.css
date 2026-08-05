@@ -1,0 +1,219 @@
+/*
+ * Диалог проверки DNS.
+ *
+ * Главная забота вёрстки — длинные значения. Ключ DKIM это 400+ символов
+ * без единого пробела: без принудительного переноса он растягивает диалог
+ * и выталкивает страницу за край экрана. Поэтому у каждого блока значения
+ * стоит и перенос по любому месту, и min-width: 0 у родителя-флекса —
+ * без второго первый не работает.
+ */
+
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.headline {
+  font-weight: 600;
+  font-size: var(--mt-font-headline-size, 15px);
+}
+
+.meta {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+}
+
+.resolverNote {
+  margin: 0 0 var(--mt-admin-gap);
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.groupTitle {
+  margin: 18px 0 2px;
+  font-size: var(--mt-font-headline-size, 15px);
+  font-weight: 600;
+}
+
+.groupNote {
+  margin: 0 0 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+}
+
+/* --- Карточка одной записи ------------------------------------------ */
+
+.card {
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  margin-bottom: 8px;
+  overflow: hidden;
+  background: var(--mt-admin-surface);
+}
+
+.cardProblem {
+  border-color: var(--mt-admin-fail);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.head:hover {
+  background: var(--mt-color-background-modal-hovered, rgba(0, 0, 0, 0.03));
+}
+
+.headTitle {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.headName {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  flex: 0 0 auto;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+.body {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--mt-admin-border);
+}
+
+.purpose {
+  margin: 10px 0 0;
+  line-height: 1.45;
+}
+
+.impact {
+  margin: 4px 0 0;
+  color: var(--mt-color-text-secondary);
+  line-height: 1.45;
+}
+
+/* --- Блок значения --------------------------------------------------- */
+
+.value {
+  margin-top: 10px;
+  min-width: 0;
+}
+
+.valueHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.valueLabel {
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.valueSpacer {
+  flex: 1 1 auto;
+}
+
+/*
+ * Само значение. white-space: pre-wrap сохраняет перенос между
+ * несколькими опубликованными записями, overflow-wrap: anywhere рвёт
+ * длинный ключ DKIM, а max-width не даёт блоку раздвинуть диалог.
+ */
+.mono {
+  display: block;
+  max-width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-modal, rgba(0, 0, 0, 0.04));
+  border: 1px solid var(--mt-admin-border);
+  font-family: var(--mt-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.monoEmpty {
+  color: var(--mt-color-text-secondary);
+  font-style: italic;
+}
+
+.diff {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border-radius: var(--mt-admin-radius);
+  border: 1px solid var(--mt-admin-fail);
+  color: var(--mt-color-text-negative);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  margin: 10px 0 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.hintLabel {
+  font-weight: 600;
+}
+
+.copied {
+  color: var(--mt-color-text-positive);
+  font-size: 12px;
+}
+
+.noCopy {
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+.footerLeft {
+  margin-right: auto;
+}
+
+/* На узком экране заголовок карточки складывается в столбик, иначе
+   длинное имя записи выдавливает плашку состояния за край. */
+@media (max-width: 560px) {
+  .head {
+    align-items: flex-start;
+  }
+
+  .headTitle {
+    flex-basis: 100%;
+  }
+
+  .valueHead {
+    align-items: flex-start;
+  }
+}

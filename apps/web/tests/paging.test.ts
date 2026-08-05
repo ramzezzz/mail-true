@@ -11,7 +11,6 @@ import { describe, expect, it } from 'vitest';
 import {
   hasMore,
   loadedCount,
-  loadedLabel,
   nextPageOffset,
   selectAllLabel,
   totalCount,
@@ -61,10 +60,6 @@ describe('счётчики страниц', () => {
   it('hasMore честно отвечает, осталось ли что грузить', () => {
     expect(hasMore([page(0, 100)])).toBe(true);
     expect(hasMore([page(0, 100), page(100, 87)])).toBe(false);
-  });
-
-  it('loadedLabel показывает, сколько из скольких', () => {
-    expect(loadedLabel(100, 187)).toBe('Показано 100 из 187');
   });
 });
 

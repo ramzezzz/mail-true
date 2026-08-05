@@ -105,8 +105,11 @@ export function Sidebar() {
               drop(f.id, e.dataTransfer);
             }}
           >
+            {/* 20×20 — размер значков mail.ru в списке папок (класс
+                ico_size_s: svg width=20 height=20 при viewBox 0 0 16 16).
+                Были 16×16 — заметно мельче эталона. */}
             <span className={styles.folderIcon}>
-              <IconFolderRole role={f.role} />
+              <IconFolderRole role={f.role} size={20} />
             </span>
             <span className={styles.itemName}>{folderTitle(f)}</span>
             {f.unreadCount > 0 && <span className={styles.counter}>{f.unreadCount}</span>}
@@ -117,7 +120,7 @@ export function Sidebar() {
           className={cx(styles.item, styles.newFolder)}
           onClick={() => void navigate('/settings/folders')}
         >
-          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" className={styles.folderIcon}>
+          <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true" className={styles.folderIcon}>
             <path
               d="M8 3a.75.75 0 0 1 .75.75v3.5h3.5a.75.75 0 0 1 0 1.5h-3.5v3.5a.75.75 0 0 1-1.5 0v-3.5h-3.5a.75.75 0 0 1 0-1.5h3.5v-3.5A.75.75 0 0 1 8 3Z"
               fill="currentColor"

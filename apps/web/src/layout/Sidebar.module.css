@@ -1,7 +1,15 @@
+/*
+ * Левая колонка начинается сразу под шапкой, без верхнего поля: у mail.ru
+ * кнопка «Написать письмо» стоит на y=62 при шапке высотой 62 (замер по
+ * research/mailru/01-inbox.png: светлая пилюля занимает строки 62…97).
+ * Сырой --mt-mail-size-sidebar-padding-top (12px) относится к внутренней
+ * прокручиваемой области списка папок, а не к колонке целиком, — с ним весь
+ * левый столбец, включая кнопку, съезжал на 12px вниз.
+ */
 .sidebar {
   width: var(--mt-app-sidebar-width, 232px);
   flex-shrink: 0;
-  padding: var(--mt-mail-size-sidebar-padding-top, 12px) 16px 16px;
+  padding: 0 16px 16px;
   overflow-y: auto;
   color: var(--mt-sidebar-item-text);
 }

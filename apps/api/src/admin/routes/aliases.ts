@@ -5,6 +5,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { checkAlias } from '../alias-check.js';
 import { BadRequestError, NotFoundError } from '../../errors.js';
 import { ConflictError } from '../errors.js';
 import { isUniqueViolation } from '../db.js';
@@ -53,9 +54,18 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/aliases', { preHandler: requireAdmin(app, 'aliases.write') }, async (request, reply) => {
     const body = createSchema.parse(request.body);
-    if (body.source === body.destination) {
-      throw new BadRequestError('Алиас не может указывать сам на себя');
-    }
+    /*
+     * Связность проверяется ДО создания. Раньше проверялось ровно одно —
+     * что адрес не указывает сам на себя, — а самая тяжёлая беда пропускалась
+     * молча: алиас с адресом существующего ящика уводит всю его входящую
+     * почту, потому что перенаправления разбираются раньше ящиков.
+     * Подробности и остальные случаи — в admin/alias-check.ts.
+     */
+    const problem = await checkAlias(body.source, body.destination, {
+      mailboxExists: async (email) => (await ctx.db.findMailUserByEmail(email)) !== null,
+      aliasTarget: (source) => ctx.db.aliasTargetOf(source),
+    });
+    if (problem?.blocking) throw new BadRequestError(problem.message);
     const domainName = body.source.slice(body.source.indexOf('@') + 1);
     const domain = await ctx.db.resolveDomain(domainName, false);
     if (!domain) {
@@ -81,6 +91,11 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
         domainId: created.domain_id,
         active: created.active,
         createdAt: created.created_at.toISOString(),
+        // Непреграждающее предупреждение: алиас создан, но человеку стоит
+        // знать, что путь ведёт на несуществующий адрес. Отказывать нельзя —
+        // ящик могут завести следующим действием, а пересылка на внешний
+        // адрес это вообще обычное дело.
+        ...(problem ? { warning: problem.message } : {}),
       };
     } catch (err) {
       if (isUniqueViolation(err)) throw new ConflictError('Такой алиас уже есть');

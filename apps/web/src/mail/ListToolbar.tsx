@@ -42,6 +42,12 @@ export interface ListToolbarProps {
    * выделять сотню — обман (см. lib/paging.ts).
    */
   selectAllLabel?: string;
+  /**
+   * В папке нет ни одного письма. Тогда «Выделить все» и «Отметить все
+   * прочитанными» выключены: выделять и отмечать нечего, а живая кнопка
+   * обещает действие, которого не будет.
+   */
+  emptyFolder?: boolean;
   filter: MessageFilter;
   onFilterChange(filter: MessageFilter): void;
   /** Папки для меню «В папку» (без текущей). */
@@ -68,10 +74,20 @@ export function ListToolbar(props: ListToolbarProps) {
   if (props.selectedCount === 0) {
     return (
       <div className={styles.toolbar}>
-        <Button mode="tertiary" before={<IconCheckAll />} onClick={props.onSelectAll}>
+        <Button
+          mode="tertiary"
+          before={<IconCheckAll />}
+          onClick={props.onSelectAll}
+          disabled={props.emptyFolder}
+        >
           {props.selectAllLabel ?? 'Выделить все'}
         </Button>
-        <Button mode="tertiary" before={<IconMailRead />} onClick={props.onMarkAllRead}>
+        <Button
+          mode="tertiary"
+          before={<IconMailRead />}
+          onClick={props.onMarkAllRead}
+          disabled={props.emptyFolder}
+        >
           Отметить все прочитанными
         </Button>
 

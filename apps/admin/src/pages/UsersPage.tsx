@@ -4,12 +4,13 @@
  */
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
 import type { MailUser } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
+import { QuotaInput } from '../components/QuotaInput';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import {
   ActiveBadge,
@@ -21,12 +22,14 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from '../components/ui';
-import { formatBytes, formatDateTime, parseBytes, pluralize } from '../lib/format';
+import { formatBytes, formatDateTime, pluralize } from '../lib/format';
+import { checkDisplayName, checkMailboxAddress } from '../lib/mailboxName';
+import { DEFAULT_QUOTA_UNIT, quotaToBytes, splitQuota, type QuotaUnit } from '../lib/quota';
 
 const LIMIT = 50;
 
 export function UsersPage() {
-  const { can } = useSession();
+  const { can, session } = useSession();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
@@ -38,8 +41,16 @@ export function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [passwordFor, setPasswordFor] = useState<MailUser | null>(null);
   const [editing, setEditing] = useState<MailUser | null>(null);
+  const [enterFor, setEnterFor] = useState<MailUser | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+
+  /**
+   * Вход в чужой ящик доступен, только если настроен служебный доступ
+   * Dovecot: без него сервер всё равно откажет, и кнопка вводила бы в
+   * заблуждение.
+   */
+  const canEnterMailbox = can('mailbox.impersonate') && (session?.masterAccess ?? false);
 
   const domains = useQuery({ queryKey: ['domains'], queryFn: () => api.domains() });
 
@@ -212,6 +223,11 @@ export function UsersPage() {
                         {user.active ? 'Заблокировать' : 'Разблокировать'}
                       </Button>
                     )}
+                    {canEnterMailbox && (
+                      <Button mode="tertiary" size="s" onClick={() => setEnterFor(user)}>
+                        Войти в ящик
+                      </Button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -263,6 +279,9 @@ export function UsersPage() {
           }}
         />
       )}
+      {enterFor && (
+        <EnterMailboxModal user={enterFor} onClose={() => setEnterFor(null)} />
+      )}
       {bulkOpen && (
         <BulkModal
           ids={selectedIds}
@@ -293,10 +312,13 @@ function CreateUserModal({
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
-  const [quota, setQuota] = useState('1 ГБ');
+  const [quotaAmount, setQuotaAmount] = useState('1');
+  const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
   const [generated, setGenerated] = useState<{ email: string; password: string } | null>(null);
 
-  const quotaBytes = parseBytes(quota);
+  const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
+  const emailProblem = checkMailboxAddress(email);
+  const displayNameProblem = checkDisplayName(displayName);
   const create = useMutation({
     mutationFn: () =>
       api.createUser({
@@ -346,7 +368,13 @@ function CreateUserModal({
             Отмена
           </Button>
           <Button
-            disabled={email.trim() === '' || create.isPending}
+            disabled={
+              email.trim() === '' ||
+              emailProblem !== null ||
+              displayNameProblem !== null ||
+              quotaBytes === null ||
+              create.isPending
+            }
             onClick={() => create.mutate()}
           >
             {create.isPending ? 'Создаём…' : 'Создать'}
@@ -355,7 +383,10 @@ function CreateUserModal({
       }
     >
       <ErrorNotice error={create.error} />
-      <Field label="Адрес" hint="Домен должен быть заведён в разделе «Домены»">
+      <Field
+        label="Адрес"
+        hint={emailProblem ?? 'Домен должен быть заведён в разделе «Домены»'}
+      >
         <input
           className="mt-input mt-mono"
           autoFocus
@@ -364,7 +395,7 @@ function CreateUserModal({
           onChange={(e) => setEmail(e.target.value)}
         />
       </Field>
-      <Field label="Отображаемое имя">
+      <Field label="Отображаемое имя" {...(displayNameProblem ? { hint: displayNameProblem } : {})}>
         <input
           className="mt-input"
           placeholder="Иван Петров"
@@ -383,11 +414,16 @@ function CreateUserModal({
         label="Квота"
         hint={
           quotaBytes === null
-            ? 'Не удалось понять значение. Примеры: 1 ГБ, 500M, 0 (без ограничения)'
+            ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
             : `Будет ${formatBytes(quotaBytes)}`
         }
       >
-        <input className="mt-input" value={quota} onChange={(e) => setQuota(e.target.value)} />
+        <QuotaInput
+          amount={quotaAmount}
+          unit={quotaUnit}
+          onAmount={setQuotaAmount}
+          onUnit={setQuotaUnit}
+        />
       </Field>
     </Modal>
   );
@@ -407,8 +443,11 @@ function EditUserModal({
   onSaved: (message: string) => void;
 }) {
   const [displayName, setDisplayName] = useState(user.displayName ?? '');
-  const [quota, setQuota] = useState(formatBytes(user.quotaBytes));
-  const quotaBytes = parseBytes(quota);
+  const initial = splitQuota(user.quotaBytes);
+  const [quotaAmount, setQuotaAmount] = useState(String(initial.amount));
+  const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(initial.unit);
+  const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
+  const displayNameProblem = checkDisplayName(displayName);
 
   const save = useMutation({
     mutationFn: () =>
@@ -428,14 +467,17 @@ function EditUserModal({
           <Button mode="secondary" onClick={onClose}>
             Отмена
           </Button>
-          <Button disabled={save.isPending} onClick={() => save.mutate()}>
+          <Button
+            disabled={save.isPending || quotaBytes === null || displayNameProblem !== null}
+            onClick={() => save.mutate()}
+          >
             Сохранить
           </Button>
         </>
       }
     >
       <ErrorNotice error={save.error} />
-      <Field label="Отображаемое имя">
+      <Field label="Отображаемое имя" {...(displayNameProblem ? { hint: displayNameProblem } : {})}>
         <input
           className="mt-input"
           value={displayName}
@@ -444,9 +486,18 @@ function EditUserModal({
       </Field>
       <Field
         label="Квота"
-        hint={quotaBytes === null ? 'Не удалось понять значение' : `Будет ${formatBytes(quotaBytes)}`}
+        hint={
+          quotaBytes === null
+            ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
+            : `Сейчас ${formatBytes(user.quotaBytes)}, станет ${formatBytes(quotaBytes)}`
+        }
       >
-        <input className="mt-input" value={quota} onChange={(e) => setQuota(e.target.value)} />
+        <QuotaInput
+          amount={quotaAmount}
+          unit={quotaUnit}
+          onAmount={setQuotaAmount}
+          onUnit={setQuotaUnit}
+        />
       </Field>
     </Modal>
   );
@@ -544,8 +595,9 @@ function BulkModal({
   onDone: (message: string) => void;
 }) {
   const [mode, setMode] = useState<'quota' | 'block' | 'unblock'>('quota');
-  const [quota, setQuota] = useState('1 ГБ');
-  const quotaBytes = parseBytes(quota);
+  const [quotaAmount, setQuotaAmount] = useState('1');
+  const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
+  const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
 
   const run = useMutation({
     mutationFn: () =>
@@ -592,11 +644,86 @@ function BulkModal({
       {mode === 'quota' && (
         <Field
           label="Новая квота"
-          hint={quotaBytes === null ? 'Не удалось понять значение' : `Будет ${formatBytes(quotaBytes)}`}
+          hint={
+            quotaBytes === null
+              ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
+              : `У всех выбранных ящиков станет ${formatBytes(quotaBytes)}`
+          }
         >
-          <input className="mt-input" value={quota} onChange={(e) => setQuota(e.target.value)} />
+          <QuotaInput
+            amount={quotaAmount}
+            unit={quotaUnit}
+            onAmount={setQuotaAmount}
+            onUnit={setQuotaUnit}
+          />
         </Field>
       )}
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Вход в чужой ящик                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Вход в ящик прямо из его строки в списке.
+ *
+ * Раньше для этого был отдельный раздел, где нужный адрес приходилось
+ * искать заново — руками, по памяти. Адрес здесь уже известен, поэтому
+ * спрашивается только причина: она обязательна, попадает в журнал аудита
+ * и видна владельцу ящика.
+ */
+function EnterMailboxModal({ user, onClose }: { user: MailUser; onClose: () => void }) {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const [reason, setReason] = useState('');
+
+  // Тот же порог, что и на сервере: причина короче пяти значащих
+  // символов объяснением не является.
+  const reasonReady = reason.replace(/\s+/gu, '').length >= 5;
+
+  const enter = useMutation({
+    mutationFn: () => api.mailboxEnter(user.email, reason.trim()),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['mailbox-session'] });
+      onClose();
+      navigate('/mailbox');
+    },
+  });
+
+  return (
+    <Modal
+      title={`Войти в ящик ${user.email}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button mode="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button disabled={!reasonReady || enter.isPending} onClick={() => enter.mutate()}>
+            {enter.isPending ? 'Входим…' : 'Войти в ящик'}
+          </Button>
+        </>
+      }
+    >
+      <ErrorNotice error={enter.error} />
+      <Field
+        label="Причина входа"
+        hint="Обязательное поле. Запись попадёт в журнал аудита, владелец ящика её увидит."
+      >
+        <input
+          className="mt-input"
+          autoFocus
+          placeholder="Обращение №1234: письмо не пришло, проверяем доставку"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </Field>
+      <Notice tone="info">
+        Отправлять письма от имени владельца нельзя. Флаг «прочитано» при просмотре не
+        ставится — следов в ящике не остаётся.
+      </Notice>
     </Modal>
   );
 }

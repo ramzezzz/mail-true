@@ -30,4 +30,35 @@ chmod 640 /etc/postfix/pgsql/*.cf
 touch /etc/aliases
 newaliases
 
+# ------------------------------------------------------------------
+# Журнал: файл в общем томе И stdout контейнера одновременно.
+#
+# Почему не что-то одно. Админке нужен ФАЙЛ: сокета Docker у сервера
+# приложения нет, а «docker compose logs» без него недоступен. Людям и
+# проверкам стенда нужен STDOUT: `docker compose logs postfix` — первое,
+# куда смотрят, и на этот вывод опираются infra/test-*.sh.
+#
+# Postfix умеет писать только в одно место (maillog_file), поэтому пишем
+# в файл, а в stdout его переливает tail. Проворачивание файла делает
+# посредник очереди командой `postfix logrotate`; tail -F следит за ИМЕНЕМ
+# и после проворота сам открывает новый файл.
+# ------------------------------------------------------------------
+MAILLOG="${QUEUE_AGENT_MAILLOG:-/var/log/mail/postfix.log}"
+mkdir -p "$(dirname "$MAILLOG")"
+chmod 1777 "$(dirname "$MAILLOG")" 2>/dev/null || true
+touch "$MAILLOG"
+chown postfix "$MAILLOG" 2>/dev/null || true
+chmod 644 "$MAILLOG"
+tail -n 0 -F "$MAILLOG" &
+
+# Посредник к очереди для админки. Без секрета не запускается вовсе
+# (см. queue-agent.pl) — то есть по умолчанию его просто нет.
+if [ -n "${QUEUE_AGENT_TOKEN:-}" ]; then
+    QUEUE_AGENT_MAILLOG="$MAILLOG"
+    export QUEUE_AGENT_MAILLOG QUEUE_AGENT_TOKEN QUEUE_AGENT_PORT
+    # Перезапуск в цикле: посредник не должен уносить с собой почтовый
+    # сервер, но и молча исчезать навсегда тоже не должен.
+    sh -c 'while true; do /usr/local/bin/queue-agent.pl; sleep 5; done' &
+fi
+
 exec /usr/sbin/postfix start-fg

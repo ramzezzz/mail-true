@@ -43,7 +43,12 @@ COPY decode2text.sh /usr/lib/dovecot/decode2text.sh
 # Письмо-предупреждение при приближении к квоте
 COPY quota-warning.sh /usr/local/bin/quota-warning.sh
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /usr/lib/dovecot/decode2text.sh /usr/local/bin/quota-warning.sh /entrypoint.sh
+RUN chmod +x /usr/lib/dovecot/decode2text.sh /usr/local/bin/quota-warning.sh /entrypoint.sh \
+    # Общий том с журналами почтового стека (его читает админка). Права
+    # задаются в образе: docker переносит их на свежесозданный том, и не
+    # важно, чей контейнер поднимется первым. Бит t — как у /tmp: каждый
+    # пишет свой файл и не может удалить чужой.
+    && mkdir -p /var/log/mail && chmod 1777 /var/log/mail
 
 # 143/993 IMAP, 110/995 POP3, 24 LMTP, 12345 SASL-auth для Postfix,
 # 12340 quota-status (policy-сервис Postfix: отказ переполненному ящику на RCPT)

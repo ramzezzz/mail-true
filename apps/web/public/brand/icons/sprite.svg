@@ -99,9 +99,10 @@
     <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
   </symbol>
   <symbol id="icon-important" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="12" r="8.5"/>
-    <path d="M12 7.4v5.3"/>
-    <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+    <path d="M6.5 4.5h11a1 1 0 0 1 1 1v14.2l-6.5-4.3-6.5 4.3V5.5a1 1 0 0 1 1-1Z"/>
+  </symbol>
+  <symbol id="icon-important-filled" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+    <path d="M6.5 3.6h11a1.9 1.9 0 0 1 1.9 1.9v14.2a1 1 0 0 1-1.55.83L12 16.6l-5.85 3.93a1 1 0 0 1-1.55-.83V5.5A1.9 1.9 0 0 1 6.5 3.6Z"/>
   </symbol>
   <symbol id="icon-send-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
     <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>

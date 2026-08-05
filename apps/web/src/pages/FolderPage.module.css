@@ -14,7 +14,7 @@
   color: var(--mt-color-text-secondary);
 }
 
-/* Подвал списка: сколько показано и подгрузка следующей страницы */
+/* Подвал списка: подгрузка следующей страницы */
 .listFooter {
   display: flex;
   align-items: center;
@@ -22,10 +22,6 @@
   gap: 12px;
   padding: 12px 0 20px;
   color: var(--mt-color-text-secondary);
-}
-
-.listFooterCount {
-  font-size: 13px;
 }
 
 /* Не смогли загрузить список писем */

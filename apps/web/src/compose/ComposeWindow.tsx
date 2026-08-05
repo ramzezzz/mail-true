@@ -11,11 +11,27 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { api } from '../api';
 import { useAccount, useSaveDraft, useSendMessage } from '../api/queries';
 import { useUiStore, type ComposeDraft, type ComposeWindowState } from '../app/store';
-import { Button, IconButton, Tooltip } from '../components';
+import { Button, Dropdown, IconButton, MenuItem, Tooltip, useDropdownClose } from '../components';
 import { parseAddresses } from '../lib/addresses';
 import { cx } from '../lib/cx';
 import { actionErrorText } from '../lib/errorText';
-import { IconAttach, IconClose, IconEvent, IconMailRead } from '../mail/icons';
+import {
+  IconAlignCenter,
+  IconAlignLeft,
+  IconAlignRight,
+  IconAttach,
+  IconClearFormat,
+  IconClose,
+  IconEmoji,
+  IconEvent,
+  IconFontFamily,
+  IconLink,
+  IconListBulleted,
+  IconListNumbered,
+  IconMailRead,
+  IconRedo,
+  IconUndo,
+} from '../mail/icons';
 import { useGeneralSettings } from '../api/settingsQueries';
 import {
   DEFAULT_GENERAL_SETTINGS,
@@ -52,6 +68,33 @@ const FONT_SIZES: Array<[string, string]> = [
   ['6', '32'],
 ];
 const EMOJI = ['🙂', '😄', '👍', '🙏', '🔥', '❤️', '🎉', '🤝'];
+
+/**
+ * Набор смайликов в меню. Отдельный компонент нужен ради `useDropdownClose`:
+ * эти кнопки нарисованы не через `MenuItem`, а он закрывается сам, — без
+ * этого меню оставалось бы висеть поверх уже изменившегося письма.
+ */
+function EmojiGrid({ onPick }: { onPick: (symbol: string) => void }) {
+  const close = useDropdownClose();
+  return (
+    <div className={styles.emojiGrid}>
+      {EMOJI.map((symbol) => (
+        <button
+          key={symbol}
+          type="button"
+          className={styles.emojiButton}
+          aria-label={`Вставить ${symbol}`}
+          onClick={() => {
+            onPick(symbol);
+            close();
+          }}
+        >
+          {symbol}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindowProps) {
   const { data: account } = useAccount();
@@ -163,6 +206,14 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     applySignature,
     patch,
   ]);
+
+  /**
+   * Выбранный размер шрифта. У нативного `select` он показывался сам;
+   * у кнопки-меню его приходится держать, иначе на панели не видно,
+   * какой размер сейчас выбран.
+   */
+  const [fontSize, setFontSize] = useState('3');
+  const fontSizeLabel = FONT_SIZES.find(([value]) => value === fontSize)?.[1] ?? '15';
 
   /** Команда форматирования contenteditable с сохранением выделения. */
   const exec = (command: string, value?: string) => {
@@ -503,15 +554,25 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
           ))}
         </div>
 
-        {/* Панель форматирования: значки 32×32, списки 48×32.
-            preventDefault на кнопках сохраняет выделение в редакторе */}
-        <div
-          className={styles.formatBar}
-          onMouseDown={(e) => {
-            const tag = (e.target as HTMLElement).tagName;
-            if (tag !== 'SELECT' && tag !== 'OPTION') e.preventDefault();
-          }}
-        >
+        {/*
+          Панель форматирования: кнопки 32×32.
+
+          Все значки — из одного набора (сетка 24×24, штрих 1.8, currentColor),
+          как у mail.ru (research/mailru/03-compose.png). Раньше здесь стояли
+          юникодные глифы «⇤ ↔ •• 1. ↶ ↷», цветное эмодзи 🔗, нативный
+          `select` со смайликом и комбинирующий «A̶»: соседние кнопки были
+          разной оптической плотности, а две — вообще цветные.
+
+          Ж/К/Ч/З остаются буквами: у mail.ru начертания подписаны ровно так же.
+
+          Выбор гарнитуры — не `select`, а меню: в 48px нативного селекта
+          «Golos Text» не влезало и наезжало на стрелку. У mail.ru на его месте
+          стоит значок «Tt», и выбор раскрывается меню.
+
+          preventDefault на mousedown сохраняет выделение в редакторе — иначе
+          команда применилась бы в пустоту.
+        */}
+        <div className={styles.formatBar} onMouseDown={(e) => e.preventDefault()}>
           <button type="button" className={styles.fmtButton} title="Жирный" onClick={() => exec('bold')}>
             <b>Ж</b>
           </button>
@@ -525,50 +586,70 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
             <s>З</s>
           </button>
 
-          <select
-            className={styles.fmtSelect}
-            title="Шрифт"
-            defaultValue="Golos Text"
-            onChange={(e) => exec('fontName', e.target.value)}
+          <Dropdown
+            menuClassName={styles.fmtMenu}
+            trigger={({ toggle }) => (
+              <button type="button" className={styles.fmtButton} title="Шрифт" onClick={toggle}>
+                <IconFontFamily size={20} />
+              </button>
+            )}
           >
             {FONT_FAMILIES.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
+              <MenuItem key={f} onClick={() => exec('fontName', f)}>
+                <span style={{ fontFamily: f }}>{f}</span>
+              </MenuItem>
             ))}
-          </select>
-          <select
-            className={styles.fmtSelect}
-            title="Размер шрифта"
-            defaultValue="3"
-            onChange={(e) => exec('fontSize', e.target.value)}
+          </Dropdown>
+
+          <Dropdown
+            menuClassName={styles.fmtMenuNarrow}
+            trigger={({ toggle }) => (
+              <button
+                type="button"
+                className={cx(styles.fmtButton, styles.fmtButtonWide)}
+                title="Размер шрифта"
+                onClick={toggle}
+              >
+                {fontSizeLabel}
+              </button>
+            )}
           >
             {FONT_SIZES.map(([value, label]) => (
-              <option key={value} value={value}>
+              <MenuItem
+                key={value}
+                onClick={() => {
+                  setFontSize(value);
+                  exec('fontSize', value);
+                }}
+                hint={value === fontSize ? '✓' : undefined}
+              >
                 {label}
-              </option>
+              </MenuItem>
             ))}
-          </select>
+          </Dropdown>
 
           <span className={styles.fmtSeparator} />
 
           <button type="button" className={styles.fmtButton} title="По левому краю" onClick={() => exec('justifyLeft')}>
-            ⇤
+            <IconAlignLeft size={20} />
           </button>
           <button type="button" className={styles.fmtButton} title="По центру" onClick={() => exec('justifyCenter')}>
-            ↔
+            <IconAlignCenter size={20} />
+          </button>
+          <button type="button" className={styles.fmtButton} title="По правому краю" onClick={() => exec('justifyRight')}>
+            <IconAlignRight size={20} />
           </button>
           <button type="button" className={styles.fmtButton} title="Маркированный список" onClick={() => exec('insertUnorderedList')}>
-            ••
+            <IconListBulleted size={20} />
           </button>
           <button type="button" className={styles.fmtButton} title="Нумерованный список" onClick={() => exec('insertOrderedList')}>
-            1.
+            <IconListNumbered size={20} />
           </button>
           <button type="button" className={styles.fmtButton} title="Отменить" onClick={() => exec('undo')}>
-            ↶
+            <IconUndo size={20} />
           </button>
           <button type="button" className={styles.fmtButton} title="Повторить" onClick={() => exec('redo')}>
-            ↷
+            <IconRedo size={20} />
           </button>
           <button
             type="button"
@@ -579,25 +660,27 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
               if (url) exec('createLink', url);
             }}
           >
-            🔗
+            <IconLink size={20} />
           </button>
-          <select
-            className={styles.fmtSelect}
-            title="Вставить смайлик"
-            value=""
-            onChange={(e) => {
-              if (e.target.value) exec('insertText', e.target.value);
-            }}
+
+          <Dropdown
+            menuClassName={styles.emojiMenu}
+            trigger={({ toggle }) => (
+              <button
+                type="button"
+                className={styles.fmtButton}
+                title="Вставить смайлик"
+                onClick={toggle}
+              >
+                <IconEmoji size={20} />
+              </button>
+            )}
           >
-            <option value="">🙂</option>
-            {EMOJI.map((e) => (
-              <option key={e} value={e}>
-                {e}
-              </option>
-            ))}
-          </select>
+            <EmojiGrid onPick={(symbol) => exec('insertText', symbol)} />
+          </Dropdown>
+
           <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
-            A̶
+            <IconClearFormat size={20} />
           </button>
         </div>
 

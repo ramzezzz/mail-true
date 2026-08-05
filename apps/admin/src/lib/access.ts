@@ -42,13 +42,18 @@ export interface NavItem {
 
 /** Полное меню админки; фильтруется правами текущей сессии. */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { to: '/', title: 'Сводка', requires: ['overview.read'] },
+  { to: '/', title: 'Дашборд', requires: ['overview.read'] },
   { to: '/users', title: 'Пользователи', requires: ['users.read'] },
   { to: '/aliases', title: 'Алиасы', requires: ['aliases.read'] },
   { to: '/domains', title: 'Домены и DNS', requires: ['domains.read'] },
   // Настройки помощника ИИ — это настройки домена, поэтому и право то же.
   { to: '/ai', title: 'Помощник ИИ', requires: ['domains.read'] },
-  { to: '/mailbox', title: 'Вход в ящик', requires: ['mailbox.impersonate'] },
+  /*
+   * Пункта «Вход в ящик» здесь больше нет. Входят теперь кнопкой прямо в
+   * строке списка ящиков — искать нужный адрес заново не приходится.
+   * Сама страница /mailbox осталась: в ней читают уже открытый ящик.
+   * Журнал входов отдельного пункта не требует — он в «Журнале аудита».
+   */
   { to: '/audit', title: 'Журнал аудита', requires: ['audit.read'] },
   { to: '/flow', title: 'Почтовый поток', requires: ['overview.read'], stub: true },
   { to: '/spam', title: 'Спам', requires: ['overview.read'], stub: true },

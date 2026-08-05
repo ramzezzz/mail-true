@@ -5,33 +5,38 @@
  * поэтому по каждой записи показывается: зачем она, что должно быть
  * (готовая строка для копирования), что опубликовано на самом деле
  * и что конкретно сделать. Никаких «SPF: FAIL».
+ *
+ * Кнопка одна. Раньше их было две — «Проверить DNS» и «Что прописать», —
+ * и они отвечали на разные половины одного вопроса: первая говорила
+ * «не настроено», не говоря что именно, вторая показывала, что должно
+ * быть, ничего не зная о том, что есть. Сравнивать приходилось в голове.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { api } from '../api/client';
-import type { DnsCheck, DnsReport, Domain } from '../api/types';
+import type { DnsReport, Domain } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import {
-  Badge,
   DnsBadge,
   ErrorNotice,
   Field,
   Modal,
   Notice,
-  Panel,
   Toolbar,
   ToolbarSpacer,
 } from '../components/ui';
 import { formatRelative } from '../lib/format';
+import { DnsDialog } from './DnsDialog';
 
 export function DomainsPage() {
   const { can } = useSession();
   const queryClient = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
-  const [report, setReport] = useState<{ domain: string; data: DnsReport } | null>(null);
+  /** Открытый диалог: домен и последний известный отчёт (может быть null). */
+  const [opened, setOpened] = useState<{ domain: Domain; report: DnsReport | null } | null>(null);
   const [dkimFor, setDkimFor] = useState<Domain | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -39,11 +44,21 @@ export function DomainsPage() {
 
   const check = useMutation({
     mutationFn: (domain: Domain) => api.dnsCheck(domain.id),
-    onSuccess: (data) => {
-      setReport({ domain: data.domain, data });
+    onSuccess: (data, domain) => {
+      setOpened({ domain, report: data });
       void queryClient.invalidateQueries({ queryKey: ['domains'] });
     },
   });
+
+  /**
+   * Открытие диалога. Прежний отчёт показывается сразу, чтобы не смотреть
+   * на пустой экран, и тут же запускается свежая проверка: устаревшая
+   * картина DNS вводит в заблуждение сильнее, чем её отсутствие.
+   */
+  const openFor = (domain: Domain): void => {
+    setOpened({ domain, report: domain.dnsStatus });
+    if (can('domains.dnscheck')) check.mutate(domain);
+  };
 
   const items = domains.data?.items ?? [];
 
@@ -86,26 +101,9 @@ export function DomainsPage() {
                 <td className={tableStyles.nowrap}>{formatRelative(domain.dnsCheckedAt)}</td>
                 <td>
                   <div className={tableStyles.actions}>
-                    <Button
-                      mode="tertiary"
-                      size="s"
-                      onClick={() => {
-                        if (domain.dnsStatus) setReport({ domain: domain.name, data: domain.dnsStatus });
-                        else check.mutate(domain);
-                      }}
-                    >
-                      Что прописать
+                    <Button mode="tertiary" size="s" onClick={() => openFor(domain)}>
+                      Проверить DNS
                     </Button>
-                    {can('domains.dnscheck') && (
-                      <Button
-                        mode="tertiary"
-                        size="s"
-                        disabled={check.isPending}
-                        onClick={() => check.mutate(domain)}
-                      >
-                        {check.isPending ? 'Проверяем…' : 'Проверить DNS'}
-                      </Button>
-                    )}
                     {can('domains.write') && (
                       <Button mode="tertiary" size="s" onClick={() => setDkimFor(domain)}>
                         Ключ DKIM
@@ -122,20 +120,19 @@ export function DomainsPage() {
         </Table>
       </TableWrap>
 
-      {report && (
-        <Modal
-          wide
-          title={`DNS домена ${report.domain}`}
-          onClose={() => setReport(null)}
-        >
-          <Notice tone={report.data.overall === 'ok' ? 'success' : 'info'}>
-            Проверено {formatRelative(report.data.checkedAt)}. Итог:{' '}
-            <DnsBadge status={report.data.overall} />
-          </Notice>
-          {report.data.checks.map((c) => (
-            <DnsCheckCard key={c.id} check={c} />
-          ))}
-        </Modal>
+      {opened && (
+        <DnsDialog
+          domainName={opened.domain.name}
+          report={opened.report}
+          checking={check.isPending}
+          error={check.error}
+          canCheck={can('domains.dnscheck')}
+          onRecheck={() => check.mutate(opened.domain)}
+          onClose={() => {
+            setOpened(null);
+            check.reset();
+          }}
+        />
       )}
 
       {addOpen && (
@@ -161,57 +158,6 @@ export function DomainsPage() {
         />
       )}
     </>
-  );
-}
-
-/** Карточка одной проверки: зачем, что должно быть, что есть, что делать. */
-function DnsCheckCard({ check }: { check: DnsCheck }) {
-  const tone = check.status === 'ok' ? 'ok' : check.status === 'fail' ? 'fail' : check.status === 'warn' ? 'warn' : 'muted';
-  return (
-    <div style={{ marginBottom: 12 }}>
-      <Panel>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <strong>{check.title}</strong>
-          <Badge tone={tone}>
-            {check.status === 'ok'
-              ? 'в порядке'
-              : check.status === 'warn'
-                ? 'замечание'
-                : check.status === 'fail'
-                  ? 'не настроено'
-                  : 'неизвестно'}
-          </Badge>
-        </div>
-        <p style={{ margin: '0 0 8px', color: 'var(--mt-color-text-secondary)' }}>{check.purpose}</p>
-
-        <TableWrap>
-          <Table>
-            <tbody>
-              <tr>
-                <td className={tableStyles.nowrap} style={{ width: 150 }}>Имя записи</td>
-                <td className="mt-mono">{check.recordName}</td>
-              </tr>
-              <tr>
-                <td className={tableStyles.nowrap}>Тип</td>
-                <td className="mt-mono">{check.recordType}</td>
-              </tr>
-              <tr>
-                <td className={tableStyles.nowrap}>Что должно быть</td>
-                <td className="mt-mono" style={{ wordBreak: 'break-all' }}>{check.expected}</td>
-              </tr>
-              <tr>
-                <td className={tableStyles.nowrap}>Что опубликовано</td>
-                <td className="mt-mono" style={{ wordBreak: 'break-all' }}>
-                  {check.actual.length > 0 ? check.actual.join(' | ') : '— ничего —'}
-                </td>
-              </tr>
-            </tbody>
-          </Table>
-        </TableWrap>
-
-        <p style={{ margin: '8px 0 0' }}>{check.hint}</p>
-      </Panel>
-    </div>
   );
 }
 

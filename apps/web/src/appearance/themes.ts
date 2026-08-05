@@ -35,7 +35,11 @@ export interface ThemeMeta {
   accent: string;
   accentHover: string;
   accentPress: string;
-  /** Подложка выбранной строки списка — светлый тон акцента. */
+  /**
+   * Подложка выделенной строки списка. Нейтрально-серая, как у mail.ru
+   * (#EBECEF — пипетка по research/mailru/10-selection.png), а не тон
+   * акцента: тема её не красит. Тёмная берёт свой нейтральный тон.
+   */
   selection: string;
   /** Фон страницы вокруг белой карточки (для обоев — усреднённый тон). */
   appBg: string;
@@ -55,7 +59,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#006ec6',
     accentHover: '#005ca8',
     accentPress: '#004e8f',
-    selection: '#e7f1fb',
+    selection: '#ebecef',
     appBg: '#f0f1f3',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -68,7 +72,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#5ca8f5',
     accentHover: '#7cbaf7',
     accentPress: '#4694e3',
-    selection: '#1a2c40',
+    selection: '#3a3a3b',
     appBg: '#19191a',
     contentBg: '#232324',
     textPrimary: '#e1e3e6',
@@ -81,7 +85,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#047857',
     accentHover: '#03654a',
     accentPress: '#05543f',
-    selection: '#e3f2ec',
+    selection: '#ebecef',
     appBg: '#eaf3ee',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -94,7 +98,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#6941c6',
     accentHover: '#5a35ad',
     accentPress: '#4c2c96',
-    selection: '#f0ecfa',
+    selection: '#ebecef',
     appBg: '#efecf9',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -107,7 +111,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#be185d',
     accentHover: '#a31450',
     accentPress: '#8c1145',
-    selection: '#fbebf2',
+    selection: '#ebecef',
     appBg: '#faeef2',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -120,7 +124,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#0e7490',
     accentHover: '#0c627a',
     accentPress: '#0a5266',
-    selection: '#e6f2f6',
+    selection: '#ebecef',
     appBg: '#e9f4f6',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -133,7 +137,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#c2410c',
     accentHover: '#a8380a',
     accentPress: '#8f2f09',
-    selection: '#fbeee6',
+    selection: '#ebecef',
     appBg: '#f7efe9',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',
@@ -148,7 +152,7 @@ export const THEMES: readonly ThemeMeta[] = [
     accent: '#006ec6',
     accentHover: '#005ca8',
     accentPress: '#004e8f',
-    selection: '#e7f1fb',
+    selection: '#ebecef',
     appBg: '#4d4d4d',
     contentBg: '#ffffff',
     textPrimary: '#2c2d2e',

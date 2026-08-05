@@ -46,8 +46,17 @@
   --mt-accent: #006ec6;
   --mt-accent-hover: #005ca8;
   --mt-accent-press: #004e8f;
-  /* Подложка выбранной строки списка — светлый тон акцента */
-  --mt-accent-selection: #e7f1fb;
+
+  /*
+   * Подложка выделенной строки списка. НЕ производная акцента: у mail.ru она
+   * нейтрально-серая при любой теме — #EBECEF, снято пипеткой с выделенной
+   * строки research/mailru/10-selection.png (rgb(235,236,239)). Раньше здесь
+   * стоял светлый тон акцента #E7F1FB, и выделение было голубым.
+   * Значение совпадает с сырым --mt-mail-color-list-letter-background-press
+   * из выгрузки, и переменная нужна ровно затем, чтобы тёмная тема могла
+   * задать свой нейтральный тон.
+   */
+  --mt-list-selection: #ebecef;
 
   /* Весь «синий кластер» токенов mail.ru замкнут на акцент темы.
      Геометрия и остальные цвета остаются как сняты с mail.ru. */
@@ -77,10 +86,20 @@
   --mt-ph-color-background-accent-themed: var(--mt-accent);
   --mt-ph-color-icon-accent: var(--mt-accent);
   --mt-ph-color-stroke-accent: var(--mt-accent);
-  --mt-mail-color-list-letter-background-press: var(--mt-accent-selection);
+  --mt-mail-color-list-letter-background-press: var(--mt-list-selection);
 
   /* Тень окна написания письма (.compose-app mail.ru) */
   --mt-compose-shadow: 0 4px 32px rgba(0, 16, 61, 0.16);
+
+  /*
+   * Рамка фокуса — ОДНА на весь интерфейс (см. global.css). До этого на одном
+   * экране жили два разных вида: у строк списка и переключателей своя, а
+   * кнопки, папки и ссылки показывали браузерную по умолчанию — чёрно-белую,
+   * не знающую ни темы, ни акцента.
+   */
+  --mt-focus-ring-width: 2px;
+  --mt-focus-ring-color: var(--mt-color-stroke-accent);
+  --mt-focus-ring-offset: 2px;
 
   /*
    * Переключатель (BaseSwitch mail.ru). Размеры сняты пиксель в пиксель с
@@ -138,7 +157,15 @@
   --mt-settings-bg: var(--mt-color-background-secondary);
   --mt-settings-card-bg: var(--mt-color-background-content);
   --mt-settings-card-radius: var(--mt-size-card-border-radius, 16px);
-  --mt-settings-nav-active-bg: var(--mt-color-background-secondary);
+  /*
+   * Активный пункт левого меню настроек — серая пилюля. Раньше здесь стоял
+   * --mt-color-background-secondary, то есть РОВНО тот же цвет, что и фон
+   * страницы настроек (--mt-settings-bg), и пилюли не было видно вовсе.
+   * Полупрозрачная накладка rgba(0,16,61,.08) поверх фона даёт rgb(226,229,233)
+   * при мейловом фоне #F6F7F8 — пипетка по research/mailru/04-settings.png
+   * показывает rgb(227,229,234). Заодно она работает в любой теме.
+   */
+  --mt-settings-nav-active-bg: var(--mt-ph-color-transparent-press);
   --mt-settings-h1-size: 32px;
   --mt-settings-h1-line-height: 36px;
   --mt-settings-h2-size: 28px;
@@ -242,10 +269,15 @@
   --mt-accent: #5ca8f5;
   --mt-accent-hover: #7cbaf7;
   --mt-accent-press: #4694e3;
-  --mt-accent-selection: #1a2c40;
+  /* Нейтральная подложка выделения, на ступень светлее фона строки */
+  --mt-list-selection: #3a3a3b;
   --mt-color-text-contrast: #15181d;
 
   /* Мейловый слой */
+  /* Третичные кнопки панели у mail.ru покрашены в #333 — на тёмном фоне
+     их нужно вернуть к основному тексту темы */
+  --mt-mail-color-button-text: var(--mt-color-text-primary);
+  --mt-mail-color-button-icon: var(--mt-color-text-primary);
   --mt-mail-color-list-letter-background: #232324;
   --mt-mail-color-list-letter-background-hover: #2c2d2e;
   --mt-mail-color-list-letter-separator-alpha: rgba(255, 255, 255, 0.12);
@@ -334,7 +366,6 @@
   --mt-accent: #047857;
   --mt-accent-hover: #03654a;
   --mt-accent-press: #05543f;
-  --mt-accent-selection: #e3f2ec;
   --mt-app-bg: #eaf3ee;
   --mt-settings-bg: #eaf3ee;
 }
@@ -344,7 +375,6 @@
   --mt-accent: #6941c6;
   --mt-accent-hover: #5a35ad;
   --mt-accent-press: #4c2c96;
-  --mt-accent-selection: #f0ecfa;
   --mt-app-bg: #efecf9;
   --mt-settings-bg: #efecf9;
 }
@@ -354,7 +384,6 @@
   --mt-accent: #be185d;
   --mt-accent-hover: #a31450;
   --mt-accent-press: #8c1145;
-  --mt-accent-selection: #fbebf2;
   --mt-app-bg: #faeef2;
   --mt-settings-bg: #faeef2;
 }
@@ -364,7 +393,6 @@
   --mt-accent: #0e7490;
   --mt-accent-hover: #0c627a;
   --mt-accent-press: #0a5266;
-  --mt-accent-selection: #e6f2f6;
   --mt-app-bg: #e9f4f6;
   --mt-settings-bg: #e9f4f6;
 }
@@ -374,7 +402,6 @@
   --mt-accent: #c2410c;
   --mt-accent-hover: #a8380a;
   --mt-accent-press: #8f2f09;
-  --mt-accent-selection: #fbeee6;
   --mt-app-bg: #f7efe9;
   --mt-settings-bg: #f7efe9;
 }

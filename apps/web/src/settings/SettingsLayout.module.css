@@ -87,6 +87,13 @@
   background: var(--mt-settings-card-bg);
 }
 
+/* Главная настроек: сама плитка и есть карточки, общей подложки нет */
+.cardPlain {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
 @media (max-width: 900px) {
   .body {
     flex-direction: column;

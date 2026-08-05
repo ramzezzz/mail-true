@@ -132,15 +132,25 @@ export const api = {
     post<{ ok: true; changed: number }>('/users/bulk', body),
 
   /* --- импорт --- */
-  importPreview: (csv: string, allowNewDomains = false) =>
-    post<ImportPreview>('/users/import/preview', { csv, allowNewDomains }),
+  /** Квота для строк без своей колонки `quota` — показывается до импорта. */
+  importDefaults: () => get<{ defaultQuotaBytes: number }>('/users/import/defaults'),
+  importPreview: (csv: string, allowNewDomains = false, defaultQuotaBytes?: number) =>
+    post<ImportPreview>('/users/import/preview', {
+      csv,
+      allowNewDomains,
+      ...(defaultQuotaBytes !== undefined ? { defaultQuotaBytes } : {}),
+    }),
   /**
    * Запуск импорта. Ответ приходит сразу с номером задания: сам импорт
    * идёт на сервере и его результат (включая сгенерированные пароли)
    * лежит в базе. Обрыв связи больше не уносит пароли с собой.
    */
-  importRun: (csv: string, allowNewDomains = false) =>
-    post<ImportStarted>('/users/import', { csv, allowNewDomains }),
+  importRun: (csv: string, allowNewDomains = false, defaultQuotaBytes?: number) =>
+    post<ImportStarted>('/users/import', {
+      csv,
+      allowNewDomains,
+      ...(defaultQuotaBytes !== undefined ? { defaultQuotaBytes } : {}),
+    }),
   importJob: (id: number) => get<ImportJob>(`/users/import/jobs/${id}`),
   importJobs: () => get<{ items: ImportJob[] }>('/users/import/jobs'),
 

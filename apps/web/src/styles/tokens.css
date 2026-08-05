@@ -419,7 +419,7 @@
   --mt-color-write-bar-input-border-hover: #D8DBDF;
   --mt-color-write-bar-input-border-press: #CFD2D8;
 
-  /* === Мейловый слой octavius (--vkui--octavius_*) — 406 шт. === */
+  /* === Мейловый слой octavius (--vkui--octavius_*) — 400 шт. === */
   --mt-mail-color-action-archive: #1F5C23;
   --mt-mail-color-action-archive-hover: #1E5924;
   --mt-mail-color-action-archive-press: #1D5625;
@@ -689,9 +689,6 @@
   --mt-mail-color-sidebar-icon-travel: #ffffff;
   --mt-mail-color-sidebar-icon-travel-hover: #B333F4;
   --mt-mail-color-sidebar-icon-travel-press: #AB31ED;
-  --mt-mail-color-sidebar-icon-unread: #ffffff;
-  --mt-mail-color-sidebar-icon-unread-hover: #0073F7;
-  --mt-mail-color-sidebar-icon-unread-press: #006FEF;
   --mt-mail-color-sidebar-item-background-alpha: transparent;
   --mt-mail-color-sidebar-item-background-alpha-hover: rgba(255, 255, 255, 0.12);
   --mt-mail-color-sidebar-item-background-alpha-press: rgba(255, 255, 255, 0.24);
@@ -719,9 +716,6 @@
   --mt-mail-color-sidebar-item-text-primary: #2C2D2E;
   --mt-mail-color-sidebar-item-text-primary-hover: #2A2C2F;
   --mt-mail-color-sidebar-item-text-primary-press: #282B2F;
-  --mt-mail-color-sidebar-item-text-secondary: rgba(255, 255, 255, .64);
-  --mt-mail-color-sidebar-item-text-secondary-hover: #82848C;
-  --mt-mail-color-sidebar-item-text-secondary-press: #7C7F88;
   --mt-mail-color-sidebar-scrollbar-alpha: rgba(255, 255, 255, 0.48);
   --mt-mail-color-sidebar-scrollbar-alpha-hover: rgba(0, 16, 61, 0.12);
   --mt-mail-color-sidebar-scrollbar-alpha-press: rgba(0, 16, 61, 0.16);

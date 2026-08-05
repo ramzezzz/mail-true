@@ -28,8 +28,18 @@ mynetworks = 127.0.0.0/8 [::1]/128 ${DOVECOT_IP}/32
 inet_interfaces = all
 inet_protocols = ipv4
 
-# Логи в stdout контейнера (docker compose logs postfix)
-maillog_file = /dev/stdout
+# Журнал — в файл общего тома, а в stdout контейнера его переливает tail
+# (см. entrypoint.sh). Так он одновременно виден и в `docker compose logs
+# postfix`, и админке: сокета Docker у сервера приложения нет, читать
+# журналы служб ему больше неоткуда.
+#
+# Раньше здесь стоял /dev/stdout, и журнал существовал ТОЛЬКО внутри
+# демона логов Docker — то есть история доставки была недоступна ничему,
+# кроме глаз человека с доступом к хосту.
+maillog_file = /var/log/mail/postfix.log
+# Провёрнутый кусок называется postfix.log.<дата-время>; проворачивает
+# `postfix logrotate`, его вызывает посредник очереди по размеру файла.
+maillog_file_rotate_suffix = %Y%m%d-%H%M%S
 
 message_size_limit = 26214400
 mailbox_size_limit = 0

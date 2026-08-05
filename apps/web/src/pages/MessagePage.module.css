@@ -314,8 +314,8 @@
 }
 
 .attachment:focus-visible {
-  outline: 2px solid var(--mt-color-stroke-accent);
-  outline-offset: 2px;
+  outline: var(--mt-focus-ring-width, 2px) solid var(--mt-focus-ring-color);
+  outline-offset: var(--mt-focus-ring-offset, 2px);
 }
 
 .attachmentExt {

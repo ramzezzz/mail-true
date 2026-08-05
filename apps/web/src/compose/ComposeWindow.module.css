@@ -194,19 +194,55 @@
   background: var(--mt-ph-color-transparent-press);
 }
 
-.fmtSelect {
-  width: 48px;
-  height: 32px;
-  border: none;
-  border-radius: var(--mt-size-border-radius, 8px);
-  background: transparent;
-  color: var(--mt-color-text-primary);
-  font: inherit;
-  font-size: var(--mt-font-caption1-size, 12px);
-  cursor: pointer;
+.fmtButton :global(svg) {
+  display: block;
 }
 
-.fmtSelect:hover {
+/* Кнопка с подписью вместо значка — размер шрифта («15») */
+.fmtButtonWide {
+  width: auto;
+  min-width: 32px;
+  padding: 0 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+/* Меню гарнитур: ширины хватает на самое длинное название целиком —
+   в нативном селекте 48px «Golos Text» обрезалось и налезало на стрелку */
+.fmtMenu {
+  width: 200px;
+}
+
+.fmtMenuNarrow {
+  width: 96px;
+}
+
+/* Смайлики — сеткой 4×2, а не списком из девяти строк */
+.emojiMenu {
+  width: auto;
+  padding: 4px;
+}
+
+.emojiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 36px);
+  gap: 2px;
+}
+
+.emojiButton {
+  width: 36px;
+  height: 36px;
+  border: none;
+  padding: 0;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
+}
+
+.emojiButton:hover {
   background: var(--mt-ph-color-transparent-hover);
 }
 
@@ -390,8 +426,7 @@
 @media (max-width: 480px) {
   /* Палец не попадает в 36px */
   .footer button,
-  .fmtButton,
-  .fmtSelect {
+  .fmtButton {
     min-height: 44px;
   }
 

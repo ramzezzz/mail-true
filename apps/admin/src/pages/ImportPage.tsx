@@ -16,16 +16,39 @@ import { PageTitle } from '../app/AdminLayout';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import { summarizeCsv } from '../lib/csvPreview';
+import { TEMPLATE_FILENAME, templateCsv, templateCsvWithBom } from '../lib/csvTemplate';
 import { formatBytes, pluralize } from '../lib/format';
+import { DEFAULT_QUOTA_UNIT, quotaToBytes, splitQuota, type QuotaUnit } from '../lib/quota';
+import { QuotaInput } from '../components/QuotaInput';
 
-const SAMPLE = `email,name,password,quota
-ivan@mail.local,Иван Петров,parol12345,1G
-anna@mail.local,Анна Смирнова,,500M`;
+const SAMPLE = templateCsv();
+
+/** Отдаёт шаблон файлом, не уводя со страницы. */
+function downloadTemplate(): void {
+  const blob = new Blob([templateCsvWithBom()], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = TEMPLATE_FILENAME;
+  link.click();
+  // Ссылку на файл в памяти надо освободить, иначе она живёт до перезагрузки
+  URL.revokeObjectURL(url);
+}
 
 export function ImportPage() {
   const [csv, setCsv] = useState('');
   const [allowNewDomains, setAllowNewDomains] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
+
+  /**
+   * Квота для строк без своего столбца `quota`. Пока поля не трогали —
+   * null, и сервер берёт значение из ADMIN_DEFAULT_QUOTA_BYTES. Само это
+   * значение показывается рядом: раньше человеку было неоткуда узнать,
+   * откуда у ящиков без квоты берётся размер.
+   */
+  const [quotaTouched, setQuotaTouched] = useState(false);
+  const [quotaAmount, setQuotaAmount] = useState('1');
+  const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
   /**
    * Номер задания импорта. Сам импорт идёт на сервере, а результат
    * (включая сгенерированные пароли) лежит в базе — закрытая вкладка
@@ -37,8 +60,21 @@ export function ImportPage() {
   // Нужна до похода на сервер, чтобы сразу увидеть кривой файл.
   const local = csv.trim() === '' ? null : summarizeCsv(csv);
 
+  /** Значение с сервера — чтобы показать его до первого предпросмотра. */
+  const defaults = useQuery({
+    queryKey: ['import-defaults'],
+    queryFn: () => api.importDefaults(),
+  });
+  const serverDefaultQuota = defaults.data?.defaultQuotaBytes ?? null;
+
+  const chosenQuota = quotaToBytes(quotaAmount, quotaUnit);
+  /** Что на самом деле уйдёт на сервер: undefined — «оставить как настроено». */
+  const defaultQuotaBytes = quotaTouched && chosenQuota !== null ? chosenQuota : undefined;
+  /** Что в итоге применится — это и показываем человеку. */
+  const effectiveQuota = defaultQuotaBytes ?? serverDefaultQuota;
+
   const doPreview = useMutation({
-    mutationFn: () => api.importPreview(csv, allowNewDomains),
+    mutationFn: () => api.importPreview(csv, allowNewDomains, defaultQuotaBytes),
     onSuccess: (data) => {
       setPreview(data);
       setJobId(null);
@@ -46,9 +82,34 @@ export function ImportPage() {
   });
 
   const doImport = useMutation({
-    mutationFn: () => api.importRun(csv, allowNewDomains),
+    mutationFn: () => api.importRun(csv, allowNewDomains, defaultQuotaBytes),
     onSuccess: (data) => setJobId(data.jobId),
   });
+
+  /**
+   * Пока поле не трогали — показываем то, что настроено на сервере,
+   * а не выдуманное «1 ГБ»: иначе подпись обещала бы одно, а применилось
+   * бы другое.
+   */
+  const shownQuota =
+    !quotaTouched && serverDefaultQuota !== null
+      ? (() => {
+          const split = splitQuota(serverDefaultQuota);
+          return { amount: String(split.amount), unit: split.unit };
+        })()
+      : { amount: quotaAmount, unit: quotaUnit };
+
+  /** Правка числа или единицы означает, что квоту задают вручную. */
+  const onQuotaAmount = (value: string): void => {
+    setQuotaTouched(true);
+    setQuotaAmount(value);
+    setPreview(null);
+  };
+  const onQuotaUnit = (value: QuotaUnit): void => {
+    setQuotaTouched(true);
+    setQuotaUnit(value);
+    setPreview(null);
+  };
 
   // Пока задание идёт — спрашиваем состояние раз в секунду.
   const job = useQuery({
@@ -84,6 +145,9 @@ export function ImportPage() {
             }}
           />
           <ToolbarSpacer />
+          <Button mode="secondary" size="s" onClick={downloadTemplate}>
+            Скачать шаблон
+          </Button>
           <Button mode="secondary" size="s" onClick={() => setCsv(SAMPLE)}>
             Подставить пример
           </Button>
@@ -129,6 +193,26 @@ export function ImportPage() {
           </Notice>
         )}
 
+        <Field
+          label="Квота по умолчанию"
+          hint={
+            chosenQuota === null && quotaTouched
+              ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
+              : effectiveQuota === null
+                ? 'Действует для строк, где столбец «quota» пуст или его нет.'
+                : `Действует для строк, где столбец «quota» пуст или его нет. ` +
+                  `Сейчас подставится ${formatBytes(effectiveQuota)}` +
+                  (quotaTouched ? '.' : ' — значение сервера по умолчанию.')
+          }
+        >
+          <QuotaInput
+            amount={shownQuota.amount}
+            unit={shownQuota.unit}
+            onAmount={onQuotaAmount}
+            onUnit={onQuotaUnit}
+          />
+        </Field>
+
         <Toolbar>
           <Checkbox
             label="Создавать домены, которых ещё нет"
@@ -165,7 +249,8 @@ export function ImportPage() {
                 Будет создано {pluralize(preview.validCount, 'ящик', 'ящика', 'ящиков')}
                 {preview.invalidCount > 0 &&
                   `, отброшено ${pluralize(preview.invalidCount, 'строка', 'строки', 'строк')}`}
-                . Домены в файле: {preview.domains.join(', ') || '—'}.
+                . Домены в файле: {preview.domains.join(', ') || '—'}. Строкам без своей
+                квоты досталось {formatBytes(preview.defaultQuotaBytes)}.
               </Notice>
             )}
 
