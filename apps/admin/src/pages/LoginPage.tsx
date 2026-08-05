@@ -163,10 +163,23 @@ export function LoginPage() {
             {busy ? 'Проверяем…' : 'Войти'}
           </Button>
 
+          {/*
+            Команда должна быть такой, чтобы её можно было скопировать и
+            выполнить. Прежняя подсказка врала дважды: путь `dist/admin/cli.js`
+            не существует (рабочий каталог контейнера — /srv, а программа лежит
+            в apps/api/dist), и роль была опущена, поэтому по подсказке всегда
+            получался администратор с полным доступом.
+          */}
           <p className={styles.hint}>
             Первый администратор заводится из консоли сервера:
             <br />
-            <code>node dist/admin/cli.js create-admin &lt;логин&gt; &lt;пароль&gt;</code>
+            <code>
+              docker compose -f infra/docker-compose.yml exec api \
+              <br />
+              &nbsp;&nbsp;node apps/api/dist/admin/cli.js create-admin &lt;логин&gt; &lt;пароль&gt; owner
+            </code>
+            <br />
+            Роль: <code>owner</code>, <code>user_manager</code> или <code>readonly</code>.
           </p>
         </form>
       </section>
