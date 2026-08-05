@@ -9,7 +9,13 @@ import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import { UnauthorizedError } from './errors.js';
-import { brokenCriticalParts, HealthMonitor, tcpPart } from './health.js';
+import {
+  brokenCriticalParts,
+  HealthMonitor,
+  IMAP_FAREWELL,
+  SMTP_FAREWELL,
+  tcpPart,
+} from './health.js';
 import { mapFrameworkError, rateLimitedError, registerErrorHandling } from './http-errors.js';
 import { MAX_ENTITY_ID_LENGTH } from './mail/folders.js';
 import type { AppDeps } from './types.js';
@@ -61,6 +67,7 @@ function buildHealthMonitor(deps: AppDeps): HealthMonitor {
       host: config.IMAP_HOST,
       port: config.IMAP_PORT,
       timeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
+      farewell: IMAP_FAREWELL,
       consequence: 'почта не читается',
     }),
   );
@@ -75,6 +82,7 @@ function buildHealthMonitor(deps: AppDeps): HealthMonitor {
       host: config.SMTP_HOST,
       port: config.SMTP_PORT,
       timeoutMs: config.HEALTH_PROBE_TIMEOUT_MS,
+      farewell: SMTP_FAREWELL,
       consequence: 'письма не отправляются, чтение работает',
     }),
   );

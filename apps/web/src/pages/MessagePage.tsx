@@ -27,6 +27,7 @@ import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
 import { unsubscribeLinks } from '../lib/unsubscribe';
 import { hotkeyFor } from '../lib/hotkeys';
+import { useSwipeBack } from '../lib/useSwipeBack';
 import { formatMessageDate } from '../lib/listDates';
 import {
   IconArchive,
@@ -177,6 +178,13 @@ export function MessagePage() {
   const ai = useMessageAi({ messageId: message?.id, threadIds });
 
   const goBack = () => navigate(`/${folderId}/`);
+
+  /**
+   * Назад к списку пальцем от левого края. Кнопка «К списку» стоит в левом
+   * верхнем углу — на телефоне это самый недосягаемый угол экрана, и одной
+   * рукой до неё не дотянуться. Кнопка при этом никуда не делась.
+   */
+  const swipeBack = useSwipeBack(goBack);
 
   /**
    * Куда уходить после того, как письмо покинуло папку, — общая настройка
@@ -348,7 +356,7 @@ export function MessagePage() {
   };
 
   return (
-    <article className={styles.page}>
+    <article className={styles.page} {...swipeBack}>
       {/* Панель действий */}
       <div className={styles.toolbar}>
         <IconButton label="К списку" onClick={goBack}>

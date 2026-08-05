@@ -148,3 +148,35 @@ describe('мины в сгенерированном слое токенов', (
     expect(tokensCss).toContain('--mt-mail-color-sidebar-item-text:');
   });
 });
+
+describe('значки не заливаются сплошным цветом', () => {
+  /*
+   * `.icon svg { fill: currentColor }` в обёртках значков перебивало
+   * их собственный `fill="none"` — CSS сильнее презентационного атрибута.
+   * Штриховые значки превращались в чёрные кляксы: «Выделить все» на панели
+   * над списком был залитым квадратом вместо рамки с галочкой.
+   */
+  it('ни одна обёртка не задаёт svg общий fill', () => {
+    const wrappers = [
+      'components/Button/Button.module.css',
+      'components/Dropdown/Dropdown.module.css',
+      'components/IconButton/IconButton.module.css',
+      'layout/AccountMenu.module.css',
+      'layout/Sidebar.module.css',
+      'mail/MessageThread.module.css',
+      'pages/SearchPage.module.css',
+      'pages/settings/FoldersPage.module.css',
+      'search/SearchFacets.module.css',
+      'search/SearchResults.module.css',
+    ];
+    for (const path of wrappers) {
+      const css = read(path);
+      expect(css, `${path}: общий fill на svg`).not.toMatch(/^\s*fill:\s*currentColor;/mu);
+    }
+  });
+
+  it('встроенные значки по-прежнему объявляют fill="none" сами', () => {
+    const icons = read('mail/icons.tsx');
+    expect(icons).toMatch(/fill="none"[\s\S]*stroke="currentColor"/u);
+  });
+});

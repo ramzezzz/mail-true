@@ -140,9 +140,11 @@
   cursor: pointer;
 }
 
-.mailbox:hover:not(:disabled),
-.row:hover .mailbox:not(:disabled) {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .mailbox:hover:not(:disabled),
+  .row:hover .mailbox:not(:disabled) {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .mailbox:disabled {
@@ -215,18 +217,30 @@
   opacity: 0;
 }
 
-.row:hover .unlink,
 .unlink:focus-visible {
   opacity: 1;
 }
 
-.unlink:hover {
-  color: var(--mt-color-text-negative, #ed330a);
+@media (hover: hover) {
+  .row:hover .unlink {
+    opacity: 1;
+  }
+}
+
+@media (hover: hover) {
+  .unlink:hover {
+    color: var(--mt-color-text-negative, #ed330a);
+  }
 }
 
 .unlink :global(svg) {
   display: block;
-  fill: currentColor;
+  /* fill НЕ задаём: каждый значок красит себя сам — фирменные из спрайта
+     своими fill/stroke внутри symbol, встроенные — атрибутами на svg.
+     Общее `fill: currentColor` здесь перебивало их `fill="none"`
+     (CSS сильнее презентационного атрибута), и штриховые значки
+     превращались в сплошные чёрные кляксы — «Выделить все» на панели
+     над списком был залитым квадратом. */
 }
 
 /* Сенсорный ввод: наведения нет, и кнопка отвязки была бы недостижима */

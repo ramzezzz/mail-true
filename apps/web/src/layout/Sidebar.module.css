@@ -56,11 +56,13 @@
 
 .composeInner svg {
   flex-shrink: 0;
-  fill: currentColor;
+  /* fill НЕ задаём: значок красит себя сам (см. Button.module.css) */
 }
 
-.composeButton:hover .composeInner {
-  background: var(--mt-sidebar-compose-bg-hover);
+@media (hover: hover) {
+  .composeButton:hover .composeInner {
+    background: var(--mt-sidebar-compose-bg-hover);
+  }
 }
 
 .composeButton:active .composeInner {
@@ -82,8 +84,10 @@
   margin-left: -1px;
 }
 
-.composeArrow:hover:not(:disabled) {
-  background: var(--mt-sidebar-compose-bg-hover);
+@media (hover: hover) {
+  .composeArrow:hover:not(:disabled) {
+    background: var(--mt-sidebar-compose-bg-hover);
+  }
 }
 
 .composeArrow:active:not(:disabled) {
@@ -117,13 +121,20 @@
     var(--mt-anim-easing-default, ease);
 }
 
-.item:hover {
-  background: var(--mt-sidebar-item-bg-hover);
+@media (hover: hover) {
+  .item:hover {
+    background: var(--mt-sidebar-item-bg-hover);
+  }
 }
 
-.active,
-.active:hover {
+.active {
   background: var(--mt-sidebar-item-bg-active);
+}
+
+@media (hover: hover) {
+  .active:hover {
+    background: var(--mt-sidebar-item-bg-active);
+  }
 }
 
 /* Вложенные папки (автокатегории): отступ слева 28px */

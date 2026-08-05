@@ -65,8 +65,10 @@
     var(--mt-anim-easing-default, ease);
 }
 
-.item:hover {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .item:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .item:active {
@@ -88,7 +90,12 @@
 
 .itemIcon :global(svg) {
   display: block;
-  fill: currentColor;
+  /* fill НЕ задаём: каждый значок красит себя сам — фирменные из спрайта
+     своими fill/stroke внутри symbol, встроенные — атрибутами на svg.
+     Общее `fill: currentColor` здесь перебивало их `fill="none"`
+     (CSS сильнее презентационного атрибута), и штриховые значки
+     превращались в сплошные чёрные кляксы — «Выделить все» на панели
+     над списком был залитым квадратом. */
 }
 
 .itemText {

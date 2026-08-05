@@ -19,6 +19,7 @@ import {
   checkDomainDns,
   combineNameAnswers,
   dkimKeysMatch,
+  mergeDnsCheck,
   normalizeDkimKey,
   parseDkimRecord,
   parseDmarcRecord,
@@ -430,6 +431,105 @@ test('отсутствие необязательной записи — зам�
   assert.equal(by(report.checks, 'autoconfig').status, 'warn');
   assert.equal(by(report.checks, 'srv-pop3s').status, 'warn');
   assert.equal(report.overall, 'warn');
+});
+
+/* ------------------------------------------------------------------ */
+/* Перепроверка одной записи                                            */
+/* ------------------------------------------------------------------ */
+
+test('точечная проверка спрашивает только про свою запись', async () => {
+  // Человек правит записи у регистратора по одной. Ждать полтора десятка
+  // ответов ради одного — плохая сделка, особенно когда резольвер тормозит.
+  const asked: string[] = [];
+  const base = fakeQuerier(goodZone());
+  const spy: DnsQuerier = {
+    servers: base.servers,
+    answeredBy: base.answeredBy,
+    query: (type, name) => {
+      asked.push(`${type} ${name}`);
+      return base.query(type, name);
+    },
+  };
+  const report = await checkDomainDns('example.ru', { ...OPTIONS, querier: spy, only: ['dmarc'] });
+
+  assert.equal(report.checks.length, 1);
+  assert.equal(report.checks[0]?.id, 'dmarc');
+  assert.ok(asked.includes('TXT _dmarc.example.ru'));
+  // Адрес сервера нужен почти каждому выводу — его спрашиваем всегда.
+  assert.ok(asked.includes('A mail.example.ru'));
+  assert.equal(asked.includes('MX example.ru'), false, 'лишнего не спрашиваем');
+  assert.equal(asked.includes('SRV _imaps._tcp.example.ru'), false);
+});
+
+test('у каждой записи своё время ответа', async () => {
+  const report = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier(goodZone()),
+  });
+  for (const check of report.checks) {
+    assert.ok(check.checkedAt, `${check.id}: нет отметки времени ответа`);
+    assert.ok(!Number.isNaN(Date.parse(check.checkedAt)));
+  }
+});
+
+test('свежий ответ вклеивается в прежний отчёт, остальное не трогается', async () => {
+  const zone = goodZone();
+  zone['TXT _dmarc.example.ru'] = ['v=DMARC1; p=none'];
+  const full = await checkDomainDns('example.ru', { ...OPTIONS, querier: fakeQuerier(zone) });
+  assert.equal(by(full.checks, 'dmarc').verdict, 'warn');
+
+  // Администратор исправил DMARC и перепроверил ОДНУ запись.
+  const fixed = goodZone();
+  const one = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier(fixed),
+    only: ['dmarc'],
+  });
+  const merged = mergeDnsCheck(full, one);
+
+  assert.equal(merged.checks.length, full.checks.length, 'записи не должны пропасть');
+  assert.equal(by(merged.checks, 'dmarc').verdict, 'ok');
+  // Ответы по остальным записям остались прежними — вместе со своим временем.
+  assert.equal(by(merged.checks, 'mx').checkedAt, by(full.checks, 'mx').checkedAt);
+  assert.equal(merged.overall, 'ok');
+});
+
+test('точечная проверка сломанной записи портит общий итог, а не прячет его', async () => {
+  const full = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier(goodZone()),
+  });
+  assert.equal(full.overall, 'ok');
+
+  const broken = goodZone();
+  delete broken['MX example.ru'];
+  const one = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier(broken),
+    only: ['mx'],
+  });
+  const merged = mergeDnsCheck(full, one);
+  assert.equal(merged.overall, 'fail');
+  assert.equal(by(merged.checks, 'mx').verdict, 'missing');
+});
+
+test('отчёта ещё не было — вклеивать некуда, берётся свежий', async () => {
+  const one = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier(goodZone()),
+    only: ['spf'],
+  });
+  assert.deepEqual(mergeDnsCheck(null, one).checks.map((c) => c.id), ['spf']);
+});
+
+test('молчащий резольвер при точечной проверке — «не удалось», а не «нет записи»', async () => {
+  const report = await checkDomainDns('example.ru', {
+    ...OPTIONS,
+    querier: fakeQuerier({}, { allDead: true }),
+    only: ['dkim'],
+  });
+  assert.equal(report.checks.length, 1);
+  assert.equal(report.checks[0]?.verdict, 'unreachable');
 });
 
 test('каждая проверка объясняет, зачем запись и что сломается без неё', async () => {

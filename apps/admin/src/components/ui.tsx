@@ -3,7 +3,7 @@
  * Своей дизайн-системы не заводим: Button, Checkbox, Spinner и прочее
  * берутся оттуда, здесь только композиция и служебные плашки.
  */
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
 import type { DnsStatus } from '../api/types';
@@ -91,25 +91,183 @@ export interface ModalProps {
   wide?: boolean;
 }
 
+/**
+ * Сколько диалог уезжает, мс. Ровно столько же длится обратный ход
+ * в ui.module.css (--mt-anim-duration-m).
+ */
+export const MODAL_EXIT_MS = 200;
+
+const FOCUSABLE =
+  'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled),' +
+  ' textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Видимые элементы диалога, на которые можно встать с клавиатуры.
+ *
+ * Скрытое отсеиваем по вычисленным стилям, а не по offsetParent: тот
+ * опирается на раскладку, которой в тестовой среде нет вовсе — там по нему
+ * отсеялось бы всё содержимое диалога, и ловушка фокуса «схлопнулась» бы.
+ */
+function focusableIn(root: HTMLElement): HTMLElement[] {
+  const view = root.ownerDocument.defaultView;
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => {
+    const style = view?.getComputedStyle(element);
+    return style?.display !== 'none' && style?.visibility !== 'hidden';
+  });
+}
+
+/** Переносит в копию то, чего нет в разметке: набранное в полях. */
+function copyFieldValues(from: HTMLElement, to: HTMLElement): void {
+  const originals = from.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
+  const copies = to.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
+  originals.forEach((field, index) => {
+    const copy = copies[index];
+    if (!copy) return;
+    copy.setAttribute('value', field.value);
+    if (copy instanceof HTMLTextAreaElement) copy.textContent = field.value;
+    if (field instanceof HTMLInputElement && copy instanceof HTMLInputElement) {
+      copy.checked = field.checked;
+    }
+  });
+}
+
 export function Modal({ title, onClose, children, footer, wide }: ModalProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  /*
+   * Откуда пришли: туда же вернём фокус, когда диалог закроется.
+   *
+   * Снимаем на первом рендере, а не в эффекте: у полей в диалогах стоит
+   * autoFocus, и React успевает увести фокус внутрь ещё до эффектов —
+   * в эффекте «откуда пришли» оказалось бы само поле диалога, и после
+   * закрытия фокус падал бы на body. Проверено живьём: возвращается
+   * ровно на кнопку, которой диалог открыли.
+   */
+  const [opener] = useState<Element | null>(() => document.activeElement);
+  /** Диалог прожил кадр. Защита от двойного вызова эффектов в StrictMode. */
+  const shownRef = useRef(false);
+  const titleId = useId();
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      shownRef.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  /*
+   * Фокус.
+   *
+   * Без этого Tab из открытого диалога уходил в шапку за ним: первым же
+   * элементом оказывалась кнопка «Выйти», то есть клавиатурный
+   * администратор был в одном Enter от выхода из панели. Заодно диалог
+   * не объявлялся скринридеру — тот читает то, на чём стоит фокус.
+   */
+  useEffect(() => {
+    const card = cardRef.current;
+    // Внутри уже мог сработать autoFocus поля — не перебиваем
+    if (card && !card.contains(document.activeElement)) {
+      (focusableIn(card)[0] ?? card).focus();
+    }
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, [opener]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const card = cardRef.current;
+      if (!card) return;
+      const stops = focusableIn(card);
+      if (stops.length === 0) {
+        event.preventDefault();
+        card.focus();
+        return;
+      }
+      const first = stops[0]!;
+      const last = stops[stops.length - 1]!;
+      const active = document.activeElement;
+      const outside = !card.contains(active);
+      if (event.shiftKey ? active === first || outside : active === last || outside) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Страница под диалогом не прокручивается: иначе фон уезжает вместе с колесом
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, []);
+
+  /*
+   * Уход диалога.
+   *
+   * Страницы закрывают диалог тем, что перестают его рисовать («Отмена»,
+   * успешное сохранение), — React снимает узел сразу, и состояние
+   * «закрываюсь» внутри диалога доиграть обратный ход уже не успеет.
+   * Поэтому его доигрывает копия узла: она ничем не управляет
+   * (pointer-events: none, inert), набранный текст в неё переносится,
+   * и через MODAL_EXIT_MS она убирается сама.
+   *
+   * Уборка именно в useLayoutEffect: она выполняется до того, как React
+   * снимет узел со страницы, поэтому подмены не видно — кадра без диалога
+   * не возникает.
+   */
+  useLayoutEffect(
+    () => () => {
+      const node = backdropRef.current;
+      if (!node || !shownRef.current) return;
+      const backdropClosing = styles.backdropClosing;
+      const modalClosing = styles.modalClosing;
+      const modalClass = styles.modal;
+      if (!backdropClosing || !modalClosing || !modalClass) return;
+
+      const ghost = node.cloneNode(true) as HTMLElement;
+      copyFieldValues(node, ghost);
+      ghost.classList.add(backdropClosing);
+      ghost.querySelector(`.${modalClass}`)?.classList.add(modalClosing);
+      // Уезжающая копия не должна ловить ни Tab, ни чтение скринридером
+      ghost.setAttribute('inert', '');
+      ghost.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(ghost);
+      setTimeout(() => ghost.remove(), MODAL_EXIT_MS);
+    },
+    [],
+  );
+
   return (
     <div
+      ref={backdropRef}
       className={styles.backdrop}
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className={cx(styles.modal, wide && styles.modalWide)} role="dialog" aria-modal="true" aria-label={title}>
-        <h2 className={styles.modalTitle}>{title}</h2>
+      <div
+        ref={cardRef}
+        className={cx(styles.modal, wide && styles.modalWide)}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h2 id={titleId} className={styles.modalTitle}>
+          {title}
+        </h2>
         {children}
         {footer !== undefined ? (
           <div className={styles.modalActions}>{footer}</div>
@@ -176,10 +334,13 @@ export function Pager({
   const to = Math.min(offset + limit, total);
   return (
     <div className={styles.pager}>
+      {/* Подсказка объясняет, почему кнопка не нажимается: без неё
+          недоступная кнопка выглядит просто сломанной. */}
       <Button
         mode="secondary"
         size="s"
         disabled={offset === 0}
+        title={offset === 0 ? 'Это первая страница' : undefined}
         onClick={() => onChange(Math.max(0, offset - limit))}
       >
         Назад
@@ -191,6 +352,7 @@ export function Pager({
         mode="secondary"
         size="s"
         disabled={to >= total}
+        title={to >= total ? 'Это последняя страница' : undefined}
         onClick={() => onChange(offset + limit)}
       >
         Вперёд

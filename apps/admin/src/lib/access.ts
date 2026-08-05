@@ -55,7 +55,12 @@ export const NAV_ITEMS: readonly NavItem[] = [
    * Журнал входов отдельного пункта не требует — он в «Журнале аудита».
    */
   { to: '/audit', title: 'Журнал аудита', requires: ['audit.read'] },
-  { to: '/flow', title: 'Почтовый поток', requires: ['overview.read'], stub: true },
+  // Очередь писем и история обработанных. Заглушкой раздел больше не
+  // является: очередь читается у Postfix, история — из разобранного журнала.
+  { to: '/flow', title: 'Почтовый поток', requires: ['overview.read'] },
+  // Журналы служб содержат адреса переписки, поэтому право то же, что
+  // у журнала аудита, а не «кто видит сводку».
+  { to: '/logs', title: 'Журналы почты', requires: ['audit.read'] },
   { to: '/spam', title: 'Спам', requires: ['overview.read'], stub: true },
   { to: '/monitoring', title: 'Наблюдение', requires: ['overview.read'], stub: true },
   { to: '/backups', title: 'Резервные копии', requires: ['overview.read'], stub: true },

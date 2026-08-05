@@ -307,6 +307,11 @@ export function FolderPage() {
         onSelectAll={() => selectMany(allIds)}
         onClearSelection={clearSelection}
         onMarkAllRead={() => applyFlags(allIds, { seen: true })}
+        // Кнопочный двойник жеста «потянуть вниз»: жест не может быть
+        // единственным способом обновить список — его не видно и его нет
+        // ни у мыши, ни у клавиатуры.
+        onRefresh={() => void page.refresh()}
+        refreshing={page.isRefreshing}
         onDelete={() => moveTo(targetIds(), 'trash')}
         onArchive={() => moveTo(targetIds(), 'archive')}
         onMoveTo={(target) => moveTo(targetIds(), target)}
@@ -357,6 +362,12 @@ export function FolderPage() {
           focusedId={focusedId}
           leavingIds={leavingIds}
           onEndReached={loadMore}
+          /* Смахнули строку: вправо — в архив, влево — удалить. Ровно те же
+             два действия лежат кнопками в панели над списком. */
+          onSwipe={(message, action) =>
+            moveTo([message.id], action === 'archive' ? 'archive' : 'trash')
+          }
+          onRefresh={() => page.refresh()}
           onContextMenu={(message, x, y) => {
             setFocusedId(message.id);
             setContextMenu({ message, x, y, view: 'main' });

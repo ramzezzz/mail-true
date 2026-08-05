@@ -24,6 +24,7 @@ const TITLES: Readonly<Record<string, string>> = {
   '/mailbox': 'Ящик пользователя',
   '/audit': 'Журнал аудита',
   '/flow': 'Почтовый поток',
+  '/logs': 'Журналы почты',
   '/spam': 'Спам',
   '/monitoring': 'Наблюдение',
   '/backups': 'Резервные копии',

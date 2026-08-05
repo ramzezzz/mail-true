@@ -37,15 +37,20 @@ use IO::Socket::INET;
 use POSIX qw(strftime);
 use Encode ();
 
-my $PORT   = $ENV{QUEUE_AGENT_PORT}  || 11345;
-my $TOKEN  = $ENV{QUEUE_AGENT_TOKEN} || '';
-my $MAILLOG = $ENV{QUEUE_AGENT_MAILLOG} || '/var/log/mail/postfix.log';
+# Всюду «//», а не «||»: в Perl ноль и пустая строка ложны, и заданное
+# явно QUEUE_AGENT_LOG_MAX_MB=0 молча превращалось бы в значение по
+# умолчанию. Поймано при проверке проворота на стенде: порог 0 не
+# срабатывал вовсе, и понять почему по поведению было нельзя.
+my $PORT    = $ENV{QUEUE_AGENT_PORT};
+$PORT = 11345 unless defined $PORT && $PORT ne '';
+my $TOKEN   = $ENV{QUEUE_AGENT_TOKEN}   // '';
+my $MAILLOG = $ENV{QUEUE_AGENT_MAILLOG} // '/var/log/mail/postfix.log';
 # Предел журнала, после которого он проворачивается (МиБ). Своей ротации у
 # Postfix нет: без этого файл рос бы без конца и однажды занял бы весь диск,
 # а место на диске почтовому серверу нужно для писем.
-my $LOG_MAX_MB = $ENV{QUEUE_AGENT_LOG_MAX_MB} || 64;
+my $LOG_MAX_MB = $ENV{QUEUE_AGENT_LOG_MAX_MB} // 64;
 # Сколько провёрнутых кусков хранить.
-my $LOG_KEEP = $ENV{QUEUE_AGENT_LOG_KEEP} || 2;
+my $LOG_KEEP = $ENV{QUEUE_AGENT_LOG_KEEP} // 2;
 
 # Ответ письмом целиком ограничен: письмо бывает и в 25 МБ, а на экране
 # администратора нужен разбор заголовков и начало тела, не весь файл.
@@ -322,6 +327,19 @@ sub run {
 # именно поэтому нельзя просто переименовать файл самому, писать
 # продолжали бы в переименованный.
 # ------------------------------------------------------------------
+# Новый файл журнала должен быть читаем всем и писан postfix'ом.
+# Владелец важен не меньше прав: каталог общий и с битом t, и открыть
+# чужой файл на дозапись там не даст сама система (fs.protected_regular).
+sub fix_maillog_permissions {
+    unless (-e $MAILLOG) {
+        open(my $fh, '>>', $MAILLOG) or return;
+        close $fh;
+    }
+    my $uid = getpwnam('postfix');
+    chown($uid, -1, $MAILLOG) if defined $uid;
+    chmod(0644, $MAILLOG);
+}
+
 sub rotate_maillog {
     $next_rotate_check = time + 60;
     return unless -f $MAILLOG;
@@ -333,6 +351,15 @@ sub rotate_maillog {
         return;
     }
     log_line("журнал провёрнут на $size байт");
+
+    # Права нового файла — обязательная часть проворота, а не украшение.
+    #
+    # `postfix logrotate` заводит новый файл сам, от root и с маской 077,
+    # то есть -rw------- root:root. Читает журнал сервер приложения (uid
+    # 5000) из общего тома — и после первого же проворота он получал бы
+    # «нет доступа», а раздел «Журналы» переставал бы показывать почту.
+    # Проверено на стенде: ровно так и вышло.
+    fix_maillog_permissions();
     # Лишние куски убираем сами: их накопление съедает диск так же, как
     # и один растущий файл.
     my ($dir, $base) = $MAILLOG =~ m{\A(.*)/([^/]+)\z};

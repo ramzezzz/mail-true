@@ -257,7 +257,16 @@ services:
       rspamd:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "postfix status"]
+      # Живость мастера по pid-файлу, а НЕ `postfix status`.
+      #
+      # `postfix status` на каждый вызов пишет в журнал строку «the Postfix
+      # mail system is running». При проверке раз в пять секунд это 17 тысяч
+      # строк в сутки в том самом журнале, который админка показывает в
+      # разделе «Журналы почты» и хранит с ограничением по объёму: полезные
+      # записи о доставке вытеснялись бы отчётом проверки о самой себе.
+      # Проверяемое условие то же — жив ли процесс master: слушающие порты
+      # и все службы Postfix порождает он.
+      test: ["CMD-SHELL", "kill -0 $$(cat /var/spool/postfix/pid/master.pid)"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -388,6 +397,13 @@ services:
       RSPAMD_CONTROLLER_PORT: 11334
       RSPAMD_PASSWORD: ${RSPAMD_PASSWORD:-}
       RESOLVER_IP: ${RESOLVER_IP:-}
+
+      # У кого спрашивать DNS при проверке домена в админке.
+      # НЕ у unbound выше: тот резольвер наш, и проверка показала бы то,
+      # что мы сами себе прописали, а вопрос стоит «видит ли наши записи
+      # остальной интернет». Пусто — публичные резольверы по умолчанию
+      # (см. PUBLIC_RESOLVERS в apps/api/src/admin/dns.ts).
+      DNS_CHECK_RESOLVERS: ${DNS_CHECK_RESOLVERS:-}
 
       UPLOAD_DIR: /srv/data/uploads
 

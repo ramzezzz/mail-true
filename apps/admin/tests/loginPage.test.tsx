@@ -17,7 +17,10 @@ import { ADMIN_ORBIT_ICONS, AdminIconSprite, ICON_PREFIX } from '../src/pages/lo
  * импорт модуля стилей отдаёт только имена классов.
  */
 const css = (name: string): string =>
-  readFileSync(fileURLToPath(new URL(`../src/pages/${name}`, import.meta.url)), 'utf8');
+  readFileSync(fileURLToPath(new URL(`../src/pages/${name}`, import.meta.url)), 'utf8')
+    // Концы строк приводим к одному виду: на Windows файл может лежать с CRLF,
+    // и поиск по тексту иначе зависел бы от машины.
+    .replace(/\r\n/gu, '\n');
 
 function page(): string {
   return renderToStaticMarkup(
@@ -123,12 +126,16 @@ describe('правила стилей, без которых страница у
 
   it('движение гасится, но картинка остаётся', () => {
     const backdrop = css('login/LoginBackdrop.module.css');
-    expect(backdrop).toContain('@media (prefers-reduced-motion: reduce)');
-    const quiet = backdrop.slice(backdrop.indexOf('@media (prefers-reduced-motion: reduce)'));
+    const start = backdrop.indexOf('@media (prefers-reduced-motion: reduce)');
+    expect(start).toBeGreaterThan(-1);
+    // Блок тянется до следующего @media — дальше идут правила узкого экрана.
+    const rest = backdrop.slice(start);
+    const next = rest.indexOf('@media', 1);
+    const quiet = next === -1 ? rest : rest.slice(0, next);
     expect(quiet).toContain('animation: none');
     // Именно animation, а не display: скрывать глобус при выключенном
     // движении значило бы оставить человека с пустым фоном.
-    expect(quiet.slice(0, quiet.indexOf('}\n}'))).not.toContain('display: none');
+    expect(quiet).not.toContain('display: none');
   });
 });
 

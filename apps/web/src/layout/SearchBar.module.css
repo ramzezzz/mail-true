@@ -81,8 +81,10 @@
   white-space: nowrap;
 }
 
-.reset:hover {
-  background: var(--mt-header-button-bg-hover);
+@media (hover: hover) {
+  .reset:hover {
+    background: var(--mt-header-button-bg-hover);
+  }
 }
 
 .resetChevron {
@@ -110,8 +112,10 @@
   white-space: nowrap;
 }
 
-.scope:hover {
-  background: var(--mt-mail-color-header-search-chip-background-hover);
+@media (hover: hover) {
+  .scope:hover {
+    background: var(--mt-mail-color-header-search-chip-background-hover);
+  }
 }
 
 .scopeArrow {
@@ -132,8 +136,10 @@
   cursor: pointer;
 }
 
-.clear:hover {
-  background: var(--mt-header-button-bg-hover);
+@media (hover: hover) {
+  .clear:hover {
+    background: var(--mt-header-button-bg-hover);
+  }
 }
 
 .submit {
@@ -149,8 +155,10 @@
   cursor: pointer;
 }
 
-.submit:hover {
-  background: var(--mt-header-button-bg-hover);
+@media (hover: hover) {
+  .submit:hover {
+    background: var(--mt-header-button-bg-hover);
+  }
 }
 
 /* --- Узкий экран ------------------------------------------------------ */

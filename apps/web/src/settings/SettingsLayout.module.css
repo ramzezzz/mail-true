@@ -31,8 +31,10 @@
   cursor: pointer;
 }
 
-.back:hover {
-  background: var(--mt-color-background-secondary-alpha);
+@media (hover: hover) {
+  .back:hover {
+    background: var(--mt-color-background-secondary-alpha);
+  }
 }
 
 .back :global(svg) {
@@ -67,8 +69,10 @@
   text-decoration: none;
 }
 
-.navItem:hover {
-  background: var(--mt-color-background-secondary-alpha);
+@media (hover: hover) {
+  .navItem:hover {
+    background: var(--mt-color-background-secondary-alpha);
+  }
 }
 
 .navItemActive {

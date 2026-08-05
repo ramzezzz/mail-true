@@ -10,10 +10,24 @@ import { ImapPool } from './imap/pool.js';
 import { UploadStore } from './uploads.js';
 import { buildApp } from './app.js';
 import { installProcessGuards } from './process-guards.js';
+import { createLogStreams } from './admin/app-log.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const logger = pino({ level: config.LOG_LEVEL });
+  // Журнал идёт в stdout контейнера (как и раньше) И, если задан
+  // API_LOG_FILE, вторым потоком в файл общего тома. Файл нужен разделу
+  // «Журналы» админки: прочитать stdout контейнера можно только через
+  // сокет Docker, а он даёт права root на всей машине — см. admin/app-log.ts.
+  const { stream: logStream, rotate: rotateLog } = createLogStreams({
+    path: process.env.API_LOG_FILE ?? '',
+    level: config.LOG_LEVEL,
+    onError: (message) => process.stderr.write(`${message}\n`),
+  });
+  const logger = pino({ level: config.LOG_LEVEL }, logStream);
+  // Проворот по размеру: файл в томе никто не проворачивает, а место
+  // на диске почтовому серверу нужно для писем.
+  const rotateTimer = rotateLog ? setInterval(rotateLog, 60_000) : null;
+  rotateTimer?.unref();
 
   // Ставится первым делом: необработанное событие error на любом соединении
   // и необработанное отклонение обещания иначе убивают процесс целиком
@@ -67,6 +81,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Остановка сервера');
     clearInterval(sweepTimer);
+    if (rotateTimer) clearInterval(rotateTimer);
     await notifier.closeAll().catch(() => undefined);
     await pool.closeAll().catch(() => undefined);
     await app.close().catch(() => undefined);

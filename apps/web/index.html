@@ -2,7 +2,19 @@
 <html lang="ru" data-theme="light">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      interactive-widget=resizes-content — из-за него клавиатура телефона
+      ужимает саму страницу, а не наезжает на неё. Без этого окно написания
+      письма (оно на телефоне во весь экран, position: fixed; inset: 0)
+      оставалось прежней высоты, клавиатура вставала поверх, и поле, в которое
+      печатают, оказывалось ровно под ней — текст набирался вслепую.
+      viewport-fit=cover — чтобы работали env(safe-area-inset-*) у нижней
+      полосы папок на телефонах с вырезом.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <title>Почта — Mail.True</title>
     <link rel="icon" type="image/svg+xml" href="/brand/favicon/favicon.svg" />
     <!-- Фирменные шрифты (Golos Text, JetBrains Mono) — локально, без CDN -->

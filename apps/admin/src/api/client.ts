@@ -12,11 +12,17 @@ import type {
   AliasPage,
   AdminSession,
   AuditPage,
+  DnsCheckOne,
   DnsReport,
   Domain,
+  FlowHistoryPage,
+  FlowHistoryStats,
   ImportJob,
   ImportPreview,
   ImportStarted,
+  LogPage,
+  LogSourcesResponse,
+  LogTailPage,
   LoginResult,
   MailboxAccessPage,
   MailboxEnterResult,
@@ -25,6 +31,7 @@ import type {
   MailUser,
   MailUserPage,
   Overview,
+  QueuePage,
   UserDeleteResult,
 } from './types';
 
@@ -177,6 +184,13 @@ export const api = {
   deleteDomain: (id: number, force = false) =>
     del<{ ok: true; aliasesRemoved: number }>(`/domains/${id}${query({ force: force || undefined })}`),
   dnsCheck: (id: number) => post<DnsReport>(`/domains/${id}/dns-check`),
+  /**
+   * Перепроверка одной записи. Отдельный запрос, а не общий: записи
+   * правят у регистратора по одной, и ждать полтора десятка ответов
+   * ради одного — плохая сделка.
+   */
+  dnsCheckOne: (id: number, checkId: string) =>
+    post<DnsCheckOne>(`/domains/${id}/dns-check/${encodeURIComponent(checkId)}`),
 
   /* --- журналы --- */
   audit: (params: {
@@ -203,6 +217,55 @@ export const api = {
     since?: string | undefined;
     limit?: number | undefined;
   }) => get<AiAuditPage>(`/ai/audit${query(params)}`),
+
+  /* --- почтовый поток: очередь и история --- */
+  queue: (params: {
+    search?: string | undefined;
+    queueName?: string | undefined;
+    limit?: number | undefined;
+    offset?: number | undefined;
+  }) => get<QueuePage>(`/queue${query(params)}`),
+  queueMessage: (id: string) =>
+    get<{ queueId: string; text: string; truncated: boolean }>(`/queue/${id}/message`),
+  queueFlush: (id: string) => post<{ ok: true }>(`/queue/${id}/flush`),
+  queueDelete: (id: string) => post<{ ok: true }>(`/queue/${id}/delete`),
+  flowHistory: (params: {
+    hours?: number | undefined;
+    status?: string | undefined;
+    direction?: string | undefined;
+    search?: string | undefined;
+    limit?: number | undefined;
+    beforeTime?: string | undefined;
+    beforeId?: string | undefined;
+  }) => get<FlowHistoryPage>(`/queue/history${query(params)}`),
+  flowStats: (hours: number) => get<FlowHistoryStats>(`/queue/history/stats${query({ hours })}`),
+
+  /* --- журналы служб --- */
+  logSources: () => get<LogSourcesResponse>('/logs/sources'),
+  logs: (params: {
+    source?: string | undefined;
+    level?: string | undefined;
+    search?: string | undefined;
+    limit?: number | undefined;
+    before?: number | undefined;
+    fileId?: string | undefined;
+  }) => get<LogPage>(`/logs${query(params)}`),
+
+  /**
+   * Только то, что дописано после `after`.
+   *
+   * Отдельный запрос, а не перечитывание первой страницы: перечитывание
+   * не отличает новое от уже показанного и на быстром журнале теряет
+   * строки между опросами.
+   */
+  logsNew: (params: {
+    source: string;
+    level?: string | undefined;
+    search?: string | undefined;
+    after: number;
+    limit?: number | undefined;
+    fileId?: string | undefined;
+  }) => get<LogTailPage>(`/logs/new${query(params)}`),
 
   /* --- вход в чужой ящик --- */
   mailboxEnter: (email: string, reason: string) =>

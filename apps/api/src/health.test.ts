@@ -7,7 +7,16 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { brokenCriticalParts, HealthMonitor, statusOf, type HealthPart } from './health.js';
+import { createServer, type Server, type Socket } from 'node:net';
+import {
+  brokenCriticalParts,
+  HealthMonitor,
+  IMAP_FAREWELL,
+  probeTcpPort,
+  SMTP_FAREWELL,
+  statusOf,
+  type HealthPart,
+} from './health.js';
 
 function part(
   id: string,
@@ -149,4 +158,107 @@ test('statusOf: важное перевешивает неважное', () => {
   assert.equal(statusOf([p(true, 'ok'), p(false, 'fail')]), 'degraded');
   assert.equal(statusOf([p(true, 'ok'), p(false, 'ok')]), 'ok');
   assert.equal(statusOf([]), 'ok');
+});
+
+/**
+ * Прощание пробы.
+ *
+ * Дефект, ради которого это появилось: проба рвала соединение сразу после
+ * установки, Postfix писал `warning: lost connection after CONNECT` каждые
+ * десять секунд, и журнал доставки в админке состоял из предупреждений,
+ * которые сервер приложения порождал сам. Настоящий обрыв в этом потоке
+ * было не отличить.
+ */
+function listen(onConnection: (socket: Socket) => void): Promise<{ port: number; server: Server }> {
+  return new Promise((resolve) => {
+    const server = createServer(onConnection);
+    server.listen(0, '127.0.0.1', () => {
+      const addr = server.address();
+      resolve({ port: typeof addr === 'object' && addr ? addr.port : 0, server });
+    });
+  });
+}
+
+test('проба прощается по протоколу, а не рвёт соединение', async () => {
+  let heard = '';
+  const { port, server } = await listen((socket) => {
+    socket.write('220 mail.local ESMTP Postfix\r\n');
+    socket.on('data', (chunk) => {
+      heard += chunk.toString('utf8');
+      socket.end('221 2.0.0 Bye\r\n');
+    });
+  });
+  try {
+    assert.equal(await probeTcpPort('127.0.0.1', port, 2000, SMTP_FAREWELL), true);
+    assert.equal(heard, 'QUIT\r\n');
+  } finally {
+    server.close();
+  }
+});
+
+test('прощание не отправляется раньше приветствия', async () => {
+  // `improper command pipelining after CONNECT` — то же предупреждение в
+  // журнале, что и обрыв: по правилам SMTP клиент ждёт строки 220.
+  let heardBeforeBanner = '';
+  const { port, server } = await listen((socket) => {
+    socket.on('data', (chunk) => {
+      heardBeforeBanner += chunk.toString('utf8');
+    });
+    // Приветствие с задержкой — так ведёт себя занятый smtpd.
+    setTimeout(() => socket.write('220 mail.local ESMTP Postfix\r\n'), 60);
+  });
+  try {
+    assert.equal(await probeTcpPort('127.0.0.1', port, 2000, SMTP_FAREWELL), true);
+    assert.equal(heardBeforeBanner, 'QUIT\r\n', 'команда должна прийти один раз и после 220');
+  } finally {
+    server.close();
+  }
+});
+
+test('служба молчит — прощание не отправляется вовсе', async () => {
+  let heard = '';
+  const { port, server } = await listen((socket) => {
+    socket.on('data', (chunk) => {
+      heard += chunk.toString('utf8');
+    });
+  });
+  try {
+    assert.equal(await probeTcpPort('127.0.0.1', port, 3000, SMTP_FAREWELL), true);
+    assert.equal(heard, '', 'говорить в тишину незачем');
+  } finally {
+    server.close();
+  }
+});
+
+test('молчащая служба не задерживает пробу дольше четверти секунды', async () => {
+  // Служба приняла соединение и не ответила ничего. Порт открыт — это и
+  // есть предмет проверки, ждать ответа незачем.
+  const { port, server } = await listen(() => undefined);
+  try {
+    const started = process.hrtime.bigint();
+    assert.equal(await probeTcpPort('127.0.0.1', port, 5000, IMAP_FAREWELL), true);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.ok(elapsedMs < 1500, `проба заняла ${String(Math.round(elapsedMs))} мс`);
+  } finally {
+    server.close();
+  }
+});
+
+test('обрыв во время прощания не превращает открытый порт в отказ', async () => {
+  // Служба закрывает соединение по-живому, не дочитав QUIT. Так делает,
+  // например, Postfix при исчерпании smtpd_client_connection_count_limit.
+  const { port, server } = await listen((socket) => {
+    socket.resetAndDestroy();
+  });
+  try {
+    assert.equal(await probeTcpPort('127.0.0.1', port, 2000, SMTP_FAREWELL), true);
+  } finally {
+    server.close();
+  }
+});
+
+test('закрытый порт остаётся отказом и с прощанием', async () => {
+  const { port, server } = await listen(() => undefined);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  assert.equal(await probeTcpPort('127.0.0.1', port, 1000, SMTP_FAREWELL), false);
 });

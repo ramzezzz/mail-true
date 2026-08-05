@@ -1,0 +1,133 @@
+/*
+ * Нижняя навигация — только телефон. На планшете и рабочем столе колонка
+ * папок либо на виду, либо в одном касании гамбургера, и полоса внизу
+ * там отбирала бы место у писем.
+ */
+
+.bar {
+  display: none;
+}
+
+/* Плавающая кнопка «Написать письмо» показывается вместе с полосой */
+.fab {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    /* Ниже затемнения (55) и ящика (60): открытый ящик перекрывает полосу */
+    z-index: 50;
+    display: flex;
+    align-items: stretch;
+    height: calc(56px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--mt-color-background-content, var(--mt-app-content-bg));
+    border-top: 1px solid var(--mt-color-separator-primary);
+    box-shadow: var(--mt-elevation-2, 0 -2px 12px rgba(0, 16, 61, 0.08));
+  }
+
+  .item {
+    flex: 1 1 0;
+    min-width: 0;
+    /* Цель касания: 56px в высоту и не меньше 44 в ширину даже впятером
+       на 360 точках (360 / 5 = 72) */
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border: none;
+    padding: 4px 2px;
+    background: transparent;
+    color: var(--mt-color-text-secondary);
+    font: inherit;
+    font-size: 11px;
+    line-height: 14px;
+    text-decoration: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .active {
+    color: var(--mt-color-background-accent);
+  }
+
+  .icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+  }
+
+  .label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Счётчик непрочитанных на значке входящих */
+  .badge {
+    position: absolute;
+    top: -4px;
+    left: 14px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--mt-mail-color-icon-favorite, #fc2c38);
+    color: var(--mt-color-text-contrast, #fff);
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+  }
+
+  /*
+   * Кнопка написания письма — плавающая, у правого нижнего угла: это
+   * единственный угол, до которого большой палец дотягивается, не перехватывая
+   * телефон. Раньше «Написать письмо» жило только в выдвижном ящике, то есть
+   * в самом верху левого края — там, куда одной рукой не дотянуться вовсе.
+   */
+  .fab {
+    position: fixed;
+    right: 16px;
+    bottom: calc(56px + 16px + env(safe-area-inset-bottom, 0px));
+    z-index: 51;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border: none;
+    border-radius: 50%;
+    background: var(--mt-color-background-accent);
+    color: var(--mt-color-text-contrast, #fff);
+    box-shadow: var(--mt-elevation-3, 0 4px 32px rgba(0, 16, 61, 0.16));
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  }
+
+  .fab:active {
+    transform: scale(0.94);
+  }
+}
+
+/* Название для чтения с экрана: счётчик значком его не заменяет */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

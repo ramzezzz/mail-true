@@ -12,7 +12,34 @@ import { BadRequestError, NotFoundError } from '../../errors.js';
 import { ConflictError } from '../errors.js';
 import { isUniqueViolation, type DomainRow } from '../db.js';
 import { audit, requireAdmin } from '../guard.js';
-import { buildDkimRecord, buildDmarcRecord, buildSpfRecord, checkDomainDns } from '../dns.js';
+import {
+  buildDkimRecord,
+  buildDmarcRecord,
+  buildSpfRecord,
+  checkDomainDns,
+  mergeDnsCheck,
+  type DnsCheckId,
+  type DnsReport,
+} from '../dns.js';
+
+/** Какие записи можно перепроверить поштучно (проверка параметра пути). */
+const DNS_CHECK_IDS: readonly DnsCheckId[] = [
+  'a',
+  'mx',
+  'spf',
+  'dkim',
+  'dmarc',
+  'ptr',
+  'web-apex',
+  'web-mail',
+  'web-admin',
+  'autoconfig',
+  'autodiscover',
+  'srv-imaps',
+  'srv-submission',
+  'srv-pop3s',
+  'srv-autodiscover',
+];
 
 const createSchema = z.object({
   name: z
@@ -200,6 +227,31 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /* --- проверка DNS ------------------------------------------------ */
+
+  /**
+   * Общая часть обеих проверок — всей зоны и одной записи.
+   *
+   * Спрашиваем ВНЕШНИЕ резольверы, а не свой unbound: вопрос стоит
+   * «видит ли наши записи остальной интернет», а свой резольвер показал
+   * бы то, что мы сами себе прописали. См. admin/dns.ts.
+   */
+  const runCheck = async (row: DomainRow, only?: readonly DnsCheckId[]): Promise<DnsReport> => {
+    const servers = ctx.config.DNS_CHECK_RESOLVERS.split(',')
+      .map((s) => s.trim())
+      .filter((s) => s !== '');
+    return checkDomainDns(row.name, {
+      mailHostname: host,
+      publicIpv4: ctx.config.MAIL_PUBLIC_IPV4,
+      dkimSelector: row.dkim_selector ?? 'mail',
+      dkimPublicKey: row.dkim_public_key,
+      imapsPort: ctx.config.IMAPS_PORT,
+      submissionPort: ctx.config.SUBMISSION_PORT,
+      pop3sPort: ctx.config.POP3S_PORT,
+      servers: servers.length > 0 ? servers : undefined,
+      only,
+    });
+  };
+
   app.post<{ Params: { id: string } }>(
     '/domains/:id/dns-check',
     {
@@ -211,22 +263,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       const row = await ctx.db.findDomainById(id);
       if (!row) throw new NotFoundError('Домен не найден');
 
-      // Спрашиваем ВНЕШНИЕ резольверы, а не свой unbound: вопрос стоит
-      // «видит ли наши записи остальной интернет», а свой резольвер
-      // показал бы то, что мы сами себе прописали. См. admin/dns.ts.
-      const servers = ctx.config.DNS_CHECK_RESOLVERS.split(',')
-        .map((s) => s.trim())
-        .filter((s) => s !== '');
-      const report = await checkDomainDns(row.name, {
-        mailHostname: host,
-        publicIpv4: ctx.config.MAIL_PUBLIC_IPV4,
-        dkimSelector: row.dkim_selector ?? 'mail',
-        dkimPublicKey: row.dkim_public_key,
-        imapsPort: ctx.config.IMAPS_PORT,
-        submissionPort: ctx.config.SUBMISSION_PORT,
-        pop3sPort: ctx.config.POP3S_PORT,
-        servers: servers.length > 0 ? servers : undefined,
-      });
+      const report = await runCheck(row);
       await ctx.db.saveDnsStatus(id, report, report.overall);
       await audit(ctx, request, {
         action: 'domain.dnscheck',
@@ -236,6 +273,42 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
         after: { overall: report.overall },
       });
       return report;
+    },
+  );
+
+  /**
+   * Перепроверка ОДНОЙ записи.
+   *
+   * Записи правят у регистратора по одной и хотят убедиться, что доехала
+   * именно эта. Общая проверка ради одного ответа заставляет ждать все
+   * полтора десятка запросов, а при молчащем резольвере — ещё и гадать,
+   * какая из строк не проверилась. Предел частоты выше общего: точечных
+   * проверок в норме делают много подряд, и каждая дешевле.
+   */
+  app.post<{ Params: { id: string; checkId: string } }>(
+    '/domains/:id/dns-check/:checkId',
+    {
+      preHandler: requireAdmin(app, 'domains.dnscheck'),
+      config: { rateLimit: { max: 120, timeWindow: 60_000 } },
+    },
+    async (request) => {
+      const id = Number(request.params.id);
+      const checkId = request.params.checkId as DnsCheckId;
+      if (!DNS_CHECK_IDS.includes(checkId)) {
+        throw new BadRequestError(`Неизвестная запись «${request.params.checkId}»`);
+      }
+      const row = await ctx.db.findDomainById(id);
+      if (!row) throw new NotFoundError('Домен не найден');
+
+      const fresh = await runCheck(row, [checkId]);
+      const check = fresh.checks[0];
+      if (!check) throw new NotFoundError('Проверка не выполнена');
+
+      // Точечная проверка не должна стирать то, что известно про
+      // остальные записи, — вклеиваем результат в прежний отчёт.
+      const merged = mergeDnsCheck((row.dns_status as DnsReport | null) ?? null, fresh);
+      await ctx.db.saveDnsStatus(id, merged, merged.overall);
+      return { check, resolver: fresh.resolver, overall: merged.overall };
     },
   );
 }

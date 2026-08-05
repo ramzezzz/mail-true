@@ -1,0 +1,185 @@
+/*
+ * Почтовый поток: очередь и история обработанных.
+ * Своей дизайн-системы не заводим — только раскладка раздела.
+ */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: var(--mt-admin-gap);
+  border-bottom: 1px solid var(--mt-admin-border);
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--mt-color-text-secondary);
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.tab:hover {
+  color: var(--mt-color-text-primary);
+}
+
+.tabActive {
+  color: var(--mt-color-text-primary);
+  border-bottom-color: var(--mt-color-accent-blue);
+}
+
+.tabCount {
+  margin-left: 6px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Строка с пояснением, откуда данные и какой они глубины. Не украшение:
+   раздел показывает разобранный журнал, и границы этого нужно назвать. */
+.auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--mt-color-text-primary);
+}
+
+.auto input {
+  cursor: pointer;
+}
+
+.source {
+  margin: 0 0 var(--mt-admin-gap);
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.mono {
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+}
+
+.reason {
+  color: var(--mt-color-text-secondary);
+  /* Причина бывает длинной; на узком экране пусть переносится, а не
+     растягивает таблицу до горизонтальной прокрутки всей страницы. */
+  max-width: 460px;
+  overflow-wrap: anywhere;
+}
+
+.rowActions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.recipients {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Исходник письма в диалоге: моноширинный, с прокруткой. */
+.messageText {
+  margin: 0;
+  padding: 10px;
+  max-height: 55vh;
+  overflow: auto;
+  background: var(--mt-color-background-secondary);
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Подгрузка по прокрутке: маячок в конце списка. */
+.sentinel {
+  padding: 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+.loaded {
+  padding: 10px 2px;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .tabs {
+    /* Лентой, как меню раздела: на узком экране вкладки не должны
+       ломаться на две строки и прыгать. */
+    overflow-x: auto;
+  }
+
+  .reason {
+    max-width: none;
+  }
+}
+
+/*
+ * Кнопка необратимого действия.
+ *
+ * Дизайн-система даёт четыре вида кнопок, разрушительного среди них нет.
+ * Заводить пятый ради одного диалога незачем — красим первичную кнопку
+ * цветом отказа из тех же токенов. Подпись остаётся белой: #C42500 даёт
+ * ей 5,81:1, то есть с запасом к норме 4,5:1.
+ */
+.danger {
+  background: var(--mt-admin-fail);
+  color: #ffffff;
+}
+
+.danger:hover:not(:disabled),
+.danger:active:not(:disabled) {
+  background: var(--mt-log-error-text, var(--mt-admin-fail));
+  filter: brightness(0.92);
+}
+
+/* ------------------------------------------------------------------ */
+/* Поля отбора                                                          */
+/*                                                                      */
+/* Ширина считается ОТ СОДЕРЖИМОГО, а не задаётся числом на все списки  */
+/* сразу. Заказчик поймал ровно это: у списка направления самый длинный */
+/* вариант, общая ширина под него не подходила, и стрелка налезала на   */
+/* последние буквы — читалось «Входящие и исходящщ▾».                   */
+/* ------------------------------------------------------------------ */
+select.control {
+  /* auto — это «по самому длинному варианту»: браузер меряет их сам. */
+  width: auto;
+  flex: 0 0 auto;
+  /*
+   * Место под стрелку. Стрелку списка рисует браузер ВНУТРИ поля, и без
+   * своего отступа справа она ложится поверх текста. Восемь точек общего
+   * поля ввода на неё не хватает.
+   */
+  padding-right: 30px;
+  max-width: 100%;
+}
+
+input.control {
+  flex: 1 1 200px;
+  width: auto;
+  min-width: 160px;
+  max-width: 320px;
+}
+
+@media (max-width: 600px) {
+  /* Три списка в ряд при 390 точках тесно в любом случае: пусть каждый
+     занимает свою строку целиком. */
+  select.control,
+  input.control {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+}

@@ -53,8 +53,10 @@
   background: var(--mt-color-background-accent);
   color: var(--mt-color-text-contrast, #fff);
 }
-.mode_primary:hover:not(:disabled) {
-  background: var(--mt-color-background-accent-hover);
+@media (hover: hover) {
+  .mode_primary:hover:not(:disabled) {
+    background: var(--mt-color-background-accent-hover);
+  }
 }
 .mode_primary:active:not(:disabled) {
   background: var(--mt-color-background-accent-press);
@@ -65,8 +67,10 @@
   background: var(--mt-ph-color-background-secondary-alpha);
   color: var(--mt-color-text-primary);
 }
-.mode_secondary:hover:not(:disabled) {
-  background: var(--mt-ph-color-background-secondary-alpha-hover);
+@media (hover: hover) {
+  .mode_secondary:hover:not(:disabled) {
+    background: var(--mt-ph-color-background-secondary-alpha-hover);
+  }
 }
 .mode_secondary:active:not(:disabled) {
   background: var(--mt-ph-color-background-secondary-alpha-press);
@@ -78,8 +82,10 @@
   color: var(--mt-sidebar-compose-text, var(--mt-color-text-primary));
   box-shadow: inset 0 0 0 1px var(--mt-sidebar-compose-border, var(--mt-color-field-border-alpha));
 }
-.mode_outline:hover:not(:disabled) {
-  background: var(--mt-sidebar-compose-bg-hover);
+@media (hover: hover) {
+  .mode_outline:hover:not(:disabled) {
+    background: var(--mt-sidebar-compose-bg-hover);
+  }
 }
 .mode_outline:active:not(:disabled) {
   background: var(--mt-sidebar-compose-bg-press);
@@ -97,8 +103,10 @@
   background: transparent;
   color: var(--mt-mail-color-button-text, #333);
 }
-.mode_tertiary:hover:not(:disabled) {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .mode_tertiary:hover:not(:disabled) {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 .mode_tertiary:active:not(:disabled) {
   background: var(--mt-ph-color-transparent-press);
@@ -116,5 +124,10 @@
 
 .icon :global(svg) {
   display: block;
-  fill: currentColor;
+  /* fill НЕ задаём: каждый значок красит себя сам — фирменные из спрайта
+     своими fill/stroke внутри symbol, встроенные — атрибутами на svg.
+     Общее `fill: currentColor` здесь перебивало их `fill="none"`
+     (CSS сильнее презентационного атрибута), и штриховые значки
+     превращались в сплошные чёрные кляксы — «Выделить все» на панели
+     над списком был залитым квадратом. */
 }

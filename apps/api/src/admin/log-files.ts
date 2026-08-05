@@ -79,6 +79,14 @@ export interface ReadLogOptions {
 
 export interface ReadLogResult {
   items: LogLine[];
+  /**
+   * Место сразу за последней ЦЕЛОЙ строкой файла.
+   *
+   * С него дочитывается всё новое при автообновлении. Именно за целой:
+   * размер файла может прийтись на середину строки, которую служба ещё
+   * дописывает, и начать оттуда значит показать её обрубок.
+   */
+  tailOffset: number;
   /** Курсор следующей страницы; null — старее ничего нет. */
   nextBefore: number | null;
   fileId: string;
@@ -222,6 +230,7 @@ export async function readLogPage(
     const nextBefore = lowestReturned ?? end;
     return {
       items,
+      tailOffset: await lastCompleteLineEnd(info.path, info.sizeBytes),
       nextBefore: nextBefore > 0 ? nextBefore : null,
       fileId: info.fileId,
       sizeBytes: info.sizeBytes,
@@ -278,4 +287,157 @@ export async function readNewLines(
     lines: text.split('\n').filter((line) => line.trim() !== ''),
     nextOffset: fromOffset + lastBreak + 1,
   };
+}
+
+
+/**
+ * Место сразу за последней целой строкой файла.
+ *
+ * Читаем только хвост: искать перевод строки с начала многомегабайтного
+ * журнала незачем — он всегда рядом с концом.
+ */
+export async function lastCompleteLineEnd(path: string, size: number): Promise<number> {
+  if (size === 0) return 0;
+  const handle = await open(path, 'r');
+  try {
+    const length = Math.min(CHUNK_BYTES, size);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, size - length);
+    const at = buffer.lastIndexOf(0x0a);
+    // Перевода строки в хвосте нет вовсе — значит, последняя строка длиннее
+    // куска и ещё не дописана; новое начнётся после неё.
+    return at < 0 ? size - length : size - length + at + 1;
+  } finally {
+    await handle.close();
+  }
+}
+
+export interface TailLogOptions {
+  /** Читать строки, начинающиеся С ЭТОГО места. */
+  after: number;
+  levelAtMost?: LogLevel;
+  search?: string | undefined;
+  /** Сколько строк отдать самое большее. */
+  limit: number;
+  /** Опознаватель файла из прошлого ответа — ловит проворот журнала. */
+  fileId?: string | undefined;
+  /** Сколько байт прочитать за раз. */
+  maxBytes?: number;
+}
+
+export interface TailLogResult {
+  items: LogLine[];
+  /** Откуда дочитывать в следующий раз. */
+  nextAfter: number;
+  fileId: string;
+  sizeBytes: number;
+  /** Журнал провернулся — прежнее место ничего не значит. */
+  rotated: boolean;
+  /**
+   * Новых строк было больше предела: отданы самые старые из них, остальное
+   * придёт следующим запросом. Врать «это всё» нельзя.
+   */
+  more: boolean;
+}
+
+/**
+ * Дочитывание НОВЫХ строк — для автообновления.
+ *
+ * Читает вперёд от `after` и отдаёт строки по возрастанию времени: в живом
+ * журнале новое приписывается снизу, и порядок здесь тот же, что на экране.
+ *
+ * Отбор по уровню и поиску применяется ЗДЕСЬ же. Иначе новые записи
+ * появлялись бы мимо фильтра: человек выбрал «только ошибки», а к нему
+ * приезжает всё подряд.
+ */
+export async function readLogTail(
+  dir: string,
+  source: LogSource,
+  options: TailLogOptions,
+  now: Date = new Date(),
+): Promise<TailLogResult> {
+  const info = await describeLogFile(dir, source);
+  if (!info.present || info.fileId === null) {
+    throw new LogFileMissingError(source, info.path);
+  }
+
+  // Прежнее место в другом файле указывает на чужие строки. Начинаем
+  // с конца нового файла и честно сообщаем о провороте: показать сейчас
+  // весь новый журнал разом — не то, о чём просили.
+  const rotated = options.fileId !== undefined && options.fileId !== info.fileId;
+  const from = rotated
+    ? await lastCompleteLineEnd(info.path, info.sizeBytes)
+    : Math.min(Math.max(0, options.after), info.sizeBytes);
+
+  const threshold = options.levelAtMost ?? 'debug';
+  const needle = options.search?.trim().toLowerCase() ?? '';
+  const maxBytes = options.maxBytes ?? SCAN_BUDGET_BYTES;
+
+  const { lines, nextOffset } = await readNewLinesWithOffsets(info.path, from, maxBytes);
+  const items: LogLine[] = [];
+  let more = false;
+  for (const line of lines) {
+    if (items.length >= options.limit) {
+      more = true;
+      break;
+    }
+    if (line.text.trim() === '') continue;
+    const entry = parseLogLine(source, line.text.slice(0, MAX_LINE_CHARS), now);
+    if (!levelAtLeast(entry.level, threshold)) continue;
+    if (needle !== '' && !line.text.toLowerCase().includes(needle)) continue;
+    items.push({ ...entry, offset: line.offset });
+  }
+
+  // Если предел упёрся, следующий запрос должен продолжить с той строки,
+  // на которой мы остановились, а не с конца порции.
+  const stopped = more && items.length > 0 ? lineAfter(lines, items[items.length - 1]!.offset) : nextOffset;
+
+  return {
+    items,
+    nextAfter: stopped,
+    fileId: info.fileId,
+    sizeBytes: info.sizeBytes,
+    rotated,
+    more,
+  };
+}
+
+/** Место сразу за строкой с указанным началом. */
+function lineAfter(lines: readonly { offset: number; text: string }[], offset: number): number {
+  const found = lines.find((line) => line.offset === offset);
+  if (!found) return offset;
+  return found.offset + Buffer.byteLength(found.text) + 1;
+}
+
+/**
+ * Целые строки от `fromOffset` вместе с их местом в файле.
+ *
+ * Место нужно как курсор: по нему автообновление продолжает ровно с той
+ * строки, на которой остановилось.
+ */
+export async function readNewLinesWithOffsets(
+  path: string,
+  fromOffset: number,
+  maxBytes: number,
+): Promise<{ lines: Array<{ offset: number; text: string }>; nextOffset: number }> {
+  const st = await stat(path);
+  if (fromOffset >= st.size) return { lines: [], nextOffset: fromOffset };
+  const end = Math.min(st.size, fromOffset + maxBytes);
+  const stream = createReadStream(path, { start: fromOffset, end: end - 1 });
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(chunk as Buffer);
+  const data = Buffer.concat(chunks);
+  const lastBreak = data.lastIndexOf(0x0a);
+  // Целой строки не набралось — ждём, пока служба допишет. Двигать место
+  // здесь нельзя: половина строки разобралась бы как мусор.
+  if (lastBreak < 0) return { lines: [], nextOffset: fromOffset };
+
+  const lines: Array<{ offset: number; text: string }> = [];
+  let start = 0;
+  for (let i = 0; i <= lastBreak; i += 1) {
+    if (data[i] !== 0x0a) continue;
+    lines.push({ offset: fromOffset + start, text: data.subarray(start, i).toString('utf8') });
+    start = i + 1;
+  }
+  return { lines, nextOffset: fromOffset + lastBreak + 1 };
 }

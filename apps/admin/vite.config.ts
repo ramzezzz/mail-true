@@ -12,6 +12,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@web': fileURLToPath(new URL('../web/src', import.meta.url)),
+      // Пределы длины адреса общие с сервером — см. tsconfig.json
+      '@shared': fileURLToPath(new URL('../../packages/shared/src', import.meta.url)),
     },
   },
   test: {

@@ -21,14 +21,16 @@ body,
 
 body {
   margin: 0;
+  /* Фирменный шрифт Mail.True — Golos Text, тот же, что в почте.
+     Раньше здесь стоял стек VK Sans Display / MailSans: этих гарнитур
+     на машинах нет, и админка молча набиралась Arial — рядом с почтой
+     она выглядела чужим продуктом. Файлы подключает index.html. */
   font-family: var(
-    --mt-mail-font-family-mail-sans,
-    'VK Sans Display',
-    VKSansDisplay,
-    MailSans,
+    --mt-font-ui,
+    'Golos Text',
     -apple-system,
-    system-ui,
-    'Helvetica Neue',
+    'Segoe UI',
+    Roboto,
     Arial,
     sans-serif
   );
@@ -45,23 +47,70 @@ body {
   --mt-admin-gap: 12px;
   --mt-admin-gap-s: 6px;
   --mt-admin-sidebar-width: 216px;
-  --mt-admin-header-height: 48px;
+  /* 56px: логотип с подписью в 48px не помещался, а почтовые 62px
+     для панели управления избыточны — она плотнее почты. */
+  --mt-admin-header-height: 56px;
   --mt-admin-radius: var(--mt-size-border-radius, 8px);
 
-  /* Служебные цвета состояний — только из палитры токенов */
-  --mt-admin-ok: var(--mt-color-accent-green);
-  --mt-admin-warn: var(--mt-color-accent-orange);
-  --mt-admin-fail: var(--mt-color-accent-red);
+  /*
+   * Служебные цвета состояний.
+   *
+   * Это НЕ сырые --mt-color-accent-*: те подобраны под крупный текст и
+   * заливку кнопок, а в админке ими подписаны значки в 12px на цветной
+   * подложке. Замеры прежних пар (WCAG 2.1, формула относительной яркости):
+   *   «работает»      #0DC268 на #ECFAF3 — 2,19:1
+   *   «не настроено»  #ED330A на #FEEFEB — 3,69:1
+   *   оранжевый       #FF9E00 на белом   — 2,07:1
+   * Ниже — те же цвета, затемнённые до нормы 4,5:1 для текста
+   * (и заодно 3:1 для рамок значков, они рисуются тем же цветом):
+   *   #0A7B44 на #ECFAF3 — 4,97:1, на белом — 5,34:1
+   *   #C42500 на #FEEFEB — 5,19:1, на белом — 5,81:1
+   *   #8A5200 на белом   — 6,39:1
+   */
+  --mt-admin-ok: #0a7b44;
+  --mt-admin-warn: #8a5200;
+  --mt-admin-fail: #c42500;
   --mt-admin-muted: var(--mt-color-text-secondary);
 
   --mt-admin-surface: var(--mt-color-background-content);
   --mt-admin-border: var(--mt-color-separator-primary);
 
-  /* Моноширинный набор для адресов, DNS-записей и значений журнала.
-     В токенах mail.ru моноширинного семейства нет — заводим своё,
-     это шрифтовой стек, а не цвет. */
-  --mt-admin-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
-    'Liberation Mono', monospace;
+  /* Моноширинный набор для адресов, DNS-записей и значений журнала —
+     фирменный JetBrains Mono, тот же, что в почте (см. brand/fonts). */
+  --mt-admin-font-mono: var(
+    --mt-font-mono,
+    'JetBrains Mono',
+    ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    'Liberation Mono',
+    monospace
+  );
+}
+
+/*
+ * Тёмные значения текстовых токенов на светлой теме.
+ *
+ * Админка набрана мельче почты (13px основной, 11–12px подписи), и
+ * палитровый вторичный #87898F давал 3,50:1 на белом и 3,09:1 на фоне
+ * страницы — им подписаны плитки сводки, заголовки таблиц, роль в шапке,
+ * пустые состояния и «скоро» в меню. Синий #0070f0 на подложке активного
+ * пункта меню давал 3,52:1.
+ *
+ * Правило переопределяет токены точечно и только для светлой темы
+ * (селектор специфичнее, чем :root в themes.css) — тёмная тема остаётся
+ * такой, какой её задала дизайн-система.
+ *
+ *   #63666B — 5,76:1 на белом, 5,10:1 на #F0F1F3
+ *   #0059C2 — 6,55:1 на белом, 5,02:1 на подложке активного пункта
+ *   #0A7B44 / #C42500 — см. выше
+ */
+:root[data-theme='light'],
+:root:not([data-theme]) {
+  --mt-color-text-secondary: #63666b;
+  --mt-color-text-link: #0059c2;
+  --mt-color-text-positive: #0a7b44;
+  --mt-color-text-negative: #c42500;
 }
 
 a {
@@ -121,4 +170,49 @@ textarea {
 .mt-mono {
   font-family: var(--mt-admin-font-mono);
   font-size: 12px;
+}
+
+/*
+ * Недоступная кнопка.
+ *
+ * Общая кнопка гасит себя прозрачностью 0,48. На основной (синей) это
+ * давало белую подпись 1,39:1 — надпись просто исчезала, а курсор при
+ * этом оставался обычным, будто нажать можно. В админке недоступная
+ * кнопка гасится заливкой, а не прозрачностью: #63666B на #F0F1F3 —
+ * 5,10:1, и курсор честно говорит «нельзя».
+ *
+ * Двойное :disabled:disabled — не опечатка: так правило перевешивает
+ * `.button:disabled` из CSS-модуля почты, не трогая саму почту.
+ */
+button:disabled:disabled {
+  opacity: 1;
+  background: var(--mt-color-background-secondary);
+  color: #63666b;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/*
+ * Движение в админке — обратная связь, а не содержание. Кому оно мешает,
+ * тот получает тот же интерфейс без переходов: длительности гасятся здесь
+ * одним правилом, и оно действует на всё, что появится позже, — за каждой
+ * новой анимацией следить руками не нужно.
+ *
+ * Правило повторяет apps/web/src/styles/global.css: админка берёт оттуда
+ * токены и компоненты, но не global.css — у неё свой сброс и типографика.
+ *
+ * Исключение — data-motion="keep" (крутилка загрузки из @web/components):
+ * остановленная, она врёт, будто работа уже закончилась.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *:not([data-motion='keep']),
+  *:not([data-motion='keep'])::before,
+  *:not([data-motion='keep'])::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

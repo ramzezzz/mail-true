@@ -7,6 +7,7 @@ import type { AdminDb } from './db.js';
 import type { ImportSecretBox } from './import-jobs.js';
 import type { AdminSessionStore, AdminSessionData } from './session.js';
 import type { MailboxMasterAccess } from './mailbox.js';
+import type { QueueAgent } from './queue-agent.js';
 
 /** Всё, что нужно админским маршрутам. Собирается один раз при регистрации. */
 export interface AdminContext {
@@ -14,6 +15,12 @@ export interface AdminContext {
   db: AdminDb;
   sessions: AdminSessionStore;
   mailbox: MailboxMasterAccess;
+  /**
+   * Доступ к очереди Postfix через посредника в его контейнере.
+   * Может быть не настроен — тогда раздел очереди честно отвечает 503
+   * с объяснением, а не показывает пустую таблицу (см. queue-agent.ts).
+   */
+  queueAgent: QueueAgent;
   /** Куки подписываются тем же секретом, что и почтовые, но имя — своё. */
   cookieSecure: boolean;
   /**

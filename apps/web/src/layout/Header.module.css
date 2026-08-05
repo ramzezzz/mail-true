@@ -67,8 +67,10 @@
   color: var(--mt-header-icon);
 }
 
-.headerButton:hover:not(:disabled) {
-  background: var(--mt-header-button-bg-hover);
+@media (hover: hover) {
+  .headerButton:hover:not(:disabled) {
+    background: var(--mt-header-button-bg-hover);
+  }
 }
 
 .headerButton:active:not(:disabled) {

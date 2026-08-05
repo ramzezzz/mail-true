@@ -44,8 +44,10 @@
     var(--mt-anim-easing-default, ease);
 }
 
-.item:hover {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .item:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .item:active {

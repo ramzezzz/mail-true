@@ -21,6 +21,7 @@ import {
   listLogFiles,
   listRotatedFiles,
   readLogPage,
+  readLogTail,
 } from '../log-files.js';
 import { LOG_LEVELS, LOG_SOURCES, type LogSource } from '../mail-log.js';
 
@@ -33,6 +34,22 @@ const querySchema = z.object({
   /** Курсор ленивой подгрузки: смещение в байтах. */
   before: z.coerce.number().int().min(0).optional(),
   /** Опознаватель файла из прошлого ответа — ловит проворот журнала. */
+  fileId: z.string().max(64).optional(),
+});
+
+/**
+ * Дочитывание новых строк для автообновления.
+ *
+ * Отдельный маршрут, а не «перечитай первую страницу»: перечитывание
+ * не отличает новое от уже показанного и на быстром журнале теряет
+ * строки между опросами. Здесь курсор точный — место в байтах.
+ */
+const tailSchema = z.object({
+  source: z.enum(['postfix', 'dovecot', 'api']).default('postfix'),
+  level: z.enum(['error', 'warn', 'info', 'debug']).default('debug'),
+  search: z.string().trim().max(200).optional(),
+  after: z.coerce.number().int().min(0),
+  limit: z.coerce.number().int().min(1).max(500).default(200),
   fileId: z.string().max(64).optional(),
 });
 
@@ -89,6 +106,8 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
         text: item.text,
       })),
       nextBefore: page.nextBefore,
+      /** С этого места дочитываются новые строки при автообновлении. */
+      tailOffset: page.tailOffset,
       fileId: page.fileId,
       sizeBytes: page.sizeBytes,
       /** Журнал провернулся между запросами — страница отдана с начала. */
@@ -98,6 +117,36 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
        * Это не «ничего нет»: с тем же курсором надо просить дальше.
        */
       budgetExhausted: page.budgetExhausted,
+    };
+  });
+
+  /** Только то, что дописано после `after`. Порядок — от старого к новому. */
+  app.get('/logs/new', { preHandler: requireAdmin(app, 'audit.read') }, async (request) => {
+    const q = tailSchema.parse(request.query);
+    const tail = await readLogTail(dir, q.source as LogSource, {
+      after: q.after,
+      levelAtMost: q.level,
+      search: q.search,
+      limit: q.limit,
+      fileId: q.fileId,
+    });
+    return {
+      source: q.source,
+      items: tail.items.map((item) => ({
+        offset: item.offset,
+        level: item.level,
+        at: item.at?.toISOString() ?? null,
+        component: item.component,
+        queueId: item.queueId,
+        text: item.text,
+      })),
+      nextAfter: tail.nextAfter,
+      fileId: tail.fileId,
+      sizeBytes: tail.sizeBytes,
+      /** Журнал провернулся — прежнее место ничего не значит. */
+      rotated: tail.rotated,
+      /** Новых строк было больше предела: остальное придёт следующим запросом. */
+      more: tail.more,
     };
   });
 }

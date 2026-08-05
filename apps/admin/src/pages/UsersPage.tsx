@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
-import type { MailUser } from '../api/types';
+import type { MailUser, UserDeleteResult } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { QuotaInput } from '../components/QuotaInput';
@@ -23,7 +23,7 @@ import {
   ToolbarSpacer,
 } from '../components/ui';
 import { formatBytes, formatDateTime, pluralize } from '../lib/format';
-import { checkDisplayName, checkMailboxAddress } from '../lib/mailboxName';
+import { addressProblemWhileTyping, displayNameLengthProblem } from '@shared/mailbox-limits';
 import { DEFAULT_QUOTA_UNIT, quotaToBytes, splitQuota, type QuotaUnit } from '../lib/quota';
 
 const LIMIT = 50;
@@ -42,6 +42,7 @@ export function UsersPage() {
   const [passwordFor, setPasswordFor] = useState<MailUser | null>(null);
   const [editing, setEditing] = useState<MailUser | null>(null);
   const [enterFor, setEnterFor] = useState<MailUser | null>(null);
+  const [deleting, setDeleting] = useState<MailUser | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -172,11 +173,11 @@ export function UsersPage() {
                 </th>
               )}
               <th>Адрес</th>
-              <th>Имя</th>
+              <th className={tableStyles.optionalNarrow}>Имя</th>
               <th className={tableStyles.numeric}>Квота</th>
-              <th className={tableStyles.numeric}>Алиасов</th>
+              <th className={`${tableStyles.numeric} ${tableStyles.optional}`}>Алиасов</th>
               <th>Состояние</th>
-              <th className={tableStyles.nowrap}>Создан</th>
+              <th className={`${tableStyles.nowrap} ${tableStyles.optional}`}>Создан</th>
               <th />
             </tr>
           </thead>
@@ -197,11 +198,11 @@ export function UsersPage() {
                   </td>
                 )}
                 <td className="mt-mono">{user.email}</td>
-                <td>{user.displayName ?? '—'}</td>
+                <td className={tableStyles.optionalNarrow}>{user.displayName ?? '—'}</td>
                 <td className={tableStyles.numeric}>{formatBytes(user.quotaBytes)}</td>
-                <td className={tableStyles.numeric}>{user.aliasCount}</td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{user.aliasCount}</td>
                 <td><ActiveBadge active={user.active} /></td>
-                <td className={tableStyles.nowrap}>{formatDateTime(user.createdAt)}</td>
+                <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>{formatDateTime(user.createdAt)}</td>
                 <td>
                   <div className={tableStyles.actions}>
                     {can('users.write') && (
@@ -226,6 +227,11 @@ export function UsersPage() {
                     {canEnterMailbox && (
                       <Button mode="tertiary" size="s" onClick={() => setEnterFor(user)}>
                         Войти в ящик
+                      </Button>
+                    )}
+                    {can('users.delete') && (
+                      <Button mode="tertiary" size="s" onClick={() => setDeleting(user)}>
+                        Удалить
                       </Button>
                     )}
                   </div>
@@ -282,9 +288,23 @@ export function UsersPage() {
       {enterFor && (
         <EnterMailboxModal user={enterFor} onClose={() => setEnterFor(null)} />
       )}
+      {deleting && (
+        <DeleteUserModal
+          user={deleting}
+          onClose={() => setDeleting(null)}
+          onDone={(message) => {
+            setFlash(message);
+            setDeleting(null);
+            setSelected(new Set());
+            invalidate();
+          }}
+        />
+      )}
       {bulkOpen && (
         <BulkModal
           ids={selectedIds}
+          emails={items.filter((u) => selected.has(u.id)).map((u) => u.email)}
+          canDelete={can('users.delete')}
           onClose={() => setBulkOpen(false)}
           onDone={(message) => {
             setFlash(message);
@@ -317,8 +337,8 @@ function CreateUserModal({
   const [generated, setGenerated] = useState<{ email: string; password: string } | null>(null);
 
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
-  const emailProblem = checkMailboxAddress(email);
-  const displayNameProblem = checkDisplayName(displayName);
+  const emailProblem = addressProblemWhileTyping(email);
+  const displayNameProblem = displayNameLengthProblem(displayName);
   const create = useMutation({
     mutationFn: () =>
       api.createUser({
@@ -447,7 +467,7 @@ function EditUserModal({
   const [quotaAmount, setQuotaAmount] = useState(String(initial.amount));
   const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(initial.unit);
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
-  const displayNameProblem = checkDisplayName(displayName);
+  const displayNameProblem = displayNameLengthProblem(displayName);
 
   const save = useMutation({
     mutationFn: () =>
@@ -585,31 +605,71 @@ function PasswordModal({
 /* Массовые операции                                                    */
 /* ------------------------------------------------------------------ */
 
+type BulkMode = 'quota' | 'block' | 'unblock' | 'delete';
+
 function BulkModal({
   ids,
+  emails,
+  canDelete,
   onClose,
   onDone,
 }: {
   ids: number[];
+  /** Адреса выбранных ящиков — их показывает подтверждение удаления. */
+  emails: string[];
+  canDelete: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
-  const [mode, setMode] = useState<'quota' | 'block' | 'unblock'>('quota');
+  const [mode, setMode] = useState<BulkMode>('quota');
   const [quotaAmount, setQuotaAmount] = useState('1');
   const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
+  const [confirm, setConfirm] = useState('');
+  const [reason, setReason] = useState('');
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
 
+  const deleteReady = confirm.trim().toLowerCase() === 'удалить';
+
   const run = useMutation({
-    mutationFn: () =>
-      api.bulkUsers({
+    mutationFn: async () => {
+      if (mode === 'delete') {
+        /*
+         * Массового удаления на сервере нет, и заводить его ради этого не
+         * стоит: удаление ящика делает много всего (карантин каталога,
+         * чистка Dovecot, запись об удалении), и честнее делать это по
+         * одному. Ошибка на одном ящике не отменяет остальные.
+         */
+        let removed = 0;
+        let failed = 0;
+        for (const id of ids) {
+          try {
+            await api.deleteUser(id, reason.trim() || undefined);
+            removed += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        return { changed: removed, failed };
+      }
+      const result = await api.bulkUsers({
         ids,
         ...(mode === 'quota' && quotaBytes !== null ? { quotaBytes } : {}),
         ...(mode === 'block' ? { active: false } : {}),
         ...(mode === 'unblock' ? { active: true } : {}),
-      }),
-    onSuccess: (result) =>
-      onDone(`Изменено ${pluralize(result.changed, 'ящик', 'ящика', 'ящиков')}`),
+      });
+      return { changed: result.changed, failed: 0 };
+    },
+    onSuccess: (result) => {
+      const what = mode === 'delete' ? 'Удалено' : 'Изменено';
+      const tail = result.failed > 0 ? `, не удалось — ${result.failed}` : '';
+      onDone(`${what} ${pluralize(result.changed, 'ящик', 'ящика', 'ящиков')}${tail}`);
+    },
   });
+
+  const blocked =
+    run.isPending ||
+    (mode === 'quota' && quotaBytes === null) ||
+    (mode === 'delete' && !deleteReady);
 
   return (
     <Modal
@@ -620,25 +680,68 @@ function BulkModal({
           <Button mode="secondary" onClick={onClose}>
             Отмена
           </Button>
-          <Button
-            disabled={run.isPending || (mode === 'quota' && quotaBytes === null)}
-            onClick={() => run.mutate()}
-          >
-            Применить
+          <Button disabled={blocked} onClick={() => run.mutate()}>
+            {run.isPending
+              ? mode === 'delete'
+                ? 'Удаляем…'
+                : 'Применяем…'
+              : mode === 'delete'
+                ? `Удалить ${pluralize(ids.length, 'ящик', 'ящика', 'ящиков')}`
+                : 'Применить'}
           </Button>
         </>
       }
     >
       <ErrorNotice error={run.error} />
+      {mode === 'delete' && (
+        <>
+          <Notice tone="error">
+            <strong>
+              Будет удалено {pluralize(ids.length, 'ящик', 'ящика', 'ящиков')} — насовсем.
+            </strong>
+            <DeletionConsequences />
+          </Notice>
+          <Field label="Какие именно">
+            <textarea
+              className="mt-textarea mt-mono"
+              readOnly
+              style={{ minHeight: 80 }}
+              value={emails.join('\n')}
+            />
+          </Field>
+          <Field label="Причина" hint="Попадёт в журнал аудита и в запись об удалении.">
+            <input
+              className="mt-input"
+              placeholder="Обращение №1234: сотрудники уволены"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="Наберите «удалить», чтобы подтвердить"
+            hint="Слово набирается руками нарочно: случайно нажать кнопку слишком легко."
+          >
+            <input
+              className="mt-input"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
+          </Field>
+        </>
+      )}
       <Field label="Что сделать">
         <select
           className="mt-select"
           value={mode}
-          onChange={(e) => setMode(e.target.value as 'quota' | 'block' | 'unblock')}
+          onChange={(e) => {
+            setMode(e.target.value as BulkMode);
+            setConfirm('');
+          }}
         >
           <option value="quota">Сменить квоту</option>
           <option value="block">Заблокировать</option>
           <option value="unblock">Разблокировать</option>
+          {canDelete && <option value="delete">Удалить ящики</option>}
         </select>
       </Field>
       {mode === 'quota' && (
@@ -724,6 +827,125 @@ function EnterMailboxModal({ user, onClose }: { user: MailUser; onClose: () => v
         Отправлять письма от имени владельца нельзя. Флаг «прочитано» при просмотре не
         ставится — следов в ящике не остаётся.
       </Notice>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Удаление ящика                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Что именно исчезает вместе с ящиком. Список один и тот же в подтверждении
+ * одного удаления и массового: цену действия надо видеть до, а не после.
+ */
+function DeletionConsequences() {
+  return (
+    <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+      <li>все письма и папки; каталог почты уводится в карантин, а не стирается сразу</li>
+      <li>алиасы, которые вели в этот ящик</li>
+      <li>пароль и возможность войти — сразу, ещё до уборки каталога</li>
+      <li>настройки ящика, правила и подписи</li>
+    </ul>
+  );
+}
+
+/**
+ * Удаление одного ящика.
+ *
+ * Подтверждение — набранный руками адрес: строки в списке похожи друг на
+ * друга, промахнуться на одну очень легко, а отменить удаление нельзя.
+ * Само удаление на сервере устроено правильно (карантин каталога, чистка
+ * Dovecot, запись об удалении) — здесь только доступ к нему.
+ */
+function DeleteUserModal({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: MailUser;
+  onClose: () => void;
+  onDone: (message: string) => void;
+}) {
+  const [confirm, setConfirm] = useState('');
+  const [reason, setReason] = useState('');
+  const [result, setResult] = useState<UserDeleteResult | null>(null);
+
+  const matches = confirm.trim().toLowerCase() === user.email.toLowerCase();
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteUser(user.id, reason.trim() || undefined),
+    onSuccess: (data) => setResult(data),
+  });
+
+  if (result) {
+    const done = (): void => onDone(`Ящик ${user.email} удалён`);
+    return (
+      <Modal title={`Ящик ${user.email} удалён`} onClose={done} footer={<Button onClick={done}>Понятно</Button>}>
+        <Notice tone="success">Ящик удалён, войти в него больше нельзя.</Notice>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>
+            Каталог почты:{' '}
+            {result.mailDirQuarantined
+              ? 'уведён в карантин — письма ещё можно вернуть'
+              : result.mailDirMissing
+                ? 'его уже не было'
+                : 'остался на месте, уберите вручную'}
+          </li>
+          <li>
+            Индексы Dovecot:{' '}
+            {result.imapPurged ? 'очищены' : 'очистить не удалось, уберите вручную'}
+          </li>
+          <li>Записей в базе удалено: {result.dbRowsRemoved}</li>
+        </ul>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      title={`Удалить ящик ${user.email}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button mode="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button disabled={!matches || remove.isPending} onClick={() => remove.mutate()}>
+            {remove.isPending ? 'Удаляем…' : 'Удалить ящик'}
+          </Button>
+        </>
+      }
+    >
+      <ErrorNotice error={remove.error} />
+      <Notice tone="error">
+        <strong>Это действие не отменяется из панели.</strong>
+        <DeletionConsequences />
+      </Notice>
+      <Field label="Причина" hint="Попадёт в журнал аудита и в запись об удалении.">
+        <input
+          className="mt-input"
+          placeholder="Обращение №1234: сотрудник уволен"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+      </Field>
+      <Field
+        label="Наберите адрес ящика, чтобы подтвердить"
+        hint={
+          confirm.trim() === '' || matches
+            ? `Полностью: ${user.email}`
+            : 'Пока не совпадает с адресом ящика.'
+        }
+      >
+        <input
+          className="mt-input mt-mono"
+          autoFocus
+          placeholder={user.email}
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+        />
+      </Field>
     </Modal>
   );
 }

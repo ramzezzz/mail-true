@@ -42,8 +42,10 @@
   cursor: pointer;
 }
 
-.conditions:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .conditions:hover {
+    text-decoration: underline;
+  }
 }
 
 .autoBadge {

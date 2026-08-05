@@ -1,0 +1,245 @@
+/*
+ * Журналы работы почты: цветные строки по уровню сообщения.
+ *
+ * Цвета берутся из переменных styles/logLevels.css (они же в реестре
+ * src/lib/logLevels.ts, и их контраст считается в tests/logContrast.test.ts).
+ * Ни одного значения цвета прямо здесь нет — иначе стили и проверка
+ * разъехались бы при первой же правке.
+ */
+
+.hint {
+  margin: 0 0 var(--mt-admin-gap);
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Лента строк. Своя прокрутка: журнал длинный, а шапка с отбором должна
+   оставаться на месте. */
+.lines {
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-admin-surface);
+  overflow: auto;
+  /* Высота от окна, а не фиксированная: на 1440 виден весь журнал,
+     на 390 — не вылезает за экран. */
+  max-height: calc(100vh - 300px);
+  min-height: 240px;
+}
+
+.line {
+  display: grid;
+  /* Колонка уровня — по содержимому (auto), а не фиксированной ширины:
+     самое длинное слово задаёт её один раз на всю ленту, и текст
+     сообщения не наезжает на подпись уровня. */
+  grid-template-columns: 76px auto 128px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 10px;
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  /* Полоса слева — второй признак уровня, кроме цвета и слова.
+     Без неё различение уровней держалось бы только на цвете. */
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--mt-color-separator-secondary);
+}
+
+.line:last-child {
+  border-bottom: 0;
+}
+
+.time {
+  color: inherit;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+
+.level {
+  white-space: nowrap;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.component {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.85;
+}
+
+.text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* --- Раскраска по уровню -------------------------------------------- */
+
+.level_error {
+  color: var(--mt-log-error-text);
+  background: var(--mt-log-error-bg);
+  border-left-color: var(--mt-log-error-text);
+}
+
+.level_warn {
+  color: var(--mt-log-warn-text);
+  background: var(--mt-log-warn-bg);
+  border-left-color: var(--mt-log-warn-text);
+}
+
+.level_info {
+  color: var(--mt-log-info-text);
+  background: var(--mt-log-info-bg);
+  border-left-color: transparent;
+}
+
+.level_debug {
+  color: var(--mt-log-debug-text);
+  background: var(--mt-log-debug-bg);
+  border-left-color: var(--mt-log-debug-text);
+}
+
+/* --- Служебные строки под лентой ------------------------------------ */
+
+.auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--mt-color-text-primary);
+}
+
+.auto input {
+  cursor: pointer;
+}
+
+/* Лента и всплывающая кнопка возврата вниз лежат в одной коробке:
+   кнопка обязана висеть НАД лентой, а не двигать её. */
+.listBox {
+  position: relative;
+}
+
+/* Кнопка «N новых записей». Появляется, только когда прилипание выключено
+   и снизу накопилось непрочитанное: иначе о новом можно вовсе не узнать. */
+.unread {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border: 1px solid var(--mt-color-accent-blue);
+  border-radius: 14px;
+  background: var(--mt-color-background-content);
+  color: var(--mt-color-text-link);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 18%);
+}
+
+.unread:hover {
+  background: var(--mt-color-background-secondary);
+}
+
+/* Шапка ленты: что будет, если прокрутить выше. */
+.older {
+  padding: 8px 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  border-bottom: 1px solid var(--mt-color-separator-secondary);
+}
+
+.sentinel {
+  padding: 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+.empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 2px;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .line {
+    /* Служба уходит из отдельной колонки: на узком экране полезнее
+       отдать ширину самому сообщению. */
+    grid-template-columns: 68px auto 1fr;
+  }
+
+  .component {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .line {
+    /* Совсем узко: время и уровень стоят рядом первой полосой, сообщение
+       занимает вторую целиком. Три отдельные полосы на строку съедали бы
+       весь экран, а одна колонка на всё — теряла бы уровень из виду. */
+    grid-template-columns: auto 1fr;
+    gap: 0 8px;
+  }
+
+  .text {
+    grid-column: 1 / -1;
+  }
+
+  .lines {
+    max-height: calc(100vh - 340px);
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Поля отбора                                                          */
+/*                                                                      */
+/* Ширина считается ОТ СОДЕРЖИМОГО, а не задаётся числом на все списки  */
+/* сразу. Заказчик поймал ровно это: у списка направления самый длинный */
+/* вариант, общая ширина под него не подходила, и стрелка налезала на   */
+/* последние буквы — читалось «Входящие и исходящщ▾».                   */
+/* ------------------------------------------------------------------ */
+select.control {
+  /* auto — это «по самому длинному варианту»: браузер меряет их сам. */
+  width: auto;
+  flex: 0 0 auto;
+  /*
+   * Место под стрелку. Стрелку списка рисует браузер ВНУТРИ поля, и без
+   * своего отступа справа она ложится поверх текста. Восемь точек общего
+   * поля ввода на неё не хватает.
+   */
+  padding-right: 30px;
+  max-width: 100%;
+}
+
+input.control {
+  flex: 1 1 200px;
+  width: auto;
+  min-width: 160px;
+  max-width: 320px;
+}
+
+@media (max-width: 600px) {
+  /* Три списка в ряд при 390 точках тесно в любом случае: пусть каждый
+     занимает свою строку целиком. */
+  select.control,
+  input.control {
+    flex: 1 1 100%;
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+}

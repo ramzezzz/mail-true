@@ -14,10 +14,13 @@ import { cx } from '@web/lib/cx';
 import type { DnsCheck, DnsReport } from '../api/types';
 import { Badge, ErrorNotice, Modal, Notice } from '../components/ui';
 import {
+  PROPAGATION_NOTE,
   VERDICT_LABEL,
+  answerStamp,
   formatActual,
   groupChecks,
   needsAttention,
+  needsPropagationNote,
   resolverNote,
   summarize,
   verdictTone,
@@ -91,11 +94,14 @@ function ValueBlock({
   value,
   empty,
   copy,
+  stamp,
 }: {
   label: string;
   value: string;
   empty?: boolean;
   copy?: { name: string } | null;
+  /** Когда и у кого получен этот ответ. */
+  stamp?: string;
 }) {
   return (
     <div className={styles.value}>
@@ -105,30 +111,55 @@ function ValueBlock({
         {copy && <CopyButton value={value} name={copy.name} />}
       </div>
       <code className={cx(styles.mono, empty === true && styles.monoEmpty)}>{value}</code>
+      {stamp !== undefined && stamp !== '' && <div className={styles.stamp}>{stamp}</div>}
     </div>
   );
 }
 
-function CheckCard({ check }: { check: DnsCheck }) {
+function CheckCard({
+  check,
+  checking,
+  canCheck,
+  onRecheck,
+}: {
+  check: DnsCheck;
+  checking: boolean;
+  canCheck: boolean;
+  onRecheck: () => void;
+}) {
   const [open, setOpen] = useState(needsAttention(check));
   const tone = verdictTone(check.verdict);
   const actual = formatActual(check);
+  const stamp = answerStamp(check);
 
   return (
     <div className={cx(styles.card, check.status === 'fail' && styles.cardProblem)}>
-      <button
-        type="button"
-        className={styles.head}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <Badge tone={tone}>{VERDICT_LABEL[check.verdict]}</Badge>
-        <span className={styles.headTitle}>{check.title}</span>
-        <span className={cx(styles.headName, 'mt-mono')}>
-          {check.recordType} {check.recordName}
-        </span>
-        <span className={styles.chevron}>{open ? '▲' : '▼'}</span>
-      </button>
+      <div className={styles.headRow}>
+        <button
+          type="button"
+          className={styles.head}
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          <Badge tone={tone}>{checking ? 'проверяем…' : VERDICT_LABEL[check.verdict]}</Badge>
+          <span className={styles.headTitle}>{check.title}</span>
+          <span className={cx(styles.headName, 'mt-mono')}>
+            {check.recordType} {check.recordName}
+          </span>
+          <span className={styles.chevron}>{open ? '▲' : '▼'}</span>
+        </button>
+        {canCheck && (
+          <Button
+            mode="tertiary"
+            size="s"
+            disabled={checking}
+            onClick={onRecheck}
+            aria-label={`Перепроверить запись ${check.recordType} ${check.recordName}`}
+          >
+            {checking ? 'Проверяем…' : 'Перепроверить'}
+          </Button>
+        )}
+      </div>
 
       {open && (
         <div className={styles.body}>
@@ -150,9 +181,12 @@ function CheckCard({ check }: { check: DnsCheck }) {
             label="Что прописано на самом деле"
             value={actual}
             empty={check.actual.length === 0}
+            stamp={checking ? 'спрашиваем…' : stamp}
           />
 
           {check.diff && <p className={styles.diff}>Расхождение: {check.diff}</p>}
+
+          {needsPropagationNote(check) && <p className={styles.ttl}>{PROPAGATION_NOTE}</p>}
 
           <p className={styles.hint}>
             <span className={styles.hintLabel}>
@@ -169,10 +203,14 @@ function CheckCard({ check }: { check: DnsCheck }) {
 export interface DnsDialogProps {
   domainName: string;
   report: DnsReport | null;
+  /** Идёт общая проверка всей зоны. */
   checking: boolean;
+  /** Идёт точечная перепроверка вот этих записей. */
+  checkingIds: readonly string[];
   error: unknown;
   canCheck: boolean;
   onRecheck: () => void;
+  onRecheckOne: (checkId: string) => void;
   onClose: () => void;
 }
 
@@ -180,9 +218,11 @@ export function DnsDialog({
   domainName,
   report,
   checking,
+  checkingIds,
   error,
   canCheck,
   onRecheck,
+  onRecheckOne,
   onClose,
 }: DnsDialogProps) {
   const summary = report ? summarize(report) : null;
@@ -229,6 +269,10 @@ export function DnsDialog({
             </span>
           </div>
           <p className={styles.resolverNote}>{resolver.text}</p>
+          <p className={styles.resolverNote}>
+            {PROPAGATION_NOTE} Время ответа показано у каждой записи отдельно — её можно
+            перепроверить одну, не дожидаясь остальных.
+          </p>
 
           {groups.map((group) => (
             <section key={group.group}>
@@ -238,7 +282,13 @@ export function DnsDialog({
               </h3>
               <p className={styles.groupNote}>{group.note}</p>
               {group.checks.map((check) => (
-                <CheckCard key={check.id} check={check} />
+                <CheckCard
+                  key={check.id}
+                  check={check}
+                  canCheck={canCheck}
+                  checking={checking || checkingIds.includes(check.id)}
+                  onRecheck={() => onRecheckOne(check.id)}
+                />
               ))}
             </section>
           ))}

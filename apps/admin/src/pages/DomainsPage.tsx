@@ -51,6 +51,42 @@ export function DomainsPage() {
   });
 
   /**
+   * Точечная перепроверка одной записи.
+   *
+   * Идущие проверки держим списком, а не одним флагом: перепроверка одной
+   * строки не должна замораживать остальной диалог, и человек вправе
+   * запустить сразу две. Результат вклеивается на место старого — весь
+   * отчёт при этом не перечитывается, иначе ответы по другим записям
+   * подменились бы новыми и потеряли своё время.
+   */
+  const [checkingIds, setCheckingIds] = useState<string[]>([]);
+  const checkOne = useMutation({
+    mutationFn: ({ domain, checkId }: { domain: Domain; checkId: string }) =>
+      api.dnsCheckOne(domain.id, checkId),
+    onMutate: ({ checkId }) => {
+      setCheckingIds((ids) => (ids.includes(checkId) ? ids : [...ids, checkId]));
+    },
+    onSuccess: (data) => {
+      setOpened((prev) => {
+        if (!prev?.report) return prev;
+        return {
+          ...prev,
+          report: {
+            ...prev.report,
+            overall: data.overall,
+            resolver: data.resolver,
+            checks: prev.report.checks.map((c) => (c.id === data.check.id ? data.check : c)),
+          },
+        };
+      });
+      void queryClient.invalidateQueries({ queryKey: ['domains'] });
+    },
+    onSettled: (_data, _error, { checkId }) => {
+      setCheckingIds((ids) => ids.filter((x) => x !== checkId));
+    },
+  });
+
+  /**
    * Открытие диалога. Прежний отчёт показывается сразу, чтобы не смотреть
    * на пустой экран, и тут же запускается свежая проверка: устаревшая
    * картина DNS вводит в заблуждение сильнее, чем её отсутствие.
@@ -125,12 +161,15 @@ export function DomainsPage() {
           domainName={opened.domain.name}
           report={opened.report}
           checking={check.isPending}
-          error={check.error}
+          checkingIds={checkingIds}
+          error={check.error ?? checkOne.error}
           canCheck={can('domains.dnscheck')}
           onRecheck={() => check.mutate(opened.domain)}
+          onRecheckOne={(checkId) => checkOne.mutate({ domain: opened.domain, checkId })}
           onClose={() => {
             setOpened(null);
             check.reset();
+            checkOne.reset();
           }}
         />
       )}

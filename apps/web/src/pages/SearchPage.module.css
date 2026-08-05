@@ -51,7 +51,7 @@
 }
 
 .placeholder :global(svg) {
-  fill: currentColor;
+  /* fill НЕ задаём: значок красит себя сам (см. Button.module.css) */
 }
 
 .placeholderText {

@@ -186,8 +186,10 @@
     var(--mt-anim-easing-default, ease);
 }
 
-.fmtButton:hover {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .fmtButton:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .fmtButton:active {
@@ -242,8 +244,10 @@
     var(--mt-anim-easing-default, ease);
 }
 
-.emojiButton:hover {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .emojiButton:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .fmtSeparator {
@@ -399,6 +403,14 @@
     width: auto;
     min-height: 0;
     max-height: none;
+    /*
+     * Именно dvh, а не vh и не «top:0; bottom:0». Когда открыта клавиатура,
+     * vh остаётся высотой ЭКРАНА, окно уходит под неё, и поле, в которое
+     * печатают, оказывается за клавиатурой. dvh считает то, что видно сейчас;
+     * вместе с interactive-widget=resizes-content в index.html окно ужимается,
+     * и поле остаётся на виду.
+     */
+    height: 100dvh;
     border-radius: 0;
   }
 

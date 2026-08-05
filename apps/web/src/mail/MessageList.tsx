@@ -5,21 +5,37 @@
  * 28px, аватар 32×32 с чекбоксом при наведении, отправитель 22%, флажок 24px,
  * тема+сниппет (со счётчиком цепочки перед темой), значки, дата 44px.
  * Группировка по периодам: «Сегодня», «Вчера», «Неделя», «Июль 2026».
+ *
+ * На телефоне строка другая — в три строки, как в мобильном mail.ru:
+ * отправитель и время, тема, начало письма. Раскладку делает CSS
+ * (сетка в `@media (max-width: 600px)`), а высоту обязан знать и JavaScript:
+ * её берёт `estimateSize` виртуализации, и без переключения все три строки
+ * налезали бы друг на друга в отведённых 48 пикселях.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { MessageSummary } from '@mail-true/shared';
 import { useUiStore } from '../app/store';
-import { Checkbox } from '../components';
+import { Checkbox, Spinner } from '../components';
 import { isReliable, messageCategory } from '../lib/categories';
 import { cx } from '../lib/cx';
 import { setDragMessages } from '../lib/dragMessages';
+import {
+  SWIPE_START,
+  isHorizontalSwipe,
+  pullArmed,
+  pullDistance,
+  swipeAction,
+  swipeOffset,
+  type SwipeAction,
+} from '../lib/gestures';
 import { HOTKEY_SCOPE_ATTR, HOTKEY_SCOPE_LIST } from '../lib/hotkeys';
 import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
-import { IconAttach, IconFlagFilled, IconShield } from './icons';
+import { usePhone } from '../lib/useMediaQuery';
+import { IconArchive, IconAttach, IconFlagFilled, IconShield, IconTrash } from './icons';
 import styles from './MessageList.module.css';
 
 export type ListRow =
@@ -38,6 +54,26 @@ export function flattenRows(messages: readonly MessageSummary[], now?: Date): Li
 
 const HEADER_HEIGHT = 40;
 
+/**
+ * Высота строки списка. Не украшение и не догадка: ровно это число
+ * виртуализация кладёт в `transform: translateY` каждой строке, поэтому оно
+ * обязано совпадать с тем, что насчитает CSS.
+ *
+ *   рабочий стол — 48px: 20 (одна строка текста) + поля;
+ *   телефон      — 84px: 20 (отправитель) + 20 (тема) + 18 (превью)
+ *                  + 20 полей и зазоров.
+ * Компактный режим («pony mode») ужимает и то и другое.
+ */
+export const ROW_HEIGHT = {
+  desktop: { normal: 48, compact: 40 },
+  phone: { normal: 84, compact: 68 },
+} as const;
+
+export function rowHeightFor(compact: boolean, phone: boolean): number {
+  const set = phone ? ROW_HEIGHT.phone : ROW_HEIGHT.desktop;
+  return compact ? set.compact : set.normal;
+}
+
 export interface MessageListProps {
   messages: readonly MessageSummary[];
   /** id письма, на котором стоит клавиатурный курсор. */
@@ -53,6 +89,19 @@ export interface MessageListProps {
    * Без этого всё, что дальше первой сотни писем, было недостижимо.
    */
   onEndReached?(): void;
+  /**
+   * Строку смахнули до конца: вправо — в архив, влево — удалить.
+   * Ровно те же два действия есть кнопками в панели над списком, жест их
+   * не заменяет, а сокращает: на телефоне до кнопки надо сперва выделить
+   * письмо, а смахнуть можно сразу.
+   */
+  onSwipe?(message: MessageSummary, action: SwipeAction): void;
+  /**
+   * Список потянули вниз — обновить. Возвращённое обещание держит крутилку
+   * до конца запроса: без него «обновление» мигало бы и исчезало, ничего
+   * не сообщая. Кнопка «Обновить» в панели делает то же самое.
+   */
+  onRefresh?(): void | Promise<unknown>;
 }
 
 function senderName(m: MessageSummary): string {
@@ -80,9 +129,13 @@ interface RowProps {
   tabbable: boolean;
   threadCount: number;
   onContextMenu?: MessageListProps['onContextMenu'];
+  onSwipe?: MessageListProps['onSwipe'];
   /** Ставится только на строку под курсором — по нему и переносится фокус. */
   rowRef?: ((node: HTMLAnchorElement | null) => void) | undefined;
 }
+
+/** Ось, по которой пошло касание. `'?'` — ещё не решили. */
+type SwipeAxis = '?' | 'x' | 'y';
 
 function Row({
   message,
@@ -92,6 +145,7 @@ function Row({
   tabbable,
   threadCount,
   onContextMenu,
+  onSwipe,
   rowRef,
 }: RowProps) {
   const toggleSelected = useUiStore((s) => s.toggleSelected);
@@ -101,10 +155,82 @@ function Row({
   const category = messageCategory(message.labels);
   const reliable = isReliable(message.labels);
 
-  return (
+  /**
+   * Смахивание. Сдвиг держим и в состоянии (его рисуем), и в ссылке
+   * (её читает обработчик отпускания): к моменту `touchend` замыкание
+   * с прежним состоянием уже устарело бы, и жест срабатывал бы через раз.
+   */
+  const [offset, setOffset] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const offsetRef = useRef(0);
+  const touch = useRef<{ x: number; y: number; axis: SwipeAxis } | null>(null);
+  /** Только что смахивали — следующий клик по строке не наш. */
+  const swiped = useRef(false);
+
+  const setSwipe = (value: number) => {
+    offsetRef.current = value;
+    setOffset(value);
+  };
+
+  const cancelSwipe = () => {
+    touch.current = null;
+    setDragging(false);
+    setSwipe(0);
+  };
+
+  const onTouchStart = (e: ReactTouchEvent) => {
+    if (!onSwipe) return;
+    const point = e.touches[0];
+    if (!point) return;
+    swiped.current = false;
+    touch.current = { x: point.clientX, y: point.clientY, axis: '?' };
+  };
+
+  const onTouchMove = (e: ReactTouchEvent) => {
+    const from = touch.current;
+    const point = e.touches[0];
+    if (!from || !point) return;
+    const dx = point.clientX - from.x;
+    const dy = point.clientY - from.y;
+
+    if (from.axis === '?') {
+      // Пока ось не выбрана, событие принадлежит прокрутке: перехватывать
+      // касание с первого же пикселя нельзя — список перестал бы листаться.
+      if (isHorizontalSwipe(dx, dy)) from.axis = 'x';
+      else if (Math.abs(dy) >= SWIPE_START) from.axis = 'y';
+      else return;
+    }
+    if (from.axis !== 'x') return;
+
+    swiped.current = true;
+    setDragging(true);
+    setSwipe(swipeOffset(dx));
+  };
+
+  const onTouchEnd = () => {
+    const from = touch.current;
+    touch.current = null;
+    setDragging(false);
+    const action = from?.axis === 'x' ? swipeAction(offsetRef.current) : null;
+    // Строка возвращается на место в любом случае: при недоведённом жесте
+    // это и есть отмена, при доведённом — её всё равно уберёт сам перенос.
+    setSwipe(0);
+    if (action) onSwipe?.(message, action);
+  };
+
+  /** Что откроется под строкой при таком сдвиге. */
+  const pending = offset > 0 ? 'archive' : offset < 0 ? 'delete' : null;
+  const armed = swipeAction(offset) !== null;
+
+  const row = (
     <a
       ref={rowRef}
       href={`/${message.folderId}/${encodeURIComponent(message.id)}`}
+      style={
+        offset === 0
+          ? undefined
+          : { transform: `translateX(${offset}px)`, transition: dragging ? 'none' : undefined }
+      }
       className={cx(
         styles.row,
         unread && styles.unread,
@@ -129,6 +255,13 @@ function Row({
         setDragMessages(e.dataTransfer, ids);
       }}
       onClick={(e) => {
+        // После смахивания браузер всё равно шлёт клик по строке. Без этой
+        // проверки любой жест заодно открывал бы письмо.
+        if (swiped.current) {
+          swiped.current = false;
+          e.preventDefault();
+          return;
+        }
         if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.button !== 0) return;
         e.preventDefault();
         navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`);
@@ -219,6 +352,39 @@ function Row({
       <span className={styles.date}>{formatListDate(message.date)}</span>
     </a>
   );
+
+  // Без жеста строка остаётся ровно тем, чем была, — лишней обёртки нет
+  if (!onSwipe) return row;
+
+  return (
+    <div
+      className={styles.swipeShell}
+      data-swipe={pending ?? 'none'}
+      data-swipe-armed={armed ? 'true' : 'false'}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={cancelSwipe}
+    >
+      {/*
+        Подложка под строкой: она и объясняет, что будет. Пока жест не доведён,
+        значок бледный — это и есть видимая разница между «отпущу и удалится»
+        и «отпущу и вернётся». Для чтения с экрана подложка не нужна: те же
+        действия там доступны кнопками панели.
+      */}
+      <span className={styles.swipeBack} aria-hidden="true">
+        <span className={cx(styles.swipeSide, styles.swipeArchive)}>
+          <IconArchive />
+          <span>В архив</span>
+        </span>
+        <span className={cx(styles.swipeSide, styles.swipeDelete)}>
+          <span>Удалить</span>
+          <IconTrash />
+        </span>
+      </span>
+      {row}
+    </div>
+  );
 }
 
 export function MessageList({
@@ -227,9 +393,12 @@ export function MessageList({
   leavingIds,
   onContextMenu,
   onEndReached,
+  onSwipe,
+  onRefresh,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
+  const phone = usePhone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => flattenRows(messages), [messages]);
@@ -251,7 +420,8 @@ export function MessageList({
     [rows, selectedIds],
   );
 
-  const rowHeight = compact ? 40 : 48;
+  // Высота строки зависит от ширины экрана: на телефоне строка трёхстрочная
+  const rowHeight = rowHeightFor(compact, phone);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -311,41 +481,116 @@ export function MessageList({
     lastSelected: false,
   };
 
+  /* --- «Потянуть вниз — обновить» ------------------------------------- */
+
+  /** Насколько список оттянут пальцем (px). */
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullFrom = useRef<number | null>(null);
+  const pullRef = useRef(0);
+
+  const setPulled = (value: number) => {
+    pullRef.current = value;
+    setPull(value);
+  };
+
+  const onPullStart = (e: ReactTouchEvent) => {
+    // Тянуть можно только с самого верха списка: иначе жест отбирал бы
+    // обычную прокрутку у всех, кто листает вверх с середины папки.
+    if (!onRefresh || refreshing) return;
+    if ((scrollRef.current?.scrollTop ?? 0) > 0) return;
+    pullFrom.current = e.touches[0]?.clientY ?? null;
+  };
+
+  const onPullMove = (e: ReactTouchEvent) => {
+    const from = pullFrom.current;
+    const y = e.touches[0]?.clientY;
+    if (from === null || y === undefined) return;
+    if ((scrollRef.current?.scrollTop ?? 0) > 0) {
+      setPulled(0);
+      return;
+    }
+    setPulled(pullDistance(y - from));
+  };
+
+  const onPullEnd = () => {
+    const distance = pullRef.current;
+    pullFrom.current = null;
+    // Недотянули — список просто встаёт на место. Это тоже отмена жеста.
+    if (!onRefresh || !pullArmed(distance)) {
+      setPulled(0);
+      return;
+    }
+    setPulled(0);
+    setRefreshing(true);
+    void Promise.resolve(onRefresh()).finally(() => setRefreshing(false));
+  };
+
+  /** Сдвиг всего списка: пока тянут — за пальцем, во время запроса — полоска. */
+  const shift = refreshing ? 40 : pull;
+
   return (
-    <div
-      ref={scrollRef}
-      className={cx(styles.scroll, compact && styles.compact)}
-      // Внутри списка стрелки и Enter — его собственное поведение,
-      // поэтому глобальные горячие клавиши здесь не отключаются
-      {...{ [HOTKEY_SCOPE_ATTR]: HOTKEY_SCOPE_LIST }}
-    >
-      <div className={styles.inner} style={{ height: virtualizer.getTotalSize() }}>
-        {virtualItems.map((item) => {
-          const row = rows[item.index];
-          if (!row) return null;
-          return (
-            <div
-              key={item.key}
-              className={styles.virtualRow}
-              style={{ transform: `translateY(${item.start}px)`, height: item.size }}
-            >
-              {row.type === 'header' ? (
-                <div className={styles.periodHeader}>{row.label}</div>
-              ) : (
-                <Row
-                  message={row.message}
-                  selection={selectionStates.get(row.message.id) ?? emptySelection}
-                  focused={row.message.id === focusedId}
-                  leaving={leavingSet.has(row.message.id)}
-                  tabbable={row.message.id === tabbableId}
-                  rowRef={row.message.id === focusedId ? focusedRowRef : undefined}
-                  threadCount={threadCounts.get(row.message.threadId) ?? 1}
-                  onContextMenu={onContextMenu}
-                />
-              )}
-            </div>
-          );
-        })}
+    <div className={cx(styles.listRoot, compact && styles.compact)}>
+      {/* Крутилка «обновляем». Живёт над списком, а не внутри прокрутки:
+          иначе она уезжала бы вместе с письмами при первом же движении. */}
+      {(pull > 0 || refreshing) && (
+        <div
+          className={styles.pullIndicator}
+          style={{ transform: `translateY(${Math.min(shift, 56)}px)` }}
+          data-armed={refreshing || pullArmed(pull) ? 'true' : 'false'}
+          role="status"
+          aria-label={refreshing ? 'Обновляем список писем' : 'Отпустите, чтобы обновить'}
+        >
+          <Spinner size={20} />
+        </div>
+      )}
+
+      <div
+        ref={scrollRef}
+        className={cx(styles.scroll, compact && styles.compact)}
+        onTouchStart={onPullStart}
+        onTouchMove={onPullMove}
+        onTouchEnd={onPullEnd}
+        onTouchCancel={onPullEnd}
+        // Внутри списка стрелки и Enter — его собственное поведение,
+        // поэтому глобальные горячие клавиши здесь не отключаются
+        {...{ [HOTKEY_SCOPE_ATTR]: HOTKEY_SCOPE_LIST }}
+      >
+        <div
+          className={styles.inner}
+          style={{
+            height: virtualizer.getTotalSize(),
+            ...(shift > 0 ? { transform: `translateY(${shift}px)` } : {}),
+          }}
+        >
+          {virtualItems.map((item) => {
+            const row = rows[item.index];
+            if (!row) return null;
+            return (
+              <div
+                key={item.key}
+                className={styles.virtualRow}
+                style={{ transform: `translateY(${item.start}px)`, height: item.size }}
+              >
+                {row.type === 'header' ? (
+                  <div className={styles.periodHeader}>{row.label}</div>
+                ) : (
+                  <Row
+                    message={row.message}
+                    selection={selectionStates.get(row.message.id) ?? emptySelection}
+                    focused={row.message.id === focusedId}
+                    leaving={leavingSet.has(row.message.id)}
+                    tabbable={row.message.id === tabbableId}
+                    rowRef={row.message.id === focusedId ? focusedRowRef : undefined}
+                    threadCount={threadCounts.get(row.message.threadId) ?? 1}
+                    onContextMenu={onContextMenu}
+                    onSwipe={onSwipe}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

@@ -14,10 +14,14 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { ComposeWindows } from '../compose/ComposeWindows';
+import { useUiStore } from '../app/store';
 import { cx } from '../lib/cx';
+import { IconCompose } from '../mail/icons';
 import { SearchFacets } from '../search/SearchFacets';
 import { SEARCH_PATH } from '../search/searchParams';
 import { SearchProvider } from '../search/SearchContext';
+import { BottomNav } from './BottomNav';
+import bottomStyles from './BottomNav.module.css';
 import { Header, NAV_DRAWER_ID } from './Header';
 import { Notice } from './Notice';
 import { Sidebar } from './Sidebar';
@@ -26,6 +30,7 @@ import styles from './AppLayout.module.css';
 export function AppLayout() {
   const location = useLocation();
   const inSearch = location.pathname.startsWith(SEARCH_PATH.replace(/\/$/u, ''));
+  const openCompose = useUiStore((s) => s.openCompose);
 
   /**
    * Открыт ли выдвижной ящик с папками. Состояние живёт здесь, а не в общем
@@ -62,6 +67,26 @@ export function AppLayout() {
             <Outlet />
           </main>
         </div>
+
+        {/*
+          Телефон: полоса главных папок внизу и плавающая кнопка написания.
+          На широком экране и то и другое скрыто стилями — там колонка папок
+          и кнопка «Написать письмо» и так на виду.
+        */}
+        <BottomNav
+          navOpen={navOpen}
+          onToggleNav={() => setNavOpen((open) => !open)}
+          drawerId={NAV_DRAWER_ID}
+        />
+        <button
+          type="button"
+          className={bottomStyles.fab}
+          aria-label="Написать письмо"
+          onClick={() => openCompose()}
+        >
+          <IconCompose size={24} />
+        </button>
+
         {/* Окна написания письма — поверх любой страницы */}
         <ComposeWindows />
         {/* Сообщение об отказе — поверх всего */}

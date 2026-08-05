@@ -21,6 +21,7 @@ import {
   IconMailUnread,
   IconMore,
   IconPrint,
+  IconRefresh,
   IconSpam,
   IconTrash,
   IconUnsubscribe,
@@ -55,6 +56,14 @@ export interface ListToolbarProps {
   onSelectAll(): void;
   onClearSelection(): void;
   onMarkAllRead(): void;
+  /**
+   * Обновить список. То же самое делает жест «потянуть вниз» на телефоне —
+   * и именно поэтому кнопка обязана быть: жест не виден, его не найти
+   * ощупью, и ни мыши, ни клавиатуре он не доступен вовсе.
+   */
+  onRefresh?(): void;
+  /** Обновление уже идёт — кнопка не должна плодить запросы. */
+  refreshing?: boolean;
   onDelete(): void;
   onArchive(): void;
   onMoveTo(folderId: string): void;
@@ -74,6 +83,16 @@ export function ListToolbar(props: ListToolbarProps) {
   if (props.selectedCount === 0) {
     return (
       <div className={styles.toolbar}>
+        {props.onRefresh && (
+          <Button
+            mode="tertiary"
+            before={<IconRefresh />}
+            onClick={props.onRefresh}
+            disabled={props.refreshing}
+          >
+            Обновить
+          </Button>
+        )}
         <Button
           mode="tertiary"
           before={<IconCheckAll />}

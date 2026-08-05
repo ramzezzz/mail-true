@@ -16,12 +16,18 @@ import { PageTitle } from '../app/AdminLayout';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import { summarizeCsv } from '../lib/csvPreview';
-import { TEMPLATE_FILENAME, templateCsv, templateCsvWithBom } from '../lib/csvTemplate';
+import { TEMPLATE_FILENAME, templateCsv, templateCsvWithBom } from '@shared/import-template';
 import { formatBytes, pluralize } from '../lib/format';
 import { DEFAULT_QUOTA_UNIT, quotaToBytes, splitQuota, type QuotaUnit } from '../lib/quota';
 import { QuotaInput } from '../components/QuotaInput';
 
 const SAMPLE = templateCsv();
+
+/** Сколько строк предпросмотра рисуем: больше человек всё равно не прочтёт. */
+const TABLE_LIMIT = 200;
+
+/** Нулевой байт: строится в коде, чтобы в исходнике его не было. */
+const NUL = String.fromCharCode(0);
 
 /** Отдаёт шаблон файлом, не уводя со страницы. */
 function downloadTemplate(): void {
@@ -59,6 +65,19 @@ export function ImportPage() {
   // Быстрая локальная сводка: сколько строк, какие столбцы распознаны.
   // Нужна до похода на сервер, чтобы сразу увидеть кривой файл.
   const local = csv.trim() === '' ? null : summarizeCsv(csv);
+
+  /*
+   * Нулевой байт видно сразу, не дожидаясь сервера. Раньше панель бодро
+   * докладывала «распознано 1 строка данных» — то есть «файл в порядке», —
+   * а потом приходил 500-й: база такого символа не принимает.
+   */
+  const nulIndex = csv.indexOf(NUL);
+  const nulProblem =
+    nulIndex === -1
+      ? null
+      : `В файле есть нулевой байт (0x00) — строка ${csv.slice(0, nulIndex).split('\n').length}. ` +
+        'Похоже, выбран двоичный файл (например, .xlsx) или файл в кодировке UTF-16. ' +
+        'Пересохраните таблицу как «CSV UTF-8» и повторите.';
 
   /** Значение с сервера — чтобы показать его до первого предпросмотра. */
   const defaults = useQuery({
@@ -179,7 +198,9 @@ export function ImportPage() {
           />
         </Field>
 
-        {local && (
+        {nulProblem && <Notice tone="error">{nulProblem}</Notice>}
+
+        {local && nulProblem === null && (
           <Notice tone="info">
             Распознано {pluralize(local.dataRows, 'строка', 'строки', 'строк')} данных
             {local.hasHeader ? ' (с заголовком)' : ''}.
@@ -221,7 +242,7 @@ export function ImportPage() {
           />
           <ToolbarSpacer />
           <Button
-            disabled={csv.trim() === '' || doPreview.isPending}
+            disabled={csv.trim() === '' || nulProblem !== null || doPreview.isPending}
             onClick={() => doPreview.mutate()}
           >
             {doPreview.isPending ? 'Проверяем…' : 'Проверить файл'}
@@ -230,9 +251,35 @@ export function ImportPage() {
         <ErrorNotice error={doPreview.error} />
       </Panel>
 
-      {preview && jobId === null && (
+      {preview && jobId === null && (() => {
+        /*
+         * Таблицу на пять тысяч строк браузер рисует несколько секунд, и всё
+         * это время страница не отвечает. Строки с ошибками важнее всего —
+         * их показываем все, годные добираем до предела.
+         */
+        const failed = preview.rows.filter((r) => r.errors.length > 0);
+        const rest = preview.rows.filter((r) => r.errors.length === 0);
+        const shownRows = [
+          ...failed,
+          ...rest.slice(0, Math.max(0, TABLE_LIMIT - failed.length)),
+        ].sort((a, b) => a.line - b.line);
+        const hiddenRows = preview.rows.length - shownRows.length;
+        return (
         <div style={{ marginTop: 12 }}>
           <Panel title="Что будет создано">
+            {preview.truncated && (
+              <Notice tone="error">
+                <strong>
+                  В файле {pluralize(preview.totalDataRows, 'строка', 'строки', 'строк')}, а за
+                  один раз создаётся не больше {preview.maxRows}. Остальные{' '}
+                  {pluralize(preview.totalDataRows - preview.maxRows, 'строка', 'строки', 'строк')}{' '}
+                  сейчас НЕ будут созданы.
+                </strong>
+                <br />
+                Разбейте файл на части и импортируйте их по очереди — иначе часть людей
+                останется без почты, и заметить это будет нечем.
+              </Notice>
+            )}
             {preview.newDomainsDenied && (
               <Notice tone="error">
                 Создавать домены вашей роли нельзя — этот флажок будет пропущен, и строки
@@ -267,7 +314,7 @@ export function ImportPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {preview.rows.map((row) => (
+                  {shownRows.map((row) => (
                     <tr key={row.line}>
                       <td className={tableStyles.numeric}>{row.line}</td>
                       <td className="mt-mono">{row.email || '—'}</td>
@@ -293,6 +340,13 @@ export function ImportPage() {
                     </tr>
                   ))}
                   {preview.rows.length === 0 && <EmptyRow colSpan={6}>Файл пуст</EmptyRow>}
+                  {hiddenRows > 0 && (
+                    <EmptyRow colSpan={6}>
+                      …и ещё {pluralize(hiddenRows, 'строка', 'строки', 'строк')}. Таблица
+                      показывает первые {TABLE_LIMIT}: рисовать тысячи строк долго, а прочесть
+                      их всё равно нельзя. Строки с ошибками показаны все.
+                    </EmptyRow>
+                  )}
                 </tbody>
               </Table>
             </TableWrap>
@@ -311,7 +365,8 @@ export function ImportPage() {
             <ErrorNotice error={doImport.error} />
           </Panel>
         </div>
-      )}
+        );
+      })()}
 
       {result && (
         <div style={{ marginTop: 12 }}>

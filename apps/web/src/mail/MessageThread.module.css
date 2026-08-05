@@ -74,8 +74,10 @@
   cursor: pointer;
 }
 
-.head:hover {
-  background: var(--mt-mail-color-list-letter-background-hover);
+@media (hover: hover) {
+  .head:hover {
+    background: var(--mt-mail-color-list-letter-background-hover);
+  }
 }
 
 /* Шапка раскрытого письма выше — 60px (letter__head в mail.ru) */
@@ -164,7 +166,12 @@
 
 .attachIcon :global(svg) {
   display: block;
-  fill: currentColor;
+  /* fill НЕ задаём: каждый значок красит себя сам — фирменные из спрайта
+     своими fill/stroke внутри symbol, встроенные — атрибутами на svg.
+     Общее `fill: currentColor` здесь перебивало их `fill="none"`
+     (CSS сильнее презентационного атрибута), и штриховые значки
+     превращались в сплошные чёрные кляксы — «Выделить все» на панели
+     над списком был залитым квадратом. */
 }
 
 .date {
@@ -212,8 +219,10 @@
   cursor: pointer;
 }
 
-.openFull:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .openFull:hover {
+    text-decoration: underline;
+  }
 }
 
 /* --- Узкий экран ------------------------------------------------------ */

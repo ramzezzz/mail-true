@@ -9,10 +9,55 @@
  * колонки 232) и тянется до правого края. Своих 8px по бокам здесь не было
  * ни у чего — они сдвигали весь список на 8px вправо.
  */
+/*
+ * Обёртка списка. Появилась вместе с «потянуть вниз — обновить»: крутилка
+ * обязана висеть НАД прокруткой, а не внутри неё, иначе она уезжает вверх
+ * вместе с письмами от первого же движения пальца.
+ */
+.listRoot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Крутилка «обновляем»: выезжает сверху ровно настолько, насколько оттянут
+   список, и держится, пока идёт запрос. */
+.pullIndicator {
+  position: absolute;
+  top: -36px;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: -16px;
+  border-radius: 50%;
+  background: var(--mt-color-background-content, var(--mt-app-content-bg));
+  box-shadow: var(--mt-elevation-2, 0 2px 12px rgba(0, 16, 61, 0.12));
+  color: var(--mt-color-icon-secondary);
+  opacity: 0.6;
+  transition: opacity var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  pointer-events: none;
+}
+
+/* Жест доведён — отпускание сработает. Это единственный видимый признак,
+   отличающий «отпущу и обновится» от «отпущу и вернётся на место». */
+.pullIndicator[data-armed='true'] {
+  opacity: 1;
+  color: var(--mt-color-background-accent);
+}
+
 .scroll {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  /* Оттягивание списка — наше, а не браузерное: без этого Chrome на Android
+     перехватывал жест собственным «обновить страницу» */
+  overscroll-behavior-y: contain;
   padding: 0;
   /* Список монтируется заново при смене папки и после загрузки — этот
      проблеск и есть ответ на «папка переключилась» */
@@ -40,6 +85,69 @@
   top: 0;
   left: 0;
   width: 100%;
+}
+
+/* ------------------------------------------------------------------ */
+/* Смахивание строки                                                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Обёртка строки под жест. `touch-action: pan-y` отдаёт браузеру вертикальную
+ * прокрутку и оставляет нам горизонталь: без него Chrome сам решал, что палец
+ * листает страницу, и смахивание не начиналось вовсе.
+ */
+.swipeShell {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  touch-action: pan-y;
+}
+
+/* Подложка: слева «в архив», справа «удалить». Видна ровно настолько,
+   насколько отъехала строка. */
+.swipeBack {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  color: var(--mt-color-text-contrast, #fff);
+  font-size: var(--mt-font-subhead-size, 14px);
+  opacity: 0;
+}
+
+.swipeSide {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+}
+
+/* Открывается только та сторона, в которую тянут */
+.swipeShell[data-swipe='archive'] .swipeBack {
+  opacity: 1;
+  background: var(--mt-color-background-positive, #12b23c);
+}
+
+.swipeShell[data-swipe='archive'] .swipeArchive {
+  opacity: 0.7;
+}
+
+.swipeShell[data-swipe='delete'] .swipeBack {
+  opacity: 1;
+  background: var(--mt-mail-color-icon-favorite, #fc2c38);
+}
+
+.swipeShell[data-swipe='delete'] .swipeDelete {
+  opacity: 0.7;
+}
+
+/* Жест доведён: значок разгорается — отпустишь, и действие произойдёт.
+   Пока он бледный, отпускание вернёт строку на место. */
+.swipeShell[data-swipe='archive'][data-swipe-armed='true'] .swipeArchive,
+.swipeShell[data-swipe='delete'][data-swipe-armed='true'] .swipeDelete {
+  opacity: 1;
 }
 
 /*
@@ -105,13 +213,17 @@
   --row-bg: var(--mt-mail-color-list-background-positive-alpha);
 }
 
-/* Наведение */
+@media (hover: hover) {
+  /* Наведение */
 .virtualRow:hover .row {
-  --row-bg: var(--mt-mail-color-list-letter-background-hover);
+    --row-bg: var(--mt-mail-color-list-letter-background-hover);
+  }
 }
 
-.virtualRow:hover .row.reliable {
-  --row-bg: var(--mt-mail-color-list-background-positive-alpha-hover);
+@media (hover: hover) {
+  .virtualRow:hover .row.reliable {
+    --row-bg: var(--mt-mail-color-list-background-positive-alpha-hover);
+  }
 }
 
 /* Клавиатурный курсор — как наведение */
@@ -129,9 +241,14 @@
 }
 
 /* Выбранная строка (после правил наведения — выигрывает при равной специфичности) */
-.row.selected,
-.virtualRow:hover .row.selected {
+.row.selected {
   --row-bg: var(--mt-mail-color-list-letter-background-press);
+}
+
+@media (hover: hover) {
+  .virtualRow:hover .row.selected {
+    --row-bg: var(--mt-mail-color-list-letter-background-press);
+  }
 }
 
 /* Скругление группы выделенных строк: первая — сверху, последняя — снизу */
@@ -166,15 +283,19 @@
     opacity var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-/* При наведении разделитель растягивается на всю ширину строки */
+@media (hover: hover) {
+  /* При наведении разделитель растягивается на всю ширину строки */
 .virtualRow:hover .row::after {
-  left: 0;
-  right: 0;
+    left: 0;
+    right: 0;
+  }
 }
 
-/* …а у соседней строки сверху — гаснет */
+@media (hover: hover) {
+  /* …а у соседней строки сверху — гаснет */
 .virtualRow:has(+ .virtualRow:hover) .row::after {
-  opacity: 0;
+    opacity: 0;
+  }
 }
 
 /* У выбранных строк разделители не рисуются — группа выглядит одной карточкой */
@@ -257,16 +378,26 @@
   background: var(--row-bg);
 }
 
-.virtualRow:hover .rowCheckbox,
 .rowCheckboxVisible {
   display: flex;
 }
 
-/* Щит надёжного отправителя висит на краю аватара и торчал бы из-под
-   чекбокса — вместе с аватаром он и уходит */
-.virtualRow:hover .reliableBadge,
+@media (hover: hover) {
+  .virtualRow:hover .rowCheckbox {
+    display: flex;
+  }
+}
+
 .row.selected .reliableBadge {
   display: none;
+}
+
+@media (hover: hover) {
+  /* Щит надёжного отправителя висит на краю аватара и торчал бы из-под
+   чекбокса — вместе с аватаром он и уходит */
+.virtualRow:hover .reliableBadge {
+    display: none;
+  }
 }
 
 /* Отправитель: 22% ширины */
@@ -407,10 +538,19 @@
 /* --- Узкий экран ------------------------------------------------------ */
 
 /*
- * Строка списка сверстана в одну линию, и её высоту задаёт виртуализация —
- * переносить содержимое на вторую строку, как это делает мобильный mail.ru,
- * здесь нечем. Поэтому на узком экране колонки ужимаются, а превью текста
- * (единственное, что дублируется внутри самого письма) уходит совсем.
+ * Телефонная строка — в три строки, как в мобильном mail.ru:
+ *   1) отправитель и время,
+ *   2) тема,
+ *   3) начало письма.
+ *
+ * Раньше здесь стояла та же однострочная раскладка, что и на рабочем столе:
+ * отправитель, тема и превью делили 390 точек, и всё три обрезалось
+ * многоточием — по такому списку нельзя было понять, о чём письма.
+ * Превью при этом пряталось совсем.
+ *
+ * Раскладка — сетка: аватар слева на все три строки, справа три ряда текста.
+ * Высоту строки при этом обязан знать и JavaScript: её задаёт виртуализация
+ * (ROW_HEIGHT в MessageList.tsx) — CSS сам себя здесь не хватает.
  */
 @media (max-width: 600px) {
   .scroll {
@@ -426,7 +566,14 @@
   }
 
   .row {
-    padding-right: 8px;
+    display: grid;
+    /* статус | аватар | текст | флажок | дата */
+    grid-template-columns: 20px 40px minmax(0, 1fr) auto auto;
+    grid-template-rows: 20px 20px 18px;
+    align-content: center;
+    align-items: center;
+    column-gap: 4px;
+    padding: 0 8px 0 0;
   }
 
   .row::after {
@@ -435,43 +582,119 @@
 
   .readStatus {
     width: 20px;
+    grid-column: 1;
+    grid-row: 1 / span 3;
   }
 
   .avatarCell {
+    grid-column: 2;
+    grid-row: 1 / span 3;
     margin-right: 8px;
-  }
-
-  .threadCount {
-    min-width: 22px;
-    height: 20px;
-    margin-right: 6px;
-    padding: 0 6px;
-    font-size: 12px;
-    line-height: 20px;
+    align-self: center;
   }
 
   .correspondent {
-    width: 34%;
-    min-width: 34%;
-    padding-right: 6px;
-  }
-
-  .snippet {
-    display: none;
-  }
-
-  .subject {
-    max-width: 100%;
-  }
-
-  .secondaryData {
+    grid-column: 3;
+    grid-row: 1;
+    width: auto;
     min-width: 0;
     padding-right: 6px;
   }
 
-  /* Здесь колонка тоже растёт по содержимому — 38px только нижний предел */
+  .flagCell {
+    grid-column: 4;
+    grid-row: 1;
+    padding-right: 4px;
+  }
+
   .date {
+    grid-column: 5;
+    grid-row: 1;
     min-width: 38px;
     font-size: 12px;
+  }
+
+  /*
+   * Тема и превью занимают вторую и третью строки во всю оставшуюся ширину.
+   * Внутри .title перенос делает `flex-basis: 100%` у превью: счётчик
+   * цепочки и тема остаются на своей строке, превью уходит под них.
+   */
+  .title {
+    grid-column: 3 / span 3;
+    grid-row: 2 / span 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    align-content: center;
+    padding-right: 4px;
+    white-space: normal;
+  }
+
+  .subject {
+    flex: 0 1 auto;
+    max-width: 100%;
+    white-space: nowrap;
+    line-height: 20px;
+  }
+
+  .snippet {
+    display: block;
+    flex: 1 0 100%;
+    min-width: 0;
+    margin-left: 0;
+    font-size: 13px;
+    line-height: 18px;
+    white-space: nowrap;
+  }
+
+  .threadCount {
+    min-width: 22px;
+    height: 18px;
+    margin-right: 6px;
+    padding: 0 6px;
+    font-size: 12px;
+    line-height: 18px;
+  }
+
+  /* Значки категории и вложения — в третьей строке, справа от превью */
+  .secondaryData {
+    grid-column: 5;
+    grid-row: 3;
+    min-width: 0;
+    padding-right: 0;
+  }
+
+  /*
+   * Выбрать письмо на телефоне — коснуться аватара (так же и в мобильном
+   * mail.ru). Чекбокс лежит поверх аватара всегда, но прозрачный: наведения
+   * на сенсорном экране нет, а без этого до выделения было не добраться
+   * иначе как кнопкой «Выделить все».
+   */
+  .rowCheckbox {
+    display: flex;
+    opacity: 0;
+  }
+
+  .rowCheckboxVisible {
+    opacity: 1;
+  }
+}
+
+/*
+ * Компактный режим на телефоне: те же три строки, только теснее.
+ * Высота — ROW_HEIGHT.phone.compact = 68px.
+ */
+@media (max-width: 600px) {
+  .compact .row {
+    grid-template-rows: 18px 18px 16px;
+  }
+
+  .compact .snippet {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .compact .subject {
+    line-height: 18px;
   }
 }

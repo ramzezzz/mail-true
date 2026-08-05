@@ -15,7 +15,7 @@
  * в сводке он тоже нужен: администратор смотрит сюда, а не в /health.
  */
 import type { FastifyInstance } from 'fastify';
-import { probeTcpPort } from '../../health.js';
+import { IMAP_FAREWELL, probeTcpPort, SMTP_FAREWELL } from '../../health.js';
 import { actionLabel } from '../audit.js';
 import { requireAdmin } from '../guard.js';
 import { checkAntispam, checkResolver } from '../services.js';
@@ -68,8 +68,8 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     // Все внешние проверки идут разом: последовательно они складывались бы
     // в секунды ожидания на экране, который открывают как раз при аварии.
     const [imapOk, smtpOk, rspamd, resolver, health] = await Promise.all([
-      probeTcpPort(apiConfig.IMAP_HOST, apiConfig.IMAP_PORT),
-      probeTcpPort(apiConfig.SMTP_HOST, apiConfig.SMTP_PORT),
+      probeTcpPort(apiConfig.IMAP_HOST, apiConfig.IMAP_PORT, 3000, IMAP_FAREWELL),
+      probeTcpPort(apiConfig.SMTP_HOST, apiConfig.SMTP_PORT, 3000, SMTP_FAREWELL),
       checkAntispam({
         host: ctx.config.RSPAMD_HOST,
         port: ctx.config.RSPAMD_CONTROLLER_PORT,

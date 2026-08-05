@@ -30,8 +30,10 @@
   color: var(--mt-color-text-tertiary);
 }
 
-.control:hover:not(:disabled) {
-  border-color: var(--mt-color-field-border-alpha-hover);
+@media (hover: hover) {
+  .control:hover:not(:disabled) {
+    border-color: var(--mt-color-field-border-alpha-hover);
+  }
 }
 
 .control:focus {
@@ -66,9 +68,14 @@
   resize: vertical;
 }
 
-.invalid,
-.invalid:hover:not(:disabled) {
+.invalid {
   border-color: var(--mt-color-stroke-negative, var(--mt-color-accent-red));
+}
+
+@media (hover: hover) {
+  .invalid:hover:not(:disabled) {
+    border-color: var(--mt-color-stroke-negative, var(--mt-color-accent-red));
+  }
 }
 
 .hint {

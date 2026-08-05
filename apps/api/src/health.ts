@@ -97,12 +97,38 @@ async function withDeadline<T>(work: Promise<T>, ms: number, what: string): Prom
  * Для Dovecot этого достаточно: если порт IMAP не принимает соединение,
  * почту не прочитает никто. Полный вход по IMAP пробой не делаем — он
  * требует чужого пароля и стоит на порядок дороже.
+ *
+ * ПРОЩАНИЕ (`farewell`). Оборвать соединение сразу после установки дешевле,
+ * но Postfix пишет на это `warning: lost connection after CONNECT`. Проба
+ * идёт каждые несколько секунд, и журнал доставки — тот самый, что админка
+ * показывает в разделе «Журналы почты», — заполнялся предупреждениями,
+ * которые порождали мы сами. Настоящая потеря соединения (сканер, кривой
+ * клиент) в этом потоке становилась неотличимой. Поэтому там, где у службы
+ * есть команда выхода, проба прощается по протоколу: SMTP — `QUIT`,
+ * IMAP — `LOGOUT`. Ответа не ждём дольше FAREWELL_WAIT_MS: порт уже
+ * ответил на соединение, а это и есть предмет проверки.
+ *
+ * Команда идёт ТОЛЬКО ПОСЛЕ ПРИВЕТСТВИЯ. Отправленная сразу, она даёт
+ * `improper command pipelining after CONNECT` — то же предупреждение, лишь
+ * под другим именем: по правилам SMTP клиент обязан дождаться строки 220.
+ * Если приветствия нет за BANNER_WAIT_MS, прощание не отправляем вовсе:
+ * говорить в тишину незачем, а порт уже признан открытым.
  */
-export function probeTcpPort(host: string, port: number, timeoutMs = 3000): Promise<boolean> {
+const FAREWELL_WAIT_MS = 250;
+const BANNER_WAIT_MS = 400;
+
+export function probeTcpPort(
+  host: string,
+  port: number,
+  timeoutMs = 3000,
+  farewell?: string,
+): Promise<boolean> {
   return new Promise((resolve) => {
     let socket: Socket | null = null;
+    let goodbye: NodeJS.Timeout | undefined;
     const done = (result: boolean): void => {
       if (!socket) return;
+      if (goodbye) clearTimeout(goodbye);
       socket.removeAllListeners();
       socket.destroy();
       socket = null;
@@ -115,11 +141,38 @@ export function probeTcpPort(host: string, port: number, timeoutMs = 3000): Prom
       return;
     }
     socket.setTimeout(timeoutMs);
-    socket.once('connect', () => done(true));
+    socket.once('connect', () => {
+      if (!farewell || !socket) {
+        done(true);
+        return;
+      }
+      // Ошибка записи после успешного соединения ничего не меняет: порт
+      // открыт. Дальше либо служба закроет соединение сама, либо выйдет
+      // время ожидания — в обоих случаях результат уже известен, поэтому
+      // прежние обработчики отказа снимаем: иначе разрыв во время прощания
+      // превратил бы успешную пробу в «порт не отвечает».
+      const live = socket;
+      live.removeAllListeners('error');
+      live.removeAllListeners('timeout');
+      live.on('error', () => done(true));
+      live.once('close', () => done(true));
+      live.once('data', () => {
+        if (goodbye) clearTimeout(goodbye);
+        live.write(farewell, () => undefined);
+        goodbye = setTimeout(() => done(true), FAREWELL_WAIT_MS);
+        goodbye.unref?.();
+      });
+      goodbye = setTimeout(() => done(true), BANNER_WAIT_MS);
+      goodbye.unref?.();
+    });
     socket.once('timeout', () => done(false));
     socket.once('error', () => done(false));
   });
 }
+
+/** Команда выхода для порта, если у службы она есть. */
+export const SMTP_FAREWELL = 'QUIT\r\n';
+export const IMAP_FAREWELL = 'A1 LOGOUT\r\n';
 
 /** Часть, проверяемая открытием TCP-соединения (Dovecot, Postfix). */
 export function tcpPart(opts: {
@@ -129,6 +182,8 @@ export function tcpPart(opts: {
   host: string;
   port: number;
   timeoutMs?: number;
+  /** Команда выхода: с ней служба не считает пробу оборванным соединением. */
+  farewell?: string;
   /** Чем грозит отказ — попадает в текст ответа. */
   consequence: string;
 }): HealthPart {
@@ -138,7 +193,7 @@ export function tcpPart(opts: {
     title: opts.title,
     critical: opts.critical,
     probe: async () => {
-      const ok = await probeTcpPort(opts.host, opts.port, opts.timeoutMs ?? 3000);
+      const ok = await probeTcpPort(opts.host, opts.port, opts.timeoutMs ?? 3000, opts.farewell);
       return {
         ok,
         detail: ok ? `Порт ${where} открыт` : `Порт ${where} не отвечает — ${opts.consequence}`,

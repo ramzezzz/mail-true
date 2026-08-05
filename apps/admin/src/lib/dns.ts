@@ -158,6 +158,46 @@ export function resolverNote(resolver: DnsResolverInfo): { tone: BadgeTone; text
   };
 }
 
+/**
+ * Предупреждение про время жизни записи.
+ *
+ * Без него «перепроверить» сразу после правки обманывает: резольвер
+ * держит прежний ответ до конца TTL, человек видит «не настроено» и
+ * начинает править верную настройку. Поэтому у каждой непройденной
+ * записи говорится, когда получен ответ и что свежая правка расходится
+ * не мгновенно.
+ */
+export const PROPAGATION_NOTE =
+  'У записей DNS есть время жизни: правка у регистратора расходится по миру ' +
+  'от нескольких минут до суток. Если только что исправили — подождите и перепроверьте.';
+
+/** Нужно ли напомнить про время жизни у этой записи. */
+export function needsPropagationNote(check: DnsCheck): boolean {
+  return check.verdict === 'missing' || check.verdict === 'mismatch';
+}
+
+/** Время суток из отметки ответа: «22:05:41». Пусто — отметки нет. */
+export function answerTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/**
+ * Подпись под строкой ответа: когда и у кого спросили. Именно у этой
+ * записи, а не «отчёт целиком»: после точечной перепроверки общее время
+ * отчёта врёт про остальные строки.
+ */
+export function answerStamp(check: DnsCheck): string {
+  const time = answerTime(check.checkedAt);
+  if (check.verdict === 'unreachable') {
+    return time === '' ? 'ответа нет' : `спросить не удалось в ${time}`;
+  }
+  if (time === '') return '';
+  return check.askedVia ? `ответ получен в ${time} от ${check.askedVia}` : `ответ получен в ${time}`;
+}
+
 /** Что показать в строке «Что опубликовано». */
 export function formatActual(check: DnsCheck): string {
   if (check.verdict === 'unreachable') return 'спросить не удалось';

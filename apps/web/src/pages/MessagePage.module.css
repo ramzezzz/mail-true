@@ -207,8 +207,10 @@
   color: var(--mt-color-icon-medium, var(--mt-color-icon-secondary));
 }
 
-.senderActions button:hover {
-  color: var(--mt-color-icon-primary);
+@media (hover: hover) {
+  .senderActions button:hover {
+    color: var(--mt-color-icon-primary);
+  }
 }
 
 /* Полоса про заблокированные картинки */
@@ -309,8 +311,10 @@
   transition: background-color 0.1s ease-out;
 }
 
-.attachment:hover {
-  background: var(--mt-color-background-secondary);
+@media (hover: hover) {
+  .attachment:hover {
+    background: var(--mt-color-background-secondary);
+  }
 }
 
 .attachment:focus-visible {
@@ -379,8 +383,10 @@
   cursor: pointer;
 }
 
-.detailsToggle:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .detailsToggle:hover {
+    text-decoration: underline;
+  }
 }
 
 .details {

@@ -34,6 +34,7 @@ import { registerErrorHandling } from '../http-errors.js';
 import { loadAdminConfig } from './config.js';
 import type { AdminDb } from './db.js';
 import { createImportBox, ImportSecretBox, packResult, unpackResult } from './import-jobs.js';
+import { QueueAgent } from './queue-agent.js';
 import { MemoryAdminSessionStore } from './session.js';
 import { adminAuthRoutes } from './routes/auth.js';
 import { adminDomainRoutes } from './routes/domains.js';
@@ -294,6 +295,10 @@ async function harness(options?: {
     db: db as unknown as AdminDb,
     sessions,
     mailbox: mailbox as unknown as AdminContext['mailbox'],
+    // Посредник к очереди намеренно НЕ настроен: эти проверки про права и
+    // маршруты, а не про очередь. Ненастроенный посредник честно отвечает
+    // 503 и никуда не ходит — сеть в проверках не нужна.
+    queueAgent: new QueueAgent({ baseUrl: '', token: '', logger: pino({ level: 'silent' }) }),
     cookieSecure: false,
     importBox: createImportBox(SECRET),
   };

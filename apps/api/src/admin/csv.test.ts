@@ -1,7 +1,8 @@
 /** Проверка разбора CSV для массового импорта ящиков. */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { parseCsv, parseQuota, parseUserImport } from './csv.js';
+import { nulByteProblem, parseCsv, parseQuota, parseUserImport } from './csv.js';
+import { templateCsv, templateCsvWithBom } from '@mail-true/shared';
 
 test('parseCsv: запятые, кавычки, экранирование, CRLF', () => {
   const rows = parseCsv('a,b,c\r\n"стро, ка","он сказал ""да""",3\r\n');
@@ -97,7 +98,9 @@ test('импорт ловит все виды плохих строк', () => {
   });
 
   const byLine = new Map(preview.rows.map((r) => [r.line, r]));
-  assert.match(byLine.get(2)?.errors.join() ?? '', /Некорректный адрес/);
+  // «нет-собаки» — адрес без «@». Раньше на любую кривизну отвечала одна
+  // фраза «Некорректный адрес: …»; теперь сказано, чего именно не хватает.
+  assert.match(byLine.get(2)?.errors.join() ?? '', /нет знака «@»/);
   assert.deepEqual(byLine.get(3)?.errors, []);
   assert.match(byLine.get(4)?.errors.join() ?? '', /Повтор адреса/);
   assert.match(byLine.get(5)?.errors.join() ?? '', /не заведён/);
@@ -130,7 +133,12 @@ test('импорт: предел числа строк', () => {
   const csv = ['email', ...Array.from({ length: 10 }, (_, i) => `u${i}@mail.local`)].join('\n');
   const preview = parseUserImport(csv, { knownDomains: ['mail.local'], maxRows: 3 });
   assert.equal(preview.validCount, 3);
-  assert.match(preview.rows.at(-1)?.errors.join() ?? '', /Превышен предел импорта/);
+  // Строки-заглушки «Превышен предел импорта» в самом низу таблицы больше
+  // нет: по ней выходило «отброшено 1 строка» на тысячи потерянных.
+  // Об усечении теперь говорит признак truncated и число строк в файле.
+  assert.equal(preview.truncated, true);
+  assert.equal(preview.totalDataRows, 10);
+  assert.equal(preview.maxRows, 3);
 });
 
 test('импорт: адреса приводятся к нижнему регистру и обрезаются пробелы', () => {
@@ -143,4 +151,112 @@ test('импорт пустого файла не падает', () => {
   const preview = parseUserImport('', {});
   assert.equal(preview.rows.length, 0);
   assert.equal(preview.validCount, 0);
+});
+
+/* ------------------------------------------------------------------ */
+/* Беды импорта, найденные проверкой панели                             */
+/* ------------------------------------------------------------------ */
+
+/** Нулевой байт строится в коде: в исходнике его быть не должно. */
+const NUL = String.fromCharCode(0);
+const header = 'email,name,password,quota\n';
+
+/** Файл из n годных строк. */
+function manyRows(n: number): string {
+  const rows = Array.from({ length: n }, (_, i) => `user${i}@mail.local,,,1G`);
+  return header + rows.join('\n');
+}
+
+test('нулевой байт: файл отвергается объяснением, а не падением вставки в базу', () => {
+  const problem = nulByteProblem(`email\nivan${NUL}@mail.local`);
+  assert.ok(problem);
+  assert.ok(problem.includes('0x00'));
+  // Человеку нужно знать, что делать, а не код ошибки Postgres
+  assert.ok(problem.includes('UTF-8'));
+  assert.ok(!problem.includes('invalid byte sequence'));
+});
+
+test('нулевой байт: названа строка, в которой он встретился', () => {
+  assert.ok(nulByteProblem(`a\nb\nc${NUL}d`)?.includes('строка 3'));
+});
+
+test('нулевой байт: обычный файл и прочие управляющие символы претензий не вызывают', () => {
+  assert.equal(nulByteProblem(manyRows(3)), null);
+  const tab = String.fromCharCode(9);
+  const bell = String.fromCharCode(7);
+  assert.equal(nulByteProblem(`email${tab}name\nivan@mail.local${tab}${bell}`), null);
+});
+
+test('усечение файла объявлено признаком, а не строкой в самом низу таблицы', () => {
+  const preview = parseUserImport(manyRows(20_000), {
+    knownDomains: ['mail.local'],
+    maxRows: 5000,
+  });
+  assert.equal(preview.truncated, true);
+  assert.equal(preview.totalDataRows, 20_000);
+  assert.equal(preview.maxRows, 5000);
+  // Именно этого числа не хватало человеку: 15 000 человек без почты
+  assert.equal(preview.totalDataRows - preview.maxRows, 15_000);
+
+  assert.equal(preview.rows.length, 5000);
+  // Раньше отброшенной числилась ровно одна строка — сама заглушка,
+  // и выходило «отброшено 1 строка» на 15 000 потерянных.
+  assert.equal(preview.invalidCount, 0);
+  for (const row of preview.rows) {
+    assert.ok(!row.errors.join(' ').includes('Превышен предел'));
+  }
+});
+
+test('файл в пределах не помечается усечённым', () => {
+  const preview = parseUserImport(manyRows(10), { knownDomains: ['mail.local'], maxRows: 5000 });
+  assert.equal(preview.truncated, false);
+  assert.equal(preview.totalDataRows, 10);
+  assert.equal(preview.rows.length, 10);
+});
+
+test('длинное имя ящика не проходит через импорт', () => {
+  const preview = parseUserImport(`${header}${'a'.repeat(100)}@mail.local,,,1G`, {
+    knownDomains: ['mail.local'],
+  });
+  assert.equal(preview.invalidCount, 1);
+  assert.ok(preview.rows[0]?.errors.join(' ').includes('64'));
+});
+
+test('длинное отображаемое имя отбрасывает строку, а не режет её молча', () => {
+  // Раньше имя обрезалось до 255 символов: ящик создавался, а имя в нём
+  // оказывалось не тем, что в файле.
+  const name = 'и'.repeat(300);
+  const preview = parseUserImport(`${header}ivan@mail.local,${name},,1G`, {
+    knownDomains: ['mail.local'],
+  });
+  assert.equal(preview.invalidCount, 1);
+  assert.ok(preview.rows[0]?.errors.join(' ').includes('255'));
+  assert.equal(preview.rows[0]?.displayName?.length, 300);
+});
+
+test('кириллический адрес объясняется раскладкой, а не общей ошибкой', () => {
+  const preview = parseUserImport(`${header}иван@mail.local,,,1G`, {
+    knownDomains: ['mail.local'],
+  });
+  assert.equal(preview.invalidCount, 1);
+  const error = preview.rows[0]?.errors.join(' ') ?? '';
+  assert.ok(error.includes('латин'));
+  assert.ok(!error.includes('Некорректные данные запроса'));
+});
+
+test('шаблон, который скачивает панель, наш же разбор принимает без ошибок', () => {
+  // Договор между панелью и сервером: выдать человеку шаблон, который
+  // импорт не понимает, — худшее, что можно сделать.
+  const preview = parseUserImport(templateCsv(), { knownDomains: ['mail.local'] });
+  assert.equal(preview.hasHeader, true);
+  assert.equal(preview.rows.length, 2);
+  assert.equal(preview.invalidCount, 0);
+  assert.equal(preview.rows[0]?.email, 'ivan@mail.local');
+  assert.equal(preview.rows[1]?.password, null); // пароль сгенерируется
+
+  // И то же самое с меткой кодировки: BOM должен отрезаться, иначе первый
+  // столбец назывался бы «\uFEFFemail».
+  const withBom = parseUserImport(templateCsvWithBom(), { knownDomains: ['mail.local'] });
+  assert.equal(withBom.hasHeader, true);
+  assert.equal(withBom.invalidCount, 0);
 });

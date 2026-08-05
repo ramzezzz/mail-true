@@ -112,6 +112,15 @@ export interface DnsCheck {
   required: boolean;
   /** Какой резольвер ответил. */
   askedVia: string | null;
+  /** Когда получен ответ именно по этой записи. */
+  checkedAt: string;
+}
+
+/** Ответ на перепроверку одной записи. */
+export interface DnsCheckOne {
+  check: DnsCheck;
+  resolver: DnsResolverInfo;
+  overall: DnsStatus;
 }
 
 export interface DnsResolverInfo {
@@ -244,6 +253,12 @@ export interface ImportPreview {
   invalidCount: number;
   domains: string[];
   hasHeader: boolean;
+  /** Файл длиннее предела — разобраны не все строки. */
+  truncated: boolean;
+  /** Сколько строк с данными в файле всего, включая неразобранные. */
+  totalDataRows: number;
+  /** Сколько строк разбирается за один раз. */
+  maxRows: number;
   /** Квота, доставшаяся строкам без своей колонки `quota`. */
   defaultQuotaBytes: number;
   /** Будут ли на самом деле создаваться новые домены (право проверено). */
@@ -464,4 +479,132 @@ export interface AiAuditTotals {
 export interface AiAuditPage {
   items: AiAuditEntry[];
   totals: AiAuditTotals;
+}
+
+/* ------------------------------------------------------------------ */
+/* Почтовый поток: очередь, история обработанных, журналы               */
+/* ------------------------------------------------------------------ */
+
+/** Адресат письма из очереди и последняя причина отсрочки для него. */
+export interface QueueRecipient {
+  address: string;
+  delayReason: string | null;
+}
+
+/** Письмо, лежащее в очереди Postfix прямо сейчас. */
+export interface QueueMessage {
+  queueId: string;
+  /** incoming | active | deferred | hold | corrupt — где именно лежит. */
+  queueName: string;
+  arrivalTime: string;
+  sizeBytes: number;
+  sender: string;
+  recipients: QueueRecipient[];
+  reason: string | null;
+}
+
+export interface QueuePage {
+  items: QueueMessage[];
+  total: number;
+  limit: number;
+  offset: number;
+  /** Сколько писем в очереди всего, без учёта отбора. */
+  queueTotal: number;
+  byQueue: Record<string, number>;
+  /** Очередь длиннее предела разбора — показанное неполно. */
+  truncated: boolean;
+  takenAt: string;
+}
+
+export type FlowStatus = 'sent' | 'deferred' | 'bounced' | 'expired' | 'rejected' | 'held';
+export type FlowDirection = 'in' | 'out' | 'unknown';
+
+/** Одна попытка доставки одному адресату — строка истории. */
+export interface FlowEvent {
+  id: string;
+  occurredAt: string;
+  queueId: string | null;
+  direction: FlowDirection;
+  status: FlowStatus;
+  sender: string | null;
+  recipient: string | null;
+  relay: string | null;
+  delaySeconds: number | null;
+  sizeBytes: number | null;
+  dsn: string | null;
+  reason: string | null;
+}
+
+export interface FlowHistoryPage {
+  items: FlowEvent[];
+  hasMore: boolean;
+  /** Курсор ленивой подгрузки; null — старее ничего нет. */
+  nextBefore: { time: string; id: string } | null;
+  limit: number;
+}
+
+export interface FlowHistoryStats {
+  hours: number;
+  counts: Partial<Record<FlowStatus, number>>;
+  total: number;
+  oldest: string | null;
+  newest: string | null;
+  /** С какого момента вообще ведётся разбор журнала. */
+  collectingSince: string | null;
+  retentionDays: number;
+  maxRows: number;
+  queueAgentConfigured: boolean;
+}
+
+export interface LogSourceInfo {
+  source: string;
+  fileName: string;
+  present: boolean;
+  sizeBytes: number;
+  modifiedAt: string | null;
+  /** Сколько провёрнутых кусков лежит рядом (раздел их не читает). */
+  rotatedFiles: number;
+}
+
+export interface LogSourcesResponse {
+  dir: string;
+  levels: string[];
+  items: LogSourceInfo[];
+}
+
+export interface LogLine {
+  /** Смещение строки в файле — из него получается курсор. */
+  offset: number;
+  level: 'error' | 'warn' | 'info' | 'debug';
+  at: string | null;
+  component: string;
+  queueId: string | null;
+  text: string;
+}
+
+export interface LogPage {
+  source: string;
+  items: LogLine[];
+  nextBefore: number | null;
+  /** С этого места дочитываются новые строки при автообновлении. */
+  tailOffset: number;
+  fileId: string;
+  sizeBytes: number;
+  /** Журнал провернулся между запросами — страница отдана с начала. */
+  rotated: boolean;
+  /** Просмотр упёрся в потолок, подходящих строк не найдено. */
+  budgetExhausted: boolean;
+}
+
+/** Дочитанное новое: строки от старых к новым. */
+export interface LogTailPage {
+  source: string;
+  items: LogLine[];
+  nextAfter: number;
+  fileId: string;
+  sizeBytes: number;
+  /** Журнал провернулся — прежнее место ничего не значит. */
+  rotated: boolean;
+  /** Новых строк было больше предела: остальное придёт следующим запросом. */
+  more: boolean;
 }

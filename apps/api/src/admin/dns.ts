@@ -96,6 +96,14 @@ export interface DnsCheckResult {
   required: boolean;
   /** Какой резольвер ответил; null — никто не ответил. */
   askedVia: string | null;
+  /**
+   * Когда получен ответ ИМЕННО по этой записи.
+   *
+   * Своё время у каждой записи, а не одно на отчёт: записи перепроверяют
+   * по одной — правят у регистратора одну строку и смотрят, доехала ли
+   * она. Общее время отчёта в этот момент врёт про остальные строки.
+   */
+  checkedAt: string;
 }
 
 export interface DnsResolverInfo {
@@ -136,6 +144,12 @@ export interface DnsCheckOptions {
   servers?: readonly string[] | undefined;
   /** Подставной резольвер для проверок. */
   querier?: DnsQuerier;
+  /**
+   * Перепроверить только эти записи. Нужно для кнопки у отдельной
+   * строки: человек правит записи у регистратора по одной и ждёт ответ
+   * про одну, а не про все пятнадцать. Пусто — проверяются все.
+   */
+  only?: readonly DnsCheckId[] | undefined;
 }
 
 /* ================================================================== */
@@ -484,7 +498,7 @@ const UNREACHABLE_HINT =
   'Проверка не состоялась: ни один резольвер не ответил. Это НЕ значит, что записи нет — ' +
   'сначала проверьте, выпускает ли сервер запросы на 53/udp наружу, и повторите.';
 
-function toCheck(spec: CheckSpec, answer: DnsAnswer): DnsCheckResult {
+function toCheck(spec: CheckSpec, answer: DnsAnswer, checkedAt: string): DnsCheckResult {
   let verdict: DnsVerdict;
   let diff: string | null = null;
   let hint: string;
@@ -525,6 +539,7 @@ function toCheck(spec: CheckSpec, answer: DnsAnswer): DnsCheckResult {
     hint,
     required: spec.required,
     askedVia,
+    checkedAt,
   };
 }
 
@@ -613,6 +628,18 @@ export async function checkDomainDns(
     options.querier ??
     createPublicQuerier({ servers: options.servers, timeoutMs: options.timeoutMs });
 
+  const only = options.only;
+  const want = (id: DnsCheckId): boolean => only === undefined || only.includes(id);
+  /**
+   * Спрашивать только то, что просили. Пропущенное всё равно отсеется
+   * в конце, но лишний запрос — это лишние секунды ожидания у человека,
+   * который правит одну запись и ждёт ответ про неё.
+   */
+  const ask = (id: DnsCheckId, type: DnsRecordType, recordName: string): Promise<DnsAnswer> =>
+    want(id)
+      ? querier.query(type, recordName)
+      : Promise.resolve<DnsAnswer>({ kind: 'unreachable', reason: 'не запрашивалось' });
+
   /* Адрес сервера нужен нескольким проверкам сразу — спрашиваем один раз. */
   const hostA = await querier.query('A', host);
   const configuredIp = ip !== '' && isIP(ip) !== 0 ? ip : '';
@@ -650,33 +677,36 @@ export async function checkDomainDns(
     srvPop3s,
     srvAutodiscover,
   ] = await Promise.all([
-    querier.query('MX', name),
-    querier.query('TXT', name),
-    querier.query('TXT', `${selector}._domainkey.${name}`),
-    querier.query('TXT', `_dmarc.${name}`),
+    ask('mx', 'MX', name),
+    ask('spf', 'TXT', name),
+    ask('dkim', 'TXT', `${selector}._domainkey.${name}`),
+    ask('dmarc', 'TXT', `_dmarc.${name}`),
     ptrIp !== ''
-      ? querier.query('PTR', ptrIp)
+      ? ask('ptr', 'PTR', ptrIp)
       : Promise.resolve<DnsAnswer>({ kind: 'unreachable', reason: 'адрес сервера неизвестен' }),
-    querier.query('A', name),
-    querier.query('CNAME', `mail.${name}`),
-    querier.query('A', `mail.${name}`),
-    querier.query('CNAME', `admin.${name}`),
-    querier.query('A', `admin.${name}`),
-    querier.query('CNAME', `autoconfig.${name}`),
-    querier.query('A', `autoconfig.${name}`),
-    querier.query('CNAME', `autodiscover.${name}`),
-    querier.query('A', `autodiscover.${name}`),
-    querier.query('SRV', `_imaps._tcp.${name}`),
-    querier.query('SRV', `_submission._tcp.${name}`),
-    querier.query('SRV', `_pop3s._tcp.${name}`),
-    querier.query('SRV', `_autodiscover._tcp.${name}`),
+    ask('web-apex', 'A', name),
+    ask('web-mail', 'CNAME', `mail.${name}`),
+    ask('web-mail', 'A', `mail.${name}`),
+    ask('web-admin', 'CNAME', `admin.${name}`),
+    ask('web-admin', 'A', `admin.${name}`),
+    ask('autoconfig', 'CNAME', `autoconfig.${name}`),
+    ask('autoconfig', 'A', `autoconfig.${name}`),
+    ask('autodiscover', 'CNAME', `autodiscover.${name}`),
+    ask('autodiscover', 'A', `autodiscover.${name}`),
+    ask('srv-imaps', 'SRV', `_imaps._tcp.${name}`),
+    ask('srv-submission', 'SRV', `_submission._tcp.${name}`),
+    ask('srv-pop3s', 'SRV', `_pop3s._tcp.${name}`),
+    ask('srv-autodiscover', 'SRV', `_autodiscover._tcp.${name}`),
   ]);
 
   const checks: DnsCheckResult[] = [];
+  /** Своё время ответа у каждой записи — см. DnsCheckResult.checkedAt. */
+  const now = new Date().toISOString();
+  const at = (spec: CheckSpec, answer: DnsAnswer): DnsCheckResult => toCheck(spec, answer, now);
 
   /* --- A: где стоит сервер ----------------------------------------- */
   checks.push(
-    toCheck(
+    at(
       {
         id: 'a',
         group: 'core',
@@ -739,7 +769,7 @@ export async function checkDomainDns(
   );
 
   checks.push(
-    toCheck(
+    at(
       {
         id: 'mx',
         group: 'core',
@@ -834,7 +864,7 @@ export async function checkDomainDns(
           : { kind: 'absent', via: spfAnswer.via }
         : spfAnswer;
     checks.push(
-      toCheck(
+      at(
         {
           id: 'spf',
           group: 'core',
@@ -919,7 +949,7 @@ export async function checkDomainDns(
       ? buildDkimRecord(expectedKey)
       : 'v=DKIM1; k=rsa; p=<публичный ключ из rspamd>';
     checks.push(
-      toCheck(
+      at(
         {
           id: 'dkim',
           group: 'core',
@@ -1000,7 +1030,7 @@ export async function checkDomainDns(
           : { kind: 'absent', via: dmarcAnswer.via }
         : dmarcAnswer;
     checks.push(
-      toCheck(
+      at(
         {
           id: 'dmarc',
           group: 'core',
@@ -1106,7 +1136,7 @@ export async function checkDomainDns(
     };
     if (badIp) {
       checks.push({
-        ...toCheck(ptrSpec, { kind: 'unreachable', reason: 'некорректный адрес' }),
+        ...at(ptrSpec, { kind: 'unreachable', reason: 'некорректный адрес' }),
         verdict: 'mismatch',
         status: 'fail',
         diff: `«${ip}» — не похоже на IP-адрес`,
@@ -1116,14 +1146,14 @@ export async function checkDomainDns(
       // Молчаливое «неизвестно» бесполезно: говорим, почему проверять нечего
       // и где взять адрес.
       checks.push({
-        ...toCheck(ptrSpec, { kind: 'unreachable', reason: 'адрес сервера неизвестен' }),
+        ...at(ptrSpec, { kind: 'unreachable', reason: 'адрес сервера неизвестен' }),
         hint:
           'Проверять нечем: адрес сервера не задан (MAIL_PUBLIC_IPV4 в infra/.env) и узнать его ' +
           `из DNS не вышло — у «${host}» нет A-записи. Заведите A-запись или впишите адрес ` +
           'в infra/.env и перезапустите api: тогда админка сверит обратную зону сама.',
       });
     } else {
-      checks.push(toCheck(ptrSpec, ptrAnswer));
+      checks.push(at(ptrSpec, ptrAnswer));
     }
   }
 
@@ -1183,7 +1213,7 @@ export async function checkDomainDns(
     // CNAME важнее: если он есть, A-записи у имени существовать не может.
     const { answer, type: answeredType } = combineNameAnswers(target.cname, target.a);
     checks.push(
-      toCheck(
+      at(
         {
           id: target.id,
           group: 'web',
@@ -1237,7 +1267,7 @@ export async function checkDomainDns(
   for (const target of autoTargets) {
     const { answer, type: answeredType } = combineNameAnswers(target.cname, target.a);
     checks.push(
-      toCheck(
+      at(
         {
           id: target.id,
           group: 'client',
@@ -1307,7 +1337,7 @@ export async function checkDomainDns(
 
   for (const spec of srvSpecs) {
     checks.push(
-      toCheck(
+      at(
         {
           id: spec.id,
           group: 'client',
@@ -1348,15 +1378,41 @@ export async function checkDomainDns(
   }
 
   const answeredBy = querier.answeredBy();
+  const wanted = checks.filter((c) => want(c.id));
   return {
     domain: name,
-    checkedAt: new Date().toISOString(),
-    overall: worstStatus(checks.map((c) => c.status)),
+    checkedAt: now,
+    overall: worstStatus(wanted.map((c) => c.status)),
     resolver: {
       servers: [...querier.servers],
       answeredBy,
       reachable: answeredBy.length > 0,
     },
+    checks: wanted,
+  };
+}
+
+/**
+ * Вклеивает свежий результат по одной записи в прежний отчёт.
+ *
+ * Записи правят у регистратора по одной, и перепроверка одной строки не
+ * должна стирать то, что уже известно про остальные: иначе таблица
+ * доменов после точечной проверки показывала бы «настроен один пункт из
+ * пятнадцати». Итог пересчитывается по обновлённому набору.
+ */
+export function mergeDnsCheck(previous: DnsReport | null, fresh: DnsReport): DnsReport {
+  if (!previous || previous.domain !== fresh.domain) return fresh;
+  const updated = new Map(fresh.checks.map((c) => [c.id, c] as const));
+  const checks = previous.checks.map((c) => updated.get(c.id) ?? c);
+  // Записи, которых в прежнем отчёте не было (набор проверок пополнился).
+  for (const c of fresh.checks) {
+    if (!checks.some((x) => x.id === c.id)) checks.push(c);
+  }
+  return {
+    domain: fresh.domain,
+    checkedAt: fresh.checkedAt,
+    overall: worstStatus(checks.map((c) => c.status)),
+    resolver: fresh.resolver,
     checks,
   };
 }

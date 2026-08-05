@@ -16,13 +16,15 @@
  * место, нужное письмам.
  */
 import { renameSync, statSync } from 'node:fs';
-import { pino, type DestinationStream, type StreamEntry } from 'pino';
+// Модуль целиком, а не `{ pino }`: у pino объявлен `export =`, и
+// destination/multistream живут на самой функции, а не рядом с ней.
+import pino from 'pino';
 
 export interface AppLogFileOptions {
   /** Путь к файлу. Пусто — файл не ведём, остаётся только stdout. */
   path: string;
   /** Уровень, с которого пишем (тот же, что у stdout). */
-  level: pino.Level;
+  level: string;
   /** Предел размера, после которого файл проворачивается. */
   maxBytes?: number;
   /** Сколько провёрнутых кусков хранить. */
@@ -42,16 +44,18 @@ const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
  * причина попадает в него же.
  */
 export function createLogStreams(options: AppLogFileOptions): {
-  stream: DestinationStream;
+  stream: pino.DestinationStream;
   rotate: (() => void) | null;
 } {
-  const streams: StreamEntry[] = [{ level: options.level, stream: process.stdout }];
+  const streams: pino.StreamEntry[] = [
+    { level: options.level as pino.Level, stream: process.stdout },
+  ];
   let rotate: (() => void) | null = null;
 
   if (options.path !== '') {
     try {
       const dest = pino.destination({ dest: options.path, sync: false, mkdir: true });
-      streams.push({ level: options.level, stream: dest });
+      streams.push({ level: options.level as pino.Level, stream: dest });
       const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
       const keep = Math.max(1, options.keep ?? 2);
       rotate = () => {

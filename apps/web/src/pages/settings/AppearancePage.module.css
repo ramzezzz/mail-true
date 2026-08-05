@@ -22,8 +22,10 @@
     box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.themeCard:hover {
-  border-color: var(--mt-color-stroke-accent);
+@media (hover: hover) {
+  .themeCard:hover {
+    border-color: var(--mt-color-stroke-accent);
+  }
 }
 
 .themeCardActive {
@@ -148,8 +150,10 @@
   transition: box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.wallpaperTile:hover {
-  box-shadow: 0 0 0 2px var(--mt-color-stroke-accent);
+@media (hover: hover) {
+  .wallpaperTile:hover {
+    box-shadow: 0 0 0 2px var(--mt-color-stroke-accent);
+  }
 }
 
 .wallpaperTileActive {

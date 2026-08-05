@@ -142,9 +142,11 @@
   height: 1.15rem;
   fill: var(--mt-color-icon-secondary, #8a97a4);
 }
-.ulineBtn:hover {
-  opacity: 1;
-  background: var(--mt-color-background-secondary, #f0f4f8);
+@media (hover: hover) {
+  .ulineBtn:hover {
+    opacity: 1;
+    background: var(--mt-color-background-secondary, #f0f4f8);
+  }
 }
 .ulineBtn:focus-visible {
   opacity: 1;

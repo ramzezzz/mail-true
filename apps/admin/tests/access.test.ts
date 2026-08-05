@@ -74,8 +74,27 @@ describe('меню', () => {
   });
 
   it('заглушки помечены и присутствуют в меню', () => {
+    // «Почтового потока» здесь больше нет: раздел работает — очередь
+    // читается у Postfix, история обработанных берётся из разобранного
+    // журнала. Помечать его «скоро» значит врать про готовое.
     const stubs = NAV_ITEMS.filter((i) => i.stub).map((i) => i.to);
-    expect(stubs).toEqual(['/flow', '/spam', '/monitoring', '/backups']);
+    expect(stubs).toEqual(['/spam', '/monitoring', '/backups']);
+  });
+
+  it('очередь и журналы — готовые разделы, а не «скоро»', () => {
+    const flow = NAV_ITEMS.find((i) => i.to === '/flow');
+    const logs = NAV_ITEMS.find((i) => i.to === '/logs');
+    expect(flow, 'в меню нет «Почтового потока»').toBeDefined();
+    expect(logs, 'в меню нет «Журналов почты»').toBeDefined();
+    expect(flow?.stub).toBeFalsy();
+    expect(logs?.stub).toBeFalsy();
+  });
+
+  it('журналы служб видны тому же кругу, что и журнал аудита', () => {
+    // В строках журнала стоят адреса отправителей и получателей, то есть
+    // сведения о переписке. Показывать их всякому, кто видит сводку, нельзя.
+    const logs = NAV_ITEMS.find((i) => i.to === '/logs');
+    expect(logs?.requires).toContain('audit.read');
   });
 
   it('у каждого пункта задано хотя бы одно требуемое право', () => {

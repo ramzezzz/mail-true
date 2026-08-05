@@ -31,8 +31,10 @@
   transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.option:hover {
-  background: var(--mt-ph-color-transparent-hover);
+@media (hover: hover) {
+  .option:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
 }
 
 .optionActive {

@@ -17,6 +17,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { FlowStore } from '../flow-store.js';
 import { audit, requireAdmin } from '../guard.js';
 import { queueMatches, type QueueMessage } from '../queue-agent.js';
 
@@ -62,6 +63,7 @@ function queueView(message: QueueMessage): Record<string, unknown> {
 export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
   const ctx = app.adminCtx;
   const agent = ctx.queueAgent;
+  const flow = new FlowStore(ctx.db);
 
   /* ---------------------------------------------------------------- */
   /* Очередь сейчас                                                     */
@@ -166,7 +168,7 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
     // Просим на одну строку больше предела: так узнаём, есть ли ещё, не
     // пересчитывая всю выборку. Считать total на сотнях тысяч строк ради
     // одной подгрузки — это секунды ожидания на каждую прокрутку.
-    const rows = await ctx.db.listFlowEvents({
+    const rows = await flow.listEvents({
       from,
       to,
       statuses: q.status ? [q.status] : undefined,
@@ -213,8 +215,8 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
     const to = new Date();
     const from = new Date(to.getTime() - q.hours * 3600 * 1000);
     const [stats, cursor] = await Promise.all([
-      ctx.db.flowStats(from, to),
-      ctx.db.getFlowCursor('postfix'),
+      flow.stats(from, to),
+      flow.getCursor('postfix'),
     ]);
     return {
       hours: q.hours,

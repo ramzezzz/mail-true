@@ -139,8 +139,10 @@
   cursor: pointer;
 }
 
-.item:hover {
-  border-color: var(--mt-ai-accent);
+@media (hover: hover) {
+  .item:hover {
+    border-color: var(--mt-ai-accent);
+  }
 }
 
 .itemBody {

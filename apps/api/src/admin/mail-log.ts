@@ -87,8 +87,8 @@ export function parseSyslogTime(month: string, day: string, time: string, now: D
   if (!Number.isFinite(hh) || !Number.isFinite(mm) || !Number.isFinite(ss)) return null;
   const at = new Date(now.getFullYear(), m, Number(day), hh, mm, ss);
   // Дата «в будущем» больше чем на сутки — это прошлый год. Сутки запаса,
-  // а не ноль: часы контейнера и часы машины расходятся на секунды, и без
-  // запаса свежая запись иногда объявлялась бы прошлогодней.
+  // а не ноль: часы контейнеров расходятся на секунды, и без запаса свежая
+  // запись иногда объявлялась бы прошлогодней.
   if (at.getTime() - now.getTime() > 24 * 3600 * 1000) {
     at.setFullYear(at.getFullYear() - 1);
   }
@@ -103,13 +103,31 @@ export function parseSyslogTime(month: string, day: string, time: string, now: D
 //
 // Служба бывает составной: `postfix/submission/smtpd` — это smtpd, поднятый
 // на порту 587. Косая черта в имени поэтому разрешена: без неё разбор
-// спотыкался ровно на подаче почты от пользователей, то есть на самом
-// частом на этом сервере событии.
+// спотыкался ровно на подаче почты пользователями, то есть на самом частом
+// на этом сервере событии.
 const POSTFIX_LINE =
   /^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})\s+(\S+)\s+(?:postfix\/)?([\w./-]+?)(?:\[(\d+)\])?:\s?([\s\S]*)$/;
 
 /** Идентификатор письма в начале текста: `4c2wKp1Vt2z: to=<…>`. */
 const QUEUE_ID_PREFIX = /^([A-Za-z0-9]{5,32}):\s/;
+
+/**
+ * Слово на месте идентификатора, которое идентификатором НЕ является.
+ *
+ * `NOQUEUE:` Postfix пишет ровно там, где обычно стоит идентификатор, и
+ * означает оно обратное: очередь этому письму не заведена вовсе (его
+ * отбили на команде RCPT). Проверка поймала это на живом примере: без
+ * исключения «NOQUEUE» ложился в историю как настоящий идентификатор,
+ * по нему связывались между собой чужие друг другу отказы, а «письмо
+ * NOQUEUE» ещё и оседало в памяти отправителей.
+ */
+const NOT_A_QUEUE_ID = new Set(['NOQUEUE']);
+
+function queueIdOf(text: string): string | null {
+  const found = QUEUE_ID_PREFIX.exec(text)?.[1] ?? null;
+  if (found === null || NOT_A_QUEUE_ID.has(found)) return null;
+  return found;
+}
 
 /**
  * Важность строки Postfix.
@@ -188,15 +206,14 @@ function parsePostfixLine(line: string, now: Date): LogEntry {
   if (!m) {
     return { source: 'postfix', level: 'info', at: null, component: '', queueId: null, text: line };
   }
-  const [, month, day, time, , component, , rest] = m;
-  const queue = QUEUE_ID_PREFIX.exec(rest);
+  const [, month = '', day = '', time = '', , component = '', , rest = ''] = m;
   return {
     source: 'postfix',
     level: postfixLevel(rest),
-    at: parseSyslogTime(month!, day!, time!, now),
-    component: component ?? '',
-    queueId: queue ? queue[1]! : null,
-    text: rest ?? '',
+    at: parseSyslogTime(month, day, time, now),
+    component,
+    queueId: queueIdOf(rest),
+    text: rest,
   };
 }
 
@@ -205,18 +222,20 @@ function parseDovecotLine(line: string, now: Date): LogEntry {
   if (!m) {
     return { source: 'dovecot', level: 'info', at: null, component: '', queueId: null, text: line };
   }
-  const [, month, day, time, who, marker, rest] = m;
+  const [, month = '', day = '', time = '', who = '', marker, rest = ''] = m;
   const level = marker ? (DOVECOT_LEVELS[marker.toLowerCase()] ?? 'info') : 'info';
   // «lmtp(user@dom)<pid><sid>» → «lmtp»: в колонке нужен вид службы,
-  // а кто и в какой сессии — уже в тексте.
-  const component = (who ?? '').replace(/[(<].*$/, '').trim();
+  // а кто и в какой сессии — остаётся в тексте.
+  const component = who.replace(/[(<].*$/, '').trim();
   return {
     source: 'dovecot',
     level,
-    at: parseSyslogTime(month!, day!, time!, now),
+    at: parseSyslogTime(month, day, time, now),
     component,
     queueId: null,
-    text: who && !marker ? `${who}: ${rest}` : `${who ? `${who}: ` : ''}${rest ?? ''}`,
+    // Кто именно (ящик, сессия) обязан остаться в тексте: без этого строка
+    // об ошибке доставки перестаёт отвечать на вопрос «кому не доставилось».
+    text: who === '' ? rest : `${who}: ${rest}`,
   };
 }
 
@@ -232,7 +251,7 @@ function parseApiLine(line: string, now: Date): LogEntry {
     const msg = typeof obj.msg === 'string' ? obj.msg : '';
     // Остальные поля записи — это и есть подробности (err, url, ящик),
     // ради которых в журнал и смотрят. Складываем их в хвост строки,
-    // выкидывая служебные, одинаковые у каждой записи.
+    // выбрасывая служебные, одинаковые у каждой записи.
     const extras = Object.entries(obj)
       .filter(([key]) => !['level', 'time', 'pid', 'hostname', 'msg'].includes(key))
       .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`)
@@ -284,12 +303,23 @@ const STATUS_MAP: Readonly<Record<string, FlowStatus>> = {
   deferred: 'deferred',
   bounced: 'bounced',
   expired: 'expired',
-  'undeliverable': 'bounced',
+  undeliverable: 'bounced',
 };
 
-/** Достаёт значение поля `key=…` из хвоста строки Postfix. */
+/**
+ * Достаёт значение поля `key=…` из хвоста строки Postfix.
+ *
+ * Разделитель полей у Postfix разный в разных строках, и это не мелочь:
+ * в строке о доставке поля идут через запятую (`to=<a@b>, relay=…`), а в
+ * строке об отказе на приёме — через пробел (`from=<a@b> to=<c@d>
+ * proto=ESMTP helo=<x>`). Проверка поймала это на живом примере: разбор
+ * по одной лишь запятой утаскивал в адресата ещё и «proto=ESMTP helo=<x>».
+ *
+ * Поэтому значение — либо адрес в угловых скобках целиком (внутри них
+ * бывают и пробелы, и запятые), либо кусок до ближайшего разделителя.
+ */
 function field(text: string, key: string): string | null {
-  const m = new RegExp(`(?:^|[\\s,])${key}=([^,]*)`).exec(text);
+  const m = new RegExp(`(?:^|[\\s,])${key}=(<[^>]*>|[^,\\s]*)`).exec(text);
   if (!m) return null;
   return m[1]!.trim() || null;
 }
@@ -298,7 +328,7 @@ function field(text: string, key: string): string | null {
 function address(raw: string | null): string | null {
   if (raw === null) return null;
   const clean = raw.replace(/^<|>$/g, '').trim();
-  if (clean === '' ) return null;
+  if (clean === '') return null;
   return clean.toLowerCase();
 }
 
@@ -333,7 +363,7 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
   const text = entry.text;
 
   // Отказ на приёме: очереди у такого письма нет вовсе.
-  if (/^NOQUEUE:\s*reject:/.test(text) || /\breject:\s/.test(text)) {
+  if (/\breject:\s/.test(text)) {
     const to = address(field(text, 'to'));
     const from = address(field(text, 'from'));
     if (to === null && from === null) return null;
@@ -357,7 +387,7 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
   const status = field(text, 'status');
   const to = field(text, 'to');
   if (status === null || to === null) return null;
-  const statusWord = status.split(/\s+/)[0]!.toLowerCase();
+  const statusWord = (status.split(/\s+/)[0] ?? '').toLowerCase();
   const mapped = STATUS_MAP[statusWord];
   if (!mapped) return null;
 
@@ -400,7 +430,7 @@ export function toQueueMeta(entry: LogEntry): QueueMeta | null {
   };
 }
 
-/** Строка `4c2w: removed` — письмо ушло из очереди, помнить о нём больше нечего. */
+/** Строка `4c2w: removed` — письмо ушло из очереди, помнить о нём нечего. */
 export function isQueueRemoval(entry: LogEntry): boolean {
   return entry.source === 'postfix' && entry.queueId !== null && /:\s*removed\s*$/.test(entry.text);
 }

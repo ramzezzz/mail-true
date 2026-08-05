@@ -51,8 +51,10 @@
   cursor: pointer;
 }
 
-.removeCondition:hover {
-  background: var(--mt-color-background-secondary-alpha);
+@media (hover: hover) {
+  .removeCondition:hover {
+    background: var(--mt-color-background-secondary-alpha);
+  }
 }
 
 .addCondition,
@@ -69,9 +71,11 @@
   cursor: pointer;
 }
 
-.addCondition:hover,
-.moreActions:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .addCondition:hover,
+  .moreActions:hover {
+    text-decoration: underline;
+  }
 }
 
 .moreActions {

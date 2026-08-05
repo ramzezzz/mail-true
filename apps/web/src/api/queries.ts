@@ -97,8 +97,16 @@ export interface FolderMessages {
   error: unknown;
   hasMore: boolean;
   isLoadingMore: boolean;
+  /** Идёт перезапрос уже показанного списка (кнопка «Обновить» или жест). */
+  isRefreshing: boolean;
   loadMore(): void;
   retry(): void;
+  /**
+   * Перезапросить список. В отличие от `retry` возвращает обещание: жест
+   * «потянуть вниз» держит по нему крутилку до конца запроса, иначе она
+   * мигала бы и пропадала, ничего не сообщив.
+   */
+  refresh(): Promise<unknown>;
 }
 
 /**
@@ -139,10 +147,12 @@ export function useFolderMessages(
     error: result.error,
     hasMore: Boolean(result.hasNextPage),
     isLoadingMore: result.isFetchingNextPage,
+    isRefreshing: result.isFetching && !result.isPending && !result.isFetchingNextPage,
     loadMore: () => {
       if (result.hasNextPage && !result.isFetchingNextPage) void result.fetchNextPage();
     },
     retry: () => void result.refetch(),
+    refresh: () => result.refetch(),
   };
 }
 

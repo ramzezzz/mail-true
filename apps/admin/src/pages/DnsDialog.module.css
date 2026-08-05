@@ -60,6 +60,15 @@
   border-color: var(--mt-admin-fail);
 }
 
+/* Заголовок карточки и кнопка перепроверки рядом: кнопка не должна быть
+   внутри раскрывающей кнопки — вложенные кнопки недопустимы. */
+.headRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+}
+
 .head {
   display: flex;
   flex-wrap: wrap;
@@ -76,7 +85,7 @@
 }
 
 .head:hover {
-  background: var(--mt-color-background-modal-hovered, rgba(0, 0, 0, 0.03));
+  background: var(--mt-color-background-modal-hover);
 }
 
 .headTitle {
@@ -153,9 +162,10 @@
   min-width: 0;
   padding: 7px 9px;
   border-radius: var(--mt-admin-radius);
-  background: var(--mt-color-background-modal, rgba(0, 0, 0, 0.04));
+  background: var(--mt-color-background-secondary);
   border: 1px solid var(--mt-admin-border);
-  font-family: var(--mt-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  /* Фирменный моноширинный набор общий с почтой — см. admin.css. */
+  font-family: var(--mt-admin-font-mono);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -166,6 +176,26 @@
 .monoEmpty {
   color: var(--mt-color-text-secondary);
   font-style: italic;
+}
+
+/* Когда и у кого получен ответ ИМЕННО по этой записи. */
+.stamp {
+  margin-top: 4px;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* Напоминание про время жизни записи: без него «перепроверить» сразу
+   после правки обманывает, и человек лезет чинить верную настройку. */
+.ttl {
+  margin: 10px 0 0;
+  padding: 7px 9px;
+  border-radius: var(--mt-admin-radius);
+  border: 1px dashed var(--mt-admin-border);
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .diff {

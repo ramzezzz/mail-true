@@ -25,8 +25,10 @@
     box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.card:hover {
-  box-shadow: 0 2px 12px rgba(0, 16, 61, 0.12);
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: 0 2px 12px rgba(0, 16, 61, 0.12);
+  }
 }
 
 .cardTitle {

@@ -16,7 +16,7 @@ import { buildAuditRecord, type AuditInput } from '../audit.js';
 import { audit, currentAdmin, originOf, requireAdmin } from '../guard.js';
 import { dovecotHash, generatePassword } from '../passwords.js';
 import { nulByteProblem, parseUserImport } from '../csv.js';
-import { addressProblem, displayNameLengthProblem } from '../address-limits.js';
+import { addressProblem, displayNameLengthProblem } from '@mail-true/shared';
 import { packResult, unpackResult, type ImportJobResult } from '../import-jobs.js';
 import { quarantineMaildir } from '../mailbox-cleanup.js';
 import { isUndefinedTable, type ImportJobRow, type MailUserRow } from '../db.js';

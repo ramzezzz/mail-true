@@ -23,6 +23,11 @@ import { adminAuthRoutes } from './routes/auth.js';
 import { adminDomainRoutes } from './routes/domains.js';
 import { adminMailboxRoutes } from './routes/mailbox.js';
 import { adminOverviewRoutes } from './routes/overview.js';
+import { adminQueueRoutes } from './routes/queue.js';
+import { adminLogRoutes } from './routes/logs.js';
+import { QueueAgent } from './queue-agent.js';
+import { FlowCollector } from './flow-collector.js';
+import { FlowStore } from './flow-store.js';
 import { adminUserRoutes } from './routes/users.js';
 import { mailboxAccessSelfRoutes } from './routes/self-access.js';
 import { aiAdminRoutes } from '../ai/admin.js';
@@ -98,11 +103,26 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     );
   }
 
+  // Очередь Postfix — через посредника в его контейнере. Сокет Docker
+  // серверу приложения не даётся: он означает права root на всей машине.
+  const queueAgent = new QueueAgent({
+    baseUrl: adminConfig.MAIL_QUEUE_AGENT_URL,
+    token: adminConfig.QUEUE_AGENT_TOKEN,
+    logger,
+  });
+  if (!queueAgent.configured) {
+    logger.warn(
+      'Посредник к очереди Postfix не настроен (MAIL_QUEUE_AGENT_URL/QUEUE_AGENT_TOKEN): ' +
+        'раздел «Очередь» будет отвечать 503 с объяснением.',
+    );
+  }
+
   const ctx: AdminContext = {
     config: adminConfig,
     db,
     sessions,
     mailbox,
+    queueAgent,
     cookieSecure: config.COOKIE_SECURE,
     importBox: createImportBox(adminConfig.importSecret),
   };
@@ -134,8 +154,37 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
 
   janitor.start();
 
+  // Сборщик истории доставки: разбирает журнал Postfix и складывает
+  // события в базу. Другого источника обработанных писем не существует —
+  // сам Postfix историю не хранит (см. flow-collector.ts).
+  const flow = new FlowCollector({
+    db,
+    logger,
+    logDir: adminConfig.MAIL_LOG_DIR,
+    intervalSeconds: adminConfig.MAIL_FLOW_INTERVAL_SECONDS,
+    retentionDays: adminConfig.MAIL_FLOW_RETENTION_DAYS,
+    maxRows: adminConfig.MAIL_FLOW_MAX_ROWS,
+  });
+  new FlowStore(db)
+    .schemaReady()
+    .then((ready: boolean) => {
+      if (!ready) {
+        logger.error(
+          'Таблиц истории доставки нет. Примените ' +
+            'infra/postgres/migrations/0007_mail_flow.sql — до этого раздел ' +
+            '«Почтовый поток» покажет только очередь, без обработанных писем.',
+        );
+        return;
+      }
+      flow.start();
+    })
+    .catch((err: unknown) =>
+      logger.error({ err }, 'Не удалось проверить схему истории доставки'),
+    );
+
   app.addHook('onClose', async () => {
     janitor.stop();
+    flow.stop();
     await db.close().catch(() => undefined);
     if (redis) redis.disconnect();
   });
@@ -151,6 +200,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       await adminDomainRoutes(scope);
       await adminAuditRoutes(scope);
       await adminMailboxRoutes(scope);
+      // Очередь писем и история обработанных, журналы служб по уровням
+      await adminQueueRoutes(scope);
+      await adminLogRoutes(scope);
       // Раздел «Помощник ИИ»: настройки по домену, предел расходов, журнал.
       // Живёт в src/ai/, но регистрируется здесь — чтобы получить ту же
       // аутентификацию, те же роли и тот же аудит, что остальная админка.
@@ -180,3 +232,9 @@ export * from './permissions.js';
 export * from './audit.js';
 export * from './csv.js';
 export * from './dns.js';
+export * from './mail-log.js';
+export * from './log-files.js';
+export * from './queue-agent.js';
+export * from './flow-store.js';
+export { FlowCollector } from './flow-collector.js';
+export { createLogStreams } from './app-log.js';

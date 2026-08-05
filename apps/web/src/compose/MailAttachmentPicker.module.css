@@ -70,9 +70,14 @@
   transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
-.itemHead:hover,
 .itemHeadOpen {
   background: var(--mt-color-background-secondary);
+}
+
+@media (hover: hover) {
+  .itemHead:hover {
+    background: var(--mt-color-background-secondary);
+  }
 }
 
 /* Каждая колонка ужимается сама: без min-width: 0 длинная тема или длинное

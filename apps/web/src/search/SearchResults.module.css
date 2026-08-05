@@ -35,8 +35,10 @@
   text-decoration: none;
 }
 
-.row:hover {
-  background: var(--mt-mail-color-list-letter-background-hover);
+@media (hover: hover) {
+  .row:hover {
+    background: var(--mt-mail-color-list-letter-background-hover);
+  }
 }
 
 .unread .subject,
@@ -68,7 +70,12 @@
 .flagIcon :global(svg),
 .attachIcon :global(svg) {
   display: block;
-  fill: currentColor;
+  /* fill НЕ задаём: каждый значок красит себя сам — фирменные из спрайта
+     своими fill/stroke внутри symbol, встроенные — атрибутами на svg.
+     Общее `fill: currentColor` здесь перебивало их `fill="none"`
+     (CSS сильнее презентационного атрибута), и штриховые значки
+     превращались в сплошные чёрные кляксы — «Выделить все» на панели
+     над списком был залитым квадратом. */
 }
 
 .title {
@@ -146,8 +153,10 @@
   cursor: pointer;
 }
 
-.attachment:hover {
-  background: var(--mt-mail-color-list-letter-background-hover);
+@media (hover: hover) {
+  .attachment:hover {
+    background: var(--mt-mail-color-list-letter-background-hover);
+  }
 }
 
 .attachmentExt {

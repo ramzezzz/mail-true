@@ -218,9 +218,11 @@ describe('правила для узкого экрана', () => {
   it('список писем не заводит собственную горизонтальную прокрутку', () => {
     const css = narrowRules(read('mail/MessageList.module.css'), 600);
     expect(css).toMatch(/\.scroll\s*\{[^}]*overflow-x:\s*hidden/);
-    // Отправитель, дата и превью ужимаются — иначе теме не остаётся места
+    // Колонки на телефоне переставлены — строка стала трёхстрочной
+    // (подробности в tests/mobileMail.test.tsx). Превью здесь больше
+    // не прячется: оно и есть третья строка.
     expect(css).toMatch(/\.correspondent/);
-    expect(css).toMatch(/\.snippet\s*\{[^}]*display:\s*none/);
+    expect(css).not.toMatch(/\.snippet\s*\{[^}]*display:\s*none/);
   });
 
   it('тело письма перестаёт отдавать треть ширины телефона полям', () => {

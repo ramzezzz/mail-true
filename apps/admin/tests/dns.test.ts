@@ -14,12 +14,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   GROUP_ORDER,
+  PROPAGATION_NOTE,
   VERDICT_LABEL,
+  answerStamp,
+  answerTime,
   buildZoneText,
   copyHint,
   formatActual,
   groupChecks,
   needsAttention,
+  needsPropagationNote,
   resolverNote,
   summarize,
   verdictTone,
@@ -43,6 +47,7 @@ function check(patch: Partial<DnsCheck> & { id: string }): DnsCheck {
     hint: 'Что сделать',
     required: true,
     askedVia: '8.8.8.8',
+    checkedAt: '2026-08-05T19:05:41.000Z',
     ...patch,
   };
 }
@@ -194,6 +199,47 @@ describe('строка «что опубликовано»', () => {
       check({ id: 'spf', verdict: 'mismatch', actual: ['v=spf1 mx ~all', 'v=spf1 -all'] }),
     );
     expect(value.split('\n')).toHaveLength(2);
+  });
+});
+
+describe('перепроверка одной записи', () => {
+  it('время ответа берётся у самой записи, а не у отчёта', () => {
+    // После точечной перепроверки общее время отчёта врёт про остальные
+    // строки: у каждой строки своя отметка.
+    const свежая = check({ id: 'mx', checkedAt: '2026-08-05T19:30:00.000Z' });
+    const старая = check({ id: 'spf', checkedAt: '2026-08-05T19:05:41.000Z' });
+    expect(answerTime(свежая.checkedAt)).not.toBe(answerTime(старая.checkedAt));
+    expect(answerStamp(свежая)).toContain(answerTime(свежая.checkedAt));
+  });
+
+  it('в отметке видно, у кого спросили', () => {
+    expect(answerStamp(check({ id: 'mx', askedVia: '9.9.9.9' }))).toContain('9.9.9.9');
+  });
+
+  it('отказ проверки не выдаётся за полученный ответ', () => {
+    const stamp = answerStamp(check({ id: 'mx', verdict: 'unreachable', askedVia: null }));
+    expect(stamp).toContain('не удалось');
+    expect(stamp).not.toContain('ответ получен');
+  });
+
+  it('без отметки времени ничего не выдумывается', () => {
+    expect(answerTime(null)).toBe('');
+    expect(answerTime('не дата')).toBe('');
+  });
+});
+
+describe('время жизни записи', () => {
+  it('про TTL напоминается там, где человек полезет править — у сломанных записей', () => {
+    // Иначе «перепроверить» сразу после правки покажет старый ответ,
+    // и человек начнёт чинить верную настройку.
+    expect(needsPropagationNote(check({ id: 'mx', verdict: 'missing' }))).toBe(true);
+    expect(needsPropagationNote(check({ id: 'mx', verdict: 'mismatch' }))).toBe(true);
+    expect(needsPropagationNote(check({ id: 'mx', verdict: 'ok' }))).toBe(false);
+  });
+
+  it('предупреждение говорит и про минуты, и про сутки', () => {
+    expect(PROPAGATION_NOTE).toMatch(/минут/);
+    expect(PROPAGATION_NOTE).toMatch(/суток/);
   });
 });
 

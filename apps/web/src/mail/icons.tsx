@@ -10,7 +10,19 @@ interface IconProps {
   size?: number;
 }
 
-const SPRITE = '/brand/icons/sprite.svg';
+/**
+ * Спрайт лежит в public/ и отдаётся как есть, без хеша в имени, а nginx
+ * ставит ему `Cache-Control: public, max-age=2592000` — тридцать дней.
+ * Поэтому у того, кто уже заходил, изменившийся значок не появится: браузер
+ * возьмёт спрайт из кэша. Ровно это и случилось, когда «Важное» стало
+ * закладкой: в интерфейсе оставался старый кружок с восклицательным знаком,
+ * а `#icon-important-filled` не находился вовсе и не рисовался ничем.
+ *
+ * ПОМЕНЯЛ СИМВОЛ В СПРАЙТЕ — УВЕЛИЧЬ НОМЕР. Другого способа сообщить об
+ * этом браузеру у файла без хеша в имени нет.
+ */
+const SPRITE_REVISION = 2;
+const SPRITE = `/brand/icons/sprite.svg?v=${SPRITE_REVISION}`;
 
 /** Значок из фирменного спрайта: `<use href="sprite.svg#icon-<имя>">`. */
 function BrandIcon({ name, size = 16 }: IconProps & { name: string }) {
@@ -133,6 +145,19 @@ export const IconArrowUp = (p: IconProps = {}) => stroke(['M12 19V6', 'M6 12l6-6
 export const IconArrowDown = (p: IconProps = {}) => stroke(['M12 5v13', 'M6 12l6 6 6-6'], p);
 
 export const IconPlus = (p: IconProps = {}) => stroke(['M12 5v14', 'M5 12h14'], p);
+
+/**
+ * Обновить список. Кнопочный двойник жеста «потянуть вниз»: жеста не видно,
+ * и у мыши с клавиатурой его нет вовсе — поэтому у него обязана быть кнопка.
+ */
+export const IconRefresh = (p: IconProps = {}) =>
+  stroke(
+    [
+      'M19.5 12a7.5 7.5 0 1 1-2.2-5.3',
+      'M19.5 4.5V9H15',
+    ],
+    p,
+  );
 
 /** Карандаш — переименовать папку, изменить правило. */
 export const IconPencil = (p: IconProps = {}) =>
@@ -266,7 +291,7 @@ export const IconFontFamily = (p: IconProps = {}) => (
     fill="currentColor"
     aria-hidden="true"
   >
-    <path d="M3.2 18.4 8 5.6h2.1l4.8 12.8h-2.05l-1.24-3.46H6.49L5.25 18.4H3.2Zm3.9-5.2h3.9L9.05 7.8 7.1 13.2Z" />
+    <path d="M2.9 5.6h10.2v1.9H9.1v10.9H6.9V7.5H2.9V5.6Z" />
     <path d="M17.6 18.55c-1.3 0-1.95-.72-1.95-2.05v-5.1h-1.4V9.75h1.4V7.4h1.9v2.35h2.05v1.65H17.55v4.85c0 .43.2.63.62.63h1.43v1.67H17.6Z" />
   </svg>
 );

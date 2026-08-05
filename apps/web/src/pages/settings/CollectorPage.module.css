@@ -19,8 +19,10 @@
   cursor: pointer;
 }
 
-.provider:hover {
-  border-color: var(--mt-color-stroke-accent);
+@media (hover: hover) {
+  .provider:hover {
+    border-color: var(--mt-color-stroke-accent);
+  }
 }
 
 .providerOther {

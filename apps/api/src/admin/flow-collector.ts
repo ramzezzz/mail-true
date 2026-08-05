@@ -26,11 +26,12 @@
  * (см. миграцию 0007). Что вытеснено, того больше нет: это тоже сказано
  * в интерфейсе, а не оставлено на догадку.
  */
+import { join } from 'node:path';
 import type { Logger } from 'pino';
-import type { AdminDb } from './db.js';
-import { LOG_FILE_NAMES, readNewLines } from './log-files.js';
-import { describeLogFile } from './log-files.js';
 import { errorInfo } from '../log.js';
+import type { AdminDb } from './db.js';
+import { FlowStore } from './flow-store.js';
+import { LOG_FILE_NAMES, describeLogFile, readNewLines } from './log-files.js';
 import {
   QueueMetaCache,
   isQueueRemoval,
@@ -39,7 +40,6 @@ import {
   toQueueMeta,
   type FlowEvent,
 } from './mail-log.js';
-import { join } from 'node:path';
 
 export interface FlowCollectorOptions {
   db: AdminDb;
@@ -64,12 +64,12 @@ export class FlowCollector {
   private running = false;
   private readonly meta = new QueueMetaCache();
   private readonly chunkBytes: number;
+  private readonly store: FlowStore;
   private lastPruneAt = 0;
-  /** Первое чтение после запуска: с него начинается «история ведётся с …». */
-  private startedAt: Date | null = null;
 
   constructor(private readonly opts: FlowCollectorOptions) {
     this.chunkBytes = opts.chunkBytes ?? 2 * 1024 * 1024;
+    this.store = new FlowStore(opts.db);
   }
 
   get path(): string {
@@ -119,17 +119,13 @@ export class FlowCollector {
     const info = await describeLogFile(this.opts.logDir, SOURCE);
     if (!info.present || info.fileId === null) return;
 
-    const cursor = await this.opts.db.getFlowCursor(SOURCE);
-    if (this.startedAt === null) {
-      this.startedAt = cursor?.startedAt ?? new Date();
-    }
+    const cursor = await this.store.getCursor(SOURCE);
 
     let offset = cursor?.byteOffset ?? 0;
     if (cursor === null) {
       // Первый запуск на непустом журнале. Разбираем только хвост: перед
       // нами может лежать журнал за неделю, и разбирать его целиком в
       // первом же заходе значит подвесить сервер приложения на старте.
-      // Хвост берём тот же, что и порция одного захода, — дальше догоним.
       offset = Math.max(0, info.sizeBytes - this.chunkBytes);
     } else if (cursor.fileId !== info.fileId) {
       // Журнал провернулся: новый файл, старые смещения ничего не значат.
@@ -146,7 +142,7 @@ export class FlowCollector {
     const { lines, nextOffset } = await readNewLines(this.path, offset, this.chunkBytes);
     if (lines.length === 0) {
       if (nextOffset !== offset || cursor === null || cursor.fileId !== info.fileId) {
-        await this.opts.db.setFlowCursor(SOURCE, info.fileId, nextOffset);
+        await this.store.setCursor(SOURCE, info.fileId, nextOffset);
       }
       return;
     }
@@ -169,9 +165,9 @@ export class FlowCollector {
     }
 
     if (events.length > 0) {
-      await this.opts.db.insertFlowEvents(events);
+      await this.store.insertEvents(events);
     }
-    await this.opts.db.setFlowCursor(SOURCE, info.fileId, nextOffset);
+    await this.store.setCursor(SOURCE, info.fileId, nextOffset);
     this.opts.logger.debug(
       { lines: lines.length, events: events.length, offset: nextOffset },
       'Сборщик истории доставки: порция разобрана',
@@ -183,10 +179,7 @@ export class FlowCollector {
     const now = Date.now();
     if (now - this.lastPruneAt < 10 * 60 * 1000) return;
     this.lastPruneAt = now;
-    const removed = await this.opts.db.pruneFlowEvents(
-      this.opts.retentionDays,
-      this.opts.maxRows,
-    );
+    const removed = await this.store.prune(this.opts.retentionDays, this.opts.maxRows);
     if (removed > 0) {
       this.opts.logger.info({ removed }, 'История доставки: вытеснены старые записи');
     }
