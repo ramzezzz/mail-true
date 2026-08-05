@@ -1,0 +1,381 @@
+/*
+ * Список писем: виртуализация, строка .llc, состояния и группировка.
+ * Все цвета — только из токенов --mt-*.
+ */
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px;
+}
+
+.inner {
+  position: relative;
+  width: 100%;
+}
+
+.virtualRow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+/* Заголовок периода: «Сегодня», «Вчера», «Неделя», «Июль 2026» */
+.periodHeader {
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+  padding: 0 12px 6px 68px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+  font-weight: 400;
+}
+
+/* ------------------------------------------------------------------ */
+/* Строка письма                                                        */
+/* ------------------------------------------------------------------ */
+
+.row {
+  --row-bg: var(--mt-mail-color-list-letter-background);
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px 0 0;
+  color: var(--mt-color-text-primary);
+  background: var(--row-bg);
+  text-decoration: none;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
+}
+
+/* Компактный режим («pony mode»): 40px, шрифт 13px */
+.compact .row {
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* Надёжный отправитель — зеленоватая подложка */
+.row.reliable {
+  --row-bg: var(--mt-mail-color-list-background-positive-alpha);
+}
+
+/* Наведение */
+.virtualRow:hover .row {
+  --row-bg: var(--mt-mail-color-list-letter-background-hover);
+}
+
+.virtualRow:hover .row.reliable {
+  --row-bg: var(--mt-mail-color-list-background-positive-alpha-hover);
+}
+
+/* Клавиатурный курсор — как наведение */
+.row.focused {
+  --row-bg: var(--mt-mail-color-list-letter-background-hover);
+}
+
+/* Строка теперь получает и настоящий фокус — его надо видеть. Подложки мало:
+   при заходе в список по Tab курсор ещё никуда не переезжал. */
+.row:focus-visible {
+  outline: 2px solid var(--mt-color-stroke-accent);
+  outline-offset: -2px;
+}
+
+/* Выбранная строка (после правил наведения — выигрывает при равной специфичности) */
+.row.selected,
+.virtualRow:hover .row.selected {
+  --row-bg: var(--mt-mail-color-list-letter-background-press);
+}
+
+/* Скругление группы выделенных строк: первая — сверху, последняя — снизу */
+.row.selected {
+  border-radius: 0;
+}
+
+.row.firstSelected {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.row.lastSelected {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Разделитель (.delimeter): не доходит до краёв текстовой зоны */
+.row::after {
+  content: '';
+  position: absolute;
+  left: 64px;
+  right: 12px;
+  bottom: 0;
+  height: 1px;
+  background: var(--mt-mail-color-list-letter-separator-alpha);
+  transition:
+    left var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    right var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    opacity var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+/* При наведении разделитель растягивается на всю ширину строки */
+.virtualRow:hover .row::after {
+  left: 0;
+  right: 0;
+}
+
+/* …а у соседней строки сверху — гаснет */
+.virtualRow:has(+ .virtualRow:hover) .row::after {
+  opacity: 0;
+}
+
+/* У выбранных строк разделители не рисуются — группа выглядит одной карточкой */
+.row.selected::after,
+.virtualRow:has(+ .virtualRow .selected) .row::after {
+  opacity: 0;
+}
+
+/* Колонка точки непрочитанного: 32px */
+.readStatus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  flex-shrink: 0;
+}
+
+.unreadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mt-mail-color-icon-unread, var(--mt-color-background-accent));
+}
+
+/* Аватар 32×32, отступ справа 12px; чекбокс поверх при наведении */
+.avatarCell {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  margin-right: 12px;
+}
+
+.compact .avatarCell {
+  width: 28px;
+  height: 28px;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  color: var(--mt-color-text-contrast);
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: 500;
+}
+
+/* Зелёный щит надёжного отправителя в углу аватара */
+.reliableBadge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  color: var(--mt-color-background-positive);
+  background: var(--mt-app-content-bg);
+}
+
+.rowCheckbox {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--mt-app-content-bg);
+}
+
+.virtualRow:hover .rowCheckbox,
+.rowCheckboxVisible {
+  display: flex;
+}
+
+/* Отправитель: 22% ширины */
+.correspondent {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 22%;
+  min-width: 22%;
+  padding-right: 8px;
+}
+
+.correspondentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unread .correspondentName {
+  font-weight: 700;
+}
+
+/* Счётчик писем в цепочке */
+.threadCount {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+}
+
+/* Флажок «важное»: 24px */
+.flagCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  min-width: 24px;
+  padding-right: 8px;
+}
+
+.flagIcon {
+  display: inline-flex;
+  color: var(--mt-color-accent-red);
+}
+
+/* Тема + сниппет */
+.title {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  padding-right: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.subject {
+  flex-shrink: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.unread .subject {
+  font-weight: 700;
+}
+
+.snippet {
+  margin-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mt-list-secondary-text);
+}
+
+/* Значки: категория, вложение */
+.secondaryData {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 40px;
+  padding-right: 8px;
+}
+
+.categoryDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.attachIcon {
+  display: inline-flex;
+  color: var(--mt-color-icon-secondary);
+}
+
+/* Дата: 44px, 13px, вправо */
+.date {
+  width: 44px;
+  min-width: 44px;
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+  color: var(--mt-list-secondary-text);
+}
+
+.compact .date {
+  font-size: 12px;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+/*
+ * Строка списка сверстана в одну линию, и её высоту задаёт виртуализация —
+ * переносить содержимое на вторую строку, как это делает мобильный mail.ru,
+ * здесь нечем. Поэтому на узком экране колонки ужимаются, а превью текста
+ * (единственное, что дублируется внутри самого письма) уходит совсем.
+ */
+@media (max-width: 600px) {
+  .scroll {
+    /* Список раньше заводил собственную горизонтальную прокрутку */
+    padding: 0 4px;
+    overflow-x: hidden;
+  }
+
+  .periodHeader {
+    padding-left: 44px;
+  }
+
+  .row {
+    padding-right: 8px;
+  }
+
+  .readStatus {
+    width: 20px;
+  }
+
+  .avatarCell {
+    margin-right: 8px;
+  }
+
+  .correspondent {
+    width: 34%;
+    min-width: 34%;
+    padding-right: 6px;
+  }
+
+  .snippet {
+    display: none;
+  }
+
+  .subject {
+    max-width: 100%;
+  }
+
+  .secondaryData {
+    min-width: 0;
+    padding-right: 6px;
+  }
+
+  .date {
+    width: 38px;
+    min-width: 38px;
+    font-size: 12px;
+  }
+}

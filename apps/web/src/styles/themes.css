@@ -1,0 +1,333 @@
+/*
+ * Темы оформления.
+ *
+ * tokens.css (сгенерирован) даёт сырую базу --mt-* со значениями, снятыми
+ * с живого e.mail.ru. Здесь поверх неё:
+ *
+ *   1) семантические переменные приложения (--mt-app-*, --mt-sidebar-*,
+ *      --mt-header-*) — только их знают компоненты каркаса;
+ *   2) три темы через data-theme на <html>:
+ *      - light     — обычная светлая (по умолчанию);
+ *      - dark      — тёмная;
+ *      - wallpaper — «обойная», как у mail.ru: фоновая картинка на всю
+ *        страницу, полупрозрачные тёмные шапка и левое меню поверх неё,
+ *        белая карточка контента. Картинка задаётся переменной
+ *        --mt-wallpaper-image (например, инлайном из настроек пользователя).
+ *
+ * Архитектура повторяет мейловскую: темы переопределяют ТОЛЬКО переменные,
+ * компоненты не знают конкретных цветов.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Базовые семантические алиасы (не зависят от темы)                    */
+/* ------------------------------------------------------------------ */
+:root {
+  /* Каркас страницы (метрики сняты с mail.ru) */
+  --mt-app-header-height: var(--mt-layout-header-height, 62px);
+  --mt-app-sidebar-width: 232px; /* .layout__column_left */
+  --mt-app-sidebar-nav-width: 200px; /* внутренний nav: 232 − 2×16 */
+
+  /* Обои по умолчанию отсутствуют */
+  --mt-wallpaper-image: none;
+  --mt-app-bg-image: none;
+
+  /* Тень окна написания письма (.compose-app mail.ru) */
+  --mt-compose-shadow: 0 4px 32px rgba(0, 16, 61, 0.16);
+
+  /*
+   * Помощник на основе ИИ. Отдельные семантические переменные нужны потому,
+   * что его плашки лежат на белой карточке контента: подложка должна быть
+   * заметна во всех трёх темах, а в тёмной фон карточки и
+   * --mt-color-background-secondary совпадают.
+   */
+  --mt-ai-banner-bg: var(--mt-color-background-secondary);
+  --mt-ai-banner-border: var(--mt-color-separator-primary);
+  --mt-ai-chip-bg: var(--mt-color-background-content);
+  --mt-ai-accent: var(--mt-color-text-accent);
+  /* Предупреждения помощника. Мейловый warning-tint непрозрачно-жёлтый и
+     в тёмной теме нечитаем, поэтому там подложка своя, полупрозрачная. */
+  --mt-ai-warning-bg: var(--mt-color-background-warning-tint);
+
+  /*
+   * Затемнение под модальным окном. В выгрузке
+   * --mt-mail-color-overlay-background равен `transparent` (снято на экране
+   * без открытых окон), поэтому подложку задаём сами — иначе окно «Создание
+   * фильтра» висело бы над нетронутой страницей.
+   */
+  --mt-modal-overlay: rgba(0, 16, 61, 0.4);
+  /* Выше выпадающих меню (--mt-z-index-popout: 100) и окон написания:
+     затемнение обязано перекрыть всё, что уже открыто на странице. */
+  --mt-z-index-dialog: 200;
+
+  /*
+   * Раздел настроек оформлен ИНАЧЕ, чем почта (docs/features-mailru.md):
+   * светлый фон, карточки на белом, простая шапка, заголовки крупнее
+   * почтовых — h1 32/36 вес 500, h2 28/32 вес 500.
+   */
+  --mt-settings-bg: var(--mt-color-background-secondary);
+  --mt-settings-card-bg: var(--mt-color-background-content);
+  --mt-settings-card-radius: var(--mt-size-card-border-radius, 16px);
+  --mt-settings-nav-active-bg: var(--mt-color-background-secondary);
+  --mt-settings-h1-size: 32px;
+  --mt-settings-h1-line-height: 36px;
+  --mt-settings-h2-size: 28px;
+  --mt-settings-h2-line-height: 32px;
+
+  /* Подсветка совпадений в результатах поиска — жёлтая, как в mail.ru */
+  --mt-search-highlight-bg: var(--mt-color-background-warning);
+  --mt-search-highlight-text: var(--mt-color-text-primary);
+  /* Подложка папки, над которой держат перетаскиваемое письмо */
+  --mt-drop-target-bg: var(--mt-color-background-accent-tint-alpha-hover);
+  --mt-drop-target-border: var(--mt-color-stroke-accent);
+  /* Скелетоны загрузки */
+  --mt-skeleton-bg: var(--mt-color-background-secondary);
+  --mt-skeleton-shine: var(--mt-color-background-tertiary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Светлая тема (по умолчанию)                                          */
+/* ------------------------------------------------------------------ */
+/*
+ * Выгрузка токенов снята при «обойной» теме, поэтому кластер sidebar/header
+ * в tokens.css белотекстовый. Для обычной светлой темы возвращаем ему
+ * значения «тёмный текст на светлом фоне».
+ */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  /* Страница и карточка контента */
+  --mt-app-bg: var(--mt-color-background-secondary); /* #F0F1F3 */
+  --mt-app-content-bg: var(--mt-color-background-content); /* #FFFFFF */
+  --mt-app-content-radius: var(--mt-size-card-border-radius, 16px);
+
+  /* Шапка портала */
+  --mt-header-bg: var(--mt-color-header-background); /* #FFFFFF */
+  --mt-header-text: var(--mt-color-text-primary);
+  --mt-header-text-secondary: var(--mt-color-text-secondary);
+  --mt-header-icon: var(--mt-color-panel-header-icon); /* #0077FF */
+  --mt-header-button-bg-hover: var(--mt-ph-color-transparent-hover);
+  --mt-header-button-bg-press: var(--mt-ph-color-transparent-press);
+  --mt-header-search-bg: var(--mt-mail-color-header-search-background);
+  --mt-header-search-text: var(--mt-mail-color-header-search-text);
+  --mt-header-search-placeholder: var(--mt-mail-color-header-search-text-collapsed);
+  --mt-header-search-icon: var(--mt-mail-color-header-search-icon);
+
+  /* Левое меню */
+  --mt-sidebar-item-text: var(--mt-color-text-primary); /* #2C2D2E */
+  --mt-sidebar-item-icon: var(--mt-color-text-primary);
+  --mt-sidebar-item-bg-hover: var(--mt-ph-color-transparent-hover); /* rgba(0,16,61,.04) */
+  --mt-sidebar-item-bg-active: var(--mt-ph-color-transparent-press); /* rgba(0,16,61,.08) */
+  --mt-sidebar-counter-text: var(--mt-color-text-secondary);
+  --mt-sidebar-compose-bg: var(--mt-mail-color-sidebar-compose-button-background);
+  --mt-sidebar-compose-bg-hover: var(--mt-mail-color-sidebar-compose-button-background-hover);
+  --mt-sidebar-compose-bg-press: var(--mt-mail-color-sidebar-compose-button-background-press);
+  --mt-sidebar-compose-text: var(--mt-mail-color-sidebar-compose-button-text);
+  --mt-sidebar-compose-border: rgba(0, 16, 61, 0.12);
+
+  /* Список писем: вторичный текст (сниппет, дата) — #93969B,
+     чуть темнее общего text-secondary (снято со строки списка mail.ru) */
+  --mt-list-secondary-text: var(--mt-mail-color-header-text-secondary, #93969b);
+
+  /* ----------------------------------------------------------------
+   * Фирменный акцент True Blue #006EC6 (см. brand/tokens.css,
+   * docs/brand.md): переопределяем все токены, нёсшие синий mail.ru
+   * #0077FF — тот не проходит WCAG AA на белом (4.13:1 против 5.19:1).
+   * Геометрия и остальные цвета остаются как сняты с mail.ru.
+   * ---------------------------------------------------------------- */
+  --mt-color-background-accent: #006ec6;
+  --mt-color-background-accent-hover: #005ca8;
+  --mt-color-background-accent-press: #004e8f;
+  --mt-color-background-accent-themed: #006ec6;
+  --mt-color-accent-blue: #006ec6;
+  --mt-color-accent-blue-hover: #005ca8;
+  --mt-color-accent-blue-press: #004e8f;
+  --mt-color-accent-azure: #006ec6;
+  --mt-color-text-link: #006ec6;
+  --mt-color-text-accent: #006ec6;
+  --mt-color-icon-accent: #006ec6;
+  --mt-color-button-text: #006ec6;
+  --mt-color-button-icon: #006ec6;
+  --mt-color-button-stroke: #006ec6;
+  --mt-color-panel-header-icon: #006ec6;
+  --mt-color-stroke-accent: #006ec6;
+  --mt-color-write-bar-icon: #006ec6;
+  --mt-color-action-sheet-text: #006ec6;
+  --mt-mail-color-icon-unread: #006ec6;
+  --mt-mail-color-header-icon-unread: #006ec6;
+  --mt-mail-color-header-progress: #006ec6;
+  --mt-ph-color-accent-blue: #006ec6;
+  --mt-ph-color-background-accent: #006ec6;
+  --mt-ph-color-background-accent-themed: #006ec6;
+  --mt-ph-color-icon-accent: #006ec6;
+  --mt-ph-color-stroke-accent: #006ec6;
+
+  /* Подложка выбранной строки списка — брендовый accent-subtle */
+  --mt-mail-color-list-letter-background-press: #e7f1fb;
+}
+
+/* ------------------------------------------------------------------ */
+/* Тёмная тема                                                          */
+/* ------------------------------------------------------------------ */
+/*
+ * В выгрузке только светлые значения, поэтому тёмная палитра собрана вручную
+ * по образцу тёмной темы VKUI/mail.ru. Переопределяем базовые --mt-color-*,
+ * от которых каскадом зависят компоненты, плюс семантику каркаса.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* Базовые цвета VKUI, тёмные значения */
+  --mt-color-text-primary: #e1e3e6;
+  --mt-color-text-secondary: #8c8e94;
+  --mt-color-text-tertiary: #6d7075;
+  --mt-color-text-subhead: #9c9da1;
+  --mt-color-background: #19191a;
+  --mt-color-background-secondary: #232324;
+  --mt-color-background-tertiary: #2c2d2e;
+  --mt-color-background-content: #232324;
+  --mt-color-background-modal: #2c2d2e;
+  --mt-color-separator-primary: rgba(255, 255, 255, 0.12);
+  --mt-color-separator-secondary: rgba(255, 255, 255, 0.08);
+  --mt-color-icon-primary: #e1e3e6;
+  --mt-color-icon-secondary: #8c8e94;
+  --mt-color-icon-tertiary: #6d7075;
+  --mt-color-header-background: #232324;
+  --mt-color-field-background: #2c2d2e;
+  --mt-color-field-border-alpha: rgba(255, 255, 255, 0.16);
+  --mt-color-image-border-alpha: rgba(255, 255, 255, 0.08);
+
+  /* Фирменный акцент в тёмной теме: осветлённый #5CA8F5 (7.10:1 на фоне),
+     на акцентной кнопке — тёмный текст #15181D (см. docs/brand.md) */
+  --mt-color-background-accent: #5ca8f5;
+  --mt-color-background-accent-hover: #7cbaf7;
+  --mt-color-background-accent-press: #4694e3;
+  --mt-color-background-accent-themed: #5ca8f5;
+  --mt-color-accent-blue: #5ca8f5;
+  --mt-color-accent-blue-hover: #7cbaf7;
+  --mt-color-accent-blue-press: #4694e3;
+  --mt-color-text-link: #5ca8f5;
+  --mt-color-text-accent: #5ca8f5;
+  --mt-color-icon-accent: #5ca8f5;
+  --mt-color-button-text: #5ca8f5;
+  --mt-color-button-icon: #5ca8f5;
+  --mt-color-button-stroke: #5ca8f5;
+  --mt-color-panel-header-icon: #5ca8f5;
+  --mt-color-text-contrast: #15181d;
+  --mt-mail-color-icon-unread: #5ca8f5;
+  --mt-mail-color-header-icon-unread: #5ca8f5;
+  --mt-mail-color-header-progress: #5ca8f5;
+
+  /* Мейловый слой */
+  --mt-mail-color-list-letter-background: #232324;
+  --mt-mail-color-list-letter-background-hover: #2c2d2e;
+  --mt-mail-color-list-letter-background-press: #1a2c40;
+  --mt-mail-color-list-letter-separator-alpha: rgba(255, 255, 255, 0.12);
+  --mt-mail-color-header-search-background: rgba(255, 255, 255, 0.08);
+  --mt-mail-color-header-search-text: #e1e3e6;
+  --mt-mail-color-header-search-text-collapsed: #8c8e94;
+  --mt-mail-color-header-search-icon: #8c8e94;
+
+  /* Тултипы портальной шапки */
+  --mt-ph-custom-color-tooltip-bg: #3a3a3b;
+  --mt-ph-custom-color-tooltip-text: #e1e3e6;
+
+  /* Семантика каркаса */
+  --mt-app-bg: #19191a;
+  --mt-app-content-bg: #232324;
+
+  --mt-header-bg: #232324;
+  --mt-header-text: var(--mt-color-text-primary);
+  --mt-header-text-secondary: var(--mt-color-text-secondary);
+  --mt-header-icon: var(--mt-color-accent-blue);
+  --mt-header-button-bg-hover: rgba(255, 255, 255, 0.08);
+  --mt-header-button-bg-press: rgba(255, 255, 255, 0.12);
+  --mt-header-search-bg: rgba(255, 255, 255, 0.08);
+  --mt-header-search-text: #e1e3e6;
+  --mt-header-search-placeholder: #8c8e94;
+  --mt-header-search-icon: #8c8e94;
+
+  --mt-sidebar-item-text: var(--mt-color-text-primary);
+  --mt-sidebar-item-icon: var(--mt-color-text-primary);
+  --mt-sidebar-item-bg-hover: rgba(255, 255, 255, 0.08);
+  --mt-sidebar-item-bg-active: rgba(255, 255, 255, 0.12);
+  --mt-sidebar-counter-text: var(--mt-color-text-secondary);
+  --mt-sidebar-compose-bg: rgba(255, 255, 255, 0.12);
+  --mt-sidebar-compose-bg-hover: rgba(255, 255, 255, 0.16);
+  --mt-sidebar-compose-bg-press: rgba(255, 255, 255, 0.2);
+  --mt-sidebar-compose-text: #e1e3e6;
+  --mt-sidebar-compose-border: rgba(255, 255, 255, 0.12);
+
+  --mt-list-secondary-text: #8c8e94;
+
+  /* Помощник: фон карточки контента здесь #232324, поэтому подложка плашек
+     берётся на ступень светлее, иначе они сливаются с телом письма */
+  --mt-ai-banner-bg: var(--mt-color-background-tertiary);
+  --mt-ai-chip-bg: var(--mt-color-background);
+  /* Тот же оттенок, что у значка предупреждения, но еле заметный: цвет
+     выводится из токена, а не задаётся числом, иначе он разойдётся
+     с остальной палитрой при следующей выгрузке токенов. */
+  --mt-ai-warning-bg: color-mix(in srgb, var(--mt-color-icon-warning) 16%, transparent);
+
+  /* Затемнение под окном на тёмном фоне должно быть плотнее */
+  --mt-modal-overlay: rgba(0, 0, 0, 0.56);
+
+  /* Настройки: тот же приём, что и в почте, — фон на ступень темнее карточки */
+  --mt-settings-bg: #19191a;
+  --mt-settings-card-bg: #232324;
+  --mt-settings-nav-active-bg: rgba(255, 255, 255, 0.08);
+
+  /* Жёлтая подсветка на тёмном нечитаема, поэтому здесь она приглушённая,
+     а текст на ней остаётся светлым */
+  --mt-search-highlight-bg: color-mix(in srgb, var(--mt-color-accent-orange) 40%, transparent);
+  --mt-search-highlight-text: var(--mt-color-text-primary);
+
+  --mt-drop-target-bg: rgba(92, 168, 245, 0.16);
+  --mt-skeleton-bg: #2c2d2e;
+  --mt-skeleton-shine: #3a3a3b;
+}
+
+/* ------------------------------------------------------------------ */
+/* «Обойная» тема                                                       */
+/* ------------------------------------------------------------------ */
+/*
+ * Значения кластера sidebar/header — ровно те, что сняты с mail.ru при
+ * включённой теме с фоновой картинкой (см. tokens.css): белый текст,
+ * полупрозрачные белые подложки. Карточка контента остаётся белой.
+ */
+:root[data-theme='wallpaper'] {
+  color-scheme: light;
+
+  --mt-app-bg: #4d4d4d; /* фон под картинкой, снят с body живого mail.ru */
+  /* Пока пользовательские обои не загружены — градиент-заглушка */
+  --mt-wallpaper-image: var(
+    --mt-user-wallpaper,
+    linear-gradient(160deg, #1e3c72 0%, #2a5298 45%, #6a85b6 100%)
+  );
+  --mt-app-bg-image: var(--mt-wallpaper-image);
+  --mt-app-content-bg: var(--mt-color-background-content);
+
+  /* Шапка: полупрозрачная тёмная поверх обоев */
+  --mt-header-bg: rgba(0, 0, 0, 0.4);
+  --mt-header-text: #ffffff;
+  --mt-header-text-secondary: rgba(255, 255, 255, 0.72);
+  --mt-header-icon: #ffffff;
+  --mt-header-button-bg-hover: var(--mt-mail-color-header-button-background-alpha-hover);
+  --mt-header-button-bg-press: var(--mt-mail-color-header-button-background-alpha-press);
+  --mt-header-search-bg: rgba(255, 255, 255, 0.16);
+  --mt-header-search-text: #ffffff;
+  --mt-header-search-placeholder: rgba(255, 255, 255, 0.72);
+  --mt-header-search-icon: rgba(255, 255, 255, 0.72);
+
+  /* Левое меню: белый текст, полупрозрачные подложки (значения из выгрузки) */
+  --mt-sidebar-item-text: var(--mt-mail-color-sidebar-item-text); /* #FFFFFF */
+  --mt-sidebar-item-icon: var(--mt-mail-color-sidebar-item-icon);
+  --mt-sidebar-item-bg-hover: var(--mt-mail-color-sidebar-item-background-alpha-hover);
+  --mt-sidebar-item-bg-active: var(--mt-mail-color-sidebar-item-background-alpha-press);
+  --mt-sidebar-counter-text: var(--mt-mail-color-sidebar-counter-text);
+  --mt-sidebar-compose-bg: var(--mt-mail-color-sidebar-compose-button-background);
+  --mt-sidebar-compose-bg-hover: var(--mt-mail-color-sidebar-compose-button-background-hover);
+  --mt-sidebar-compose-bg-press: var(--mt-mail-color-sidebar-compose-button-background-press);
+  --mt-sidebar-compose-text: var(--mt-mail-color-sidebar-compose-button-text);
+  --mt-sidebar-compose-border: transparent;
+}

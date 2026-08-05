@@ -1,0 +1,69 @@
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Нативный input прячем, но оставляем доступным для клавиатуры */
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: var(--mt-size-check-border-radius, 4px);
+  box-shadow: inset 0 0 0 1.5px var(--mt-color-icon-tertiary, #aaadb3);
+  background: transparent;
+  color: var(--mt-color-text-contrast, #fff);
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.mark {
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity var(--mt-anim-duration-s, 0.1s) ease,
+    transform var(--mt-anim-duration-s, 0.1s) ease;
+}
+
+.input:checked + .box {
+  background: var(--mt-color-background-accent);
+  box-shadow: inset 0 0 0 1.5px var(--mt-color-background-accent);
+}
+
+.input:checked + .box .mark {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.input:focus-visible + .box {
+  outline: 2px solid var(--mt-color-stroke-accent, #0077ff);
+  outline-offset: 1px;
+}
+
+.input:disabled ~ * {
+  opacity: var(--mt-opacity-disable, 0.48);
+}
+
+.label {
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  color: var(--mt-color-text-primary);
+}

@@ -1,0 +1,6 @@
+# Карта виртуальных доменов (virtual_mailbox_domains)
+hosts = postgres
+user = ${POSTGRES_USER}
+password = ${POSTGRES_PASSWORD}
+dbname = ${POSTGRES_DB}
+query = SELECT 1 FROM virtual_domains WHERE name = '%s'

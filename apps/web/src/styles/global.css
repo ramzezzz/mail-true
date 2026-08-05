@@ -1,0 +1,64 @@
+/*
+ * Глобальные стили: сброс и базовая типографика.
+ * Всё остальное — в CSS-модулях компонентов.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* Фирменный шрифт Mail.True — Golos Text (см. docs/brand.md);
+     --mt-font-ui задаётся в brand/fonts/fonts.css */
+  font-family: var(
+    --mt-font-ui,
+    'Golos Text',
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Arial,
+    sans-serif
+  );
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  color: var(--mt-color-text-primary);
+  background-color: var(--mt-app-bg);
+  background-image: var(--mt-app-bg-image);
+  background-size: cover;
+  background-position: var(--mt-mail-position-background, 50% 0);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--mt-color-text-link, #0070f0);
+  text-decoration: none;
+}
+
+button {
+  font: inherit;
+}
+
+/* Тонкие скроллбары как у mail.ru */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mt-color-separator-primary) transparent;
+}
+
+/* Экран ожидания во весь рост — пока проверяется сессия */
+.mt-center-screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--mt-color-text-secondary);
+}

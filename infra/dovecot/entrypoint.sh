@@ -1,0 +1,43 @@
+#!/bin/sh
+# Генерируем конфигурацию Dovecot из шаблонов (/etc/dovecot-repo, монтируется из
+# infra/dovecot/conf) с подстановкой переменных из .env и запускаем в foreground.
+# После правки конфигов на хосте: docker compose restart dovecot
+set -e
+
+: "${MAIL_DOMAIN:=mail.local}"
+# По умолчанию — безопасное значение: без TLS пароль не принимаем.
+: "${DOVECOT_DISABLE_PLAINTEXT_AUTH:=yes}"
+# Внутренняя сеть стека — должна совпадать с подсетью из docker-compose.yml
+: "${DOCKER_SUBNET:=172.28.0.0/16}"
+export MAIL_DOMAIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DOVECOT_DISABLE_PLAINTEXT_AUTH DOCKER_SUBNET
+
+envsubst '${MAIL_DOMAIN} ${DOVECOT_DISABLE_PLAINTEXT_AUTH} ${DOCKER_SUBNET}' \
+    < /etc/dovecot-repo/dovecot.conf.template > /etc/dovecot/dovecot.conf
+
+envsubst '${POSTGRES_DB} ${POSTGRES_USER} ${POSTGRES_PASSWORD}' \
+    < /etc/dovecot-repo/dovecot-sql.conf.ext.template > /etc/dovecot/dovecot-sql.conf.ext
+chmod 600 /etc/dovecot/dovecot-sql.conf.ext
+
+# ------------------------------------------------------------------
+# Служебный (master) пользователь для входа администратора в чужой ящик.
+# Файл passwd-file: «логин:{СХЕМА}хэш». Пароль хэшируется здесь же,
+# в открытом виде на диск не попадает. Без DOVECOT_MASTER_PASSWORD файл
+# остаётся пустым — тогда служебный вход просто не работает.
+# ------------------------------------------------------------------
+: > /etc/dovecot/master-users
+if [ -n "${DOVECOT_MASTER_USER:-}" ] && [ -n "${DOVECOT_MASTER_PASSWORD:-}" ]; then
+    MASTER_HASH=$(doveadm pw -s SHA512-CRYPT -p "$DOVECOT_MASTER_PASSWORD" | tr -d '\r\n')
+    printf '%s:%s\n' "$DOVECOT_MASTER_USER" "$MASTER_HASH" > /etc/dovecot/master-users
+    echo "Служебный пользователь Dovecot: $DOVECOT_MASTER_USER"
+fi
+# passwd-file читает процесс auth уже под пользователем dovecot,
+# поэтому файл принадлежит ему и доступен только на чтение только ему.
+chown dovecot:dovecot /etc/dovecot/master-users
+chmod 400 /etc/dovecot/master-users
+
+# Права на тома (named volume может прийти с root-владельцем):
+#   /var/mail/vhosts — письма, /var/mail/index — индексы, включая Xapian
+mkdir -p /var/mail/vhosts /var/mail/index
+chown vmail:vmail /var/mail/vhosts /var/mail/index
+
+exec dovecot -F

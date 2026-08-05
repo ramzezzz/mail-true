@@ -1,0 +1,70 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 12px 0 44px; /* 32px колонка непрочитанного + 12px поле */
+}
+
+.compact .row {
+  height: 40px;
+}
+
+.avatar,
+.correspondent,
+.subject,
+.date {
+  background: var(--mt-skeleton-bg);
+  border-radius: var(--mt-size-border-radius, 8px);
+  animation: shimmer 1.4s var(--mt-anim-easing-default, ease) infinite;
+}
+
+.avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+
+.correspondent {
+  flex: 0 0 18%;
+  height: 12px;
+}
+
+.subject {
+  height: 12px;
+}
+
+.date {
+  flex: none;
+  width: 44px;
+  height: 10px;
+  margin-left: auto;
+}
+
+@keyframes shimmer {
+  0%,
+  100% {
+    background-color: var(--mt-skeleton-bg);
+  }
+  50% {
+    background-color: var(--mt-skeleton-shine);
+  }
+}
+
+/* Мигание — не единственный способ сказать «грузится»: у списка есть
+   aria-busy, поэтому анимацию можно смело отключать. */
+@media (prefers-reduced-motion: reduce) {
+  .avatar,
+  .correspondent,
+  .subject,
+  .date {
+    animation: none;
+  }
+}

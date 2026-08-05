@@ -1,0 +1,35 @@
+{
+  "name": "mail-true",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Почтовый сервер с веб-интерфейсом в стиле Mail.ru",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:api dev:web",
+    "dev:api": "npm run dev --workspace @mail-true/api",
+    "dev:web": "npm run dev --workspace @mail-true/web",
+    "dev:admin": "npm run dev --workspace @mail-true/admin",
+    "build": "npm run build --workspace @mail-true/shared && npm run build --workspace @mail-true/api && npm run build --workspace @mail-true/web",
+    "build:admin": "npm run build --workspace @mail-true/admin",
+    "livetest:admin": "bash apps/admin/scripts/live-test.sh",
+    "typecheck": "tsc --build --force",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "stack:up": "docker compose -f infra/docker-compose.yml up -d",
+    "stack:down": "docker compose -f infra/docker-compose.yml down",
+    "stack:logs": "docker compose -f infra/docker-compose.yml logs -f"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "npm-run-all2": "^7.0.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  }
+}

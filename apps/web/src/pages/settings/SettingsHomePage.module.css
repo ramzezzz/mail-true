@@ -1,0 +1,43 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-card-border-radius, 16px);
+  background: var(--mt-settings-card-bg);
+  color: var(--mt-color-text-primary);
+  text-decoration: none;
+  transition: border-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.card:hover {
+  border-color: var(--mt-color-stroke-accent);
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--mt-font-h2-size, 20px);
+  line-height: var(--mt-font-h2-line-height, 26px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.cardArrow {
+  display: inline-flex;
+  color: var(--mt-color-icon-secondary);
+}
+
+.cardText {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  color: var(--mt-color-text-secondary);
+}

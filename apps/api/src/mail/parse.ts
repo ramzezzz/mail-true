@@ -1,0 +1,193 @@
+/**
+ * Разбор полного письма: mailparser для тела и заголовков,
+ * BODYSTRUCTURE для списка вложений, санитизация HTML.
+ */
+import { simpleParser } from 'mailparser';
+import type { AddressObject, ParsedMail } from 'mailparser';
+import type { FetchMessageObject } from 'imapflow';
+import type { AuthResult, MailAddress, Message } from '@mail-true/shared';
+import { sanitizeEmailHtml } from './sanitize.js';
+import { cidToPartMap, collectAttachments } from './structure.js';
+import { buildSummary } from './summary.js';
+import { htmlToText, makeSnippet } from './text.js';
+
+function mailparserAddresses(obj: AddressObject | AddressObject[] | undefined): MailAddress[] {
+  if (!obj) return [];
+  const list = Array.isArray(obj) ? obj : [obj];
+  const result: MailAddress[] = [];
+  for (const group of list) {
+    for (const item of group.value) {
+      if (item.address) {
+        result.push({ name: item.name || null, address: item.address });
+      }
+    }
+  }
+  return result;
+}
+
+const AUTH_VALUES: ReadonlySet<string> = new Set([
+  'pass',
+  'fail',
+  'softfail',
+  'neutral',
+  'none',
+  'temperror',
+  'permerror',
+]);
+
+/** Разбирает заголовок Authentication-Results (spf/dkim/dmarc). */
+export function parseAuthResults(header: string | undefined): Message['authentication'] {
+  const result: { spf: AuthResult; dkim: AuthResult; dmarc: AuthResult } = {
+    spf: 'none',
+    dkim: 'none',
+    dmarc: 'none',
+  };
+  if (!header) return result;
+  for (const match of header.matchAll(/\b(spf|dkim|dmarc)\s*=\s*([a-z]+)/gi)) {
+    const key = match[1]?.toLowerCase() as 'spf' | 'dkim' | 'dmarc' | undefined;
+    const value = match[2]?.toLowerCase();
+    if (key && value && AUTH_VALUES.has(value)) {
+      result[key] = value as AuthResult;
+    }
+  }
+  return result;
+}
+
+/**
+ * Заголовки, полезные интерфейсу. Имена — строго в нижнем регистре:
+ * интерфейс ищет их именно так.
+ */
+const HEADER_WHITELIST = new Set([
+  'return-path',
+  'list-unsubscribe',
+  'list-unsubscribe-post',
+  'list-id',
+  'list-help',
+  'list-post',
+  'list-owner',
+  'list-archive',
+  'x-mailer',
+  'user-agent',
+  'authentication-results',
+  'content-language',
+  'importance',
+  'x-priority',
+  'precedence',
+  'auto-submitted',
+]);
+
+/** Длиннее этого заголовок интерфейсу всё равно не нужен. */
+const MAX_HEADER_LENGTH = 4096;
+
+/** Склеивает свёрнутый заголовок в одну строку. */
+function unfold(value: string): string {
+  return value.replace(/\r?\n[ \t]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Отбирает заголовки для ответа.
+ *
+ * Читается `headerLines`, а не `headers`. Причина: mailparser сводит ВСЮ
+ * группу `list-*` в один разобранный объект под ключом `list`, поэтому
+ * `headers.get('list-unsubscribe')` возвращает undefined, а проверка
+ * `typeof === 'string'` отбрасывала и сам объект `list`, и `return-path`
+ * (он разбирается в адресный объект). В итоге письмо рассылки приходило
+ * с `headers: {}` — и кнопка «Отписаться» в интерфейсе была недостижима
+ * в принципе, сколько её ни чини на стороне клиента.
+ *
+ * `headerLines` отдаёт исходные строки заголовков с уже приведёнными
+ * к нижнему регистру именами — ровно то, что нужно интерфейсу.
+ */
+function pickHeaders(parsed: ParsedMail): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of parsed.headerLines ?? []) {
+    const name = item.key.toLowerCase();
+    if (!HEADER_WHITELIST.has(name)) continue;
+    const colon = item.line.indexOf(':');
+    if (colon < 0) continue;
+    const value = unfold(item.line.slice(colon + 1)).slice(0, MAX_HEADER_LENGTH);
+    if (!value) continue;
+    // Заголовок мог встретиться дважды — сохраняем оба значения
+    out[name] = out[name] ? `${out[name]}, ${value}` : value;
+  }
+  return out;
+}
+
+/**
+ * Разбирает только заголовки письма (для отписки от рассылки и т. п.).
+ * Принимает как полный исходник, так и один блок заголовков.
+ */
+export async function parseMessageHeaders(source: Buffer): Promise<Record<string, string>> {
+  const parsed = await simpleParser(source);
+  return pickHeaders(parsed);
+}
+
+export interface ParseMessageArgs {
+  folderId: string;
+  msg: FetchMessageObject;
+  source: Buffer;
+  /** Разрешить внешние картинки (иначе блокируются). */
+  allowRemote: boolean;
+}
+
+export interface ParsedMessageResult {
+  message: Message;
+  blockedRemote: number;
+}
+
+/** Собирает полное Message из исходника письма и данных FETCH. */
+export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMessageResult> {
+  const { folderId, msg, source, allowRemote } = args;
+  // skipImageLinks: cid-ссылки не заменяются на data:URI —
+  // мы сами переписываем их на /api/messages/:id/parts/:partId
+  const parsed = await simpleParser(source, { skipImageLinks: true });
+
+  const cidMap = cidToPartMap(msg.bodyStructure);
+  const messageId = `${folderId}:${msg.uid}`;
+  const partUrl = (partId: string): string =>
+    `/api/messages/${encodeURIComponent(messageId)}/parts/${encodeURIComponent(partId)}`;
+
+  let bodyHtml: string | null = null;
+  let blockedRemote = 0;
+  const rawHtml = parsed.html || null;
+  if (rawHtml) {
+    const sanitized = sanitizeEmailHtml(rawHtml, {
+      allowRemote,
+      resolveCid: (cid) => {
+        const part = cidMap.get(cid);
+        return part ? partUrl(part) : null;
+      },
+    });
+    bodyHtml = sanitized.html;
+    blockedRemote = sanitized.blockedRemote;
+  }
+
+  const bodyText = parsed.text ?? (rawHtml ? htmlToText(rawHtml) : null);
+  const snippet = makeSnippet(bodyText ?? '');
+
+  const summary = buildSummary({ folderId, msg, snippet });
+
+  const references = Array.isArray(parsed.references)
+    ? parsed.references
+    : parsed.references
+      ? [parsed.references]
+      : [];
+
+  const authHeader = parsed.headers.get('authentication-results');
+
+  const message: Message = {
+    ...summary,
+    messageId: parsed.messageId ?? null,
+    inReplyTo: parsed.inReplyTo ?? null,
+    references,
+    replyTo: mailparserAddresses(parsed.replyTo),
+    bcc: mailparserAddresses(parsed.bcc),
+    bodyHtml,
+    bodyText,
+    attachments: collectAttachments(msg.bodyStructure),
+    headers: pickHeaders(parsed),
+    authentication: parseAuthResults(typeof authHeader === 'string' ? authHeader : undefined),
+  };
+
+  return { message, blockedRemote };
+}

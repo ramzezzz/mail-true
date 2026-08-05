@@ -1,0 +1,212 @@
+.zone {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* В поисковом режиме строка занимает и зону логотипа, и зону поиска */
+.zoneSearch {
+  gap: 12px;
+  padding-left: 12px;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 640px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-header-search-bg);
+  color: var(--mt-header-search-icon);
+}
+
+/* Рамка фокуса на всём поле: у самого input ни рамки, ни своего фона нет,
+   и идущий через Tab не видел, что уже попал в поиск */
+.field:focus-within {
+  outline: 2px solid var(--mt-color-stroke-accent);
+  outline-offset: 2px;
+}
+
+.zoneSearch .field {
+  max-width: none;
+}
+
+.icon {
+  flex: none;
+  display: block;
+}
+
+.input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--mt-header-search-text);
+  font-family: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--mt-header-search-placeholder);
+}
+
+/* Крестик у нативного type=search дублировал бы наш — гасим его */
+.input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+/* «‹ Сбросить поиск» слева, на месте логотипа */
+.reset {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: var(--mt-header-text);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.reset:hover {
+  background: var(--mt-header-button-bg-hover);
+}
+
+.resetChevron {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Чип области поиска «Везде ▾» внутри поля */
+.scopeHost {
+  flex: none;
+}
+
+.scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--mt-mail-color-header-search-chip-background);
+  color: var(--mt-header-search-text);
+  font-size: var(--mt-font-subhead-size, 14px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scope:hover {
+  background: var(--mt-mail-color-header-search-chip-background-hover);
+}
+
+.scopeArrow {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.clear {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mt-header-search-icon);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clear:hover {
+  background: var(--mt-header-button-bg-hover);
+}
+
+.submit {
+  flex: none;
+  height: 36px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: var(--mt-header-text);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  cursor: pointer;
+}
+
+.submit:hover {
+  background: var(--mt-header-button-bg-hover);
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 1024px) {
+  .zone {
+    padding-right: 4px;
+  }
+
+  /* Ниже этого поле перестаёт быть полем ввода и становится полоской */
+  .field {
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 640px) {
+  /*
+   * «‹ Сбросить поиск» ужимается до шеврона: подпись съедала половину строки
+   * поиска. font-size: 0 гасит только показ — в дереве доступности название
+   * кнопки остаётся прежним, в отличие от display: none.
+   */
+  .reset {
+    font-size: 0;
+    padding: 0 8px;
+  }
+
+  .resetChevron {
+    font-size: 22px;
+  }
+
+  .zoneSearch {
+    gap: 6px;
+    padding-left: 4px;
+  }
+
+  .submit {
+    padding: 0 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Лупа внутри поля лишняя: рядом уже есть «‹» и «Найти», а запросу
+     нужен каждый пиксель */
+  .zoneSearch .icon {
+    display: none;
+  }
+
+  /* Палец не попадает в 36px */
+  .field,
+  .reset,
+  .submit {
+    height: 44px;
+  }
+
+  .clear {
+    width: 32px;
+    height: 32px;
+  }
+}

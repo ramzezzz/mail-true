@@ -1,0 +1,223 @@
+/*
+ * Раздел настроек помощника на основе ИИ — он же экран согласия.
+ * Одна колонка с ограниченной шириной: это текст, который надо прочитать,
+ * а не таблица, которую надо охватить взглядом.
+ */
+
+.page {
+  height: 100%;
+  overflow-y: auto;
+  padding: 24px 24px 48px;
+}
+
+.inner {
+  max-width: 720px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-h1-size, 24px);
+  line-height: var(--mt-font-h1-line-height, 28px);
+  font-weight: 500;
+}
+
+.lead {
+  margin: 0 0 24px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.section {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--mt-ai-banner-border);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-banner-bg);
+}
+
+.sectionTitle {
+  margin: 0 0 12px;
+  font-size: var(--mt-font-headline1-size, 16px);
+  font-weight: 500;
+}
+
+.text {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.text:last-child {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: var(--mt-color-text-secondary);
+}
+
+/* Пары «свойство — значение» про поставщика */
+.rows {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 6px 16px;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.rowKey {
+  color: var(--mt-color-text-secondary);
+}
+
+.rowValue {
+  overflow-wrap: anywhere;
+}
+
+/* Главное про локальную модель: письма не покидают периметр */
+.local {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-mail-color-list-background-positive-alpha);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.localIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mt-color-background-positive);
+}
+
+.localTitle {
+  font-weight: 500;
+}
+
+/* Сервис снаружи — предупреждаем прямо */
+.remote {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-warning-bg);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.warning {
+  margin-bottom: 12px;
+  padding: 12px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-warning-bg);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.error {
+  margin-bottom: 12px;
+  color: var(--mt-color-text-negative);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+/* Список возможностей */
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feature {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.featureHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.featureTitle {
+  font-weight: 500;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.featureText {
+  margin: 0;
+  padding-left: 24px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.featureSends {
+  margin: 0;
+  padding-left: 24px;
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.featureSendsLabel {
+  color: var(--mt-color-text-secondary);
+}
+
+/* Списки «что не отправляется» */
+.list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.list li {
+  margin-bottom: 4px;
+}
+
+/* Расход */
+.budget {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.budgetItem {
+  flex: 1 1 180px;
+  padding: 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-chip-bg);
+}
+
+.budgetValue {
+  font-size: var(--mt-font-h1-size, 24px);
+  line-height: var(--mt-font-h1-line-height, 28px);
+  font-weight: 500;
+}
+
+.budgetLabel {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+/* Пояснение, стоящее после блока или списка */
+.spacedNote {
+  margin-top: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.centered {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+  color: var(--mt-color-text-secondary);
+}

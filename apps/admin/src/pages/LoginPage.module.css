@@ -1,0 +1,46 @@
+/* Вход в админку: отдельная страница, ничего кроме формы. */
+
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 24px;
+  background: var(--mt-color-background-secondary);
+}
+
+.card {
+  width: 100%;
+  max-width: 360px;
+  background: var(--mt-admin-surface);
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-size-card-border-radius, 12px);
+  padding: 24px;
+}
+
+.title {
+  margin: 0 0 4px;
+  font-size: var(--mt-font-title2-size, 20px);
+  font-weight: 600;
+}
+
+.subtitle {
+  margin: 0 0 20px;
+  color: var(--mt-color-text-secondary);
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.error {
+  margin-bottom: 12px;
+  color: var(--mt-color-text-negative);
+}
+
+.footnote {
+  margin-top: 16px;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+  line-height: 16px;
+}

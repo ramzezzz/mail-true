@@ -1,0 +1,22 @@
+# Подключение Dovecot к PostgreSQL (шаблон; секреты подставляются из .env)
+driver = pgsql
+connect = host=postgres dbname=${POSTGRES_DB} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD}
+
+# Схема по умолчанию, если хэш без префикса {SCHEME}
+default_pass_scheme = SHA512-CRYPT
+
+password_query = \
+  SELECT email AS user, password \
+  FROM virtual_users WHERE email = '%u' AND active
+
+# quota_rule — лимит ящика для плагина quota; берётся из virtual_users.quota_bytes.
+# quota_bytes = 0 означает «без ограничения» (Dovecot трактует bytes=0 именно так).
+user_query = \
+  SELECT '/var/mail/vhosts/%d/%n' AS home, 5000 AS uid, 5000 AS gid, \
+         '*:bytes=' || quota_bytes AS quota_rule \
+  FROM virtual_users WHERE email = '%u' AND active
+
+# Перебор всех ящиков — нужен для doveadm с ключом -A
+# (переиндексация, пересчёт квот и т.п.)
+iterate_query = \
+  SELECT email AS user FROM virtual_users WHERE active

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 186 32" width="186" height="32" role="img" aria-label="Mail.True">
+  <title>Mail.True — вариант для тёмного фона</title>
+  <!-- Знак: почтовая марка с галочкой-клапаном -->
+  <path fill="#5CA8F5" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#15181D" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+  <!-- Написание MAIL -->
+  <g fill="none" stroke="#E9EDF2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M46 24 V8 L52.5 17.5 L59 8 V24"/>
+    <path d="M65 24 L71 8 L77 24 M67.5 18.6 H74.5"/>
+    <path d="M84.3 8 V24"/>
+    <path d="M91.6 8 V24 H100.6"/>
+  </g>
+  <!-- Точка-марка -->
+  <rect x="107.6" y="17" width="7" height="7" rx="2" fill="#5CA8F5"/>
+  <!-- Написание TRUE -->
+  <g fill="none" stroke="#5CA8F5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M121.6 8 H133.6 M127.6 8 V24"/>
+    <path d="M139.6 24 V8 M139.6 8 H146.1 A4 4 0 0 1 146.1 16 H139.6 M145.6 16 L150.1 24"/>
+    <path d="M156.1 8 V18.5 A5.5 5.5 0 0 0 167.1 18.5 V8"/>
+    <path d="M182.1 8 H173.1 V24 H182.1 M173.1 16 H180.6"/>
+  </g>
+</svg>

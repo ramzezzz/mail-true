@@ -1,0 +1,75 @@
+# Боевое переопределение стека Mail.True.
+#
+# Основной файл infra/docker-compose.yml рассчитан на машину разработчика:
+# все порты опубликованы на 127.0.0.1, чтобы стек не торчал наружу.
+# На боевом сервере почтовые порты и веб-порты обязаны слушать все адреса,
+# иначе снаружи не подключится ни один почтовый сервер и ни один клиент.
+#
+# Служебные порты (Postgres, Redis, веб-интерфейс Rspamd, отладочный порт
+# autoconfig) намеренно НЕ переопределяются: они остаются на 127.0.0.1.
+#
+# Применяется вместе с основным файлом:
+#   docker compose -f infra/docker-compose.yml -f install/compose.prod.yml up -d
+#
+# Теги !override заменяют список портов целиком, а не дописывают к нему
+# (иначе получилось бы две публикации одного порта: 127.0.0.1:25 и 0.0.0.0:25,
+# что даёт «address already in use»). Требуется Docker Compose 2.24 и новее —
+# install/install.sh это проверяет.
+
+services:
+  postfix:
+    ports: !override
+      - "${BIND_ADDRESS:-0.0.0.0}:25:25"       # приём почты от чужих серверов
+      - "${BIND_ADDRESS:-0.0.0.0}:587:587"     # отправка: submission, STARTTLS + SASL
+    logging: &prod-logging
+      driver: json-file
+      options:
+        # Ограничение лога: на VPS с маленьким диском разросшийся json-лог
+        # контейнера — вторая по частоте причина «сервер встал» после почты.
+        max-size: "10m"
+        max-file: "5"
+
+  dovecot:
+    ports: !override
+      - "${BIND_ADDRESS:-0.0.0.0}:143:143"     # IMAP + STARTTLS
+      - "${BIND_ADDRESS:-0.0.0.0}:993:993"     # IMAPS
+      - "${BIND_ADDRESS:-0.0.0.0}:110:110"     # POP3 + STARTTLS
+      - "${BIND_ADDRESS:-0.0.0.0}:995:995"     # POP3S
+    logging: *prod-logging
+
+  nginx:
+    ports: !override
+      - "${BIND_ADDRESS:-0.0.0.0}:80:80"       # ACME + autoconfig/autodiscover
+      - "${BIND_ADDRESS:-0.0.0.0}:443:443"     # то же по HTTPS (нужно Outlook)
+    logging: *prod-logging
+
+  # Сервер приложения. Наружу не публикуется вовсе: весь HTTP приходит
+  # через nginx, поэтому отладочный порт 3000 на боевом сервере не нужен.
+  api:
+    ports: !override []
+    environment:
+      # Cookie сессии не должна уходить по открытому HTTP: на боевом
+      # сервере вход в почту и админку идёт только по HTTPS.
+      COOKIE_SECURE: "true"
+      # Почта, API и админка живут на одном имени хоста каждый —
+      # межсайтовые запросы не нужны, и разрешать их незачем.
+      CORS_ORIGIN: "https://${MAIL_DOMAIN},https://mail.${MAIL_DOMAIN},https://admin.${MAIL_DOMAIN}"
+      # В журнал попадает адрес клиента из X-Forwarded-For от nginx
+      MAIL_PUBLIC_IPV4: "${MAIL_PUBLIC_IPV4:-}"
+    logging: *prod-logging
+
+  # Остальные сервисы наружу не публикуются — только ограничиваем логи.
+  web:
+    logging: *prod-logging
+  admin:
+    logging: *prod-logging
+  postgres:
+    logging: *prod-logging
+  redis:
+    logging: *prod-logging
+  rspamd:
+    logging: *prod-logging
+  unbound:
+    logging: *prod-logging
+  autoconfig:
+    logging: *prod-logging

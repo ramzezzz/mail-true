@@ -1,0 +1,124 @@
+/*
+ * Базовые стили админки.
+ *
+ * Токены и темы берутся из веб-интерфейса (apps/web/src/styles) — второй
+ * дизайн-системы не заводим. Здесь только семантические переменные,
+ * специфичные для админки: плотная таблица, узкие отступы, служебные цвета
+ * состояний. Ни одного зашитого цвета — всё через --mt-*.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(
+    --mt-mail-font-family-mail-sans,
+    'VK Sans Display',
+    VKSansDisplay,
+    MailSans,
+    -apple-system,
+    system-ui,
+    'Helvetica Neue',
+    Arial,
+    sans-serif
+  );
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: var(--mt-font-footnote-line-height, 16px);
+  color: var(--mt-color-text-primary);
+  background: var(--mt-color-background-secondary);
+  -webkit-font-smoothing: antialiased;
+}
+
+:root {
+  /* Плотная сетка админки: строка таблицы, отступы, ширина колонок */
+  --mt-admin-row-height: 34px;
+  --mt-admin-gap: 12px;
+  --mt-admin-gap-s: 6px;
+  --mt-admin-sidebar-width: 216px;
+  --mt-admin-header-height: 48px;
+  --mt-admin-radius: var(--mt-size-border-radius, 8px);
+
+  /* Служебные цвета состояний — только из палитры токенов */
+  --mt-admin-ok: var(--mt-color-accent-green);
+  --mt-admin-warn: var(--mt-color-accent-orange);
+  --mt-admin-fail: var(--mt-color-accent-red);
+  --mt-admin-muted: var(--mt-color-text-secondary);
+
+  --mt-admin-surface: var(--mt-color-background-content);
+  --mt-admin-border: var(--mt-color-separator-primary);
+
+  /* Моноширинный набор для адресов, DNS-записей и значений журнала.
+     В токенах mail.ru моноширинного семейства нет — заводим своё,
+     это шрифтовой стек, а не цвет. */
+  --mt-admin-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+
+a {
+  color: var(--mt-color-text-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mt-color-separator-primary) transparent;
+}
+
+/* Поля ввода админки: один вид на всё приложение */
+.mt-input,
+.mt-select,
+.mt-textarea {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-content);
+  color: var(--mt-color-text-primary);
+  outline: none;
+}
+
+.mt-input:focus,
+.mt-select:focus,
+.mt-textarea:focus {
+  border-color: var(--mt-color-accent-blue);
+}
+
+.mt-textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: var(--mt-admin-font-mono);
+}
+
+.mt-label {
+  display: block;
+  margin-bottom: var(--mt-admin-gap-s);
+  color: var(--mt-color-text-secondary);
+}
+
+/* Моноширинный текст: адреса, DNS-записи, значения журнала */
+.mt-mono {
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+}

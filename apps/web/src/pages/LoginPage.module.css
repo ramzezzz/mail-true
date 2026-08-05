@@ -1,0 +1,69 @@
+/* Экран входа: карточка по центру, как на входе mail.ru. */
+
+.screen {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--mt-color-background-secondary);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 360px;
+  padding: 32px;
+  border-radius: 16px;
+  background: var(--mt-color-background-content);
+  box-shadow: var(--mt-elevation-1);
+}
+
+.logo {
+  height: 28px;
+  align-self: flex-start;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--mt-color-text-primary);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 13px;
+  color: var(--mt-color-text-secondary);
+}
+
+.input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 8px;
+  background: var(--mt-color-background-content);
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  font-size: 15px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--mt-color-stroke-accent);
+}
+
+.error {
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-negative);
+  font-size: 13px;
+}

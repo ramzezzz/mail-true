@@ -1,0 +1,189 @@
+.sidebar {
+  width: var(--mt-app-sidebar-width, 232px);
+  flex-shrink: 0;
+  padding: var(--mt-mail-size-sidebar-padding-top, 12px) 16px 16px;
+  overflow-y: auto;
+  color: var(--mt-sidebar-item-text);
+}
+
+/* Кнопка «Написать письмо»: 164px текстовая часть + 36px стрелка = 200px */
+.composeRow {
+  display: flex;
+  width: var(--mt-app-sidebar-nav-width, 200px);
+  height: 36px;
+  margin-bottom: 12px;
+}
+
+.composeButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: block;
+  height: 36px;
+  border: none;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+  color: var(--mt-sidebar-compose-text);
+  text-decoration: none;
+}
+
+.composeInner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: var(--mt-size-border-radius, 8px) 0 0 var(--mt-size-border-radius, 8px);
+  background: var(--mt-sidebar-compose-bg);
+  box-shadow: inset 0 0 0 1px var(--mt-sidebar-compose-border);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background-color var(--mt-anim-duration-s, 0.1s) ease-in;
+}
+
+.composeInner svg {
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+.composeButton:hover .composeInner {
+  background: var(--mt-sidebar-compose-bg-hover);
+}
+
+.composeButton:active .composeInner {
+  background: var(--mt-sidebar-compose-bg-press);
+}
+
+.composeDropdownHost {
+  flex-shrink: 0;
+}
+
+/* Стрелка выпадающего меню — отдельная кнопка справа */
+.composeArrow {
+  width: 36px;
+  height: 36px;
+  border-radius: 0 var(--mt-size-border-radius, 8px) var(--mt-size-border-radius, 8px) 0;
+  background: var(--mt-sidebar-compose-bg);
+  box-shadow: inset 0 0 0 1px var(--mt-sidebar-compose-border);
+  color: var(--mt-sidebar-compose-text);
+  margin-left: -1px;
+}
+
+.composeArrow:hover:not(:disabled) {
+  background: var(--mt-sidebar-compose-bg-hover);
+}
+
+.composeArrow:active:not(:disabled) {
+  background: var(--mt-sidebar-compose-bg-press);
+}
+
+/* Список папок: пункты 200×36 с шагом 37px (36 + 1px зазор) */
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: var(--mt-app-sidebar-nav-width, 200px);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.item:hover {
+  background: var(--mt-sidebar-item-bg-hover);
+}
+
+.active,
+.active:hover {
+  background: var(--mt-sidebar-item-bg-active);
+}
+
+/* Вложенные папки (автокатегории): отступ слева 28px */
+.nested {
+  padding-left: 28px;
+}
+
+.folderIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mt-sidebar-item-icon);
+}
+
+.itemName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counter {
+  flex-shrink: 0;
+  color: var(--mt-sidebar-counter-text);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.newFolder {
+  opacity: 0.72;
+}
+
+/* Папка под перетаскиваемым письмом */
+.dropTarget {
+  background: var(--mt-drop-target-bg);
+  box-shadow: inset 0 0 0 1px var(--mt-drop-target-border);
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+/* В выдвижном ящике (см. AppLayout) колонка тянется во всю его ширину:
+   зазор до правого края там лишний, а на узком телефоне и вреден. */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: min(280px, 85vw);
+    padding-bottom: 24px;
+  }
+
+  .composeRow,
+  .nav {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Палец не попадает в 36px */
+  .composeRow,
+  .composeButton,
+  .composeInner,
+  .composeArrow,
+  .item {
+    height: 44px;
+  }
+
+  .composeArrow {
+    width: 44px;
+  }
+}

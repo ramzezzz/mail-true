@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg>

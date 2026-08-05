@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg>

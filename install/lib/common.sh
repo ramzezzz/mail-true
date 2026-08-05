@@ -1,0 +1,474 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # часть переменных используется в подключающих скриптах
+# ------------------------------------------------------------------
+# Общие функции установщика Mail.True.
+# Подключается через `source "$(dirname "$0")/lib/common.sh"`.
+# Ничего не выполняет сама — только объявляет функции и переменные.
+# ------------------------------------------------------------------
+
+# Каталоги проекта. Файл лежит в install/lib/, значит корень — на два уровня выше.
+MT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INSTALL_DIR="$(dirname "$MT_LIB_DIR")"
+REPO_DIR="$(dirname "$INSTALL_DIR")"
+INFRA_DIR="$REPO_DIR/infra"
+ENV_FILE="$INFRA_DIR/.env"
+ENV_EXAMPLE="$INFRA_DIR/.env.example"
+COMPOSE_FILE="$INFRA_DIR/docker-compose.yml"
+COMPOSE_PROD="$INSTALL_DIR/compose.prod.yml"
+STATE_DIR="$INSTALL_DIR/state"
+STATE_FILE="$STATE_DIR/install.conf"
+CERT_DIR="$INFRA_DIR/data/certs"
+
+# Порты, которые почтовый сервер занимает на боевой машине.
+MT_REQUIRED_PORTS=(25 80 443 143 993 110 995 587)
+# 465 (SMTPS) пока не слушается стеком — см. docs/install.md, раздел «Порты».
+
+# ------------------------------------------------------------------
+# Тома с данными, которые ОБЯЗАНЫ попадать в резервную копию.
+# Один список на backup.sh и restore.sh: раздельные перечни уже привели
+# к тому, что очередь Postfix (postfix-spool) появилась в стеке, а в
+# копию не попала. Потеря очереди — это тихая потеря принятых писем.
+# Формат: <суффикс тома>:<файл в архиве>:<описание для человека>
+# ------------------------------------------------------------------
+MT_BACKUP_VOLUMES=(
+    "vmail:vmail.tar.gz:Maildir (письма)"
+    "rspamd-data:rspamd-data.tar.gz:данные rspamd (ключи DKIM)"
+    "postfix-spool:postfix-spool.tar.gz:очередь Postfix (принятые, но ещё не доставленные письма)"
+    # Обучение антиспама живёт ЗДЕСЬ, а не в rspamd-data: классификатор
+    # настроен на Redis (infra/rspamd/local.d/classifier-bayes.conf), и
+    # ключи BAYES_SPAM_keys/BAYES_HAM_keys лежат в этом томе.
+    #
+    # Без него восстановление из копии молча обнуляло обучение: каждая
+    # пометка «это спам», сделанная людьми за месяцы, пропадала. Ничто при
+    # этом не ломается — сервер просто снова начинает ошибаться в раскладке,
+    # и понять, почему, уже невозможно.
+    "redisdata:redisdata.tar.gz:обучение антиспама (байесовская статистика)"
+    # Вложения, уже загруженные, но ещё не отправленные: человек собирал
+    # письмо с большим файлом и не успел нажать «Отправить».
+    "api-uploads:api-uploads.tar.gz:незавершённые загрузки вложений"
+)
+
+# ------------------------------------------------------------------
+# Тома, которые в копию НЕ входят намеренно, — чтобы это было решением,
+# а не забывчивостью:
+#
+#   mailindex  — индексы Dovecot и полнотекстового поиска. Восстанавливаются
+#                из самих писем, но занимают столько же места, сколько почта.
+#                После восстановления поиск работает не сразу: нужен
+#                infra/scripts/fts-reindex.sh (см. docs/install.md).
+#   clamav-db  — базы антивируса. Скачиваются заново за несколько минут.
+#   pgdata     — сама база. В копию идёт логический дамп (pg_dump), он
+#                переносим между версиями Postgres, а том — нет.
+# ------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# Ключи infra/.env, ПРИВЯЗАННЫЕ К ТОМУ БАЗЫ, а не к данным.
+#
+# Postgres принимает POSTGRES_PASSWORD только при инициализации пустого
+# тома. Если восстановить .env из копии поверх уже созданного тома, пароль
+# в файле разъедется с паролем внутри базы: сама база работать будет
+# (healthcheck ходит локальным сокетом и пароля не спрашивает), а api,
+# postfix и dovecot, которые ходят по TCP, доступ потеряют.
+#
+# Поэтому при восстановлении .env берётся из копии ЦЕЛИКОМ (в нём ключи
+# шифрования, без которых не прочитать сохранённые секреты), а эти ключи
+# возвращаются из действующей установки.
+# ------------------------------------------------------------------
+MT_VOLUME_BOUND_ENV_KEYS=(POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB)
+
+# ------------------------------------------------------------------
+# Вывод
+# ------------------------------------------------------------------
+if [ -t 1 ] && [ "${NO_COLOR:-}" = "" ]; then
+    C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'
+    C_BLUE=$'\033[36m'; C_BOLD=$'\033[1m'; C_OFF=$'\033[0m'
+else
+    C_RED=''; C_GREEN=''; C_YELLOW=''; C_BLUE=''; C_BOLD=''; C_OFF=''
+fi
+
+# Счётчики результатов проверок (использует selfcheck.sh)
+MT_PASS=0
+MT_WARN=0
+MT_FAIL=0
+
+step()  { printf '\n%s=== %s ===%s\n' "$C_BOLD" "$*" "$C_OFF"; }
+info()  { printf '     %s\n' "$*"; }
+ok()    { printf '  %s[ ОК ]%s   %s\n' "$C_GREEN" "$C_OFF" "$*"; MT_PASS=$((MT_PASS + 1)); }
+warn()  { printf '  %s[ ! ]%s    %s\n' "$C_YELLOW" "$C_OFF" "$*"; MT_WARN=$((MT_WARN + 1)); }
+fail()  { printf '  %s[ НЕТ ]%s  %s\n' "$C_RED" "$C_OFF" "$*"; MT_FAIL=$((MT_FAIL + 1)); }
+hint()  { printf '           %s→ %s%s\n' "$C_BLUE" "$*" "$C_OFF"; }
+die()   { printf '\n%sОшибка:%s %s\n' "$C_RED" "$C_OFF" "$*" >&2; exit 1; }
+
+# ------------------------------------------------------------------
+# Диалог с пользователем.
+# В неинтерактивном режиме (MT_NONINTERACTIVE=1) вопросов не задаём:
+# значение берётся из переменной окружения, а если её нет — падаем с
+# понятным сообщением, какую переменную нужно задать.
+# ------------------------------------------------------------------
+
+# ask <имя переменной> <вопрос> [значение по умолчанию]
+ask() {
+    local var="$1" prompt="$2" default="${3:-}" current answer
+    current="${!var:-}"
+    if [ -n "$current" ]; then
+        info "$prompt: $current"
+        return 0
+    fi
+    if [ "${MT_NONINTERACTIVE:-0}" = "1" ]; then
+        [ -n "$default" ] || die "не задана переменная $var ($prompt)"
+        printf -v "$var" '%s' "$default"
+        info "$prompt: $default (по умолчанию)"
+        return 0
+    fi
+    if [ -n "$default" ]; then
+        read -r -p "  $prompt [$default]: " answer
+        [ -n "$answer" ] || answer="$default"
+    else
+        while :; do
+            read -r -p "  $prompt: " answer
+            if [ -n "$answer" ]; then break; fi
+            printf '  Пустой ответ не подходит.\n'
+        done
+    fi
+    printf -v "$var" '%s' "$answer"
+}
+
+# ask_secret <имя переменной> <вопрос> — ввод скрыт, спрашивается дважды.
+ask_secret() {
+    local var="$1" prompt="$2" first second
+    if [ -n "${!var:-}" ]; then
+        info "$prompt: задан через переменную окружения"
+        return 0
+    fi
+    if [ "${MT_NONINTERACTIVE:-0}" = "1" ]; then
+        die "не задана переменная $var ($prompt)"
+    fi
+    while :; do
+        read -r -s -p "  $prompt: " first; printf '\n'
+        if [ "${#first}" -lt 10 ]; then
+            printf '  Пароль короче 10 символов — так нельзя.\n'
+            continue
+        fi
+        read -r -s -p "  Повторите пароль: " second; printf '\n'
+        if [ "$first" = "$second" ]; then break; fi
+        printf '  Пароли не совпали, попробуйте ещё раз.\n'
+    done
+    printf -v "$var" '%s' "$first"
+}
+
+# ascii_lower <строка> — опустить регистр ТОЛЬКО латиницы.
+# Штатное ${var,,} в локали C/POSIX (обычной на сервере) портит
+# многобайтовую кириллицу побайтово: «нет» превращается в мусор, и ответ
+# «нет» переставал распознаваться вовсе. Поэтому свой, безопасный вариант.
+ascii_lower() {
+    printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z'
+}
+
+# normalize_yes_no <значение> — печатает yes|no и возвращает 0, либо
+# возвращает 1, если значение не распознано. Опечатку («yse», «nо» с
+# русской «о», «true1») нельзя молча считать значением по умолчанию:
+# человек написал «yes», получил «no» и узнал об этом через месяц.
+normalize_yes_no() {
+    # Кириллица перечислена в обоих регистрах: опускать её регистр нечем,
+    # пока локаль может оказаться C/POSIX.
+    case "$(ascii_lower "$1")" in
+        1|y|yes|true|on|enable|enabled|д|да|Д|Да|ДА) printf 'yes'; return 0 ;;
+        0|n|no|false|off|disable|disabled|н|нет|Н|Нет|НЕТ) printf 'no'; return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# normalize_choice <значение> <допустимые через пробел> — печатает значение
+# в нижнем регистре и возвращает 0, либо 1, если оно не из списка.
+normalize_choice() {
+    local value allowed="$2" one
+    value="$(ascii_lower "$1")"
+    for one in $allowed; do
+        if [ "$value" = "$one" ]; then printf '%s' "$value"; return 0; fi
+    done
+    return 1
+}
+
+# Пароли-заглушки: они есть в примерах и в документации, проходят проверку
+# длины и потому легко доезжают до боевой установки. Пускать их нельзя.
+MT_PLACEHOLDER_PASSWORDS=(
+    'смените-этот-пароль'
+    'change-me'
+    'changeme'
+    'change-this-password'
+    'password'
+    'пароль'
+    'mailtrue'
+    'admin123456'
+    '1234567890'
+)
+
+# is_placeholder_password <пароль> — 0, если это заглушка из примера.
+is_placeholder_password() {
+    local pw known
+    pw="$(ascii_lower "$1")"
+    for known in "${MT_PLACEHOLDER_PASSWORDS[@]}"; do
+        if [ "$pw" = "$(ascii_lower "$known")" ]; then return 0; fi
+    done
+    # change-me-... из infra/.env.example
+    case "$pw" in change-me*|смените*) return 0 ;; esac
+    return 1
+}
+
+# ask_yes_no <имя переменной> <вопрос> <yes|no по умолчанию>
+ask_yes_no() {
+    local var="$1" prompt="$2" default="$3" answer current normalized
+    current="${!var:-}"
+    if [ -n "$current" ]; then
+        # Значение пришло из файла ответов или окружения: опечатка здесь
+        # раньше молча превращалась в значение по умолчанию.
+        if ! normalized="$(normalize_yes_no "$current")"; then
+            die "непонятное значение $var=«$current» ($prompt). Допустимо: yes или no"
+        fi
+        printf -v "$var" '%s' "$normalized"
+        info "$prompt: ${!var}"
+        return 0
+    fi
+    if [ "${MT_NONINTERACTIVE:-0}" = "1" ] || [ "${MT_ASSUME_YES:-0}" = "1" ]; then
+        printf -v "$var" '%s' "$default"
+        info "$prompt: $default (по умолчанию)"
+        return 0
+    fi
+    local suffix='[y/N]'
+    if [ "$default" = "yes" ]; then suffix='[Y/n]'; fi
+    read -r -p "  $prompt $suffix: " answer
+    if [ -z "$answer" ]; then
+        printf -v "$var" '%s' "$default"
+        return 0
+    fi
+    local normalized
+    if normalized="$(normalize_yes_no "$answer")"; then
+        printf -v "$var" '%s' "$normalized"
+    else
+        # Живой человек мог просто промахнуться по клавише — переспрашиваем,
+        # а не подставляем молча значение по умолчанию.
+        printf '  Не понял ответ «%s». Ответьте yes или no.\n' "$answer"
+        ask_yes_no "$var" "$prompt" "$default"
+    fi
+}
+
+# confirm <вопрос> — возвращает 0 при согласии. В неинтерактивном режиме
+# согласие нужно выразить заранее: MT_ASSUME_YES=1.
+confirm() {
+    local answer
+    if [ "${MT_ASSUME_YES:-0}" = "1" ]; then return 0; fi
+    if [ "${MT_NONINTERACTIVE:-0}" = "1" ]; then return 1; fi
+    read -r -p "  $1 [y/N]: " answer
+    [ -n "$answer" ] || return 1
+    [ "$(normalize_yes_no "$answer" || printf 'no')" = "yes" ]
+}
+
+# ------------------------------------------------------------------
+# Секреты
+# ------------------------------------------------------------------
+
+# rand_secret [длина в байтах] — случайная строка из букв и цифр.
+# Без символов /+= : значение попадает в .env, в строки подключения к
+# Postgres и в конфиги postfix/dovecot, где спецсимволы ломают разбор.
+rand_secret() {
+    local bytes="${1:-24}" out=''
+    if [ -r /dev/urandom ]; then
+        out=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$bytes")
+    fi
+    if [ -z "$out" ] && command -v openssl >/dev/null 2>&1; then
+        out=$(openssl rand -base64 $((bytes * 2)) | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c "$bytes")
+    fi
+    [ -n "$out" ] || die "нечем сгенерировать случайный пароль (нет /dev/urandom и openssl)"
+    printf '%s' "$out"
+}
+
+# ------------------------------------------------------------------
+# Работа с infra/.env
+# ------------------------------------------------------------------
+
+# env_get <ключ> [файл] — значение переменной из .env (пусто, если нет).
+env_get() {
+    local key="$1" file="${2:-$ENV_FILE}"
+    [ -f "$file" ] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -1 | tr -d '\r'
+}
+
+# env_set <ключ> <значение> [файл] — задать или заменить строку в .env.
+env_set() {
+    local key="$1" value="$2" file="${3:-$ENV_FILE}" tmp
+    tmp="$(mktemp)"
+    if [ -f "$file" ] && grep -q "^${key}=" "$file"; then
+        # Значение подставляем через awk, чтобы не экранировать спецсимволы sed
+        awk -v k="$key" -v v="$value" '
+            index($0, k "=") == 1 && !done { print k "=" v; done = 1; next }
+            { print }
+        ' "$file" > "$tmp"
+    else
+        if [ -f "$file" ]; then cat "$file" > "$tmp"; fi
+        printf '%s=%s\n' "$key" "$value" >> "$tmp"
+    fi
+    cat "$tmp" > "$file"
+    rm -f "$tmp"
+    chmod 600 "$file"
+}
+
+# env_ensure <ключ> <значение по умолчанию> — задать, только если пусто.
+# Это и есть идемпотентность: уже сгенерированные секреты не перезаписываются.
+env_ensure() {
+    local key="$1" value="$2" current
+    current="$(env_get "$key")"
+    if [ -z "$current" ]; then
+        env_set "$key" "$value"
+        return 0   # значение было создано
+    fi
+    return 1       # значение уже было
+}
+
+# load_env — загрузить infra/.env в окружение текущего процесса.
+load_env() {
+    [ -f "$ENV_FILE" ] || die "нет файла $ENV_FILE — сначала выполните install/install.sh"
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+}
+
+# ------------------------------------------------------------------
+# Docker Compose
+# ------------------------------------------------------------------
+
+# compose_args — набор -f для основного файла и боевого переопределения.
+compose_args() {
+    local args=(-f "$COMPOSE_FILE")
+    if [ -f "$COMPOSE_PROD" ] && [ "${MT_USE_PROD_OVERRIDE:-1}" = "1" ]; then
+        args+=(-f "$COMPOSE_PROD")
+    fi
+    if [ "${CLAMAV_ENABLED:-false}" = "true" ]; then
+        args+=(--profile clamav)
+    fi
+    printf '%s\n' "${args[@]}"
+}
+
+# dc <аргументы docker compose>
+dc() {
+    local args=()
+    mapfile -t args < <(compose_args)
+    docker compose "${args[@]}" "$@"
+}
+
+# service_state <сервис> — строка вида "running healthy" / "exited".
+service_state() {
+    dc ps --format '{{.State}} {{.Health}}' "$1" 2>/dev/null | head -1
+}
+
+# wait_healthy <таймаут секунд> <сервисы...>
+wait_healthy() {
+    local timeout="$1"; shift
+    local services=("$@") deadline waiting state svc
+    deadline=$(( $(date +%s) + timeout ))
+    while :; do
+        waiting=()
+        for svc in "${services[@]}"; do
+            state="$(service_state "$svc")"
+            case "$state" in
+                *healthy*)  : ;;
+                running*)   # сервис без healthcheck считаем готовым
+                            case "$state" in *starting*|*unhealthy*) waiting+=("$svc") ;; esac ;;
+                *)          waiting+=("$svc") ;;
+            esac
+        done
+        if [ "${#waiting[@]}" -eq 0 ]; then return 0; fi
+        if [ "$(date +%s)" -ge "$deadline" ]; then
+            printf '  не дождались: %s\n' "${waiting[*]}" >&2
+            return 1
+        fi
+        printf '\r     ждём готовности: %-60s' "${waiting[*]}"
+        sleep 3
+    done
+}
+
+# ------------------------------------------------------------------
+# Проверки системы
+# ------------------------------------------------------------------
+
+# port_listener <порт> — кто слушает порт: "процесс (pid)" или пусто.
+port_listener() {
+    local port="$1" out=''
+    if command -v ss >/dev/null 2>&1; then
+        out=$(ss -H -ltnp "sport = :$port" 2>/dev/null | head -1)
+    elif command -v netstat >/dev/null 2>&1; then
+        out=$(netstat -ltnp 2>/dev/null | awk -v p=":$port\$" '$4 ~ p {print; exit}')
+    fi
+    printf '%s' "$out"
+}
+
+# port_busy <порт> — 0, если порт кем-то занят.
+port_busy() {
+    [ -n "$(port_listener "$1")" ]
+}
+
+# tcp_probe <хост> <порт> [таймаут] — 0, если соединение установилось.
+tcp_probe() {
+    local host="$1" port="$2" timeout="${3:-5}"
+    timeout "$timeout" bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null
+}
+
+# have <команда> — есть ли команда в системе.
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# version_ge <версия> <минимум> — сравнение вида 2.24.1 >= 2.24
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
+}
+
+# require_root — установщику нужен root (docker, apt, порты <1024, certbot).
+require_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        die "запускать нужно от root: sudo bash $0 $*"
+    fi
+}
+
+# public_ip — внешний IPv4 сервера (по маршруту наружу, затем по сервису).
+public_ip() {
+    local ip=''
+    if have ip; then
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+    fi
+    case "$ip" in
+        10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|127.*|'')
+            # За NAT локальный адрес бесполезен — спрашиваем снаружи
+            if have curl; then
+                local ext
+                ext=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)
+                if [ -n "$ext" ]; then ip="$ext"; fi
+            fi
+            ;;
+    esac
+    printf '%s' "$ip"
+}
+
+# resolve_a <имя> — A-записи имени через getent/dig, по одной на строку.
+resolve_a() {
+    local name="$1"
+    if have dig; then
+        dig +short A "$name" 2>/dev/null | grep -E '^[0-9.]+$' || true
+    elif have getent; then
+        getent ahostsv4 "$name" 2>/dev/null | awk '{print $1}' | sort -u || true
+    fi
+}
+
+# is_fqdn <имя> — грубая проверка доменного имени.
+is_fqdn() {
+    [[ "$1" =~ ^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$ ]]
+}
+
+# is_email <адрес>
+is_email() {
+    [[ "$1" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]
+}
+
+# node_in_container <скрипт> — выполнить JS внутри контейнера autoconfig
+# (там уже есть node, отдельные зависимости на хосте не нужны).
+node_in_container() {
+    dc exec -T autoconfig node -e "$1"
+}

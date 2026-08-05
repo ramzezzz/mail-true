@@ -1,0 +1,40 @@
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+.env
+.env.*
+!.env.example
+
+# данные почтового стека (Maildir, БД, ключи DKIM)
+infra/data/
+infra/secrets/
+*.pem
+*.key
+
+# артефакты исследования интерфейса
+.playwright-mcp/
+research/**/*.png
+research/**/*.har
+# Выгрузки сняты с живого ящика и могут содержать переписку и адреса.
+# Они полезны как справочник по вёрстке, но в общий доступ им нельзя.
+# Обезличенные копии при необходимости добавляйте принудительно.
+research/mailru/*.json
+
+logs/
+*.log
+npm-debug.log*
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Рабочие следы проверок: снимки экрана, снятые агентами при проверке правок.
+# Полезны в момент проверки, но к продукту отношения не имеют.
+.shots/
+*-raw.png
+docs/manual/build/

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg>

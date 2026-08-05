@@ -1,0 +1,91 @@
+/*
+ * Панель над списком: высота 48px, кнопки 36px (метрики .button2 mail.ru).
+ *
+ * Перенос разрешён на любой ширине: кнопка выделения подписана числом
+ * загруженных писем и растёт вместе с ним, поэтому «Фильтр» упирался
+ * в правый край не только на планшете. Пока всё помещается, полоса
+ * остаётся ровно 48px.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 48px;
+  flex-shrink: 0;
+  padding: 0 12px 0 8px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+/* Счётчик выделенных: «✓ N» */
+.counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  color: var(--mt-color-background-accent);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Меню «Фильтр» — ширина 204px как у mail.ru */
+.filterMenu {
+  width: 204px;
+}
+
+/* Меню «⋯» — ширина 285px, пункт 36px, поля 0 16px */
+.moreMenu {
+  width: 285px;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 1024px) {
+  .toolbar {
+    row-gap: 4px;
+    padding: 6px 8px;
+  }
+
+  /* Распорка при переносе только мешает: она одна заняла бы всю первую
+     строку и увела бы «Фильтр» вниз даже там, где он помещался */
+  .spacer {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  /*
+   * Панель становится значковой: подписи вроде «Отметить все прочитанными»
+   * на телефоне занимают больше экрана, чем весь остальной ряд. Подпись не
+   * убирается из разметки, а только уводится с глаз — display: none забрал
+   * бы у кнопки название, и для чтения с экрана она стала бы безымянной.
+   * Подсказки при наведении здесь не теряются: на сенсорном экране их нет.
+   */
+  .toolbar button {
+    position: relative;
+    padding: 0 8px;
+  }
+
+  .toolbar button > span + span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Палец не попадает в 36px */
+  .toolbar button {
+    min-width: 44px;
+    height: 44px;
+  }
+}

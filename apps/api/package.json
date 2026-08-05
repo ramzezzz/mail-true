@@ -1,0 +1,43 @@
+{
+  "name": "@mail-true/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "dev": "node --watch --experimental-strip-types src/server.ts",
+    "build": "tsc -b",
+    "start": "node dist/server.js",
+    "test": "tsc -b && node --test \"dist/**/*.test.js\"",
+    "smoke:imap": "node dist/scripts/smoke-imap.js",
+    "smoke:api": "node dist/scripts/smoke-api.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/multipart": "^9.0.2",
+    "@fastify/rate-limit": "^10.2.2",
+    "@fastify/websocket": "^11.0.2",
+    "@mail-true/ai": "*",
+    "@mail-true/migrate": "*",
+    "@mail-true/shared": "*",
+    "dompurify": "^3.2.3",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.0",
+    "imapflow": "^1.0.171",
+    "ioredis": "^5.4.2",
+    "jose": "^5.9.6",
+    "jsdom": "^25.0.1",
+    "mailparser": "^3.7.2",
+    "nodemailer": "^6.9.16",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^21.1.7",
+    "@types/mailparser": "^3.4.5",
+    "@types/nodemailer": "^6.4.17",
+    "@types/pg": "^8.11.10"
+  }
+}

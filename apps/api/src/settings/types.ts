@@ -1,0 +1,176 @@
+/**
+ * Типы раздела настроек: общие параметры ящика, подписи, правила фильтрации.
+ *
+ * Набор полей взят один в один с интерфейса настроек mail.ru
+ * (docs/features-mailru.md, разделы «Общие настройки» и «Правила
+ * фильтрации»), потому что интерфейс должен повторяться до мелочей.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Общие настройки                                                      */
+/* ------------------------------------------------------------------ */
+
+/** Что показывать после удаления письма. */
+export type AfterDelete = 'list' | 'next';
+
+/** Автоответчик: текст и срок действия. */
+export interface AutoReplySettings {
+  enabled: boolean;
+  subject: string | null;
+  text: string;
+  /** ISO-даты начала и конца действия; null — без границы. */
+  from: string | null;
+  until: string | null;
+  /** Не отвечать одному адресату чаще, чем раз в столько дней. */
+  days: number;
+}
+
+/** Общие настройки ящика. Отсутствие строки в базе = эти значения. */
+export interface MailSettings {
+  accountEmail: string;
+  /** Имя отправителя в заголовке From. null — берётся из адреса. */
+  senderName: string | null;
+  /** Включать содержимое исходного письма в ответ. */
+  replyQuote: boolean;
+  afterDelete: AfterDelete;
+  notifyBrowser: boolean;
+  notifyTab: boolean;
+  /** Автоматически пополнять адресную книгу. */
+  collectContacts: boolean;
+  autoReply: AutoReplySettings;
+  updatedAt: string | null;
+}
+
+/** Заплатка автоответчика: передаются только изменяемые поля. */
+export type AutoReplyPatch = {
+  [K in keyof AutoReplySettings]?: AutoReplySettings[K] | undefined;
+};
+
+/** Заплатка общих настроек: передаются только изменяемые поля. */
+export interface MailSettingsPatch {
+  senderName?: string | null | undefined;
+  replyQuote?: boolean | undefined;
+  afterDelete?: AfterDelete | undefined;
+  notifyBrowser?: boolean | undefined;
+  notifyTab?: boolean | undefined;
+  collectContacts?: boolean | undefined;
+  autoReply?: AutoReplyPatch | undefined;
+}
+
+/** Подпись. Подписей несколько, одна — по умолчанию. */
+export interface Signature {
+  id: number;
+  name: string;
+  bodyHtml: string;
+  isDefault: boolean;
+  position: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Правила фильтрации                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Поле письма, по которому идёт проверка.
+ * «Переадресовано от/для» — это заголовки Resent-From / Resent-To
+ * (RFC 5322 §3.6.6), их и проверяет Sieve.
+ */
+export type FilterField =
+  | 'from'
+  | 'to'
+  | 'subject'
+  | 'cc'
+  | 'resent-from'
+  | 'resent-to'
+  | 'size';
+
+/** Оператор сравнения. По умолчанию — «содержит». */
+export type FilterOperator =
+  | 'contains'
+  | 'not-contains'
+  | 'is'
+  | 'not-is'
+  | 'matches'
+  | 'not-matches'
+  /** Только для поля «Размер»: больше / меньше указанного числа килобайт. */
+  | 'greater'
+  | 'less';
+
+export interface FilterCondition {
+  field: FilterField;
+  op: FilterOperator;
+  /** Для поля size — число килобайт в виде строки. */
+  value: string;
+}
+
+/** Автоответ конкретного правила (отдельно от общего автоответчика). */
+export interface FilterAutoReply {
+  subject: string | null;
+  text: string;
+  days: number;
+}
+
+/** Действия правила. Порядок исполнения задаёт генератор Sieve. */
+export interface FilterActions {
+  /** Полный IMAP-путь папки. null — не перекладывать. */
+  folder: string | null;
+  markRead: boolean;
+  flag: boolean;
+  /** Переслать копию сообщения на эти адреса. */
+  forwardTo: string[];
+  autoReply: FilterAutoReply | null;
+  /** Применять правило к письмам, помеченным как спам. */
+  applyToSpam: boolean;
+  /** После срабатывания применять другие фильтры (по умолчанию да). */
+  continueFiltering: boolean;
+}
+
+export interface FilterRule {
+  id: number;
+  name: string;
+  position: number;
+  enabled: boolean;
+  /** Автофильтр, заведённый сервисом; в интерфейсе скрыт под флажком. */
+  auto: boolean;
+  matchMode: 'all' | 'any';
+  conditions: FilterCondition[];
+  actions: FilterActions;
+}
+
+/** Правило без служебных полей — то, что приходит от интерфейса. */
+export type FilterRuleInput = Omit<FilterRule, 'id' | 'position'> & {
+  position?: number;
+};
+
+/** Значения действий по умолчанию (совпадают с mail.ru). */
+export const DEFAULT_ACTIONS: FilterActions = {
+  folder: null,
+  markRead: false,
+  flag: false,
+  forwardTo: [],
+  autoReply: null,
+  applyToSpam: false,
+  continueFiltering: true,
+};
+
+/** Значения общих настроек по умолчанию. */
+export function defaultMailSettings(email: string): MailSettings {
+  return {
+    accountEmail: email,
+    senderName: null,
+    replyQuote: true,
+    afterDelete: 'list',
+    notifyBrowser: false,
+    notifyTab: true,
+    collectContacts: true,
+    autoReply: {
+      enabled: false,
+      subject: null,
+      text: '',
+      from: null,
+      until: null,
+      days: 7,
+    },
+    updatedAt: null,
+  };
+}

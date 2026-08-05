@@ -1,0 +1,155 @@
+/*
+ * Опись отправленного. Свёрнута по умолчанию: она нужна тогда, когда
+ * человек хочет проверить, а не каждый раз при чтении письма.
+ */
+
+.details {
+  margin-top: 8px;
+  border-top: 1px solid var(--mt-ai-banner-border);
+  padding-top: 8px;
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--mt-color-text-link);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* Убираем системный треугольник, свой значок — в разметке */
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summaryIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+
+.details[open] .summaryIcon {
+  transform: rotate(180deg);
+}
+
+.summaryTotal {
+  color: var(--mt-color-text-secondary);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* Куда ушло */
+.local,
+.remote {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  line-height: 16px;
+}
+
+.local {
+  background: var(--mt-mail-color-list-background-positive-alpha);
+  color: var(--mt-color-text-primary);
+}
+
+.remote {
+  background: var(--mt-ai-warning-bg);
+  color: var(--mt-color-text-primary);
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: minmax(64px, auto) 1fr;
+  gap: 4px 12px;
+}
+
+.rowKey {
+  color: var(--mt-color-text-secondary);
+}
+
+.rowValue {
+  overflow-wrap: anywhere;
+}
+
+.blockTitle {
+  margin-bottom: 6px;
+  color: var(--mt-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+/* Поле, которое ушло наружу */
+.field {
+  margin-bottom: 8px;
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.fieldHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fieldLabel {
+  font-weight: 500;
+}
+
+.fieldChars {
+  color: var(--mt-color-text-secondary);
+}
+
+/* Значение выводится как текст: это содержимое письма, а не разметка */
+.fieldValue {
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-chip-bg);
+  font-family: inherit;
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.more {
+  border: none;
+  margin-top: 2px;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.list li {
+  margin-bottom: 2px;
+}
+
+.total {
+  color: var(--mt-color-text-secondary);
+}
+
+/* Ответ из кэша: описи нет, потому что отправки не было */
+.cached {
+  margin-top: 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}

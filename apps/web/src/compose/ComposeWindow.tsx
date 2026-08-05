@@ -1,0 +1,688 @@
+/**
+ * Окно написания письма (.compose-app mail.ru): 880px, радиус 12px,
+ * тень rgba(0,16,61,.16) 0 4px 32px. Поля Кому / От кого / Тема
+ * с раскрытием «Копии» и «Скрытой», панель форматирования на
+ * contenteditable (без сторонних редакторов), подпись, нижняя панель
+ * Отправить / Сохранить / Отменить. Поддерживает свёрнутое состояние
+ * и несколько окон одновременно.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { api } from '../api';
+import { useAccount, useSaveDraft, useSendMessage } from '../api/queries';
+import { useUiStore, type ComposeDraft, type ComposeWindowState } from '../app/store';
+import { Button, IconButton, Tooltip } from '../components';
+import { parseAddresses } from '../lib/addresses';
+import { cx } from '../lib/cx';
+import { actionErrorText } from '../lib/errorText';
+import { IconAttach, IconClose, IconEvent, IconMailRead } from '../mail/icons';
+import { useGeneralSettings } from '../api/settingsQueries';
+import {
+  DEFAULT_GENERAL_SETTINGS,
+  defaultSignature,
+  signatureHtml,
+} from '../settings/generalSettings';
+import { ComposeAiPanel } from './ComposeAiPanel';
+import styles from './ComposeWindow.module.css';
+
+/**
+ * Метка блока подписи внутри тела письма.
+ *
+ * Именно атрибут, а не класс: классы здесь из CSS-модулей, их имена
+ * пересобираются, и искать блок по ним значило бы зависеть от сборки.
+ */
+const SIGNATURE_MARK = 'data-mt-signature';
+
+interface ComposeWindowProps {
+  win: ComposeWindowState;
+  /** Порядковый номер развёрнутого окна — для каскада. */
+  offset: number;
+  /** Сдвиг свёрнутой плашки от левого края, px. */
+  minimizedLeft?: number;
+}
+
+const FONT_FAMILIES = ['Golos Text', 'Arial', 'Georgia', 'JetBrains Mono'];
+const FONT_SIZES: Array<[string, string]> = [
+  ['1', '10'],
+  ['2', '13'],
+  ['3', '15'],
+  ['4', '18'],
+  ['5', '24'],
+  ['6', '32'],
+];
+const EMOJI = ['🙂', '😄', '👍', '🙏', '🔥', '❤️', '🎉', '🤝'];
+
+export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindowProps) {
+  const { data: account } = useAccount();
+  // Подписи живут в общих настройках ящика. Раньше сюда подставлялось
+  // `account.signature`, а его /api/account отдаёт пустой строкой — в письмо
+  // уезжал пустой блок, и выбрать одну из заведённых подписей было негде.
+  const { data: settings, isPending: settingsPending } = useGeneralSettings();
+  const preferences = settings ?? DEFAULT_GENERAL_SETTINGS;
+  const closeCompose = useUiStore((s) => s.closeCompose);
+  const toggleMinimized = useUiStore((s) => s.toggleComposeMinimized);
+  const updateDraft = useUiStore((s) => s.updateComposeDraft);
+  const sendMessage = useSendMessage();
+  const saveDraft = useSaveDraft();
+
+  /**
+   * Всё введённое живёт в общем состоянии окна, а не в локальном useState:
+   * иначе сворачивание (а с ним — перерисовка в другом виде) стирало бы
+   * письмо целиком.
+   */
+  const draft = win.draft;
+  const patch = useCallback(
+    (values: Partial<ComposeDraft> | ((draft: ComposeDraft) => Partial<ComposeDraft>)) =>
+      updateDraft(win.id, values),
+    [updateDraft, win.id],
+  );
+
+  const { to, cc, bcc, subject, showCc, showBcc, attachments, savedAt } = draft;
+
+  const [maximized, setMaximized] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const editorRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Начальное содержимое редактора.
+   *
+   * Пересчитывается только когда редактор действительно создаётся заново —
+   * при открытии окна и при возврате из свёрнутого вида. В свёрнутом виде
+   * редактора в DOM нет, поэтому его содержимое берётся из черновика:
+   * так набранный текст возвращается на место вместе с окном. Внутри одного
+   * показа значение неизменно — иначе React переписывал бы innerHTML на
+   * каждое нажатие клавиши и курсор прыгал бы в начало.
+   */
+  const initialHtml = useMemo(() => {
+    if (draft.bodyInitialized) return draft.bodyHtml;
+    // Блок подписи заводится пустым: настройки с подписями приходят своим
+    // запросом и почти всегда позже открытия окна. Текст в него положит
+    // эффект ниже — место под него нужно уже сейчас, чтобы подпись встала
+    // над цитатой, а не в конец письма.
+    return `<div><br></div><div ${SIGNATURE_MARK} class="${styles.signature}"></div>${win.init.bodyHtml ?? ''}`;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [win.id, win.minimized]);
+
+  // Собранное тело сразу кладём в черновик: дальше оно живёт там и потому
+  // возвращается на место после сворачивания окна.
+  useEffect(() => {
+    if (!draft.bodyInitialized) patch({ bodyHtml: initialHtml, bodyInitialized: true });
+  }, [draft.bodyInitialized, initialHtml, patch]);
+
+  /** Тело письма из редактора; если он ещё не смонтирован — из черновика. */
+  const currentBodyHtml = (): string => editorRef.current?.innerHTML ?? draft.bodyHtml;
+
+  /** Запоминаем набранное — по каждому изменению редактора. */
+  const rememberBody = () => patch({ bodyHtml: currentBodyHtml() });
+
+  /**
+   * Подставляет выбранную подпись, не трогая написанное.
+   *
+   * Меняется только содержимое помеченного блока: подпись переключают уже
+   * посреди набранного письма, и переписывать всё тело целиком значило бы
+   * стирать текст. Возвращает false, если редактора в DOM нет (окно
+   * свёрнуто) — тогда подставлять ещё рано.
+   */
+  const applySignature = useCallback(
+    (id: string | null): boolean => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+      const chosen = id === null ? null : preferences.signatures.find((s) => s.id === id);
+      let block = editor.querySelector(`[${SIGNATURE_MARK}]`);
+      if (!block) {
+        // Блок стёрли вместе с прежней подписью — заводим новый в конце.
+        block = document.createElement('div');
+        block.setAttribute(SIGNATURE_MARK, '');
+        block.className = styles.signature ?? '';
+        editor.append(block);
+      }
+      block.innerHTML = chosen ? signatureHtml(chosen.text) : '';
+      patch({ bodyHtml: editor.innerHTML, signatureId: id });
+      return true;
+    },
+    [preferences.signatures, patch],
+  );
+
+  // Первая подстановка — как только пришли настройки. Раньше окно
+  // открывалось, а подписи ждать было неоткуда.
+  useEffect(() => {
+    if (draft.signatureApplied || settingsPending || win.minimized) return;
+    if (applySignature(defaultSignature(preferences)?.id ?? null)) {
+      patch({ signatureApplied: true });
+    }
+  }, [
+    draft.signatureApplied,
+    settingsPending,
+    win.minimized,
+    preferences,
+    applySignature,
+    patch,
+  ]);
+
+  /** Команда форматирования contenteditable с сохранением выделения. */
+  const exec = (command: string, value?: string) => {
+    editorRef.current?.focus();
+    document.execCommand(command, false, value);
+  };
+
+  /* --- Мостик к помощнику -------------------------------------------
+   * Помощник ничего не знает про contenteditable: он получает текст
+   * и отдаёт текст, а вставкой занимаются эти четыре функции —
+   * через тот же document.execCommand, что и панель форматирования. */
+
+  /** Экранирование: текст от модели вставляется как текст, а не как разметка. */
+  const asHtml = (text: string): string =>
+    text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\n/g, '<br>');
+
+  const readAll = (): string => editorRef.current?.innerText ?? '';
+
+  /** Выделенный фрагмент внутри редактора; если выделения нет — весь текст. */
+  const readSelectionOrAll = (): { text: string; whole: boolean } => {
+    const selection = window.getSelection();
+    const editor = editorRef.current;
+    const inside =
+      selection && selection.rangeCount > 0 && editor
+        ? editor.contains(selection.getRangeAt(0).commonAncestorContainer)
+        : false;
+    const selected = inside ? (selection?.toString() ?? '') : '';
+    return selected.trim() ? { text: selected, whole: false } : { text: readAll(), whole: true };
+  };
+
+  const insertAiText = (text: string) => exec('insertHTML', asHtml(text));
+
+  const replaceAiText = (text: string, whole: boolean) => {
+    editorRef.current?.focus();
+    // Выделения нет — правка относилась ко всему тексту, его и заменяем.
+    if (whole) document.execCommand('selectAll');
+    exec('insertHTML', asHtml(text));
+  };
+
+  const buildPayload = () => {
+    const payload: Parameters<typeof sendMessage.mutate>[0] = {
+      to: parseAddresses(to),
+      cc: parseAddresses(cc),
+      bcc: parseAddresses(bcc),
+      subject,
+      bodyHtml: currentBodyHtml(),
+      attachmentIds: attachments.map((a) => a.id),
+    };
+    // Повторное сохранение заменяет прежний черновик, а не плодит копии
+    if (draft.draftUid !== null) payload.draftUid = draft.draftUid;
+    if (win.init.inReplyTo) payload.inReplyTo = win.init.inReplyTo;
+    if (win.init.references) payload.references = win.init.references;
+    return payload;
+  };
+
+  const send = () => {
+    const payload = buildPayload();
+    if (payload.to.length === 0) {
+      setError('Укажите хотя бы одного получателя');
+      return;
+    }
+    setError(null);
+    rememberBody();
+    sendMessage.mutate(payload, {
+      onSuccess: () => closeCompose(win.id),
+      // Не отправилось — окно остаётся с текстом, а причина видна
+      onError: (err) => setError(actionErrorText('Не удалось отправить письмо', err)),
+    });
+  };
+
+  /**
+   * Сохранение черновика. Возвращает обещание, чтобы закрытие по Esc могло
+   * дождаться результата: раньше окно закрывалось независимо от исхода —
+   * сохранение падало, а текст письма пропадал вместе с окном.
+   */
+  const save = (): Promise<boolean> => {
+    rememberBody();
+    return new Promise((resolve) => {
+      saveDraft.mutate(buildPayload(), {
+        onSuccess: (r) => {
+          setError(null);
+          patch({ savedAt: r.savedAt, draftUid: r.draftUid ?? draft.draftUid });
+          resolve(true);
+        },
+        onError: (err) => {
+          setError(actionErrorText('Не удалось сохранить черновик', err));
+          resolve(false);
+        },
+      });
+    });
+  };
+
+  /** Esc и крестик: сохраняем черновик и закрываем окно ТОЛЬКО если сохранилось. */
+  const saveAndClose = async (): Promise<void> => {
+    if (await save()) closeCompose(win.id);
+  };
+
+  /**
+   * Есть ли в окне что терять. Пустое окно закрывается сразу: заводить
+   * черновик из ничего незачем, он только замусорит папку.
+   */
+  const hasContent = (): boolean =>
+    subject.trim() !== '' ||
+    to.trim() !== '' ||
+    cc.trim() !== '' ||
+    bcc.trim() !== '' ||
+    attachments.length > 0 ||
+    // Смотрим на видимый текст, а не на разметку: у пустого редактора
+    // innerHTML не пустой — браузер держит там <br> или неразрывный пробел,
+    // и по разметке любое только что открытое окно считалось бы непустым.
+    (editorRef.current?.textContent ?? '').replace(/ /g, ' ').trim() !== '';
+
+  /**
+   * Закрытие крестиком.
+   *
+   * Раньше крестик звал закрытие напрямую — и написанное письмо исчезало
+   * молча, без черновика и без вопроса. При этом Esc в том же окне вёл себя
+   * правильно: сохранял черновик и закрывался только при успехе. То есть два
+   * жеста «закрыть» делали прямо противоположное, и более очевидный из
+   * двух — тот, что уничтожал работу.
+   *
+   * Теперь крестик — это тот же Esc. Пустое окно закрывается сразу.
+   */
+  const closeByCross = (): void => {
+    if (!hasContent()) {
+      closeCompose(win.id);
+      return;
+    }
+    void saveAndClose();
+  };
+
+  /**
+   * «Отменить» — единственный способ выбросить написанное. Он и должен
+   * выбрасывать, иначе выбросить было бы нечем. Но не молча: спрашиваем,
+   * когда есть что терять.
+   */
+  const discard = (): void => {
+    if (hasContent() && !window.confirm('Закрыть письмо без сохранения? Написанное будет потеряно.')) {
+      return;
+    }
+    closeCompose(win.id);
+  };
+
+  const attachFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const uploaded = await api.uploadAttachment(file);
+      patch((current) => ({ attachments: [...current.attachments, uploaded] }));
+    } catch (err) {
+      // Раньше это был необработанный промис: файл не загружался молча
+      setError(actionErrorText(`Не удалось загрузить «${file.name}»`, err));
+    }
+  };
+
+  if (win.minimized) {
+    return (
+      <div className={styles.minimizedBar} style={{ left: minimizedLeft }}>
+        <button
+          type="button"
+          className={styles.minimizedTitle}
+          onClick={() => toggleMinimized(win.id)}
+        >
+          {subject || 'Новое письмо'}
+        </button>
+        <IconButton label="Закрыть" size="s" onClick={closeByCross}>
+          <IconClose size={14} />
+        </IconButton>
+      </div>
+    );
+  }
+
+  return (
+    <section
+      className={cx(styles.window, maximized && styles.maximized)}
+      /* Каскад задаётся переменной, а не свойством right: на узком экране
+         окно раскрывается во весь экран правилом из CSS, а встроенный стиль
+         перебил бы его и оставил окно у правого края. */
+      style={maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)}
+      aria-label="Новое письмо"
+      onKeyDown={(e) => {
+        // Esc сохраняет черновик и закрывает окно (как в mail.ru).
+        // Окно закрывается только после успешного сохранения: иначе
+        // упавший запрос уносил бы с собой всё написанное.
+        if (e.key === 'Escape') {
+          e.stopPropagation();
+          void saveAndClose();
+        }
+      }}
+    >
+      {/* Шапка окна: получатель + управление окном */}
+      <div className={styles.header}>
+        <span className={styles.headerTitle}>{subject || 'Новое письмо'}</span>
+        <div className={styles.windowControls}>
+          <Tooltip text="Свернуть">
+            <IconButton label="Свернуть" size="s" onClick={() => toggleMinimized(win.id)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 18h16v2H4z" fill="currentColor" />
+              </svg>
+            </IconButton>
+          </Tooltip>
+          <Tooltip text={maximized ? 'Свернуть в окно' : 'Развернуть'}>
+            <IconButton
+              label={maximized ? 'Свернуть в окно' : 'Развернуть'}
+              size="s"
+              onClick={() => setMaximized((v) => !v)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M5 5h14v14H5V5Zm2 2v10h10V7H7Z"
+                  fill="currentColor"
+                  fillRule="evenodd"
+                />
+              </svg>
+            </IconButton>
+          </Tooltip>
+          <Tooltip text="Закрыть">
+            <IconButton label="Закрыть" size="s" onClick={closeByCross}>
+              <IconClose size={14} />
+            </IconButton>
+          </Tooltip>
+        </div>
+      </div>
+
+      {/* Кому */}
+      <div className={styles.fieldRow}>
+        <span className={styles.fieldLabel}>Кому</span>
+        <input
+          className={styles.fieldInput}
+          value={to}
+          onChange={(e) => patch({ to: e.target.value })}
+          placeholder="Введите адрес"
+          aria-label="Кому"
+          autoFocus
+        />
+        <span className={styles.fieldLinks}>
+          {!showCc && (
+            <button type="button" className={styles.fieldLink} onClick={() => patch({ showCc: true })}>
+              Копия
+            </button>
+          )}
+          {!showBcc && (
+            <button type="button" className={styles.fieldLink} onClick={() => patch({ showBcc: true })}>
+              Скрытая
+            </button>
+          )}
+        </span>
+      </div>
+
+      {showCc && (
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>Копия</span>
+          <input
+            className={styles.fieldInput}
+            value={cc}
+            onChange={(e) => patch({ cc: e.target.value })}
+            aria-label="Копия"
+          />
+        </div>
+      )}
+      {showBcc && (
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>Скрытая</span>
+          <input
+            className={styles.fieldInput}
+            value={bcc}
+            onChange={(e) => patch({ bcc: e.target.value })}
+            aria-label="Скрытая"
+          />
+        </div>
+      )}
+
+      {/* От кого */}
+      <div className={styles.fieldRow}>
+        <span className={styles.fieldLabel}>От кого</span>
+        <span className={styles.fieldStatic}>
+          {account ? `${account.displayName} <${account.email}>` : '…'}
+        </span>
+      </div>
+
+      {/* Тема */}
+      <div className={styles.fieldRow}>
+        <span className={styles.fieldLabel}>Тема</span>
+        <input
+          className={styles.fieldInput}
+          value={subject}
+          onChange={(e) => patch({ subject: e.target.value })}
+          aria-label="Тема"
+        />
+      </div>
+
+      {/* Вложения */}
+      <div className={styles.attachRow}>
+        <input
+          ref={fileRef}
+          type="file"
+          hidden
+          multiple
+          onChange={(e) => {
+            for (const f of Array.from(e.target.files ?? [])) void attachFile(f);
+            e.target.value = '';
+          }}
+        />
+        <button type="button" className={styles.attachButton} onClick={() => fileRef.current?.click()}>
+          <IconAttach />
+          Прикрепить файл
+        </button>
+        <button
+          type="button"
+          className={styles.attachButton}
+          onClick={() => console.info('Из Облака: появится вместе с облаком')}
+        >
+          Из Облака
+        </button>
+        <button
+          type="button"
+          className={styles.attachButton}
+          onClick={() => console.info('Из Почты: появится вместе с бэкендом')}
+        >
+          Из Почты
+        </button>
+        {attachments.map((a) => (
+          <span key={a.id} className={styles.attachChip}>
+            {a.filename}
+            <button
+              type="button"
+              className={styles.attachChipRemove}
+              aria-label={`Убрать ${a.filename}`}
+              onClick={() =>
+                patch((current) => ({
+                  attachments: current.attachments.filter((x) => x.id !== a.id),
+                }))
+              }
+            >
+              <IconClose size={12} />
+            </button>
+          </span>
+        ))}
+      </div>
+
+      {/* Панель форматирования: значки 32×32, списки 48×32.
+          preventDefault на кнопках сохраняет выделение в редакторе */}
+      <div
+        className={styles.formatBar}
+        onMouseDown={(e) => {
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag !== 'SELECT' && tag !== 'OPTION') e.preventDefault();
+        }}
+      >
+        <button type="button" className={styles.fmtButton} title="Жирный" onClick={() => exec('bold')}>
+          <b>Ж</b>
+        </button>
+        <button type="button" className={styles.fmtButton} title="Наклонный" onClick={() => exec('italic')}>
+          <i>К</i>
+        </button>
+        <button type="button" className={styles.fmtButton} title="Подчёркнутый" onClick={() => exec('underline')}>
+          <u>Ч</u>
+        </button>
+        <button type="button" className={styles.fmtButton} title="Зачёркнутый" onClick={() => exec('strikeThrough')}>
+          <s>З</s>
+        </button>
+
+        <select
+          className={styles.fmtSelect}
+          title="Шрифт"
+          defaultValue="Golos Text"
+          onChange={(e) => exec('fontName', e.target.value)}
+        >
+          {FONT_FAMILIES.map((f) => (
+            <option key={f} value={f}>
+              {f}
+            </option>
+          ))}
+        </select>
+        <select
+          className={styles.fmtSelect}
+          title="Размер шрифта"
+          defaultValue="3"
+          onChange={(e) => exec('fontSize', e.target.value)}
+        >
+          {FONT_SIZES.map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+
+        <span className={styles.fmtSeparator} />
+
+        <button type="button" className={styles.fmtButton} title="По левому краю" onClick={() => exec('justifyLeft')}>
+          ⇤
+        </button>
+        <button type="button" className={styles.fmtButton} title="По центру" onClick={() => exec('justifyCenter')}>
+          ↔
+        </button>
+        <button type="button" className={styles.fmtButton} title="Маркированный список" onClick={() => exec('insertUnorderedList')}>
+          ••
+        </button>
+        <button type="button" className={styles.fmtButton} title="Нумерованный список" onClick={() => exec('insertOrderedList')}>
+          1.
+        </button>
+        <button type="button" className={styles.fmtButton} title="Отменить" onClick={() => exec('undo')}>
+          ↶
+        </button>
+        <button type="button" className={styles.fmtButton} title="Повторить" onClick={() => exec('redo')}>
+          ↷
+        </button>
+        <button
+          type="button"
+          className={styles.fmtButton}
+          title="Вставить ссылку"
+          onClick={() => {
+            const url = window.prompt('Адрес ссылки');
+            if (url) exec('createLink', url);
+          }}
+        >
+          🔗
+        </button>
+        <select
+          className={styles.fmtSelect}
+          title="Вставить смайлик"
+          value=""
+          onChange={(e) => {
+            if (e.target.value) exec('insertText', e.target.value);
+          }}
+        >
+          <option value="">🙂</option>
+          {EMOJI.map((e) => (
+            <option key={e} value={e}>
+              {e}
+            </option>
+          ))}
+        </select>
+        <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
+          A̶
+        </button>
+      </div>
+
+      {/* Помощь с ответом. Панели нет вовсе, если помощник выключен */}
+      <ComposeAiPanel
+        sourceMessageId={win.init.sourceMessageId}
+        readAll={readAll}
+        readSelectionOrAll={readSelectionOrAll}
+        insert={insertAiText}
+        replace={replaceAiText}
+      />
+
+      {/* Выбор подписи. Список — из общих настроек ящика; пока подписей
+          там нет, выбирать нечего и строки не показываем */}
+      {preferences.signatures.length > 0 && (
+        <div className={styles.signatureRow}>
+          <span className={styles.signatureLabel}>Подпись</span>
+          <select
+            className={styles.signatureSelect}
+            aria-label="Подпись"
+            value={draft.signatureId ?? ''}
+            onChange={(e) => applySignature(e.target.value || null)}
+          >
+            <option value="">Без подписи</option>
+            {preferences.signatures.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Тело письма — contenteditable */}
+      <div
+        ref={editorRef}
+        className={styles.editor}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        aria-label="Текст письма"
+        // Набранное запоминается в состоянии окна, а не только в DOM:
+        // иначе сворачивание окна стирало бы тело письма.
+        onInput={rememberBody}
+        onBlur={rememberBody}
+        dangerouslySetInnerHTML={{ __html: initialHtml }}
+      />
+
+      {error && <div className={styles.error}>{error}</div>}
+
+      {/* Нижняя панель */}
+      <div className={styles.footer}>
+        <Button mode="primary" className={styles.sendButton} onClick={send} disabled={sendMessage.isPending}>
+          {sendMessage.isPending ? 'Отправка…' : 'Отправить'}
+        </Button>
+        <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
+          {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
+        </Button>
+        <Button mode="secondary" onClick={discard}>
+          Отменить
+        </Button>
+        {savedAt && (
+          <span className={styles.savedNote}>
+            Сохранено в {new Date(savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        )}
+        <div className={styles.footerSpacer} />
+        <Tooltip text="Уведомить о прочтении">
+          <IconButton
+            label="Уведомить о прочтении"
+            onClick={() => console.info('Уведомления о прочтении появятся вместе с бэкендом')}
+          >
+            <IconMailRead />
+          </IconButton>
+        </Tooltip>
+        <Tooltip text="Отложенная отправка">
+          <IconButton
+            label="Отложенная отправка"
+            onClick={() => console.info('Отложенная отправка появится вместе с бэкендом')}
+          >
+            <IconEvent />
+          </IconButton>
+        </Tooltip>
+      </div>
+    </section>
+  );
+}

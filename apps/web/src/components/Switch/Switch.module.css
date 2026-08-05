@@ -1,0 +1,80 @@
+.wrapper {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.disabled {
+  cursor: default;
+  opacity: var(--mt-opacity-disable, 0.48);
+}
+
+/* Настоящий input скрыт визуально, но остаётся фокусируемым */
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.track {
+  flex: none;
+  position: relative;
+  width: var(--mt-size-switch-width, 34px);
+  height: var(--mt-size-switch-height, 20px);
+  border-radius: 999px;
+  background: var(--mt-color-background-secondary-alpha);
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
+}
+
+.thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: var(--mt-size-switch-pin, 16px);
+  height: var(--mt-size-switch-pin, 16px);
+  border-radius: 50%;
+  background: var(--mt-color-background-content);
+  box-shadow: var(--mt-elevation-1);
+  transition: transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.input:checked + .track {
+  background: var(--mt-color-background-accent);
+}
+
+.input:checked + .track .thumb {
+  transform: translateX(14px);
+}
+
+.input:focus-visible + .track {
+  outline: 2px solid var(--mt-color-stroke-accent);
+  outline-offset: 2px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-size-switch-height, 20px);
+  color: var(--mt-color-text-primary);
+}
+
+.description {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 18px;
+  color: var(--mt-color-text-secondary);
+}

@@ -1,0 +1,300 @@
+/* Меню ящика: шире обычного выпадающего — в нём адреса почты.
+   На телефоне ширину ограничивает экран, иначе меню уезжает за край. */
+.menu {
+  /* 320px — чтобы «Помощник на основе ИИ — включить» помещался целиком,
+     а адрес ящика со счётчиком не сходился в многоточие */
+  width: 320px;
+  max-width: calc(100vw - 16px);
+}
+
+/* --- Значок в шапке --------------------------------------------------- */
+
+.avatarButton {
+  position: relative;
+  display: inline-flex;
+  border: none;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--mt-color-background-accent);
+  color: var(--mt-color-text-contrast, #fff);
+  font-size: var(--mt-font-caption1-size, 12px);
+  font-weight: 500;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Общий счётчик по всем ящикам — поверх аватара, как у mail.ru */
+.avatarBadge {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  border: 2px solid var(--mt-header-bg);
+  background: var(--mt-color-text-negative, #ed330a);
+  color: #fff;
+  font-size: var(--mt-font-caption2-size, 11px);
+  line-height: 14px;
+  font-weight: 500;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* --- Текущий ящик ----------------------------------------------------- */
+
+.current {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 12px;
+}
+
+.currentAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--mt-color-background-accent);
+  color: var(--mt-color-text-contrast, #fff);
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: 500;
+}
+
+.currentAvatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.currentText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.currentName {
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: var(--mt-font-headline2-line-height, 20px);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.currentEmail {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Связанные ящики -------------------------------------------------- */
+
+/* Строка = кнопка переключения + кнопка отвязки. Вложить вторую в первую
+   нельзя: кнопка внутри кнопки — недопустимая разметка, и нажатие на
+   отвязку заодно переключало бы ящик. */
+.row {
+  display: flex;
+  align-items: center;
+}
+
+.mailbox {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  margin: 0;
+  padding: 0 4px 0 16px;
+  height: 40px;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mailbox:hover:not(:disabled),
+.row:hover .mailbox:not(:disabled) {
+  background: var(--mt-ph-color-transparent-hover);
+}
+
+.mailbox:disabled {
+  cursor: default;
+}
+
+.mailboxAvatar {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption2-size, 11px);
+  font-weight: 500;
+}
+
+.mailboxEmail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailboxUnread {
+  flex: none;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 20px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Ящик не ответил — счётчик неизвестен, и это честнее нуля */
+.mailboxWarn {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-negative, #ed330a);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 20px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.unlink {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 40px;
+  border: none;
+  padding: 0;
+  margin-right: 8px;
+  background: transparent;
+  color: var(--mt-color-icon-secondary);
+  cursor: pointer;
+  /* Проявляется при наведении на строку — как действия письма в списке */
+  opacity: 0;
+}
+
+.row:hover .unlink,
+.unlink:focus-visible {
+  opacity: 1;
+}
+
+.unlink:hover {
+  color: var(--mt-color-text-negative, #ed330a);
+}
+
+.unlink :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+/* Сенсорный ввод: наведения нет, и кнопка отвязки была бы недостижима */
+@media (hover: none) {
+  .unlink {
+    opacity: 1;
+  }
+}
+
+/* --- Подтверждение отвязки -------------------------------------------- */
+
+.confirm {
+  padding: 8px 16px;
+  background: var(--mt-color-background-secondary);
+}
+
+.confirmText {
+  display: block;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+  overflow-wrap: anywhere;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 16px;
+  padding-top: 6px;
+}
+
+.confirmDanger,
+.confirmCancel {
+  border: none;
+  padding: 0;
+  background: transparent;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.confirmDanger {
+  color: var(--mt-color-text-negative, #ed330a);
+}
+
+.confirmCancel {
+  color: var(--mt-color-text-secondary);
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 480px) {
+  /* Палец не попадает в 36px — на телефоне цель не меньше 44×44 */
+  .avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  /* Меню шире экрана быть не может: у правого края телефона оно уезжало бы
+     за границу вместе со счётчиками */
+  .menu {
+    width: calc(100vw - 16px);
+    max-width: 320px;
+  }
+
+  /* Строка ящика тоже становится удобной пальцу */
+  .mailbox,
+  .unlink {
+    height: 44px;
+  }
+}

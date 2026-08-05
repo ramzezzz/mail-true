@@ -1,0 +1,209 @@
+/*
+ * Плашки помощника на странице письма: резюме, извлечённые данные,
+ * перевод. Геометрия повторяет .reliableBanner из MessagePage.module.css,
+ * чтобы плашки стояли в одном ряду с остальными.
+ */
+
+.banner {
+  margin: 4px 8px 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--mt-ai-banner-border);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-banner-bg);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.bannerHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.bannerIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mt-ai-accent);
+}
+
+.bannerTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.bannerClose {
+  flex-shrink: 0;
+}
+
+.summaryText {
+  margin: 0;
+  color: var(--mt-color-text-primary);
+}
+
+.bullets {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.bullets li {
+  margin-bottom: 2px;
+}
+
+.actionRequired {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: var(--mt-ai-warning-bg);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+/* Мелкая честная подпись: откуда взялся ответ и что ушло наружу */
+.note {
+  margin-top: 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.noteButton {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.noteButton:disabled {
+  color: var(--mt-color-text-secondary);
+  cursor: default;
+}
+
+.error {
+  color: var(--mt-color-text-negative, var(--mt-color-text-secondary));
+}
+
+.pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* --- Извлечённые данные --------------------------------------------- */
+
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupTitle {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Каждое значение — кнопка: одно нажатие копирует его в буфер обмена */
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--mt-ai-banner-border);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-chip-bg);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  border-color: var(--mt-ai-accent);
+}
+
+.itemBody {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itemValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.itemLabel {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.itemIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mt-color-icon-secondary);
+}
+
+.itemCopied {
+  color: var(--mt-ai-accent);
+}
+
+/* --- Перевод --------------------------------------------------------- */
+
+.translationBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px;
+  padding: 8px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-ai-banner-bg);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.translationBarSpacer {
+  flex: 1 1 auto;
+}
+
+/* Опись отправленного под полосой перевода — в одних полях с ней */
+.translationOutbound {
+  margin: 0 8px;
+}
+
+/*
+ * Перевод — текст, пришедший от модели. Он выводится как обычный текст,
+ * а не как разметка: чужой HTML в тело письма не вставляем.
+ */
+.translationBody {
+  margin: 0;
+  padding: 20px 32px 40px;
+  font-family: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}

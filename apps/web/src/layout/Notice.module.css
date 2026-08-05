@@ -1,0 +1,23 @@
+/* Плашка отказа: снизу по центру, поверх всего, но не мешает нажатиям. */
+
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: var(--mt-z-index-modal, 99);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+  padding: 10px 8px 10px 16px;
+  border-radius: 10px;
+  background: var(--mt-color-background-accent, #0070f0);
+  color: var(--mt-color-text-contrast, #fff);
+  box-shadow: var(--mt-elevation-1);
+}
+
+.text {
+  font-size: 14px;
+  line-height: 18px;
+}

@@ -1,0 +1,43 @@
+/* Каркас страницы папки: панель над списком + список на всю высоту. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.centered {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Подвал списка: сколько показано и подгрузка следующей страницы */
+.listFooter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0 20px;
+  color: var(--mt-color-text-secondary);
+}
+
+.listFooterCount {
+  font-size: 13px;
+}
+
+/* Не смогли загрузить список писем */
+.loadError {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  text-align: center;
+}
+
+.loadErrorText {
+  margin: 0;
+}

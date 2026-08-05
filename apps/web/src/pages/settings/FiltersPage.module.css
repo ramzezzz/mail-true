@@ -1,0 +1,81 @@
+.topRow {
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * Строка правила: стрелки порядка · переключатель · условия · действия ·
+ * корзина. Условия и действия — две колонки, как в mail.ru.
+ */
+.rule {
+  display: grid;
+  grid-template-columns: 28px auto minmax(0, 1fr) minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+}
+
+.order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.conditions {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conditions:hover {
+  text-decoration: underline;
+}
+
+.autoBadge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--mt-color-background-secondary-alpha);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+  vertical-align: middle;
+}
+
+.actions {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  color: var(--mt-color-text-secondary);
+}
+
+.delete {
+  justify-self: end;
+}
+
+@media (max-width: 760px) {
+  .rule {
+    grid-template-columns: 28px auto minmax(0, 1fr) 36px;
+  }
+
+  .actions {
+    grid-column: 3 / -1;
+  }
+}

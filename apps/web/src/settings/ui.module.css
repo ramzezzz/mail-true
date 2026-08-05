@@ -1,0 +1,111 @@
+/* Типографика раздела настроек — крупнее почтовой (docs/features-mailru.md) */
+
+.title {
+  margin: 0 0 24px;
+  font-size: var(--mt-settings-h1-size, 32px);
+  line-height: var(--mt-settings-h1-line-height, 36px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.subtitle {
+  margin: 0 0 16px;
+  font-size: var(--mt-settings-h2-size, 28px);
+  line-height: var(--mt-settings-h2-line-height, 32px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.lead {
+  margin: -12px 0 24px;
+  max-width: 640px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  color: var(--mt-color-text-secondary);
+}
+
+.section {
+  margin-bottom: 32px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.sectionTitle {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-h2-size, 20px);
+  line-height: var(--mt-font-h2-line-height, 26px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.sectionDescription {
+  margin: 0 0 16px;
+  max-width: 640px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  color: var(--mt-color-text-secondary);
+}
+
+.sectionBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 640px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 24px;
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-secondary);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+}
+
+.empty {
+  padding: 32px 0;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  color: var(--mt-color-text-secondary);
+}
+
+.skeleton {
+  height: 36px;
+  margin-bottom: 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-skeleton-bg);
+  animation: pulse 1.2s var(--mt-anim-easing-default, ease) infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

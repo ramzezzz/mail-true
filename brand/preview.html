@@ -1,0 +1,1154 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Mail.True — фирменный стиль, превью</title>
+<link rel="icon" href="favicon/favicon.svg">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: var(--mt-font-ui); color: var(--mt-text); background: var(--mt-bg-2); padding: 32px; }
+  h1 { font-size: 28px; font-weight: 600; margin: 0 0 6px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 40px 0 14px; }
+  .muted { color: var(--mt-text-2); }
+  .panel { background: var(--mt-bg); border-radius: var(--mt-radius-card); padding: 24px; box-shadow: var(--mt-shadow-1); margin-top: 12px; }
+  .panel_dark { background: #15181D; color: #E9EDF2; }
+  .row { display: flex; gap: 28px; flex-wrap: wrap; align-items: center; }
+  .logo-scale { display: flex; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .swatch { display: flex; gap: 10px; align-items: flex-start; background: var(--mt-bg); border-radius: 10px; padding: 10px; box-shadow: var(--mt-shadow-1); }
+  .swatch_dark { background: #1C2026; color: #E9EDF2; }
+  .swatch__chip { width: 46px; height: 46px; border-radius: 8px; flex: none; border: 1px solid rgba(128,128,128,.25); }
+  .swatch__meta { font-size: 13px; line-height: 1.35; display: flex; flex-direction: column; gap: 2px; }
+  .swatch__meta small { color: inherit; opacity: .65; }
+  code { font-family: var(--mt-font-mono); font-size: 12px; }
+  .icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .icon-cell { background: inherit; border: 1px solid var(--mt-separator); border-radius: 10px; padding: 12px; }
+  .panel_dark .icon-cell { border-color: #323843; }
+  .icon-sizes { display: flex; gap: 14px; align-items: flex-end; margin-bottom: 8px; }
+  .icon-name { font-size: 12px; line-height: 1.4; opacity: .85; }
+  .type-sample { display: grid; gap: 10px; }
+  .type-sample > div { display: flex; gap: 16px; align-items: baseline; }
+  .type-sample .lbl { width: 210px; flex: none; font-size: 12px; color: var(--mt-text-2); font-family: var(--mt-font-mono); }
+  .favrow img { image-rendering: auto; background: #fff; border: 1px solid var(--mt-separator); border-radius: 6px; padding: 6px; }
+  .favrow.on-dark img { background: #15181D; border-color: #323843; }
+  .btn { display: inline-block; padding: 8px 20px; border-radius: 8px; font-size: 15px; font-weight: 500; }
+</style>
+</head>
+<body>
+  <h1>Mail.True — фирменный стиль</h1>
+  <p class="muted">Превью всех ресурсов каталога <code>brand/</code>. Подробное описание — в <code>docs/brand.md</code>.</p>
+
+  <h2>Логотип</h2>
+  <div class="panel">
+    <div class="row">
+      <svg height="40" width="232" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 186 32" width="186" height="32" role="img" aria-label="Mail.True">
+  <title>Mail.True</title>
+  <!-- Знак: почтовая марка с галочкой-клапаном -->
+  <path fill="#006EC6" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#FFFFFF" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+  <!-- Написание MAIL -->
+  <g fill="none" stroke="#21252B" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M46 24 V8 L52.5 17.5 L59 8 V24"/>
+    <path d="M65 24 L71 8 L77 24 M67.5 18.6 H74.5"/>
+    <path d="M84.3 8 V24"/>
+    <path d="M91.6 8 V24 H100.6"/>
+  </g>
+  <!-- Точка-марка -->
+  <rect x="107.6" y="17" width="7" height="7" rx="2" fill="#006EC6"/>
+  <!-- Написание TRUE -->
+  <g fill="none" stroke="#006EC6" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M121.6 8 H133.6 M127.6 8 V24"/>
+    <path d="M139.6 24 V8 M139.6 8 H146.1 A4 4 0 0 1 146.1 16 H139.6 M145.6 16 L150.1 24"/>
+    <path d="M156.1 8 V18.5 A5.5 5.5 0 0 0 167.1 18.5 V8"/>
+    <path d="M182.1 8 H173.1 V24 H182.1 M173.1 16 H180.6"/>
+  </g>
+</svg>
+      <svg height="64" width="64" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True</title>
+  <path fill="#006EC6" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#FFFFFF" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+</svg>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True</title>
+  <path fill="#006EC6" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#FFFFFF" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+</svg>
+      <span style="color:#21252B"><svg height="48" width="48" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True — одноцветный контурный (наследует currentColor)</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="2" d="M3 1 H6.9 A2.2 2.2 0 0 0 11.1 1 H13.9 A2.2 2.2 0 0 0 18.1 1 H20.9 A2.2 2.2 0 0 0 25.1 1 H29 A2 2 0 0 1 31 3 V6.9 A2.2 2.2 0 0 0 31 11.1 V13.9 A2.2 2.2 0 0 0 31 18.1 V20.9 A2.2 2.2 0 0 0 31 25.1 V29 A2 2 0 0 1 29 31 H25.1 A2.2 2.2 0 0 0 20.9 31 H18.1 A2.2 2.2 0 0 0 13.9 31 H11.1 A2.2 2.2 0 0 0 6.9 31 H3 A2 2 0 0 1 1 29 V25.1 A2.2 2.2 0 0 0 1 20.9 V18.1 A2.2 2.2 0 0 0 1 13.9 V11.1 A2.2 2.2 0 0 0 1 6.9 V3 A2 2 0 0 1 3 1 Z"/>
+    <path stroke-width="2.8" d="M9.4 16 L14.7 21.3 L23 10.7"/>
+  </g>
+</svg></span>
+    </div>
+    <p class="muted" style="margin-top:14px; font-size:13px">Полный логотип, знак 64 и 32, одноцветный контурный (currentColor).</p>
+  </div>
+  <div class="panel panel_dark">
+    <div class="row">
+      <svg height="40" width="232" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 186 32" width="186" height="32" role="img" aria-label="Mail.True">
+  <title>Mail.True — вариант для тёмного фона</title>
+  <!-- Знак: почтовая марка с галочкой-клапаном -->
+  <path fill="#5CA8F5" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#15181D" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+  <!-- Написание MAIL -->
+  <g fill="none" stroke="#E9EDF2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M46 24 V8 L52.5 17.5 L59 8 V24"/>
+    <path d="M65 24 L71 8 L77 24 M67.5 18.6 H74.5"/>
+    <path d="M84.3 8 V24"/>
+    <path d="M91.6 8 V24 H100.6"/>
+  </g>
+  <!-- Точка-марка -->
+  <rect x="107.6" y="17" width="7" height="7" rx="2" fill="#5CA8F5"/>
+  <!-- Написание TRUE -->
+  <g fill="none" stroke="#5CA8F5" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M121.6 8 H133.6 M127.6 8 V24"/>
+    <path d="M139.6 24 V8 M139.6 8 H146.1 A4 4 0 0 1 146.1 16 H139.6 M145.6 16 L150.1 24"/>
+    <path d="M156.1 8 V18.5 A5.5 5.5 0 0 0 167.1 18.5 V8"/>
+    <path d="M182.1 8 H173.1 V24 H182.1 M173.1 16 H180.6"/>
+  </g>
+</svg>
+      <svg height="64" width="64" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True — вариант для тёмного фона</title>
+  <path fill="#5CA8F5" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#15181D" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+</svg>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True — вариант для тёмного фона</title>
+  <path fill="#5CA8F5" d="M3 0 H6.8 A2.2 2.2 0 0 0 11.2 0 H13.8 A2.2 2.2 0 0 0 18.2 0 H20.8 A2.2 2.2 0 0 0 25.2 0 H29 A3 3 0 0 1 32 3 V6.8 A2.2 2.2 0 0 0 32 11.2 V13.8 A2.2 2.2 0 0 0 32 18.2 V20.8 A2.2 2.2 0 0 0 32 25.2 V29 A3 3 0 0 1 29 32 H25.2 A2.2 2.2 0 0 0 20.8 32 H18.2 A2.2 2.2 0 0 0 13.8 32 H11.2 A2.2 2.2 0 0 0 6.8 32 H3 A3 3 0 0 1 0 29 V25.2 A2.2 2.2 0 0 0 0 20.8 V18.2 A2.2 2.2 0 0 0 0 13.8 V11.2 A2.2 2.2 0 0 0 0 6.8 V3 A3 3 0 0 1 3 0 Z"/>
+  <path fill="none" stroke="#15181D" stroke-width="3.3" stroke-linecap="round" stroke-linejoin="round" d="M9 16 L14.6 21.6 L23.4 10.4"/>
+</svg>
+      <span style="color:#E9EDF2"><svg height="48" width="48" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="Mail.True">
+  <title>Знак Mail.True — одноцветный контурный (наследует currentColor)</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="2" d="M3 1 H6.9 A2.2 2.2 0 0 0 11.1 1 H13.9 A2.2 2.2 0 0 0 18.1 1 H20.9 A2.2 2.2 0 0 0 25.1 1 H29 A2 2 0 0 1 31 3 V6.9 A2.2 2.2 0 0 0 31 11.1 V13.9 A2.2 2.2 0 0 0 31 18.1 V20.9 A2.2 2.2 0 0 0 31 25.1 V29 A2 2 0 0 1 29 31 H25.1 A2.2 2.2 0 0 0 20.9 31 H18.1 A2.2 2.2 0 0 0 13.9 31 H11.1 A2.2 2.2 0 0 0 6.9 31 H3 A2 2 0 0 1 1 29 V25.1 A2.2 2.2 0 0 0 1 20.9 V18.1 A2.2 2.2 0 0 0 1 13.9 V11.1 A2.2 2.2 0 0 0 1 6.9 V3 A2 2 0 0 1 3 1 Z"/>
+    <path stroke-width="2.8" d="M9.4 16 L14.7 21.3 L23 10.7"/>
+  </g>
+</svg></span>
+    </div>
+    <p style="margin-top:14px; font-size:13px; opacity:.65">Те же варианты на тёмном фоне.</p>
+  </div>
+
+  <h2>Фавиконки (файлы из brand/favicon/)</h2>
+  <div class="panel">
+    <div class="row favrow">
+      <img src="favicon/favicon-48.svg" width="48" height="48" alt="48">
+      <img src="favicon/favicon-32.svg" width="32" height="32" alt="32">
+      <img src="favicon/favicon-16.svg" width="16" height="16" alt="16">
+      <span class="muted" style="font-size:13px">48 / 32 / 16 — у 16 своя упрощённая геометрия без перфорации</span>
+    </div>
+    <div class="row favrow on-dark" style="margin-top:10px">
+      <img src="favicon/favicon-48.svg" width="48" height="48" alt="48">
+      <img src="favicon/favicon-32.svg" width="32" height="32" alt="32">
+      <img src="favicon/favicon-16.svg" width="16" height="16" alt="16">
+      <span class="muted" style="font-size:13px">то же на тёмной подложке</span>
+    </div>
+  </div>
+
+  <h2>Палитра — светлая тема</h2>
+  <div class="swatches">
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#006EC6"></div>
+    <div class="swatch__meta"><b>Акцент True Blue</b><code>#006EC6</code><small>контраст: текст на белом 5.19, белый на нём 5.19</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#005CA8"></div>
+    <div class="swatch__meta"><b>Акцент, наведение</b><code>#005CA8</code><small>контраст: на белом 6.78</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#E7F1FB"></div>
+    <div class="swatch__meta"><b>Подложка выделения</b><code>#E7F1FB</code><small>контраст: основной текст 13.47, акцент 4.54</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#21252B"></div>
+    <div class="swatch__meta"><b>Текст основной</b><code>#21252B</code><small>контраст: на белом 15.39</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#5E6673"></div>
+    <div class="swatch__meta"><b>Текст вторичный</b><code>#5E6673</code><small>контраст: на белом 5.79, на bg-2 5.35</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#F4F6F8"></div>
+    <div class="swatch__meta"><b>Фон-2 (панели)</b><code>#F4F6F8</code></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#EDF0F4"></div>
+    <div class="swatch__meta"><b>Фон-3 (наведение)</b><code>#EDF0F4</code></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#0E7A46"></div>
+    <div class="swatch__meta"><b>Успех, текст</b><code>#0E7A46</code><small>контраст: на белом 5.40</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#149C58"></div>
+    <div class="swatch__meta"><b>Успех, плашка</b><code>#149C58</code><small>контраст: белый на ней 3.54 (крупное/значки)</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#C92C3C"></div>
+    <div class="swatch__meta"><b>Ошибка</b><code>#C92C3C</code><small>контраст: на белом 5.37, белый на ней 5.37</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#8F5A00"></div>
+    <div class="swatch__meta"><b>Предупреждение, текст</b><code>#8F5A00</code><small>контраст: на белом 5.78</small></div>
+  </div>
+  <div class="swatch">
+    <div class="swatch__chip" style="background:#F5A623"></div>
+    <div class="swatch__meta"><b>Предупреждение, плашка</b><code>#F5A623</code><small>контраст: тёмный текст на ней 7.60</small></div>
+  </div></div>
+  <h2>Палитра — тёмная тема</h2>
+  <div class="swatches">
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#5CA8F5"></div>
+    <div class="swatch__meta"><b>Акцент (тёмная)</b><code>#5CA8F5</code><small>контраст: текст на фоне 7.10, тёмный на нём 7.10</small></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#15181D"></div>
+    <div class="swatch__meta"><b>Фон</b><code>#15181D</code></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#1C2026"></div>
+    <div class="swatch__meta"><b>Фон-2</b><code>#1C2026</code></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#242932"></div>
+    <div class="swatch__meta"><b>Фон-3</b><code>#242932</code></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#E9EDF2"></div>
+    <div class="swatch__meta"><b>Текст основной</b><code>#E9EDF2</code><small>контраст: на фоне 15.13</small></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#9AA3AF"></div>
+    <div class="swatch__meta"><b>Текст вторичный</b><code>#9AA3AF</code><small>контраст: на фоне 6.97</small></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#3DD68C"></div>
+    <div class="swatch__meta"><b>Успех</b><code>#3DD68C</code><small>контраст: на фоне 9.49</small></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#F2555F"></div>
+    <div class="swatch__meta"><b>Ошибка</b><code>#F2555F</code><small>контраст: на фоне 5.29</small></div>
+  </div>
+  <div class="swatch swatch_dark">
+    <div class="swatch__chip" style="background:#F5B84D"></div>
+    <div class="swatch__meta"><b>Предупреждение</b><code>#F5B84D</code><small>контраст: на фоне 10.04</small></div>
+  </div></div>
+
+  <h2>Кнопки на палитре</h2>
+  <div class="panel">
+    <div class="row">
+      <span class="btn" style="background:#006EC6;color:#fff">Написать письмо</span>
+      <span class="btn" style="background:#005CA8;color:#fff">Наведение</span>
+      <span class="btn" style="background:#E7F1FB;color:#006EC6">Вторичная</span>
+      <span class="btn" style="background:#C92C3C;color:#fff">Удалить навсегда</span>
+    </div>
+  </div>
+
+  <h2>Типографика</h2>
+  <div class="panel type-sample">
+    <div><span class="lbl">Golos Text 600 · 24/28</span><span style="font-size:24px;line-height:28px;font-weight:600">Настоящая почта — на своём сервере</span></div>
+    <div><span class="lbl">Golos Text 600 · 20/26</span><span style="font-size:20px;line-height:26px;font-weight:600">Заголовок раздела настроек</span></div>
+    <div><span class="lbl">Golos Text 500 · 16/20</span><span style="font-size:16px;line-height:20px;font-weight:500">Тема письма в списке — выделенная строка</span></div>
+    <div><span class="lbl">Golos Text 400 · 15/20</span><span style="font-size:15px;line-height:20px">Основной текст интерфейса: строки списка, меню, поля ввода — съешь ещё этих мягких французских булок</span></div>
+    <div><span class="lbl">Golos Text 400 · 13/16</span><span style="font-size:13px;line-height:16px;color:var(--mt-text-2)">Вторичный текст: сниппет письма, дата, счётчики</span></div>
+    <div><span class="lbl">JetBrains Mono 400 · 13/18</span><span style="font-family:var(--mt-font-mono);font-size:13px;line-height:18px">DKIM-Signature: v=1; a=rsa-sha256; d=mail.local; s=dkim</span></div>
+  </div>
+
+  <h2>Значки — светлая тема (16 / 24 / 48)</h2>
+  <div class="panel"><div class="icons"><div class="icon-cell" title="archive.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg></div>
+    <div class="icon-name">В архив<br><code>archive.svg</code></div>
+  </div>
+<div class="icon-cell" title="attach.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg></div>
+    <div class="icon-name">Вложение<br><code>attach.svg</code></div>
+  </div>
+<div class="icon-cell" title="compose.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg></div>
+    <div class="icon-name">Написать письмо<br><code>compose.svg</code></div>
+  </div>
+<div class="icon-cell" title="delete.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg></div>
+    <div class="icon-name">Удалить<br><code>delete.svg</code></div>
+  </div>
+<div class="icon-cell" title="flag.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg></div>
+    <div class="icon-name">Флажок<br><code>flag.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-archive.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg></div>
+    <div class="icon-name">Архив<br><code>folder-archive.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-drafts.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg></div>
+    <div class="icon-name">Черновики<br><code>folder-drafts.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-inbox.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg></div>
+    <div class="icon-name">Входящие<br><code>folder-inbox.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-sent.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg></div>
+    <div class="icon-name">Отправленные<br><code>folder-sent.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-spam.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg></div>
+    <div class="icon-name">Спам<br><code>folder-spam.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-trash.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg></div>
+    <div class="icon-name">Корзина<br><code>folder-trash.svg</code></div>
+  </div>
+<div class="icon-cell" title="forward.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg></div>
+    <div class="icon-name">Переслать<br><code>forward.svg</code></div>
+  </div>
+<div class="icon-cell" title="important.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Важное<br><code>important.svg</code></div>
+  </div>
+<div class="icon-cell" title="label.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Пометить меткой<br><code>label.svg</code></div>
+  </div>
+<div class="icon-cell" title="move-to-folder.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg></div>
+    <div class="icon-name">В папку<br><code>move-to-folder.svg</code></div>
+  </div>
+<div class="icon-cell" title="print.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg></div>
+    <div class="icon-name">Печать<br><code>print.svg</code></div>
+  </div>
+<div class="icon-cell" title="read.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg></div>
+    <div class="icon-name">Прочитано<br><code>read.svg</code></div>
+  </div>
+<div class="icon-cell" title="reply-all.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg></div>
+    <div class="icon-name">Ответить всем<br><code>reply-all.svg</code></div>
+  </div>
+<div class="icon-cell" title="reply.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg></div>
+    <div class="icon-name">Ответить<br><code>reply.svg</code></div>
+  </div>
+<div class="icon-cell" title="search.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg></div>
+    <div class="icon-name">Поиск<br><code>search.svg</code></div>
+  </div>
+<div class="icon-cell" title="send-error.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg></div>
+    <div class="icon-name">Ошибка отправки<br><code>send-error.svg</code></div>
+  </div>
+<div class="icon-cell" title="settings.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg></div>
+    <div class="icon-name">Настройки<br><code>settings.svg</code></div>
+  </div>
+<div class="icon-cell" title="unread.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Непрочитано<br><code>unread.svg</code></div>
+  </div></div></div>
+
+  <h2>Значки — тёмная тема</h2>
+  <div class="panel panel_dark"><div class="icons"><div class="icon-cell" title="archive.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В архив">
+  <title>В архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M12 11.2v5.4m0 0-2.4-2.4m2.4 2.4 2.4-2.4"/>
+</svg></div>
+    <div class="icon-name">В архив<br><code>archive.svg</code></div>
+  </div>
+<div class="icon-cell" title="attach.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Вложение">
+  <title>Вложение</title>
+  <path d="m17.2 7.9-7.5 7.5a1.7 1.7 0 0 1-2.4-2.4l7.7-7.7a3.4 3.4 0 0 1 4.8 4.8l-8 8a5.1 5.1 0 0 1-7.2-7.2L11.9 3.6"/>
+</svg></div>
+    <div class="icon-name">Вложение<br><code>attach.svg</code></div>
+  </div>
+<div class="icon-cell" title="compose.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg></div>
+    <div class="icon-name">Написать письмо<br><code>compose.svg</code></div>
+  </div>
+<div class="icon-cell" title="delete.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Удалить">
+  <title>Удалить</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg></div>
+    <div class="icon-name">Удалить<br><code>delete.svg</code></div>
+  </div>
+<div class="icon-cell" title="flag.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg></div>
+    <div class="icon-name">Флажок<br><code>flag.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-archive.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Архив">
+  <title>Архив</title>
+  <rect x="3.5" y="4.5" width="17" height="4.4" rx="1.2"/>
+  <path d="M5.4 8.9V18a2 2 0 0 0 2 2h9.2a2 2 0 0 0 2-2V8.9"/>
+  <path d="M9.8 12.6h4.4"/>
+</svg></div>
+    <div class="icon-name">Архив<br><code>folder-archive.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-drafts.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg></div>
+    <div class="icon-name">Черновики<br><code>folder-drafts.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-inbox.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Входящие">
+  <title>Входящие</title>
+  <path d="M4.1 13.5 6.2 5.9A1.8 1.8 0 0 1 7.93 4.5h8.14a1.8 1.8 0 0 1 1.73 1.4l2.1 7.6"/>
+  <path d="M3.9 13.5h4.5l1.6 2.7h4l1.6-2.7h4.5V17.7a1.8 1.8 0 0 1-1.8 1.8H5.7a1.8 1.8 0 0 1-1.8-1.8Z"/>
+</svg></div>
+    <div class="icon-name">Входящие<br><code>folder-inbox.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-sent.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Отправленные">
+  <title>Отправленные</title>
+  <path d="M20.3 3.7 4 9.9a.55.55 0 0 0 .05 1.05l5.6 1.55a1 1 0 0 1 .7.7l1.55 5.6a.55.55 0 0 0 1.05.05L19.2 4.4"/>
+  <path d="M20.3 3.7 10.1 13.9"/>
+</svg></div>
+    <div class="icon-name">Отправленные<br><code>folder-sent.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-spam.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Спам">
+  <title>Спам</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M6.1 6.1 17.9 17.9"/>
+</svg></div>
+    <div class="icon-name">Спам<br><code>folder-spam.svg</code></div>
+  </div>
+<div class="icon-cell" title="folder-trash.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Корзина">
+  <title>Корзина</title>
+  <path d="M4.5 6.5h15"/>
+  <path d="M9.5 6.3V5a1.5 1.5 0 0 1 1.5-1.5h2A1.5 1.5 0 0 1 14.5 5v1.3"/>
+  <path d="M6.4 6.7 7.2 18.6a2 2 0 0 0 2 1.9h5.6a2 2 0 0 0 2-1.9l.8-11.9"/>
+  <path d="M10 10.5v6.2M14 10.5v6.2"/>
+</svg></div>
+    <div class="icon-name">Корзина<br><code>folder-trash.svg</code></div>
+  </div>
+<div class="icon-cell" title="forward.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Переслать">
+  <title>Переслать</title>
+  <path d="M14.5 6.5 19.5 11l-5 4.5"/>
+  <path d="M19.5 11h-8.3a6.7 6.7 0 0 0-6.7 6.7v.8"/>
+</svg></div>
+    <div class="icon-name">Переслать<br><code>forward.svg</code></div>
+  </div>
+<div class="icon-cell" title="important.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Важное<br><code>important.svg</code></div>
+  </div>
+<div class="icon-cell" title="label.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Пометить меткой">
+  <title>Пометить меткой</title>
+  <path d="M12.3 3.5H6a1.8 1.8 0 0 0-1.8 1.8v6.3a1.8 1.8 0 0 0 .53 1.27l7.2 7.2a1.8 1.8 0 0 0 2.54 0l5.3-5.3a1.8 1.8 0 0 0 0-2.54l-7.2-7.2a1.8 1.8 0 0 0-1.27-.53Z"/>
+  <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Пометить меткой<br><code>label.svg</code></div>
+  </div>
+<div class="icon-cell" title="move-to-folder.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="В папку">
+  <title>В папку</title>
+  <path d="M3.5 6.7a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.4a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"/>
+  <path d="M9.3 13.6h5.4m0 0-2.2-2.2m2.2 2.2-2.2 2.2"/>
+</svg></div>
+    <div class="icon-name">В папку<br><code>move-to-folder.svg</code></div>
+  </div>
+<div class="icon-cell" title="print.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Печать">
+  <title>Печать</title>
+  <path d="M7 8.3V4.5h10v3.8"/>
+  <path d="M7 16.3H5.2a1.7 1.7 0 0 1-1.7-1.7V10a1.7 1.7 0 0 1 1.7-1.7h13.6A1.7 1.7 0 0 1 20.5 10v4.6a1.7 1.7 0 0 1-1.7 1.7H17"/>
+  <rect x="7" y="13.4" width="10" height="6.1" rx="1"/>
+</svg></div>
+    <div class="icon-name">Печать<br><code>print.svg</code></div>
+  </div>
+<div class="icon-cell" title="read.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Прочитано">
+  <title>Прочитано</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.2 17.6 2.1 2.1 3.9-4.5"/>
+</svg></div>
+    <div class="icon-name">Прочитано<br><code>read.svg</code></div>
+  </div>
+<div class="icon-cell" title="reply-all.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить всем">
+  <title>Ответить всем</title>
+  <path d="M7.7 6.7 3.5 11l4.2 4.3"/>
+  <path d="M12.2 6.7 8 11l4.2 4.3"/>
+  <path d="M8 11h6a6.5 6.5 0 0 1 6.5 6.5v1"/>
+</svg></div>
+    <div class="icon-name">Ответить всем<br><code>reply-all.svg</code></div>
+  </div>
+<div class="icon-cell" title="reply.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ответить">
+  <title>Ответить</title>
+  <path d="M9.5 6.5 4.5 11l5 4.5"/>
+  <path d="M4.5 11h8.3a6.7 6.7 0 0 1 6.7 6.7v.8"/>
+</svg></div>
+    <div class="icon-name">Ответить<br><code>reply.svg</code></div>
+  </div>
+<div class="icon-cell" title="search.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Поиск">
+  <title>Поиск</title>
+  <circle cx="10.8" cy="10.8" r="6.3"/>
+  <path d="M15.4 15.4 20.5 20.5"/>
+</svg></div>
+    <div class="icon-name">Поиск<br><code>search.svg</code></div>
+  </div>
+<div class="icon-cell" title="send-error.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Ошибка отправки">
+  <title>Ошибка отправки</title>
+  <path d="M20.5 10.8V7.6a2 2 0 0 0-2-2h-13a2 2 0 0 0-2 2v8.8a2 2 0 0 0 2 2h6.7"/>
+  <path d="m4.4 7.5 7.6 5 7.6-5"/>
+  <path d="m15.6 15.6 4.6 4.6m0-4.6-4.6 4.6"/>
+</svg></div>
+    <div class="icon-name">Ошибка отправки<br><code>send-error.svg</code></div>
+  </div>
+<div class="icon-cell" title="settings.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Настройки">
+  <title>Настройки</title>
+  <path d="M3.5 6.5h3.6M11.5 6.5h9M3.5 12h9M17 12h3.5M3.5 17.5h2M10 17.5h10.5"/>
+  <circle cx="9.3" cy="6.5" r="2.2"/>
+  <circle cx="14.8" cy="12" r="2.2"/>
+  <circle cx="7.8" cy="17.5" r="2.2"/>
+</svg></div>
+    <div class="icon-name">Настройки<br><code>settings.svg</code></div>
+  </div>
+<div class="icon-cell" title="unread.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Непрочитано<br><code>unread.svg</code></div>
+  </div></div></div>
+
+  <h2>Значки в акцентном цвете</h2>
+  <div class="panel" style="color:#006EC6"><div class="icons"><div class="icon-cell" title="compose.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Написать письмо">
+  <title>Написать письмо</title>
+  <path d="M12 5.5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V12"/>
+  <path d="M17.7 3.8a1.94 1.94 0 0 1 2.75 2.75l-7.4 7.4-3.6.85.85-3.6Z"/>
+</svg></div>
+    <div class="icon-name">Написать письмо<br><code>compose.svg</code></div>
+  </div>
+<div class="icon-cell" title="unread.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Непрочитано">
+  <title>Непрочитано</title>
+  <path d="M20.5 9.8v6.6a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V7.6a2 2 0 0 1 2-2h9.4"/>
+  <path d="m4.4 7.5 7.6 5 5-3.3"/>
+  <circle cx="19.3" cy="4.9" r="2.5" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Непрочитано<br><code>unread.svg</code></div>
+  </div>
+<div class="icon-cell" title="important.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Важное">
+  <title>Важное</title>
+  <circle cx="12" cy="12" r="8.5"/>
+  <path d="M12 7.4v5.3"/>
+  <circle cx="12" cy="16.3" r="1.2" fill="currentColor" stroke="none"/>
+</svg></div>
+    <div class="icon-name">Важное<br><code>important.svg</code></div>
+  </div>
+<div class="icon-cell" title="flag.svg">
+    <div class="icon-sizes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Флажок">
+  <title>Флажок</title>
+  <path d="M6 20.5V3.8"/>
+  <path d="M6 4.5h11.4l-2.7 4 2.7 4H6"/>
+</svg></div>
+    <div class="icon-name">Флажок<br><code>flag.svg</code></div>
+  </div></div></div>
+</body>
+</html>

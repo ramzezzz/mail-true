@@ -1,0 +1,65 @@
+# Автоопределение настроек почтовых клиентов (Mail.True).
+# Шаблон обрабатывается entrypoint-ом образа nginx (envsubst): ${MAIL_DOMAIN}
+# подставляется из окружения; переменные nginx ($host и т.п.) не трогаются.
+#
+# Имена хостов:
+#   autoconfig.<домен>   — Mozilla Autoconfig (Thunderbird)
+#   autodiscover.<домен> — Microsoft Autodiscover (Outlook)
+#
+# Служебные пути автонастройки на корневом домене (/.well-known/ и
+# /autodiscover/autodiscover.xml) переехали в app.conf.template — туда,
+# где живёт веб-интерфейс почты: на одном имени хоста может быть только
+# один server-блок. Сами проверки автонастройки от этого не изменились.
+#
+# В dev сертификат самоподписанный (CN=mail.local) — клиентам/curl нужен -k.
+
+# Адрес сервиса разрешается встроенным DNS Docker на каждом запросе
+# (директива resolver объявлена в app.conf.template — в http-контексте она
+# одна на весь nginx). Статический блок upstream здесь стоял раньше и был
+# настоящей поломкой: nginx запоминал адрес контейнера навсегда, и после
+# пересоздания autoconfig запросы уходили в чужой контейнер, занявший
+# освободившийся адрес. Проверка здоровья при этом оставалась зелёной —
+# отвечал-то кто-то, — а Thunderbird и Outlook получали не тот ответ.
+
+# ------------------------------------------------------------------
+# autoconfig.<домен> — Thunderbird: GET /mail/config-v1.1.xml
+# ------------------------------------------------------------------
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name autoconfig.${MAIL_DOMAIN};
+
+    ssl_certificate     /certs/mail.crt;
+    ssl_certificate_key /certs/mail.key;
+
+    location / {
+        set $autoconfig_upstream http://autoconfig:8080;
+        proxy_pass $autoconfig_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# ------------------------------------------------------------------
+# autodiscover.<домен> — Outlook: POST/GET /autodiscover/autodiscover.xml
+# (регистр пути бывает разным — сервис обрабатывает без учёта регистра)
+# ------------------------------------------------------------------
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name autodiscover.${MAIL_DOMAIN};
+
+    ssl_certificate     /certs/mail.crt;
+    ssl_certificate_key /certs/mail.key;
+
+    location / {
+        set $autoconfig_upstream http://autoconfig:8080;
+        proxy_pass $autoconfig_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

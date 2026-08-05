@@ -1,0 +1,118 @@
+/* Каркас админки: узкая шапка, левое меню, плотная область содержимого. */
+
+.layout {
+  display: grid;
+  grid-template-columns: var(--mt-admin-sidebar-width) 1fr;
+  grid-template-rows: var(--mt-admin-header-height) 1fr;
+  grid-template-areas:
+    'header header'
+    'sidebar content';
+  height: 100%;
+}
+
+.header {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap);
+  padding: 0 var(--mt-admin-gap);
+  background: var(--mt-admin-surface);
+  border-bottom: 1px solid var(--mt-admin-border);
+}
+
+.brand {
+  font-weight: 600;
+  font-size: var(--mt-font-headline-size, 15px);
+}
+
+.brandMuted {
+  color: var(--mt-color-text-secondary);
+  font-weight: 400;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  color: var(--mt-color-text-secondary);
+}
+
+.whoLogin {
+  color: var(--mt-color-text-primary);
+  font-weight: 500;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  background: var(--mt-admin-surface);
+  border-right: 1px solid var(--mt-admin-border);
+  padding: var(--mt-admin-gap) 8px;
+  overflow-y: auto;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: var(--mt-admin-radius);
+  color: var(--mt-color-text-primary);
+}
+
+.navLink:hover {
+  background: var(--mt-color-background-secondary);
+  text-decoration: none;
+}
+
+.navLinkActive {
+  background: var(--mt-color-background-accent-themed-alpha);
+  color: var(--mt-color-text-link);
+  font-weight: 500;
+}
+
+.navStub {
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+.content {
+  grid-area: content;
+  padding: var(--mt-admin-gap);
+  overflow: auto;
+}
+
+.pageTitle {
+  margin: 0 0 var(--mt-admin-gap);
+  font-size: var(--mt-font-title2-size, 20px);
+  font-weight: 600;
+}
+
+.pageSubtitle {
+  margin: -8px 0 var(--mt-admin-gap);
+  color: var(--mt-color-text-secondary);
+}
+
+/* Плашка административного сеанса в чужом ящике — видна всегда */
+.impersonation {
+  grid-area: header;
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  padding: 0 var(--mt-admin-gap);
+  background: var(--mt-color-background-negative-tint);
+  color: var(--mt-color-text-negative);
+  border-bottom: 1px solid var(--mt-admin-fail);
+}
+
+.center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}

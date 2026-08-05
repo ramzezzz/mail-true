@@ -1,0 +1,69 @@
+/* Плотная таблица админки: строки, а не карточки. */
+
+.wrap {
+  overflow-x: auto;
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-admin-surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--mt-font-footnote-size, 13px);
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 500;
+  color: var(--mt-color-text-secondary);
+  background: var(--mt-color-background-secondary);
+  padding: 0 10px;
+  height: 30px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--mt-admin-border);
+}
+
+.table td {
+  padding: 0 10px;
+  height: var(--mt-admin-row-height);
+  border-bottom: 1px solid var(--mt-admin-border);
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.table tbody tr:hover td {
+  background: var(--mt-color-background-secondary);
+}
+
+.selected td {
+  background: var(--mt-color-background-accent-themed-alpha);
+}
+
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+}
+
+.actions {
+  display: flex;
+  gap: var(--mt-admin-gap-s);
+  justify-content: flex-end;
+  white-space: nowrap;
+}

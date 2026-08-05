@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Черновики">
+  <title>Черновики</title>
+  <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5Z"/>
+  <path d="M13.5 3.5V8.5H18.5"/>
+  <path d="M8.5 13h7M8.5 16.5h4.5"/>
+</svg>

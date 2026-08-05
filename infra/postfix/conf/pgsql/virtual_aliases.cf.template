@@ -1,0 +1,6 @@
+# Карта алиасов (virtual_alias_maps)
+hosts = postgres
+user = ${POSTGRES_USER}
+password = ${POSTGRES_PASSWORD}
+dbname = ${POSTGRES_DB}
+query = SELECT destination FROM virtual_aliases WHERE source = '%s' AND active

@@ -1,0 +1,14 @@
+.spinner {
+  display: inline-flex;
+  color: var(--mt-color-icon-secondary);
+}
+
+.svg {
+  animation: rotate 0.7s linear infinite;
+}
+
+@keyframes rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}

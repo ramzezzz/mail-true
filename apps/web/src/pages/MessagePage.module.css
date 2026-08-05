@@ -1,0 +1,517 @@
+/* Просмотр письма: панель действий, плашки, шапка отправителя, тело. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.centered {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Панель действий: кнопки 36px, полоса 48px.
+ *
+ * Перенос разрешён на любой ширине, а не только на узком экране: полный
+ * набор кнопок требует около 1150px, и на ноутбуке с 1100px «Кратко» и
+ * стрелки к соседним письмам обрезались краем — контент растит `overflow:
+ * hidden`, так что до них было не дотянуться вовсе. Пока всё помещается,
+ * полоса остаётся ровно 48px и выглядит как прежде.
+ */
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 48px;
+  flex-shrink: 0;
+  padding: 0 12px 0 8px;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.moreMenu {
+  width: 285px;
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 24px 32px;
+}
+
+/* Плашка надёжного отправителя */
+.reliableBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 8px 12px;
+  padding: 10px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-mail-color-list-background-positive-alpha);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.reliableIcon {
+  display: inline-flex;
+  color: var(--mt-color-background-positive);
+}
+
+.reliableMore {
+  border: none;
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Тема: h2 24px/28px, вес 500; рядом чип категории */
+.subjectRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 8px 16px;
+}
+
+.subject {
+  margin: 0;
+  font-size: var(--mt-font-h1-size, 24px);
+  line-height: var(--mt-font-h1-line-height, 28px);
+  font-weight: 500;
+}
+
+.categoryChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.categoryChipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Блок отправителя */
+.senderBlock {
+  display: flex;
+  /* По верхнему краю, а не по центру: при раскрытых подробностях блок
+     вырастает, и при центрировании аватар со значками уезжали на середину,
+     отрываясь от строки отправителя, к которой относятся. */
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 8px;
+  padding-bottom: 12px;
+}
+
+.senderAvatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  color: var(--mt-color-text-contrast);
+  font-size: var(--mt-font-headline1-size, 16px);
+  font-weight: 500;
+}
+
+.senderInfo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.senderLine {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.senderName {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.senderDate {
+  flex-shrink: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.senderTo {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+/* Обрезается только перечень адресатов; кнопка «подробности» рядом с ним
+   и остаётся на виду при любом их числе */
+.senderToText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.senderActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  /* Цвет основной, а не вторичный: со вторичным значки печати и календаря
+     сливались с фоном настолько, что их не находили глазами. В mail.ru эти
+     значки такого же размера, но заметнее по контрасту. */
+  color: var(--mt-color-icon-medium, var(--mt-color-icon-secondary));
+}
+
+.senderActions button:hover {
+  color: var(--mt-color-icon-primary);
+}
+
+/* Полоса про заблокированные картинки */
+.imagesBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px;
+  padding: 8px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-warning-tint);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.imagesShow {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Тело письма: внутренние поля 20px 32px 40px (как .letter__body) */
+.body,
+.bodyText {
+  padding: 20px 32px 40px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  overflow-wrap: break-word;
+}
+
+.body :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.body :global(blockquote) {
+  margin: 8px 0 8px 4px;
+  padding-left: 12px;
+  border-left: 2px solid var(--mt-color-separator-primary);
+  color: var(--mt-color-text-secondary);
+}
+
+.bodyText {
+  white-space: pre-wrap;
+  font-family: inherit;
+  margin: 0;
+}
+
+/* Вложения */
+.attachments {
+  margin: 0 8px 24px;
+  padding: 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-mail-color-letter-attach-list-background, var(--mt-color-background-tertiary));
+}
+
+.attachmentsTitle {
+  margin-bottom: 12px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: 500;
+}
+
+.attachmentsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-content);
+  box-shadow: var(--mt-elevation-1);
+  /* Вложение — ссылка на скачивание, но выглядит карточкой, а не текстом */
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.1s ease-out;
+}
+
+.attachment:hover {
+  background: var(--mt-color-background-secondary);
+}
+
+.attachment:focus-visible {
+  outline: 2px solid var(--mt-color-stroke-accent);
+  outline-offset: 2px;
+}
+
+.attachmentExt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: var(--mt-color-background-accent);
+  color: var(--mt-color-text-contrast);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.attachmentInfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.attachmentName {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.attachmentSize {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+/* Нижняя панель */
+.bottomBar {
+  display: flex;
+  gap: 8px;
+  margin: 0 8px;
+}
+
+/* --- Адрес отправителя и подробности письма -------------------------- */
+
+.senderAddress {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailsToggle {
+  flex: none;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mt-color-text-accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.detailsToggle:hover {
+  text-decoration: underline;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.details dt {
+  color: var(--mt-color-text-secondary);
+}
+
+.details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailsMono {
+  font-family: var(--mt-font-family-mono, monospace);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.headers summary {
+  cursor: pointer;
+  color: var(--mt-color-text-accent);
+}
+
+.headersBody {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-content);
+  font-family: var(--mt-font-family-mono, monospace);
+  font-size: var(--mt-font-caption1-size, 12px);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Не смогли загрузить письмо: причина и что можно сделать */
+.loadError {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  max-width: 420px;
+  text-align: center;
+}
+
+.loadErrorText {
+  margin: 0;
+  color: var(--mt-color-text-secondary);
+}
+
+.loadErrorActions {
+  display: flex;
+  gap: 8px;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 1024px) {
+  .toolbar {
+    row-gap: 4px;
+    padding: 6px 8px;
+  }
+
+  /* Распорка при переносе только мешает: она одна заняла бы всю первую
+     строку и увела бы стрелки вниз даже там, где они помещались */
+  .spacer {
+    display: none;
+  }
+
+  .scroll {
+    padding: 0 12px 24px;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Подписи кнопок уводятся с глаз, но остаются названиями кнопок
+     для чтения с экрана — см. тот же приём в ListToolbar.module.css */
+  .toolbar button {
+    position: relative;
+    padding: 0 8px;
+  }
+
+  .toolbar button > span + span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .scroll {
+    padding: 0 4px 24px;
+  }
+
+  /* Поля тела письма 32px с каждой стороны отнимали у текста треть
+     ширины телефона, и слова переносились по три-четыре буквы */
+  .body,
+  .bodyText {
+    padding: 16px 8px 32px;
+  }
+
+  .subject {
+    font-size: var(--mt-font-h2-size, 20px);
+    line-height: 24px;
+  }
+
+  .subjectRow {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 4px 12px;
+  }
+
+  .senderBlock,
+  .imagesBar,
+  .reliableBanner,
+  .attachments,
+  .bottomBar {
+    margin-left: 4px;
+    margin-right: 4px;
+  }
+
+  .bottomBar {
+    flex-wrap: wrap;
+  }
+
+  .attachmentName {
+    max-width: 150px;
+  }
+
+  .details {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+
+  .details dt {
+    margin-top: 6px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Палец не попадает в 36px */
+  .toolbar button,
+  .senderActions button,
+  .bottomBar button {
+    min-width: 44px;
+    height: 44px;
+  }
+
+  /* Текстовые ссылки внутри строк: область касания растёт полями, а строка
+     не разъезжается — то же расстояние отыграно отрицательными отступами */
+  .detailsToggle,
+  .imagesShow,
+  .reliableMore {
+    padding: 12px 4px;
+    margin-top: -12px;
+    margin-bottom: -12px;
+  }
+}

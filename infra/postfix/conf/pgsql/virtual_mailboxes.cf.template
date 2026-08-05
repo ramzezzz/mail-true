@@ -1,0 +1,6 @@
+# Карта виртуальных ящиков (virtual_mailbox_maps)
+hosts = postgres
+user = ${POSTGRES_USER}
+password = ${POSTGRES_PASSWORD}
+dbname = ${POSTGRES_DB}
+query = SELECT 1 FROM virtual_users WHERE email = '%s' AND active

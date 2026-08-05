@@ -1,0 +1,114 @@
+.modal {
+  max-width: 680px;
+}
+
+.groupTitle {
+  margin: 16px 0 12px;
+  font-size: var(--mt-font-h2-size, 20px);
+  line-height: var(--mt-font-h2-line-height, 26px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.groupTitle:first-child {
+  margin-top: 0;
+}
+
+/* Строка «поле · оператор · значение · ×» */
+.condition {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.conditionField {
+  flex: 0 0 200px;
+}
+
+.conditionOperator {
+  flex: 0 0 130px;
+}
+
+.conditionValue {
+  flex: 1 1 auto;
+}
+
+.actionFolder {
+  flex: 1 1 auto;
+}
+
+.removeCondition {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: var(--mt-color-icon-secondary);
+  cursor: pointer;
+}
+
+.removeCondition:hover {
+  background: var(--mt-color-background-secondary-alpha);
+}
+
+.addCondition,
+.moreActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 8px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font-size: var(--mt-font-headline2-size, 15px);
+  cursor: pointer;
+}
+
+.addCondition:hover,
+.moreActions:hover {
+  text-decoration: underline;
+}
+
+.moreActions {
+  margin-top: 16px;
+}
+
+.checkRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 12px 0;
+}
+
+/* Список папок для «применить к уже полученным» */
+.folderPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0 0 28px;
+  padding: 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.extraActions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.error {
+  margin: 12px 0 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+}

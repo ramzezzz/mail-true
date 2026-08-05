@@ -1,0 +1,102 @@
+/*
+ * Каркас страницы. Три опорные ширины:
+ *   >1024      — шапка, колонка папок и белая карточка контента рядом;
+ *   481–1024   — колонка папок уезжает выдвижным ящиком, контент во всю ширину;
+ *   ≤480       — то же, плюс телефонные размеры внутри блоков.
+ */
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: var(--mt-mail-size-layout-width-max, 2150px);
+  margin: 0 auto;
+}
+
+.body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0; /* иначе flex-дети не дают скроллиться контенту */
+}
+
+/* Обёртка левой колонки: на широком экране — обычный столбец потока */
+.aside {
+  display: flex;
+  flex: none;
+  min-height: 0;
+}
+
+.aside > * {
+  flex: 1 1 auto;
+}
+
+/* Затемнения на широком экране нет вовсе */
+.scrim {
+  display: none;
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--mt-app-content-bg);
+  border-radius: var(--mt-app-content-radius, 16px) 0 0 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1024px) {
+  /* Ящик с папками: поверх контента, во всю высоту под шапкой */
+  .aside {
+    position: fixed;
+    top: var(--mt-app-header-height, 62px);
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    background: var(--mt-app-content-bg);
+    box-shadow: var(--mt-elevation-3, 0 4px 32px rgba(0, 16, 61, 0.16));
+    transform: translateX(-100%);
+    transition: transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+    /* Пока ящик закрыт, до его кнопок нельзя дотянуться ни мышью, ни Tab */
+    visibility: hidden;
+  }
+
+  .asideOpen {
+    transform: none;
+    visibility: visible;
+  }
+
+  .scrim {
+    display: block;
+    position: fixed;
+    top: var(--mt-app-header-height, 62px);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 55;
+    border: none;
+    padding: 0;
+    background: var(--mt-color-overlay-primary, rgba(0, 0, 0, 0.4));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+  }
+
+  .scrimOpen {
+    opacity: 1;
+    pointer-events: auto;
+    cursor: pointer;
+  }
+
+  /* Контент занимает всю ширину — скруглять нечего */
+  .content {
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aside,
+  .scrim {
+    transition: none;
+  }
+}

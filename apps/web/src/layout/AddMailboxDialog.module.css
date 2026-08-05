@@ -1,0 +1,47 @@
+/* Окно узкое: в нём всего два поля, широкое выглядело бы пустым. */
+.card {
+  max-width: var(--mt-size-popup-small, 420px);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.lead {
+  margin: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+}
+
+.warning {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+}
+
+.error {
+  margin: 0;
+  color: var(--mt-color-text-negative, #ed330a);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: var(--mt-font-subhead-line-height, 18px);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+/* Телефон: кнопки в столбик — рядом они не помещаются */
+@media (max-width: 480px) {
+  .actions {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,147 @@
+/*
+ * Геометрия повторяет левое меню почты (Sidebar.module.css):
+ * колонка 232px, внутренние пункты 200×36 с шагом 37px, радиус 8px.
+ * Так переход «почта → поиск» не дёргает колонку.
+ */
+
+.sidebar {
+  flex: none;
+  width: var(--mt-app-sidebar-width, 232px);
+  padding: 12px 16px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.title {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-sidebar-counter-text);
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 16px;
+}
+
+.groupTitle {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  margin-bottom: 4px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-sidebar-item-bg-hover);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-sidebar-item-text);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: var(--mt-sidebar-item-text);
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--mt-sidebar-item-bg-hover);
+}
+
+.active {
+  background: var(--mt-sidebar-item-bg-active);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+/* Периоды идут без значка, с отступом под текст остальных пунктов */
+.periodItem {
+  padding-left: 34px;
+}
+
+.itemIcon {
+  flex: none;
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--mt-sidebar-item-icon);
+}
+
+.itemIcon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+.itemName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.counter {
+  flex: none;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-sidebar-counter-text);
+}
+
+.empty {
+  padding: 0 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-sidebar-counter-text);
+}
+
+/* Скелетон пункта — пока считаются первые результаты */
+.skeleton {
+  height: 36px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-skeleton-bg);
+  animation: pulse 1.2s var(--mt-anim-easing-default, ease) infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+/* В выдвижном ящике узкого экрана (см. AppLayout) колонка занимает его весь */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: min(280px, 85vw);
+  }
+}
+
+@media (max-width: 480px) {
+  /* Палец не попадает в 36px */
+  .item,
+  .groupTitle {
+    height: 44px;
+  }
+}

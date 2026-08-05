@@ -1,0 +1,102 @@
+.host {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: var(--mt-z-index-popout, 100);
+  min-width: 200px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: var(--mt-color-background-modal, #fff);
+  box-shadow: var(
+    --mt-elevation-3,
+    0 0 2px rgba(0, 16, 61, 0.08),
+    0 16px 16px rgba(0, 16, 61, 0.16)
+  );
+  animation: menuShow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.alignRight {
+  left: auto;
+  right: 0;
+}
+
+@keyframes menuShow {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  margin: 0;
+  padding: 0 16px;
+  height: 36px;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--mt-ph-color-transparent-hover);
+}
+
+.item:active {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.danger {
+  color: var(--mt-color-text-negative, #ed330a);
+}
+
+.itemIcon {
+  display: inline-flex;
+  color: var(--mt-color-icon-secondary);
+}
+
+.danger .itemIcon {
+  color: inherit;
+}
+
+.itemIcon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+.itemText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Подпись горячей клавиши справа от текста пункта */
+.itemHint {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  white-space: nowrap;
+}
+
+.separator {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--mt-color-separator-primary);
+}

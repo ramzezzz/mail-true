@@ -1,0 +1,35 @@
+{
+  "name": "@mail-true/migrate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Перенос почты с внешнего IMAP-сервера (Kerio Connect, Exchange, Zimbra, Dovecot и др.) в Mail.True",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "mail-true-migrate": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "watch": "tsc -b --watch",
+    "test": "npm run build && node --test \"dist/__tests__/*.test.js\"",
+    "livetest": "npm run build && bash scripts/live-test.sh"
+  },
+  "dependencies": {
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.2",
+    "pg": "^8.13.1",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.5",
+    "@types/pg": "^8.11.10"
+  }
+}

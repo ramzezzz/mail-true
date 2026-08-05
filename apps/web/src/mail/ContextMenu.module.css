@@ -1,0 +1,83 @@
+/* Контекстное меню: ширина 301px, пункт 36px (метрики mail.ru). */
+
+.menu {
+  position: fixed;
+  z-index: var(--mt-z-index-popout, 100);
+  width: 301px;
+  padding: 8px 0;
+  border-radius: 12px;
+  background: var(--mt-color-background-modal);
+  box-shadow: var(--mt-elevation-3);
+  animation: menuShow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+@keyframes menuShow {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  border: none;
+  margin: 0;
+  padding: 0 16px;
+  height: 36px;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font-family: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--mt-ph-color-transparent-hover);
+}
+
+.item:active {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.danger {
+  color: var(--mt-color-text-negative);
+}
+
+.itemIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mt-color-icon-secondary);
+}
+
+.danger .itemIcon {
+  color: inherit;
+}
+
+.itemText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itemHint {
+  margin-left: auto;
+  padding-left: 16px;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  white-space: nowrap;
+}
+
+.separator {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--mt-color-separator-primary);
+}

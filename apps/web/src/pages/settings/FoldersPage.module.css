@@ -1,0 +1,80 @@
+.topRow {
+  margin-bottom: 24px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.headCell {
+  padding: 0 8px 8px;
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: var(--mt-font-weight-base1, 400);
+  color: var(--mt-color-text-secondary);
+  text-align: left;
+}
+
+.row {
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+}
+
+.nameCell,
+.countCell,
+.actionsCell {
+  padding: 8px;
+  height: 48px;
+  vertical-align: middle;
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+
+.name {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon {
+  display: inline-flex;
+  color: var(--mt-color-icon-secondary);
+}
+
+.icon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+.countCell {
+  width: 140px;
+  color: var(--mt-color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Набор действий у строки свой: у Корзины он пуст, и колонка просто пустая */
+.actionsCell {
+  width: 140px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.dialog {
+  max-width: var(--mt-size-popup-small, 480px);
+}
+
+.confirmText {
+  margin: 0;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  color: var(--mt-color-text-secondary);
+}

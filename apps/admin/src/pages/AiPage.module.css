@@ -1,0 +1,79 @@
+/* Раздел «Помощник ИИ»: формы настроек, карточки возможностей, итоги журнала. */
+
+.panelGap {
+  margin-bottom: var(--mt-admin-gap);
+}
+
+/* Сетка формы: поля в две-три колонки, длинные — во всю ширину */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0 var(--mt-admin-gap);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+/* Строка с переключателями и подписью рядом */
+.switchRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mt-admin-gap);
+  margin-bottom: var(--mt-admin-gap);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  margin-bottom: var(--mt-admin-gap);
+}
+
+/* Карточка возможности: флажок слева, описание справа */
+.features {
+  display: grid;
+  gap: var(--mt-admin-gap-s);
+}
+
+.feature {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mt-admin-gap-s);
+  padding: 8px 10px;
+  border: 1px solid var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+}
+
+.featureTitle {
+  font-weight: 600;
+}
+
+.featureText {
+  margin: 2px 0 0;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Ответ модели при проверке связи — как пришёл, с переносами */
+.summary {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--mt-color-text-secondary);
+}
+
+.list li {
+  margin-bottom: 4px;
+}
+
+/* Подпись под пределом расходов и прочими полями */
+.muted {
+  color: var(--mt-color-text-secondary);
+}

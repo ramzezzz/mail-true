@@ -1,0 +1,22 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+    // Админка — приложение, а не библиотека: сборкой занимается Vite,
+    // tsc используется только для проверки типов. Поэтому проект не composite
+    // и ничего не эмитит (иначе пришлось бы городить rootDir поверх
+    // переиспользуемых компонентов из apps/web).
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "paths": {
+      // Компоненты и токены берём из веб-интерфейса, а не копируем:
+      // вторая дизайн-система нам не нужна.
+      "@web/*": ["../web/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
+}

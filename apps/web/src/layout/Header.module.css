@@ -1,0 +1,129 @@
+.header {
+  display: flex;
+  align-items: center;
+  height: var(--mt-app-header-height, 62px);
+  flex-shrink: 0;
+  background: var(--mt-header-bg);
+  color: var(--mt-header-text);
+}
+
+/* Кнопка-гамбургер: нужна только там, где колонка папок спрятана */
+.menuButton {
+  display: none;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+/* Зона логотипа совпадает по ширине с левой колонкой */
+.logoZone {
+  width: var(--mt-app-sidebar-width, 232px);
+  flex-shrink: 0;
+  padding-left: var(--mt-ph-logo-margin-left, 12px);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.logoLight,
+.logoDark {
+  height: var(--mt-ph-logo-height, 30px);
+  width: auto;
+  display: block;
+}
+
+/* Светлое начертание — по умолчанию; тёмное включается там, где шапка тёмная:
+   в тёмной теме и в «обойной», где меню и шапка лежат поверх фоновой картинки. */
+.logoDark {
+  display: none;
+}
+
+:global([data-theme='dark']) .logoLight,
+:global([data-theme='wallpaper']) .logoLight {
+  display: none;
+}
+
+:global([data-theme='dark']) .logoDark,
+:global([data-theme='wallpaper']) .logoDark {
+  display: block;
+}
+
+/* Поисковая строка живёт в SearchBar.module.css: у неё два вида —
+   обычный и поисковый, и они не должны знать про геометрию шапки. */
+
+.rightZone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+/* Кнопки в шапке наследуют «шапочные» цвета темы */
+.headerButton {
+  color: var(--mt-header-icon);
+}
+
+.headerButton:hover:not(:disabled) {
+  background: var(--mt-header-button-bg-hover);
+}
+
+.headerButton:active:not(:disabled) {
+  background: var(--mt-header-button-bg-press);
+}
+
+/* Аватар и меню ящика живут в AccountMenu.module.css: у меню своя
+   геометрия (список ящиков, счётчики), и шапке про неё знать незачем. */
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 1024px) {
+  .menuButton {
+    display: inline-flex;
+  }
+
+  /* Зона логотипа больше ничего не выравнивает: колонки рядом нет */
+  .logoZone {
+    width: auto;
+    padding-left: 8px;
+  }
+
+  .rightZone {
+    padding: 0 8px;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Логотип уступает место поиску: втроём (гамбургер, логотип, поиск)
+     на 390px строка поиска сжималась до нечитаемых четырёх пикселей.
+     Вход на главную остался в ящике папок — «Входящие». */
+  .logoZone {
+    display: none;
+  }
+
+  /* Палец не попадает в 36px — на телефоне цель не меньше 44×44 */
+  .menuButton,
+  .headerButton {
+    width: 44px;
+    height: 44px;
+  }
+
+  .rightZone {
+    gap: 0;
+    padding: 0 4px;
+  }
+
+  /*
+   * Поиск на телефоне занимает всю шапку — как в мобильном mail.ru.
+   * Вместе с гамбургером, «‹», чипом области, кнопкой «Найти» и тремя
+   * значками справа под сам запрос оставалось четыре пикселя. Значки
+   * возвращаются, стоит выйти из поиска кнопкой «‹» слева.
+   */
+  .headerSearch .rightZone {
+    display: none;
+  }
+}

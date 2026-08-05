@@ -1,0 +1,29 @@
+{
+  "name": "@mail-true/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tokens": "node scripts/build-tokens.mjs",
+    "dev": "node scripts/build-tokens.mjs && vite",
+    "build": "node scripts/build-tokens.mjs && tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mail-true/shared": "*",
+    "@tanstack/react-query": "^5.62.7",
+    "@tanstack/react-virtual": "^3.11.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.1.1",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.17",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.5",
+    "vitest": "^4.1.10"
+  }
+}

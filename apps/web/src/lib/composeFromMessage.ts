@@ -1,0 +1,43 @@
+/**
+ * Наполнение окна написания из письма: ответ и пересылка.
+ *
+ * Живёт отдельно от страницы письма, потому что то же самое нужно списку:
+ * `R` и `F` работают и там, и там, и собирать ответ двумя разными способами
+ * значило бы получить два разных ответа.
+ */
+
+import type { Message } from '@mail-true/shared';
+import type { ComposeInit } from '../app/store';
+
+/** Цитата исходного письма для ответа/пересылки. */
+export function quoteHtml(message: Message): string {
+  const date = new Date(message.date).toLocaleString('ru-RU');
+  const from = message.from.name ?? message.from.address;
+  return `<br><br><p>${date}, ${from} &lt;${message.from.address}&gt;:</p><blockquote>${
+    message.bodyHtml ?? message.bodyText ?? ''
+  }</blockquote>`;
+}
+
+/**
+ * Ответ отправителю. Настройка «Включать содержимое исходного письма
+ * в ответ» — только про ответ; пересылка ей не подчиняется и у mail.ru.
+ */
+export function replyInit(message: Message, quoteOriginal: boolean): ComposeInit {
+  return {
+    to: message.from.address,
+    subject: message.subject.startsWith('Re:') ? message.subject : `Re: ${message.subject}`,
+    bodyHtml: quoteOriginal ? quoteHtml(message) : undefined,
+    inReplyTo: message.messageId ?? undefined,
+    references: message.messageId ? [...message.references, message.messageId] : undefined,
+    sourceMessageId: message.id,
+  };
+}
+
+/** Пересылка: получателя нет, тело — исходное письмо целиком. */
+export function forwardInit(message: Message): ComposeInit {
+  return {
+    subject: message.subject.startsWith('Fwd:') ? message.subject : `Fwd: ${message.subject}`,
+    bodyHtml: quoteHtml(message),
+    sourceMessageId: message.id,
+  };
+}

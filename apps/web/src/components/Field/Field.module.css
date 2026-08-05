@@ -1,0 +1,84 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 18px;
+  color: var(--mt-color-text-secondary);
+}
+
+.control {
+  width: 100%;
+  height: var(--mt-size-field-height, 36px);
+  padding: 0 12px;
+  border: 1px solid var(--mt-color-field-border-alpha);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-field-background);
+  color: var(--mt-color-text-primary);
+  font-family: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  outline: none;
+  transition: border-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.control::placeholder {
+  color: var(--mt-color-text-tertiary);
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--mt-color-field-border-alpha-hover);
+}
+
+.control:focus {
+  border-color: var(--mt-color-stroke-accent);
+}
+
+.control:disabled {
+  opacity: var(--mt-opacity-disable, 0.48);
+  cursor: default;
+}
+
+.select {
+  /* Стрелка нарисована фоном: у нативной высота не подчиняется полю */
+  appearance: none;
+  padding-right: 32px;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% + 1px),
+    calc(100% - 12px) calc(50% + 1px);
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.textarea {
+  height: auto;
+  min-height: 80px;
+  padding: 8px 12px;
+  resize: vertical;
+}
+
+.invalid,
+.invalid:hover:not(:disabled) {
+  border-color: var(--mt-color-stroke-negative, var(--mt-color-accent-red));
+}
+
+.hint {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-color-text-secondary);
+}
+
+.error {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+}

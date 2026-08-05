@@ -1,0 +1,288 @@
+# Веб-интерфейс Mail.True: почта, админка и сервер приложения.
+# Шаблон обрабатывается entrypoint-ом образа nginx (envsubst): ${MAIL_DOMAIN}
+# подставляется из окружения; переменные nginx ($host, $scheme) не трогаются.
+#
+# ------------------------------------------------------------------
+# Почему разделение по именам хостов, а не по путям
+# ------------------------------------------------------------------
+# Оба приложения собраны Vite с базой «/»: ссылки на файлы сборки внутри
+# index.html абсолютные (/assets/index-*.js), маршрутизатор создан через
+# createBrowserRouter без basename. Отдать админку по пути /admin/ можно
+# было бы только правкой исходного кода обоих приложений (base у Vite и
+# basename у маршрутизатора). Разные имена хостов дают то же самое без
+# единой строчки в приложениях — и попутно две полезные вещи:
+#   * cookie почты (mt_session) и cookie админки (mt_admin) не пересекаются
+#     даже по недосмотру: браузер разводит их по разным именам;
+#   * админку можно закрыть по адресу или спрятать за VPN отдельно от почты,
+#     не трогая почтовый вход.
+#
+#   <домен>, mail.<домен>   — почта (apps/web) + /api и /ws
+#   admin.<домен>           — админка (apps/admin) + /api/admin
+#   autoconfig.<домен>,
+#   autodiscover.<домен>    — автонастройка клиентов (autoconfig.conf.template)
+
+# Апстримы разрешаются встроенным DNS Docker на каждом запросе, а не один раз
+# при старте. Это не косметика: с обычным блоком upstream nginx запоминает
+# адрес контейнера навсегда, и после «docker compose up -d» с пересозданием
+# api/web/admin весь веб-интерфейс отвечал бы 502 до перезапуска nginx —
+# то есть каждое обновление продукта ломало бы почту в браузере.
+resolver 127.0.0.11 ipv6=off valid=10s;
+
+# Проброс WebSocket: заголовок Connection зависит от того, попросил ли
+# клиент апгрейд протокола.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# HSTS выдаём только по HTTPS: по HTTP этот заголовок игнорируется
+# спецификацией, а на самоподписанном dev-стенде ещё и мешает.
+# Пустое значение nginx не добавляет.
+map $scheme $hsts_header {
+    https   "max-age=31536000; includeSubDomains";
+    default "";
+}
+
+# ------------------------------------------------------------------
+# Ошибки прокси на путях /api/ — телом по договору, а не страницей nginx
+# ------------------------------------------------------------------
+# Когда сервер приложения лежит (обновление, падение, ещё не поднялся),
+# nginx отвечает САМ. По умолчанию — своей страницей «502 Bad Gateway» в
+# HTML. Интерфейс ждёт `{error, message}` (docs/api.md), разобрать HTML не
+# может и показывает человеку английское «Bad Gateway» из statusText —
+# ровно в тот момент, когда объяснение нужнее всего.
+#
+# Тексты отвечают на вопрос «что мне делать»: подождать и повторить.
+# Код ошибки один на все три случая — UPSTREAM_UNAVAILABLE: для интерфейса
+# это одно и то же «сервер сейчас недоступен, повтори позже». HTTP-статус
+# при этом сохраняется настоящий (502/503/504) — по нему видно, лежит
+# сервер приложения или не успевает ответить.
+#
+# ВАЖНО: proxy_intercept_errors намеренно НЕ включается. Он подменял бы и
+# ЗАКОННЫЕ ответы самого приложения — 503 UPSTREAM_UNAVAILABLE при обрыве
+# IMAP и 503 пробы состояния — вместе с их телами. Без него error_page
+# ловит только то, что nginx сочинил сам, то есть настоящую недоступность.
+#
+# Сами ответы собраны в именованных location'ах ниже (@api_502/@api_503/
+# @api_504): они повторяются в обоих виртуальных хостах, потому что
+# именованный location виден только внутри своего server-блока.
+
+# ------------------------------------------------------------------
+# Почта: корневой домен, mail.<домен> и всё, что не опознано (default_server)
+# ------------------------------------------------------------------
+server {
+    listen 80 default_server;
+    listen 443 ssl default_server;
+    server_name ${MAIL_DOMAIN} mail.${MAIL_DOMAIN} _;
+
+    ssl_certificate     /certs/mail.crt;
+    ssl_certificate_key /certs/mail.key;
+    http2 on;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:4m;
+    ssl_session_timeout 1h;
+
+    server_tokens off;
+    # Вложение до 25 МБ (UPLOAD_MAX_BYTES) плюс накладные расходы multipart
+    client_max_body_size 30m;
+
+    # Сжатие ответов API. Статика приходит уже сжатой от сервиса web —
+    # nginx повторно её не жмёт.
+    gzip on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types application/json application/javascript text/css text/plain
+               image/svg+xml text/xml application/xml;
+
+    # Заголовки безопасности. always — чтобы попадали и в ответы с ошибкой.
+    add_header Strict-Transport-Security $hsts_header always;
+    add_header X-Content-Type-Options    "nosniff" always;
+    add_header X-Frame-Options           "SAMEORIGIN" always;
+    add_header Referrer-Policy           "same-origin" always;
+    add_header Permissions-Policy        "geolocation=(), microphone=(), camera=(), payment=()" always;
+    # Письма показываются прямо в странице, поэтому img-src и style-src
+    # обязаны быть широкими: у писем свои картинки и свои inline-стили.
+    # Скрипты — только свои файлы сборки: ни одного inline-скрипта
+    # в собранном index.html нет, письма скриптов не получают вовсе.
+    add_header Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
+
+    # --- Автонастройка почтовых клиентов (было и осталось) ---------
+    # Thunderbird: запасной путь по спецификации well-known
+    location /.well-known/ {
+        set $autoconfig_upstream http://autoconfig:8080;
+        proxy_pass $autoconfig_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Outlook сначала пробует https://<домен>/autodiscover/autodiscover.xml
+    location ~* ^/autodiscover/autodiscover\.xml$ {
+        set $autoconfig_upstream http://autoconfig:8080;
+        proxy_pass $autoconfig_upstream$request_uri;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # --- Сервер приложения ------------------------------------------
+    location /api/ {
+        set $api_upstream http://api:3000;
+        proxy_pass $api_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # Именно перезапись, а не $proxy_add_x_forwarded_for: тот дописывает
+        # настоящий адрес в конец, оставляя первым значение, присланное самим
+        # клиентом, — а Fastify берёт первое. Так обходилось ограничение
+        # частоты запросов (защита от подбора пароля) и подделывался адрес
+        # в журнале аудита администратора. Перезапись эту возможность убирает.
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+        # Загрузка вложений идёт потоком, без промежуточного файла
+        proxy_request_buffering off;
+        proxy_read_timeout 120s;
+
+        # Сервер приложения недоступен — ответ по договору, а не HTML
+        error_page 502 = @api_502;
+        error_page 503 = @api_503;
+        error_page 504 = @api_504;
+    }
+
+    location @api_502 {
+        default_type application/json;
+        return 502 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения не отвечает. Скорее всего, идёт обновление или перезапуск — повторите через несколько секунд."}';
+    }
+
+    location @api_503 {
+        default_type application/json;
+        return 503 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения временно недоступен. Повторите запрос через несколько секунд."}';
+    }
+
+    location @api_504 {
+        default_type application/json;
+        return 504 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения не ответил вовремя. Попробуйте ещё раз; если повторяется — почтовый стек перегружен."}';
+    }
+
+    # Живые события ящика: новое письмо, изменение флагов
+    location = /ws {
+        set $ws_upstream http://api:3000;
+        proxy_pass $ws_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # Перезапись, а не дополнение (см. пояснение в блоке почты выше)
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Соединение живёт, пока открыта вкладка
+        proxy_read_timeout  3600s;
+        proxy_send_timeout  3600s;
+    }
+
+    # --- Сам интерфейс ----------------------------------------------
+    # Заголовки кэширования выставляет сервис web: он знает, у какого файла
+    # в имени есть хеш содержимого, а у какого нет.
+    location / {
+        set $web_upstream http://web:8080;
+        proxy_pass $web_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+    }
+}
+
+# ------------------------------------------------------------------
+# Админка: admin.<домен>
+# ------------------------------------------------------------------
+server {
+    listen 80;
+    listen 443 ssl;
+    server_name admin.${MAIL_DOMAIN};
+
+    ssl_certificate     /certs/mail.crt;
+    ssl_certificate_key /certs/mail.key;
+    http2 on;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:4m;
+    ssl_session_timeout 1h;
+
+    server_tokens off;
+    # Импорт списка ящиков из CSV
+    client_max_body_size 16m;
+
+    gzip on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types application/json application/javascript text/css text/plain
+               image/svg+xml text/xml application/xml;
+
+    add_header Strict-Transport-Security $hsts_header always;
+    add_header X-Content-Type-Options    "nosniff" always;
+    # Админку не встраивают никуда и никогда
+    add_header X-Frame-Options           "DENY" always;
+    add_header Referrer-Policy           "same-origin" always;
+    add_header Permissions-Policy        "geolocation=(), microphone=(), camera=(), payment=()" always;
+    # Админка чужого HTML не показывает, кроме предпросмотра письма
+    # при входе в ящик, — поэтому правила те же, что у почты.
+    add_header Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    # Админку не должно быть в поисковой выдаче
+    add_header X-Robots-Tag              "noindex, nofollow" always;
+
+    # Только админский раздел API: почтовые маршруты пользователя
+    # на этом имени хоста не нужны и не открываются.
+    location /api/admin/ {
+        set $api_upstream http://api:3000;
+        proxy_pass $api_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # Перезапись, а не дополнение (см. пояснение в блоке почты выше)
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+        proxy_request_buffering off;
+        proxy_read_timeout 120s;
+
+        # Тот же договор, что и в почте: админка разбирает {error, message}
+        error_page 502 = @api_502;
+        error_page 503 = @api_503;
+        error_page 504 = @api_504;
+    }
+
+    location @api_502 {
+        default_type application/json;
+        return 502 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения не отвечает. Скорее всего, идёт обновление или перезапуск — повторите через несколько секунд."}';
+    }
+
+    location @api_503 {
+        default_type application/json;
+        return 503 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения временно недоступен. Повторите запрос через несколько секунд."}';
+    }
+
+    location @api_504 {
+        default_type application/json;
+        return 504 '{"error":"UPSTREAM_UNAVAILABLE","message":"Сервер приложения не ответил вовремя. Попробуйте ещё раз; если повторяется — почтовый стек перегружен."}';
+    }
+
+    # Всё остальное из /api/ на этом имени хоста не существует. Без явного
+    # 404 такой запрос уходил бы в статику админки и возвращал её index.html
+    # с кодом 200 — вид, будто маршрут есть.
+    location /api/ {
+        return 404;
+    }
+
+    location / {
+        set $admin_upstream http://admin:8080;
+        proxy_pass $admin_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+    }
+}

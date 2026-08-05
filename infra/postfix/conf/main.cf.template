@@ -1,0 +1,126 @@
+# main.cf Postfix (шаблон; ${VAR} подставляются из .env при старте контейнера)
+compatibility_level = 3.6
+
+smtpd_banner = $myhostname ESMTP Mail.True
+biff = no
+append_dot_mydomain = no
+
+myhostname = ${MAIL_HOSTNAME}
+mydomain = ${MAIL_DOMAIN}
+myorigin = $mydomain
+# Локальной доставки нет — вся почта идёт через виртуальные ящики в Dovecot
+mydestination =
+local_recipient_maps =
+local_transport = error:local mail delivery is disabled
+
+# Доверенные сети: петля и ровно один адрес — Dovecot.
+#
+# Dovecot должен уметь отправлять почту: этого требуют действия правил
+# «переслать копию» и «автоответчик». Он делает это через нас, и чтобы
+# пересылка уходила на внешние адреса, его нужно пустить в relay.
+#
+# Адрес именно один, а не вся внутренняя подсеть. Разница существенная:
+# при подсети право рассылать получил бы каждый контейнер, включая те,
+# что разбирают недоверенное содержимое писем. Постоянный адрес Dovecot
+# задан в docker-compose.yml как раз для того, чтобы такое правило было
+# возможно записать точно.
+mynetworks = 127.0.0.0/8 [::1]/128 ${DOVECOT_IP}/32
+inet_interfaces = all
+inet_protocols = ipv4
+
+# Логи в stdout контейнера (docker compose logs postfix)
+maillog_file = /dev/stdout
+
+message_size_limit = 26214400
+mailbox_size_limit = 0
+recipient_delimiter = +
+
+# ------------------------------------------------------------------
+# Виртуальные домены/ящики/алиасы из PostgreSQL
+# ------------------------------------------------------------------
+virtual_mailbox_domains = pgsql:/etc/postfix/pgsql/virtual_domains.cf
+virtual_mailbox_maps = pgsql:/etc/postfix/pgsql/virtual_mailboxes.cf
+virtual_alias_maps = pgsql:/etc/postfix/pgsql/virtual_aliases.cf
+# Доставка в Dovecot по LMTP — по АДРЕСУ, а не по имени.
+#
+# Разница не косметическая: она решает, потеряется письмо или дождётся.
+#
+# Пока адресат задан именем, всё зависит от того, что ответит служба имён
+# Docker. Пока контейнер Dovecot существует, она отвечает, и сбой получается
+# временный: письмо ждёт в очереди. Но стоит контейнеру исчезнуть — не
+# подняться после обновления, остаться на время обслуживания, — и Postfix
+# получает «Host not found». Это ПОСТОЯННАЯ ошибка: письмо отбивается
+# отправителю и стирается из очереди.
+#
+# Проверено на стенде дважды: письмо, уже принятое сервером, уничтожалось
+# насовсем, а отправитель получал «адрес не существует», хотя ящик жив.
+# Контрольный опыт с адресом вместо имени: то же письмо осталось в очереди и
+# доставилось, когда Dovecot вернулся.
+#
+# Постоянный адрес Dovecot закреплён в docker-compose.yml (DOVECOT_IP) —
+# как раз ради таких случаев. Транспорт LMTP до сих пор ходил по имени.
+virtual_transport = lmtp:inet:${DOVECOT_IP}:24
+
+# ------------------------------------------------------------------
+# SASL-аутентификация через Dovecot (используется на submission:587)
+# ------------------------------------------------------------------
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = inet:dovecot:12345
+smtpd_sasl_auth_enable = no
+smtpd_sasl_security_options = noanonymous
+smtpd_sasl_local_domain = $mydomain
+broken_sasl_auth_clients = yes
+
+# ------------------------------------------------------------------
+# TLS (самоподписанные сертификаты для разработки, см. scripts/gen-certs.sh)
+# ------------------------------------------------------------------
+smtpd_tls_cert_file = /certs/mail.crt
+smtpd_tls_key_file = /certs/mail.key
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_loglevel = 1
+smtpd_tls_session_cache_database = btree:${data_directory}/smtpd_scache
+smtp_tls_security_level = may
+smtp_tls_loglevel = 1
+
+# ------------------------------------------------------------------
+# Ограничения приёма (порт 25)
+# ------------------------------------------------------------------
+smtpd_helo_required = yes
+smtpd_relay_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    defer_unauth_destination
+# Последним пунктом — квоты: спрашиваем Dovecot (служба quota-status)
+# прямо на RCPT TO. Если ящик получателя переполнен, отправитель получает
+# отказ сразу, не передавая тело письма.
+# См. infra/dovecot/conf/dovecot.conf.template, service quota-status.
+smtpd_recipient_restrictions =
+    permit_mynetworks,
+    permit_sasl_authenticated,
+    reject_unauth_destination,
+    check_policy_service inet:dovecot:12340
+smtpd_sender_restrictions =
+    reject_non_fqdn_sender
+
+# Кому какой адрес отправителя разрешён.
+#
+# Сама карта ничего не запрещает — она отвечает на вопрос «этот адрес чей?».
+# Проверка включается только на портах отправки (587 и 465), где человек
+# входит по логину: там в master.cf стоит reject_sender_login_mismatch.
+# На порту 25 её быть не должно — туда приходит почта со всего мира, и
+# отправитель там по определению чужой.
+#
+# Зачем: без этого любой сотрудник мог отправить письмо от имени директора.
+# Хуже того, письмо уходило бы подписанным нашим же ключом DKIM, с нашего
+# адреса, — у получателя SPF, DKIM и DMARC сошлись бы полностью, и отличить
+# подделку от настоящего письма было бы нечем.
+smtpd_sender_login_maps = pgsql:/etc/postfix/pgsql/sender_login.cf
+
+# ------------------------------------------------------------------
+# Rspamd как milter: антиспам + DKIM-подпись исходящих
+# ------------------------------------------------------------------
+smtpd_milters = inet:rspamd:11332
+non_smtpd_milters = inet:rspamd:11332
+milter_default_action = accept
+milter_protocol = 6

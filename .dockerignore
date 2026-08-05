@@ -1,0 +1,33 @@
+# Что не отправляется в контекст сборки Docker.
+# Контекст у всех образов приложений — корень репозитория (npm workspaces),
+# поэтому без этого файла в демон уезжали бы сотни мегабайт node_modules.
+
+**/node_modules
+**/dist
+**/.vite
+**/*.tsbuildinfo
+
+# Секреты и данные стека
+.env
+**/.env
+**/.env.*
+!**/.env.example
+infra/data/
+infra/secrets/
+*.pem
+*.key
+
+# Артефакты исследования интерфейса и отладки
+.git/
+.playwright-mcp/
+research/**/*.png
+research/**/*.har
+docs/
+brand/preview.html
+install/state/
+
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

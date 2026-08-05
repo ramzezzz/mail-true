@@ -1,0 +1,237 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 12px 32px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupTitle {
+  margin: 0;
+  padding: 16px 12px 8px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  font-weight: var(--mt-font-weight-base1, 400);
+  color: var(--mt-color-text-secondary);
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Строка результата: та же анатомия, что у строки списка писем */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--mt-color-text-primary);
+  text-decoration: none;
+}
+
+.row:hover {
+  background: var(--mt-mail-color-list-letter-background-hover);
+}
+
+.unread .subject,
+.unread .correspondent {
+  font-weight: var(--mt-font-weight-accent1, 600);
+}
+
+.correspondent {
+  flex: 0 0 22%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+
+.flagCell {
+  flex: none;
+  width: 24px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.flagIcon {
+  display: inline-flex;
+  color: var(--mt-mail-color-icon-favorite);
+}
+
+.flagIcon :global(svg),
+.attachIcon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+.title {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+
+.subject {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mt-list-secondary-text);
+}
+
+/* Чип папки, где лежит найденное письмо */
+.folderChip {
+  flex: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  height: 24px;
+  line-height: 24px;
+  padding: 0 8px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary-alpha);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.attachCell {
+  flex: none;
+  width: 20px;
+  display: inline-flex;
+  justify-content: center;
+  color: var(--mt-mail-color-header-icon-attach);
+}
+
+.date {
+  flex: none;
+  width: 52px;
+  text-align: right;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--mt-list-secondary-text);
+}
+
+/* Карточка вложения под строкой письма */
+.attachment {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  margin: 2px 0 8px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 12px;
+  background: var(--mt-mail-color-letter-attach-list-background, transparent);
+  color: var(--mt-color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.attachment:hover {
+  background: var(--mt-mail-color-list-letter-background-hover);
+}
+
+.attachmentExt {
+  flex: none;
+  width: 28px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--mt-color-background-negative-tint-alpha);
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+  font-size: 9px;
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.attachmentBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.attachmentName {
+  font-size: var(--mt-font-subhead-size, 14px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentFragment {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-list-secondary-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Подсветка совпадения */
+.mark {
+  background: var(--mt-search-highlight-bg);
+  color: var(--mt-search-highlight-text);
+  border-radius: 2px;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+/* Тем же способом, что и список писем: колонки ужимаются, а превью текста
+   уходит — на 390px от темы иначе остаётся один символ */
+@media (max-width: 600px) {
+  .list {
+    padding: 0 4px 24px;
+  }
+
+  .row {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .correspondent {
+    flex: 0 0 30%;
+  }
+
+  .snippet {
+    display: none;
+  }
+
+  .subject {
+    max-width: 100%;
+  }
+
+  .folderChip {
+    max-width: 72px;
+  }
+
+  /* Скрепка уходит: вложения в выдаче и без неё показаны отдельными
+     карточками под строкой письма, а теме нужно место */
+  .attachCell {
+    display: none;
+  }
+
+  .date {
+    width: 40px;
+    font-size: 12px;
+  }
+}

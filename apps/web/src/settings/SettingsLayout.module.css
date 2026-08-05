@@ -1,0 +1,105 @@
+/*
+ * Раздел настроек. Собственный фон перекрывает и фоновую картинку
+ * «обойной» темы: у mail.ru настройки всегда светлые, без обоев.
+ */
+
+.root {
+  min-height: 100%;
+  background: var(--mt-settings-bg);
+  background-image: none;
+  color: var(--mt-color-text-primary);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 12px;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-headline2-size, 15px);
+  cursor: pointer;
+}
+
+.back:hover {
+  background: var(--mt-color-background-secondary-alpha);
+}
+
+.back :global(svg) {
+  display: block;
+}
+
+.body {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  padding: 0 24px 48px;
+}
+
+.nav {
+  flex: none;
+  width: 208px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 16px;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-headline2-size, 15px);
+  text-decoration: none;
+}
+
+.navItem:hover {
+  background: var(--mt-color-background-secondary-alpha);
+}
+
+.navItemActive {
+  background: var(--mt-settings-nav-active-bg);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+/* Белая карточка с содержимым раздела */
+.card {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 1000px;
+  min-height: 640px;
+  padding: 32px;
+  border-radius: var(--mt-settings-card-radius, 16px);
+  background: var(--mt-settings-card-bg);
+}
+
+@media (max-width: 900px) {
+  .body {
+    flex-direction: column;
+  }
+
+  .nav {
+    position: static;
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .card {
+    width: 100%;
+  }
+}

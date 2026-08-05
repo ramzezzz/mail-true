@@ -1,0 +1,67 @@
+/* Фирменные токены Mail.True.
+   Компоненты интерфейса не знают конкретных цветов — только переменные:
+   тёмная тема переопределяет их через [data-theme='dark'].
+   Реальные коэффициенты контрастности каждой пары — в docs/brand.md. */
+
+:root {
+  /* Фирменный синий: True Blue. Осознанно глубже, чем #0077FF у mail.ru:
+     привычная синева сохраняется, но цвет проходит WCAG AA (4.5:1)
+     как текст на всех трёх фонах — у #0077FF на белом лишь 3.55:1. */
+  --mt-accent: #006ec6;
+  --mt-accent-hover: #005ca8;
+  --mt-accent-pressed: #004e8f;
+  --mt-accent-subtle: #e7f1fb; /* подложка выбранной строки, лёгкие плашки */
+  --mt-on-accent: #ffffff;
+
+  /* Фоны */
+  --mt-bg: #ffffff;
+  --mt-bg-2: #f4f6f8; /* колонки, панели */
+  --mt-bg-3: #edf0f4; /* наведение, утопленные области */
+
+  /* Текст */
+  --mt-text: #21252b;
+  --mt-text-2: #5e6673; /* вторичный: сниппеты, даты */
+  --mt-text-3: #8b93a1; /* только декоративное и крупное */
+
+  /* Служебные */
+  --mt-success: #0e7a46; /* текст */
+  --mt-success-accent: #149c58; /* значки, плашки */
+  --mt-error: #c92c3c; /* текст и плашки */
+  --mt-warning: #8f5a00; /* текст */
+  --mt-warning-accent: #f5a623; /* плашки: на них тёмный текст --mt-text */
+
+  /* Прочее */
+  --mt-separator: #dde2e8;
+  --mt-unread: var(--mt-accent); /* точка непрочитанного */
+
+  --mt-radius: 8px;
+  --mt-radius-card: 16px;
+  --mt-shadow-1: 0 2px 6px rgba(10, 30, 60, 0.08), 0 1px 2px rgba(10, 30, 60, 0.08);
+  --mt-easing: cubic-bezier(0.3, 0.3, 0.5, 1);
+  --mt-duration: 0.1s;
+}
+
+[data-theme='dark'] {
+  --mt-accent: #5ca8f5;
+  --mt-accent-hover: #7cbaf7;
+  --mt-accent-pressed: #4694e3;
+  --mt-accent-subtle: #1a2c40;
+  --mt-on-accent: #15181d;
+
+  --mt-bg: #15181d;
+  --mt-bg-2: #1c2026;
+  --mt-bg-3: #242932;
+
+  --mt-text: #e9edf2;
+  --mt-text-2: #9aa3af;
+  --mt-text-3: #6b7480;
+
+  --mt-success: #3dd68c;
+  --mt-success-accent: #2bb374;
+  --mt-error: #f2555f;
+  --mt-warning: #f5b84d;
+  --mt-warning-accent: #f5b84d;
+
+  --mt-separator: #323843;
+  --mt-shadow-1: 0 2px 6px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.35);
+}

@@ -1,0 +1,243 @@
+.thread {
+  margin: 24px 32px 40px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  font-weight: var(--mt-font-weight-base1, 400);
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Цепочка выглядит одной карточкой: внешние углы скруглены, внутренние —
+ * нет. Разделители между строками рисуются рамкой сверху, кроме первой.
+ */
+.letters {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--mt-mail-color-layout-letter-border-alpha);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--mt-color-background-content);
+}
+
+.letter + .letter {
+  border-top: 1px solid var(--mt-mail-color-list-letter-separator-alpha);
+}
+
+/* Свёрнутая строка — ровно 48px, как строка списка писем */
+.letterCollapsed .head {
+  height: 48px;
+}
+
+.letterExpanded {
+  /* Раскрытое письмо отделяется от соседей скруглением с обеих сторон */
+  border-radius: 12px;
+  background: var(--mt-color-background-content);
+  box-shadow: var(--mt-elevation-1);
+}
+
+/* Сосед сверху от раскрытого не должен скругляться снизу — и наоборот */
+.letterExpandedNext {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.letterExpandedPrev {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.letterFirst {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.letterLast {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.head:hover {
+  background: var(--mt-mail-color-list-letter-background-hover);
+}
+
+/* Шапка раскрытого письма выше — 60px (letter__head в mail.ru) */
+.headExpanded {
+  height: 60px;
+  align-items: center;
+  cursor: default;
+}
+
+.readStatus {
+  flex: none;
+  width: 20px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.unreadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mt-mail-color-icon-unread);
+}
+
+.avatar {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--mt-color-background-secondary-alpha);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.details {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detailsLine {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sender {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+
+.letterUnread .sender {
+  font-weight: var(--mt-font-weight-accent1, 600);
+}
+
+.snippet {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mt-list-secondary-text);
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+
+.to {
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-secondary);
+}
+
+.attachIcon {
+  flex: none;
+  display: inline-flex;
+  color: var(--mt-mail-color-header-icon-attach);
+}
+
+.attachIcon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
+
+.date {
+  flex: none;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--mt-list-secondary-text);
+}
+
+.body {
+  padding: 8px 20px 20px 60px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  overflow-x: auto;
+}
+
+.body :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.bodyText {
+  margin: 0;
+  font-family: inherit;
+  white-space: pre-wrap;
+}
+
+.bodyLoading {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  color: var(--mt-color-text-secondary);
+}
+
+.openFull {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-link);
+  font-size: var(--mt-font-subhead-size, 14px);
+  cursor: pointer;
+}
+
+.openFull:hover {
+  text-decoration: underline;
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 600px) {
+  .thread {
+    margin: 16px 4px 24px;
+  }
+
+  .head {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  /* Отступ под аватар съедал половину ширины текста письма */
+  .body {
+    padding: 8px 12px 20px;
+  }
+
+  .sender {
+    max-width: 55%;
+  }
+
+  .detailsLine {
+    gap: 8px;
+  }
+}

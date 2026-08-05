@@ -1,0 +1,56 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--mt-z-index-dialog, 200);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--mt-modal-overlay);
+  overflow-y: auto;
+}
+
+.card {
+  width: 100%;
+  max-width: var(--mt-size-popup-medium, 680px);
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  background: var(--mt-color-background-modal);
+  border-radius: var(--mt-size-card-border-radius, 16px);
+  box-shadow: var(--mt-elevation-3);
+  outline: none;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 24px 8px 32px;
+}
+
+.title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--mt-font-h1-size, 24px);
+  line-height: var(--mt-font-h1-line-height, 28px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-color-text-primary);
+}
+
+.close {
+  flex: none;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 32px 16px;
+}
+
+.footer {
+  display: flex;
+  gap: 12px;
+  padding: 8px 32px 24px;
+}

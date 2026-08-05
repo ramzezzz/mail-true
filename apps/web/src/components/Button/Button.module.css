@@ -1,0 +1,105 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  font-family: inherit;
+  font-weight: var(--mt-font-weight-accent2, 500);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.button:disabled {
+  opacity: var(--mt-opacity-disable, 0.48);
+  cursor: default;
+}
+
+/* Размеры (шкала VKUI) */
+.size_s {
+  height: var(--mt-size-button-small-height, 28px);
+  font-size: var(--mt-font-subhead-size, 14px);
+  padding: 0 12px;
+}
+.size_m {
+  height: var(--mt-size-button-medium-height, 36px);
+  font-size: var(--mt-font-headline2-size, 15px);
+}
+.size_l {
+  height: var(--mt-size-button-large-height, 44px);
+  font-size: var(--mt-font-headline1-size, 16px);
+}
+
+.stretched {
+  width: 100%;
+}
+
+/* Основная — фирменный синий */
+.mode_primary {
+  background: var(--mt-color-background-accent);
+  color: var(--mt-color-text-contrast, #fff);
+}
+.mode_primary:hover:not(:disabled) {
+  background: var(--mt-color-background-accent-hover);
+}
+.mode_primary:active:not(:disabled) {
+  background: var(--mt-color-background-accent-press);
+}
+
+/* Вторичная — полупрозрачная серая подложка */
+.mode_secondary {
+  background: var(--mt-ph-color-background-secondary-alpha);
+  color: var(--mt-color-text-primary);
+}
+.mode_secondary:hover:not(:disabled) {
+  background: var(--mt-ph-color-background-secondary-alpha-hover);
+}
+.mode_secondary:active:not(:disabled) {
+  background: var(--mt-ph-color-background-secondary-alpha-press);
+}
+
+/* Контурная — как «Написать письмо» */
+.mode_outline {
+  background: var(--mt-sidebar-compose-bg, var(--mt-color-background-content));
+  color: var(--mt-sidebar-compose-text, var(--mt-color-text-primary));
+  box-shadow: inset 0 0 0 1px var(--mt-sidebar-compose-border, var(--mt-color-field-border-alpha));
+}
+.mode_outline:hover:not(:disabled) {
+  background: var(--mt-sidebar-compose-bg-hover);
+}
+.mode_outline:active:not(:disabled) {
+  background: var(--mt-sidebar-compose-bg-press);
+}
+
+/* Третичная — прозрачная, подложка только при наведении */
+.mode_tertiary {
+  background: transparent;
+  color: var(--mt-color-text-primary);
+}
+.mode_tertiary:hover:not(:disabled) {
+  background: var(--mt-ph-color-transparent-hover);
+}
+.mode_tertiary:active:not(:disabled) {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.icon :global(svg) {
+  display: block;
+  fill: currentColor;
+}
