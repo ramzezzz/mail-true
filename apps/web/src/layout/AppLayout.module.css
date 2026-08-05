@@ -19,11 +19,15 @@
   min-height: 0; /* иначе flex-дети не дают скроллиться контенту */
 }
 
-/* Обёртка левой колонки: на широком экране — обычный столбец потока */
+/* Обёртка левой колонки: на широком экране — обычный столбец потока.
+   Подложку задаёт только «обойная» тема (--mt-sidebar-backdrop): второй
+   слой затемнения, без которого белый текст меню на светлой фотографии
+   не добирает контраста (расчёт — tests/themes.test.ts). */
 .aside {
   display: flex;
   flex: none;
   min-height: 0;
+  background: var(--mt-sidebar-backdrop, none);
 }
 
 .aside > * {
@@ -53,7 +57,9 @@
     left: 0;
     bottom: 0;
     z-index: 60;
-    background: var(--mt-app-content-bg);
+    /* В «обойной» теме ящик лежит поверх белой карточки, и фон обязан быть
+       непрозрачным тёмным (--mt-sidebar-drawer-bg) — текст меню там белый */
+    background: var(--mt-sidebar-drawer-bg, var(--mt-app-content-bg));
     box-shadow: var(--mt-elevation-3, 0 4px 32px rgba(0, 16, 61, 0.16));
     transform: translateX(-100%);
     transition: transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);

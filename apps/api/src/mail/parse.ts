@@ -136,6 +136,20 @@ export interface ParsedMessageResult {
 }
 
 /** Собирает полное Message из исходника письма и данных FETCH. */
+/**
+ * Тело письма из исходника — всё после первой пустой строки.
+ *
+ * Кодировку здесь не разбираем: у письма, которое не разобралось, объявленной
+ * кодировки могло и не быть. Читаем как UTF-8 — для латиницы и для писем в
+ * UTF-8 это верно, а испорченные байты становятся видимыми, а не невидимыми.
+ */
+function rawBodyOf(source: Buffer): string {
+  const crlf = source.indexOf('\r\n\r\n');
+  if (crlf >= 0) return source.subarray(crlf + 4).toString('utf8');
+  const lf = source.indexOf('\n\n');
+  return lf >= 0 ? source.subarray(lf + 2).toString('utf8') : '';
+}
+
 /** Блок заголовков письма — всё до первой пустой строки. */
 function headerBlockOf(source: Buffer): Buffer {
   const end = source.indexOf('\r\n\r\n');
@@ -172,7 +186,34 @@ export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMe
     blockedRemote = sanitized.blockedRemote;
   }
 
-  const bodyText = parsed.text ?? (rawHtml ? htmlToText(rawHtml) : null);
+  let bodyText = parsed.text ?? (rawHtml ? htmlToText(rawHtml) : null);
+  const attachments = collectAttachments(msg.bodyStructure);
+
+  /*
+   * Запасной путь к тексту, когда разбор не дал ни одной части.
+   *
+   * Так выглядит письмо с испорченным разделителем частей: в заголовке
+   * объявлен один разделитель, а в теле стоит другой. Разбор в этом случае
+   * не находит ничего, и письмо показывалось СОВЕРШЕННО пустым — тема и
+   * отправитель есть, текста нет, и добраться до него нельзя ничем: ни
+   * «показать исходник», ни скачиванием у нас нет.
+   *
+   * Такие письма ходят: разделитель портят самописные рассылки и пересылка
+   * через старые шлюзы. Почтовые программы показывают такое письмо как есть
+   * — берём тело исходника целиком, без заголовков.
+   *
+   * Признак `bodyRecovered` уходит наружу, чтобы интерфейс мог сказать
+   * человеку, что письмо разобрать не удалось и показан исходный текст.
+   */
+  let bodyRecovered = false;
+  if (!bodyHtml && (bodyText === null || bodyText.trim() === '') && attachments.length === 0) {
+    const raw = rawBodyOf(source);
+    if (raw.trim() !== '') {
+      bodyText = raw;
+      bodyRecovered = true;
+    }
+  }
+
   const snippet = makeSnippet(bodyText ?? '');
 
   /*
@@ -203,9 +244,13 @@ export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMe
     bcc: mailparserAddresses(parsed.bcc),
     bodyHtml,
     bodyText,
-    attachments: collectAttachments(msg.bodyStructure),
+    attachments,
     headers: pickHeaders(parsed),
     authentication: parseAuthResults(typeof authHeader === 'string' ? authHeader : undefined),
+    // Признак ставим ТОЛЬКО когда текст действительно взят из исходника:
+    // лишнее поле в обычном письме заставило бы интерфейс объяснять то,
+    // чего не было.
+    ...(bodyRecovered ? { bodyRecovered: true } : {}),
   };
 
   return { message, blockedRemote };

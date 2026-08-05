@@ -107,7 +107,7 @@ user+IP exceeded`), — это 503. Иначе при упоре в предел
 | GET | `/api/account` | `Account`: профиль + квота из IMAP QUOTA. `createdAt` — из `virtual_users`, `null` если базы нет |
 | GET | `/api/folders` | `{folders: Folder[]}` — роли, счётчики, дерево. Служебные каталоги Dovecot (`dovecot/...`) не показываются |
 | GET | `/api/messages` | `MessageListPage`. Параметры: `folderId`, `offset`, `limit` (<=100), `filter` (`all/unread/flagged/with-attachments`), `search`, `snippets=0/1` |
-| GET | `/api/messages/:id` | Полное `Message` + `blockedRemote`. `?images=1` — разрешить внешние картинки |
+| GET | `/api/messages/:id` | Полное `Message` + `blockedRemote`. `?images=1` — разрешить внешние картинки. `bodyRecovered: true` означает, что разбор не дал ни одной части и текст взят из исходника как есть |
 | GET | `/api/messages/:id/parts/:partId` | Вложение/встроенная картинка (inline для картинок, attachment для остального) |
 | POST | `/api/messages/:id/unsubscribe` | Отписка от рассылки (RFC 8058) -> `{ok, method, …}` |
 | POST | `/api/messages/flags` | `{ids[], seen?, flagged?, deleted?}` (true — установить, false — снять) -> `{updated}` |

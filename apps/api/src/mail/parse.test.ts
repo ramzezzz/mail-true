@@ -131,3 +131,71 @@ test('parseAuthResults: разбор заголовка', () => {
   assert.deepEqual(parseAuthResults(undefined), { spf: 'none', dkim: 'none', dmarc: 'none' });
   assert.deepEqual(parseAuthResults('garbage'), { spf: 'none', dkim: 'none', dmarc: 'none' });
 });
+
+/**
+ * Письмо с испорченным разделителем частей не должно выглядеть пустым.
+ *
+ * Найдено проверкой на настоящей почте: в заголовке объявлен один
+ * разделитель, а в теле стоит другой. Разбор не находит ни одной части, и
+ * письмо показывалось СОВЕРШЕННО пустым — тема и отправитель есть, текста
+ * нет, и добраться до него нельзя ничем: «показать исходник» у нас нет.
+ *
+ * Такие письма ходят: разделитель портят самописные рассылки и пересылка
+ * через старые шлюзы.
+ */
+test('текст письма с неверным разделителем берётся из исходника', async () => {
+  const source = Buffer.from(
+    [
+      'From: rassylka@example.com',
+      'To: kolya@mail.local',
+      'Subject: Slomannyi razdelitel',
+      'Content-Type: multipart/mixed; boundary="OBYAVLENNYI"',
+      '',
+      '--NASTOYASHCHIY',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'Tekst vnutri nepravilnogo razdelitelya.',
+      '--NASTOYASHCHIY--',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+
+  const { message } = await parseFullMessage({
+    folderId: 'inbox',
+    msg: { uid: 7, bodyStructure: undefined } as never,
+    source,
+    allowRemote: false,
+  });
+
+  assert.ok(
+    (message.bodyText ?? '').includes('Tekst vnutri nepravilnogo razdelitelya'),
+    `текст должен быть виден, получено: ${JSON.stringify(message.bodyText)}`,
+  );
+  assert.equal(message.bodyRecovered, true, 'и человеку должно быть сказано, что письмо не разобралось');
+});
+
+test('обычное письмо признаком «не разобралось» не помечается', async () => {
+  const source = Buffer.from(
+    [
+      'From: ivan@example.com',
+      'To: kolya@mail.local',
+      'Subject: Obychnoe pismo',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'Vsyo v poryadke.',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+
+  const { message } = await parseFullMessage({
+    folderId: 'inbox',
+    msg: { uid: 8, bodyStructure: undefined } as never,
+    source,
+    allowRemote: false,
+  });
+
+  assert.match(message.bodyText ?? '', /Vsyo v poryadke/);
+  assert.equal(message.bodyRecovered, undefined, 'лишний признак заставил бы объяснять то, чего не было');
+});
