@@ -1,69 +1,356 @@
-/* Экран входа: карточка по центру, как на входе mail.ru. */
+/*
+ * Страница входа. Оформление перенесено из прототипа `login_page/`:
+ * тёмный фон с созвездием точек, проволочный глобус слева, белая карточка
+ * справа. Ни одной растровой картинки — всё нарисовано кодом, поэтому
+ * страница ничего не докачивает и одинаково выглядит на любом экране.
+ *
+ * Цвета взяты из фирменных токенов (`--mt-color-*`, см. docs/brand.md), а не
+ * из палитры прототипа: там был чужой синий #186FC2, у нас свой True Blue
+ * #006EC6. Тёмная подложка задана прямо здесь: вход намеренно тёмный в любой
+ * теме — это заставка, а не рабочий экран.
+ */
 
-.screen {
+.page {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  overflow: hidden;
+  background: radial-gradient(120% 120% at 42% 44%, #0b1a3a 0%, #081431 55%, #071129 100%);
+  color: #e8eefc;
+}
+
+/* Мягкие размытые пятна — глубина фона за созвездием */
+.bokehBlue,
+.bokehWarm {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.5;
+  z-index: 1;
+  pointer-events: none;
+}
+.bokehBlue {
+  width: 22rem;
+  height: 22rem;
+  left: 20%;
+  top: 30%;
+  background: radial-gradient(circle, rgba(0, 110, 198, 0.55), transparent 70%);
+  animation: mtDrift1 18s ease-in-out infinite;
+}
+.bokehWarm {
+  width: 12rem;
+  height: 12rem;
+  left: 27%;
+  top: 24%;
+  background: radial-gradient(circle, rgba(240, 140, 70, 0.4), transparent 70%);
+  animation: mtDrift2 22s ease-in-out infinite;
+}
+
+/* --- Карточка входа --------------------------------------------------- */
+
+.panel {
+  position: absolute;
+  z-index: 3;
+  right: 7%;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  padding: 24px;
-  background: var(--mt-color-background-secondary);
 }
 
 .card {
+  position: relative;
+  width: 24rem;
+  max-width: 92vw;
+  background: var(--mt-color-background-content, #fff);
+  border-radius: 12px;
+  box-shadow: 0 1.5rem 3.5rem rgba(0, 10, 30, 0.45);
+  padding: 2.2rem 2.2rem 1.8rem;
+  color: var(--mt-color-text-primary, #12161c);
+  animation: mtCardIn 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) 0.15s both;
+}
+
+.brand {
   display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-  max-width: 360px;
-  padding: 32px;
-  border-radius: 16px;
-  background: var(--mt-color-background-content);
-  box-shadow: var(--mt-elevation-1);
+  align-items: center;
+  margin-bottom: 0.35rem;
 }
-
 .logo {
-  height: 28px;
-  align-self: flex-start;
+  height: 1.75rem;
+  width: auto;
+}
+.tagline {
+  margin: 0 0 1.6rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--mt-color-text-primary, #12161c);
 }
 
-.title {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--mt-color-text-primary);
-}
+/* --- Поля с подчёркиванием -------------------------------------------- */
 
 .field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  margin-bottom: 1.2rem;
 }
-
 .label {
-  font-size: 13px;
-  color: var(--mt-color-text-secondary);
+  display: block;
+  font-size: 0.78rem;
+  color: var(--mt-color-text-secondary, #5a6472);
+  margin-bottom: 0.15rem;
 }
-
+.uline {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--mt-color-separator-primary, #dfe4ea);
+  transition: border-color var(--mt-anim-duration-m, 200ms) var(--mt-anim-easing-default, ease);
+}
+.uline:focus-within {
+  border-color: var(--mt-color-background-accent, #006ec6);
+}
 .input {
-  height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--mt-color-separator-primary);
-  border-radius: 8px;
-  background: var(--mt-color-background-content);
-  color: var(--mt-color-text-primary);
-  font: inherit;
-  font-size: 15px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  padding: 0.55rem 0.1rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: inherit;
+}
+.input::placeholder {
+  color: var(--mt-color-text-tertiary, #b8c0cc);
 }
 
-.input:focus {
-  outline: none;
-  border-color: var(--mt-color-stroke-accent);
+.ulineBtn {
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.55;
+  transition:
+    opacity var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease),
+    background var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease);
+}
+.ulineBtn svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: var(--mt-color-icon-secondary, #8a97a4);
+}
+.ulineBtn:hover {
+  opacity: 1;
+  background: var(--mt-color-background-secondary, #f0f4f8);
+}
+.ulineBtn:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--mt-color-background-accent, #006ec6);
+  outline-offset: 2px;
+}
+
+/* Подсказка про Caps Lock: частая причина «пароль не подходит» */
+.caps {
+  margin: 0.35rem 0 0;
+  font-size: 0.76rem;
+  color: #b26a00;
+}
+
+/* --- Строка «запомнить» ------------------------------------------------ */
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1rem 0 1.4rem;
+  font-size: 0.82rem;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--mt-color-text-secondary, #5a6472);
+  cursor: pointer;
+}
+.check input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.checkBox {
+  width: 1rem;
+  height: 1rem;
+  border: 1px solid var(--mt-color-separator-primary, #b9c2d0);
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  transition:
+    background var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease),
+    border-color var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease);
+}
+.checkBox::after {
+  content: '';
+  width: 0.28rem;
+  height: 0.5rem;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform var(--mt-anim-duration-s, 100ms) var(--mt-anim-easing-default, ease);
+}
+.check input:checked + .checkBox {
+  background: var(--mt-color-background-accent, #006ec6);
+  border-color: var(--mt-color-background-accent, #006ec6);
+}
+.check input:checked + .checkBox::after {
+  transform: rotate(45deg) scale(1);
+}
+.check input:focus-visible + .checkBox {
+  outline: 2px solid var(--mt-color-background-accent, #006ec6);
+  outline-offset: 2px;
 }
 
 .error {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: var(--mt-color-background-secondary);
-  color: var(--mt-color-text-negative);
-  font-size: 13px;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  background: var(--mt-color-background-secondary, #fdecec);
+  color: var(--mt-color-text-negative, #c0392b);
+  font-size: 0.85rem;
+}
+
+.hint {
+  margin: 1rem 0 0;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary, #5a6472);
+  text-align: center;
+}
+
+/* --- Подвал ------------------------------------------------------------ */
+
+.footer {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 1.4rem;
+  text-align: center;
+  color: #7fa8d8;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  padding: 0 1rem;
+  animation: mtFadeUp 0.9s ease 0.3s both;
+}
+.footer p {
+  margin: 0;
+}
+
+/* --- Движение ----------------------------------------------------------- */
+
+@keyframes mtCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+  }
+}
+@keyframes mtFadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes mtDrift1 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(30px, -20px);
+  }
+}
+@keyframes mtDrift2 {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(-24px, 26px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bokehBlue,
+  .bokehWarm {
+    animation: none;
+  }
+  .card,
+  .footer {
+    animation-duration: 0.001s;
+  }
+}
+
+/*
+ * Узкий экран. Карточка встаёт по центру, а на телефоне занимает страницу
+ * целиком: глобус там не помещается и только мешает (он прячется правилом
+ * в global.css вместе с остальным оформлением фона).
+ */
+@media (max-width: 1024px) {
+  .panel {
+    right: 50%;
+    transform: translate(50%, -50%);
+  }
+  @keyframes mtCardIn {
+    from {
+      opacity: 0;
+      transform: translate(50%, -50%) translateY(30px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(50%, -50%);
+    }
+  }
+}
+
+@media (max-width: 680px) {
+  .bokehBlue,
+  .bokehWarm {
+    display: none;
+  }
+  .panel {
+    /*
+     * Именно relative, а не static: слой (z-index) действует только на
+     * позиционированный элемент. При static карточка теряла свой слой, и
+     * точки фона рисовались ПОВЕРХ неё — прямо по полям ввода.
+     */
+    position: relative;
+    right: auto;
+    top: auto;
+    transform: none;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 1.25rem 1rem 6.5rem;
+    justify-content: center;
+  }
+  .card {
+    width: 100%;
+    max-width: 26rem;
+    padding: 1.75rem 1.5rem 1.5rem;
+    animation: mtFadeUp 0.6s ease both;
+  }
+  .footer {
+    font-size: 0.72rem;
+    bottom: 1rem;
+  }
 }

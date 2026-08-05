@@ -340,371 +340,371 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
 
   return (
     <>
-    <section
-      className={cx(styles.window, maximized && styles.maximized)}
-      /* Каскад задаётся переменной, а не свойством right: на узком экране
-         окно раскрывается во весь экран правилом из CSS, а встроенный стиль
-         перебил бы его и оставил окно у правого края. */
-      style={maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)}
-      aria-label="Новое письмо"
-      onKeyDown={(e) => {
-        // Esc сохраняет черновик и закрывает окно (как в mail.ru).
-        // Окно закрывается только после успешного сохранения: иначе
-        // упавший запрос уносил бы с собой всё написанное.
-        if (e.key === 'Escape') {
-          e.stopPropagation();
-          void saveAndClose();
-        }
-      }}
-    >
-      {/* Шапка окна: получатель + управление окном */}
-      <div className={styles.header}>
-        <span className={styles.headerTitle}>{subject || 'Новое письмо'}</span>
-        <div className={styles.windowControls}>
-          <Tooltip text="Свернуть">
-            <IconButton label="Свернуть" size="s" onClick={() => toggleMinimized(win.id)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 18h16v2H4z" fill="currentColor" />
-              </svg>
-            </IconButton>
-          </Tooltip>
-          <Tooltip text={maximized ? 'Свернуть в окно' : 'Развернуть'}>
-            <IconButton
-              label={maximized ? 'Свернуть в окно' : 'Развернуть'}
-              size="s"
-              onClick={() => setMaximized((v) => !v)}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                <path
-                  d="M5 5h14v14H5V5Zm2 2v10h10V7H7Z"
-                  fill="currentColor"
-                  fillRule="evenodd"
-                />
-              </svg>
-            </IconButton>
-          </Tooltip>
-          <Tooltip text="Закрыть">
-            <IconButton label="Закрыть" size="s" onClick={closeByCross}>
-              <IconClose size={14} />
-            </IconButton>
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* Кому */}
-      <div className={styles.fieldRow}>
-        <span className={styles.fieldLabel}>Кому</span>
-        <input
-          className={styles.fieldInput}
-          value={to}
-          onChange={(e) => patch({ to: e.target.value })}
-          placeholder="Введите адрес"
-          aria-label="Кому"
-          autoFocus
-        />
-        <span className={styles.fieldLinks}>
-          {!showCc && (
-            <button type="button" className={styles.fieldLink} onClick={() => patch({ showCc: true })}>
-              Копия
-            </button>
-          )}
-          {!showBcc && (
-            <button type="button" className={styles.fieldLink} onClick={() => patch({ showBcc: true })}>
-              Скрытая
-            </button>
-          )}
-        </span>
-      </div>
-
-      {showCc && (
-        <div className={styles.fieldRow}>
-          <span className={styles.fieldLabel}>Копия</span>
-          <input
-            className={styles.fieldInput}
-            value={cc}
-            onChange={(e) => patch({ cc: e.target.value })}
-            aria-label="Копия"
-          />
-        </div>
-      )}
-      {showBcc && (
-        <div className={styles.fieldRow}>
-          <span className={styles.fieldLabel}>Скрытая</span>
-          <input
-            className={styles.fieldInput}
-            value={bcc}
-            onChange={(e) => patch({ bcc: e.target.value })}
-            aria-label="Скрытая"
-          />
-        </div>
-      )}
-
-      {/* От кого */}
-      <div className={styles.fieldRow}>
-        <span className={styles.fieldLabel}>От кого</span>
-        <span className={styles.fieldStatic}>
-          {account ? `${account.displayName} <${account.email}>` : '…'}
-        </span>
-      </div>
-
-      {/* Тема */}
-      <div className={styles.fieldRow}>
-        <span className={styles.fieldLabel}>Тема</span>
-        <input
-          className={styles.fieldInput}
-          value={subject}
-          onChange={(e) => patch({ subject: e.target.value })}
-          aria-label="Тема"
-        />
-      </div>
-
-      {/* Вложения */}
-      <div className={styles.attachRow}>
-        <input
-          ref={fileRef}
-          type="file"
-          hidden
-          multiple
-          onChange={(e) => {
-            for (const f of Array.from(e.target.files ?? [])) void attachFile(f);
-            e.target.value = '';
-          }}
-        />
-        <button type="button" className={styles.attachButton} onClick={() => fileRef.current?.click()}>
-          <IconAttach />
-          Прикрепить файл
-        </button>
-        {/* «Из Почты» — прикрепить файл, который уже приходил в другом
-            письме. Кнопка была пустышкой (писала в консоль); теперь
-            открывает выбор — см. MailAttachmentPicker. */}
-        <button
-          type="button"
-          className={styles.attachButton}
-          onClick={() => setPickerOpen(true)}
-        >
-          Из Почты
-        </button>
-        {attachments.map((a) => (
-          <span key={a.id} className={styles.attachChip}>
-            {a.filename}
-            <button
-              type="button"
-              className={styles.attachChipRemove}
-              aria-label={`Убрать ${a.filename}`}
-              onClick={() =>
-                patch((current) => ({
-                  attachments: current.attachments.filter((x) => x.id !== a.id),
-                }))
-              }
-            >
-              <IconClose size={12} />
-            </button>
-          </span>
-        ))}
-      </div>
-
-      {/* Панель форматирования: значки 32×32, списки 48×32.
-          preventDefault на кнопках сохраняет выделение в редакторе */}
-      <div
-        className={styles.formatBar}
-        onMouseDown={(e) => {
-          const tag = (e.target as HTMLElement).tagName;
-          if (tag !== 'SELECT' && tag !== 'OPTION') e.preventDefault();
+      <section
+        className={cx(styles.window, maximized && styles.maximized)}
+        /* Каскад задаётся переменной, а не свойством right: на узком экране
+           окно раскрывается во весь экран правилом из CSS, а встроенный стиль
+           перебил бы его и оставил окно у правого края. */
+        style={maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)}
+        aria-label="Новое письмо"
+        onKeyDown={(e) => {
+          // Esc сохраняет черновик и закрывает окно (как в mail.ru).
+          // Окно закрывается только после успешного сохранения: иначе
+          // упавший запрос уносил бы с собой всё написанное.
+          if (e.key === 'Escape') {
+            e.stopPropagation();
+            void saveAndClose();
+          }
         }}
       >
-        <button type="button" className={styles.fmtButton} title="Жирный" onClick={() => exec('bold')}>
-          <b>Ж</b>
-        </button>
-        <button type="button" className={styles.fmtButton} title="Наклонный" onClick={() => exec('italic')}>
-          <i>К</i>
-        </button>
-        <button type="button" className={styles.fmtButton} title="Подчёркнутый" onClick={() => exec('underline')}>
-          <u>Ч</u>
-        </button>
-        <button type="button" className={styles.fmtButton} title="Зачёркнутый" onClick={() => exec('strikeThrough')}>
-          <s>З</s>
-        </button>
+        {/* Шапка окна: получатель + управление окном */}
+        <div className={styles.header}>
+          <span className={styles.headerTitle}>{subject || 'Новое письмо'}</span>
+          <div className={styles.windowControls}>
+            <Tooltip text="Свернуть">
+              <IconButton label="Свернуть" size="s" onClick={() => toggleMinimized(win.id)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 18h16v2H4z" fill="currentColor" />
+                </svg>
+              </IconButton>
+            </Tooltip>
+            <Tooltip text={maximized ? 'Свернуть в окно' : 'Развернуть'}>
+              <IconButton
+                label={maximized ? 'Свернуть в окно' : 'Развернуть'}
+                size="s"
+                onClick={() => setMaximized((v) => !v)}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M5 5h14v14H5V5Zm2 2v10h10V7H7Z"
+                    fill="currentColor"
+                    fillRule="evenodd"
+                  />
+                </svg>
+              </IconButton>
+            </Tooltip>
+            <Tooltip text="Закрыть">
+              <IconButton label="Закрыть" size="s" onClick={closeByCross}>
+                <IconClose size={14} />
+              </IconButton>
+            </Tooltip>
+          </div>
+        </div>
 
-        <select
-          className={styles.fmtSelect}
-          title="Шрифт"
-          defaultValue="Golos Text"
-          onChange={(e) => exec('fontName', e.target.value)}
-        >
-          {FONT_FAMILIES.map((f) => (
-            <option key={f} value={f}>
-              {f}
-            </option>
-          ))}
-        </select>
-        <select
-          className={styles.fmtSelect}
-          title="Размер шрифта"
-          defaultValue="3"
-          onChange={(e) => exec('fontSize', e.target.value)}
-        >
-          {FONT_SIZES.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+        {/* Кому */}
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>Кому</span>
+          <input
+            className={styles.fieldInput}
+            value={to}
+            onChange={(e) => patch({ to: e.target.value })}
+            placeholder="Введите адрес"
+            aria-label="Кому"
+            autoFocus
+          />
+          <span className={styles.fieldLinks}>
+            {!showCc && (
+              <button type="button" className={styles.fieldLink} onClick={() => patch({ showCc: true })}>
+                Копия
+              </button>
+            )}
+            {!showBcc && (
+              <button type="button" className={styles.fieldLink} onClick={() => patch({ showBcc: true })}>
+                Скрытая
+              </button>
+            )}
+          </span>
+        </div>
 
-        <span className={styles.fmtSeparator} />
+        {showCc && (
+          <div className={styles.fieldRow}>
+            <span className={styles.fieldLabel}>Копия</span>
+            <input
+              className={styles.fieldInput}
+              value={cc}
+              onChange={(e) => patch({ cc: e.target.value })}
+              aria-label="Копия"
+            />
+          </div>
+        )}
+        {showBcc && (
+          <div className={styles.fieldRow}>
+            <span className={styles.fieldLabel}>Скрытая</span>
+            <input
+              className={styles.fieldInput}
+              value={bcc}
+              onChange={(e) => patch({ bcc: e.target.value })}
+              aria-label="Скрытая"
+            />
+          </div>
+        )}
 
-        <button type="button" className={styles.fmtButton} title="По левому краю" onClick={() => exec('justifyLeft')}>
-          ⇤
-        </button>
-        <button type="button" className={styles.fmtButton} title="По центру" onClick={() => exec('justifyCenter')}>
-          ↔
-        </button>
-        <button type="button" className={styles.fmtButton} title="Маркированный список" onClick={() => exec('insertUnorderedList')}>
-          ••
-        </button>
-        <button type="button" className={styles.fmtButton} title="Нумерованный список" onClick={() => exec('insertOrderedList')}>
-          1.
-        </button>
-        <button type="button" className={styles.fmtButton} title="Отменить" onClick={() => exec('undo')}>
-          ↶
-        </button>
-        <button type="button" className={styles.fmtButton} title="Повторить" onClick={() => exec('redo')}>
-          ↷
-        </button>
-        <button
-          type="button"
-          className={styles.fmtButton}
-          title="Вставить ссылку"
-          onClick={() => {
-            const url = window.prompt('Адрес ссылки');
-            if (url) exec('createLink', url);
-          }}
-        >
-          🔗
-        </button>
-        <select
-          className={styles.fmtSelect}
-          title="Вставить смайлик"
-          value=""
-          onChange={(e) => {
-            if (e.target.value) exec('insertText', e.target.value);
-          }}
-        >
-          <option value="">🙂</option>
-          {EMOJI.map((e) => (
-            <option key={e} value={e}>
-              {e}
-            </option>
-          ))}
-        </select>
-        <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
-          A̶
-        </button>
-      </div>
+        {/* От кого */}
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>От кого</span>
+          <span className={styles.fieldStatic}>
+            {account ? `${account.displayName} <${account.email}>` : '…'}
+          </span>
+        </div>
 
-      {/* Помощь с ответом. Панели нет вовсе, если помощник выключен */}
-      <ComposeAiPanel
-        sourceMessageId={win.init.sourceMessageId}
-        readAll={readAll}
-        readSelectionOrAll={readSelectionOrAll}
-        insert={insertAiText}
-        replace={replaceAiText}
-      />
+        {/* Тема */}
+        <div className={styles.fieldRow}>
+          <span className={styles.fieldLabel}>Тема</span>
+          <input
+            className={styles.fieldInput}
+            value={subject}
+            onChange={(e) => patch({ subject: e.target.value })}
+            aria-label="Тема"
+          />
+        </div>
 
-      {/* Выбор подписи. Список — из общих настроек ящика; пока подписей
-          там нет, выбирать нечего и строки не показываем */}
-      {preferences.signatures.length > 0 && (
-        <div className={styles.signatureRow}>
-          <span className={styles.signatureLabel}>Подпись</span>
-          <select
-            className={styles.signatureSelect}
-            aria-label="Подпись"
-            value={draft.signatureId ?? ''}
-            onChange={(e) => applySignature(e.target.value || null)}
+        {/* Вложения */}
+        <div className={styles.attachRow}>
+          <input
+            ref={fileRef}
+            type="file"
+            hidden
+            multiple
+            onChange={(e) => {
+              for (const f of Array.from(e.target.files ?? [])) void attachFile(f);
+              e.target.value = '';
+            }}
+          />
+          <button type="button" className={styles.attachButton} onClick={() => fileRef.current?.click()}>
+            <IconAttach />
+            Прикрепить файл
+          </button>
+          {/* «Из Почты» — прикрепить файл, который уже приходил в другом
+              письме. Кнопка была пустышкой (писала в консоль); теперь
+              открывает выбор — см. MailAttachmentPicker. */}
+          <button
+            type="button"
+            className={styles.attachButton}
+            onClick={() => setPickerOpen(true)}
           >
-            <option value="">Без подписи</option>
-            {preferences.signatures.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+            Из Почты
+          </button>
+          {attachments.map((a) => (
+            <span key={a.id} className={styles.attachChip}>
+              {a.filename}
+              <button
+                type="button"
+                className={styles.attachChipRemove}
+                aria-label={`Убрать ${a.filename}`}
+                onClick={() =>
+                  patch((current) => ({
+                    attachments: current.attachments.filter((x) => x.id !== a.id),
+                  }))
+                }
+              >
+                <IconClose size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+
+        {/* Панель форматирования: значки 32×32, списки 48×32.
+            preventDefault на кнопках сохраняет выделение в редакторе */}
+        <div
+          className={styles.formatBar}
+          onMouseDown={(e) => {
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag !== 'SELECT' && tag !== 'OPTION') e.preventDefault();
+          }}
+        >
+          <button type="button" className={styles.fmtButton} title="Жирный" onClick={() => exec('bold')}>
+            <b>Ж</b>
+          </button>
+          <button type="button" className={styles.fmtButton} title="Наклонный" onClick={() => exec('italic')}>
+            <i>К</i>
+          </button>
+          <button type="button" className={styles.fmtButton} title="Подчёркнутый" onClick={() => exec('underline')}>
+            <u>Ч</u>
+          </button>
+          <button type="button" className={styles.fmtButton} title="Зачёркнутый" onClick={() => exec('strikeThrough')}>
+            <s>З</s>
+          </button>
+
+          <select
+            className={styles.fmtSelect}
+            title="Шрифт"
+            defaultValue="Golos Text"
+            onChange={(e) => exec('fontName', e.target.value)}
+          >
+            {FONT_FAMILIES.map((f) => (
+              <option key={f} value={f}>
+                {f}
               </option>
             ))}
           </select>
+          <select
+            className={styles.fmtSelect}
+            title="Размер шрифта"
+            defaultValue="3"
+            onChange={(e) => exec('fontSize', e.target.value)}
+          >
+            {FONT_SIZES.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+
+          <span className={styles.fmtSeparator} />
+
+          <button type="button" className={styles.fmtButton} title="По левому краю" onClick={() => exec('justifyLeft')}>
+            ⇤
+          </button>
+          <button type="button" className={styles.fmtButton} title="По центру" onClick={() => exec('justifyCenter')}>
+            ↔
+          </button>
+          <button type="button" className={styles.fmtButton} title="Маркированный список" onClick={() => exec('insertUnorderedList')}>
+            ••
+          </button>
+          <button type="button" className={styles.fmtButton} title="Нумерованный список" onClick={() => exec('insertOrderedList')}>
+            1.
+          </button>
+          <button type="button" className={styles.fmtButton} title="Отменить" onClick={() => exec('undo')}>
+            ↶
+          </button>
+          <button type="button" className={styles.fmtButton} title="Повторить" onClick={() => exec('redo')}>
+            ↷
+          </button>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Вставить ссылку"
+            onClick={() => {
+              const url = window.prompt('Адрес ссылки');
+              if (url) exec('createLink', url);
+            }}
+          >
+            🔗
+          </button>
+          <select
+            className={styles.fmtSelect}
+            title="Вставить смайлик"
+            value=""
+            onChange={(e) => {
+              if (e.target.value) exec('insertText', e.target.value);
+            }}
+          >
+            <option value="">🙂</option>
+            {EMOJI.map((e) => (
+              <option key={e} value={e}>
+                {e}
+              </option>
+            ))}
+          </select>
+          <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
+            A̶
+          </button>
         </div>
-      )}
 
-      {/* Тело письма — contenteditable */}
-      <div
-        ref={editorRef}
-        className={styles.editor}
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline="true"
-        aria-label="Текст письма"
-        // Набранное запоминается в состоянии окна, а не только в DOM:
-        // иначе сворачивание окна стирало бы тело письма.
-        onInput={rememberBody}
-        onBlur={rememberBody}
-        dangerouslySetInnerHTML={{ __html: initialHtml }}
-      />
+        {/* Помощь с ответом. Панели нет вовсе, если помощник выключен */}
+        <ComposeAiPanel
+          sourceMessageId={win.init.sourceMessageId}
+          readAll={readAll}
+          readSelectionOrAll={readSelectionOrAll}
+          insert={insertAiText}
+          replace={replaceAiText}
+        />
 
-      {error && <div className={styles.error}>{error}</div>}
-
-      {/* Нижняя панель */}
-      <div className={styles.footer}>
-        <Button mode="primary" className={styles.sendButton} onClick={send} disabled={sendMessage.isPending}>
-          {sendMessage.isPending ? 'Отправка…' : 'Отправить'}
-        </Button>
-        <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
-          {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
-        </Button>
-        <Button mode="secondary" onClick={discard}>
-          Отменить
-        </Button>
-        {savedAt && (
-          <span className={styles.savedNote}>
-            Сохранено в {new Date(savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-          </span>
+        {/* Выбор подписи. Список — из общих настроек ящика; пока подписей
+            там нет, выбирать нечего и строки не показываем */}
+        {preferences.signatures.length > 0 && (
+          <div className={styles.signatureRow}>
+            <span className={styles.signatureLabel}>Подпись</span>
+            <select
+              className={styles.signatureSelect}
+              aria-label="Подпись"
+              value={draft.signatureId ?? ''}
+              onChange={(e) => applySignature(e.target.value || null)}
+            >
+              <option value="">Без подписи</option>
+              {preferences.signatures.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
         )}
-        <div className={styles.footerSpacer} />
-        <Tooltip text="Уведомить о прочтении">
-          <IconButton
-            label="Уведомить о прочтении"
-            onClick={() => console.info('Уведомления о прочтении появятся вместе с бэкендом')}
-          >
-            <IconMailRead />
-          </IconButton>
-        </Tooltip>
-        <Tooltip text="Отложенная отправка">
-          <IconButton
-            label="Отложенная отправка"
-            onClick={() => console.info('Отложенная отправка появится вместе с бэкендом')}
-          >
-            <IconEvent />
-          </IconButton>
-        </Tooltip>
-      </div>
-    </section>
 
-    {/* Выбор вложения из уже пришедших писем. Окно стоит РЯДОМ с окном
-        написания, а не внутри: иначе Escape в нём всплывал бы до
-        обработчика окна и заодно закрывал бы само письмо. */}
-    {pickerOpen && (
-      <MailAttachmentPicker
-        onClose={() => setPickerOpen(false)}
-        onPick={(files) => {
-          if (files.length === 0) return;
-          patch((current) => ({
-            // Одно и то же вложение, выбранное дважды, прикрепится дважды —
-            // это разные загрузки с разными id. Сравнение по id защищает
-            // только от повторного добавления одной и той же загрузки.
-            attachments: [
-              ...current.attachments,
-              ...files.filter((f) => !current.attachments.some((a) => a.id === f.id)),
-            ],
-          }));
-        }}
-      />
-    )}
+        {/* Тело письма — contenteditable */}
+        <div
+          ref={editorRef}
+          className={styles.editor}
+          contentEditable
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Текст письма"
+          // Набранное запоминается в состоянии окна, а не только в DOM:
+          // иначе сворачивание окна стирало бы тело письма.
+          onInput={rememberBody}
+          onBlur={rememberBody}
+          dangerouslySetInnerHTML={{ __html: initialHtml }}
+        />
+
+        {error && <div className={styles.error}>{error}</div>}
+
+        {/* Нижняя панель */}
+        <div className={styles.footer}>
+          <Button mode="primary" className={styles.sendButton} onClick={send} disabled={sendMessage.isPending}>
+            {sendMessage.isPending ? 'Отправка…' : 'Отправить'}
+          </Button>
+          <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
+            {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
+          </Button>
+          <Button mode="secondary" onClick={discard}>
+            Отменить
+          </Button>
+          {savedAt && (
+            <span className={styles.savedNote}>
+              Сохранено в {new Date(savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          <div className={styles.footerSpacer} />
+          <Tooltip text="Уведомить о прочтении">
+            <IconButton
+              label="Уведомить о прочтении"
+              onClick={() => console.info('Уведомления о прочтении появятся вместе с бэкендом')}
+            >
+              <IconMailRead />
+            </IconButton>
+          </Tooltip>
+          <Tooltip text="Отложенная отправка">
+            <IconButton
+              label="Отложенная отправка"
+              onClick={() => console.info('Отложенная отправка появится вместе с бэкендом')}
+            >
+              <IconEvent />
+            </IconButton>
+          </Tooltip>
+        </div>
+      </section>
+
+      {/* Выбор вложения из уже пришедших писем. Окно стоит РЯДОМ с окном
+          написания, а не внутри: иначе Escape в нём всплывал бы до
+          обработчика окна и заодно закрывал бы само письмо. */}
+      {pickerOpen && (
+        <MailAttachmentPicker
+          onClose={() => setPickerOpen(false)}
+          onPick={(files) => {
+            if (files.length === 0) return;
+            patch((current) => ({
+              // Одно и то же вложение, выбранное дважды, прикрепится дважды —
+              // это разные загрузки с разными id. Сравнение по id защищает
+              // только от повторного добавления одной и той же загрузки.
+              attachments: [
+                ...current.attachments,
+                ...files.filter((f) => !current.attachments.some((a) => a.id === f.id)),
+              ],
+            }));
+          }}
+        />
+      )}
     </>
   );
 }
