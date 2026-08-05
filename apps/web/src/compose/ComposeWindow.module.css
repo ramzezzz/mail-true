@@ -147,6 +147,14 @@
   font-size: var(--mt-font-caption1-size, 12px);
 }
 
+/* Вложенное письмо, а не файл: рамка отличает его от обычного вложения —
+   открывается оно тоже иначе, и путать их в одном ряду нельзя */
+.attachChipMessage {
+  background: transparent;
+  border: 1px solid var(--mt-color-separator-primary);
+  color: var(--mt-color-text-secondary);
+}
+
 .attachChipRemove {
   display: inline-flex;
   border: none;
@@ -325,6 +333,68 @@
 .savedNote {
   color: var(--mt-color-text-secondary);
   font-size: var(--mt-font-caption1-size, 12px);
+}
+
+/* Назначенное время отложенной отправки — рядом с кнопкой «Отправить
+   позже»: письмо, которое уйдёт завтра, не должно выглядеть как обычное */
+.sendAtNote {
+  color: var(--mt-color-text-accent, var(--mt-color-text-link));
+  font-size: var(--mt-font-caption1-size, 12px);
+  white-space: nowrap;
+}
+
+/*
+  Меню отложенной отправки раскрывается ВВЕРХ.
+
+  Кнопка стоит в самой нижней строке окна написания, а окно прижато к низу
+  экрана. Меню по умолчанию раскрывается вниз — и на живом стенде оно
+  целиком уехало за нижний край: выбрать время было нечем, хотя кнопка
+  честно отрабатывала нажатие.
+
+  Класс удвоен намеренно: правило перебивает `top` из Dropdown.module.css,
+  а у того такая же вес — одна к одной, и победил бы тот, чей файл окажется
+  в сборке ниже. Удвоение поднимает вес и снимает зависимость от порядка.
+*/
+.sendLaterMenu.sendLaterMenu {
+  width: 260px;
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom center;
+}
+
+.sendLater {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.sendLaterTitle {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.sendLaterInput {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  padding: 0 8px;
+  background: var(--mt-color-background-content);
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.sendLaterProblem {
+  color: var(--mt-color-text-negative);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.sendLaterActions {
+  display: flex;
+  gap: 8px;
 }
 
 .footerSpacer {

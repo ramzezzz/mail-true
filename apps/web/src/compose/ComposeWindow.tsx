@@ -25,6 +25,7 @@ import {
   IconEmoji,
   IconEvent,
   IconFontFamily,
+  IconForward,
   IconLink,
   IconListBulleted,
   IconListNumbered,
@@ -69,6 +70,110 @@ const FONT_SIZES: Array<[string, string]> = [
 ];
 const EMOJI = ['🙂', '😄', '👍', '🙏', '🔥', '❤️', '🎉', '🤝'];
 
+/** Человеческая запись времени отложенной отправки: «6 августа в 09:00». */
+export function formatSendAt(iso: string): string {
+  const at = new Date(iso);
+  const day = at.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+  const time = at.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return `${day} в ${time}`;
+}
+
+/**
+ * Значение для `<input type="datetime-local">` из момента времени.
+ *
+ * Поле работает в местном времени и не понимает ни «Z», ни смещения,
+ * поэтому ISO-строку в него подставить нельзя: браузер молча покажет
+ * пустое поле. Отсюда и ручная сборка.
+ */
+export function toLocalInputValue(at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}` +
+    `T${pad(at.getHours())}:${pad(at.getMinutes())}`
+  );
+}
+
+/** Ближайшее «удобное» время по умолчанию — завтра в 9 утра, как у mail.ru. */
+export function defaultSendAt(now: Date): Date {
+  const at = new Date(now);
+  at.setDate(at.getDate() + 1);
+  at.setHours(9, 0, 0, 0);
+  return at;
+}
+
+/**
+ * Выбор времени отложенной отправки.
+ *
+ * Отдельный компонент ради `useDropdownClose`: поле и кнопки нарисованы
+ * не через `MenuItem`, и без этого меню осталось бы висеть поверх окна
+ * с уже назначенным временем.
+ */
+function SendLaterMenu({
+  value,
+  onPick,
+  onClear,
+}: {
+  value: string | null;
+  onPick: (iso: string) => void;
+  onClear: () => void;
+}) {
+  const close = useDropdownClose();
+  const [local, setLocal] = useState(() =>
+    toLocalInputValue(value ? new Date(value) : defaultSendAt(new Date())),
+  );
+  const [problem, setProblem] = useState<string | null>(null);
+
+  return (
+    <div className={styles.sendLater}>
+      <span className={styles.sendLaterTitle}>Отправить позже</span>
+      <input
+        type="datetime-local"
+        className={styles.sendLaterInput}
+        aria-label="Время отправки"
+        value={local}
+        min={toLocalInputValue(new Date())}
+        onChange={(e) => setLocal(e.target.value)}
+      />
+      {problem && <span className={styles.sendLaterProblem}>{problem}</span>}
+      <div className={styles.sendLaterActions}>
+        <Button
+          mode="primary"
+          size="s"
+          onClick={() => {
+            const at = new Date(local);
+            if (Number.isNaN(at.getTime())) {
+              setProblem('Укажите дату и время');
+              return;
+            }
+            // Меньше минуты сервер отправляет сразу — обещать «позже»
+            // в этом случае значило бы соврать
+            if (at.getTime() - Date.now() < 60_000) {
+              setProblem('Выберите время хотя бы через минуту');
+              return;
+            }
+            onPick(at.toISOString());
+            close();
+          }}
+        >
+          Назначить
+        </Button>
+        {value && (
+          <Button
+            mode="secondary"
+            size="s"
+            onClick={() => {
+              onClear();
+              close();
+            }}
+          >
+            Отправить сразу
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * Набор смайликов в меню. Отдельный компонент нужен ради `useDropdownClose`:
  * эти кнопки нарисованы не через `MenuItem`, а он закрывается сам, — без
@@ -104,6 +209,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
   const { data: settings, isPending: settingsPending } = useGeneralSettings();
   const preferences = settings ?? DEFAULT_GENERAL_SETTINGS;
   const closeCompose = useUiStore((s) => s.closeCompose);
+  const showNotice = useUiStore((s) => s.showNotice);
   const toggleMinimized = useUiStore((s) => s.toggleComposeMinimized);
   const updateDraft = useUiStore((s) => s.updateComposeDraft);
   const sendMessage = useSendMessage();
@@ -121,7 +227,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     [updateDraft, win.id],
   );
 
-  const { to, cc, bcc, subject, showCc, showBcc, attachments, savedAt } = draft;
+  const { to, cc, bcc, subject, showCc, showBcc, attachments, attachedMessages, savedAt } = draft;
 
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -270,6 +376,10 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     if (draft.draftUid !== null) payload.draftUid = draft.draftUid;
     if (win.init.inReplyTo) payload.inReplyTo = win.init.inReplyTo;
     if (win.init.references) payload.references = win.init.references;
+    if (attachedMessages.length > 0) {
+      payload.attachMessageIds = attachedMessages.map((m) => m.id);
+    }
+    if (draft.requestReadReceipt) payload.requestReadReceipt = true;
     return payload;
   };
 
@@ -279,10 +389,20 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
       setError('Укажите хотя бы одного получателя');
       return;
     }
+    // Отложенная отправка уходит тем же запросом: сервер сам решает,
+    // отправить сейчас или положить письмо в очередь.
+    if (draft.sendAt) payload.sendAt = draft.sendAt;
     setError(null);
     rememberBody();
     sendMessage.mutate(payload, {
-      onSuccess: () => closeCompose(win.id),
+      onSuccess: (result) => {
+        // Про отложенное письмо надо сказать отдельно: «Отправлено» о нём
+        // было бы неправдой — у получателя его ещё нет.
+        if (result.scheduled && result.sendAt) {
+          showNotice(`Письмо уйдёт ${formatSendAt(result.sendAt)}`);
+        }
+        closeCompose(win.id);
+      },
       // Не отправилось — окно остаётся с текстом, а причина видна
       onError: (err) => setError(actionErrorText('Не удалось отправить письмо', err)),
     });
@@ -325,6 +445,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     cc.trim() !== '' ||
     bcc.trim() !== '' ||
     attachments.length > 0 ||
+    attachedMessages.length > 0 ||
     // Смотрим на видимый текст, а не на разметку: у пустого редактора
     // innerHTML не пустой — браузер держит там <br> или неразрывный пробел,
     // и по разметке любое только что открытое окно считалось бы непустым.
@@ -360,6 +481,11 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     }
     closeCompose(win.id);
   };
+
+  /** Что обещает кнопка просьбы уведомить о прочтении в текущем состоянии. */
+  const readReceiptHint = draft.requestReadReceipt
+    ? 'Не запрашивать уведомление о прочтении'
+    : 'Уведомить о прочтении';
 
   const attachFile = async (file: File | undefined) => {
     if (!file) return;
@@ -552,6 +678,27 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
               </button>
             </span>
           ))}
+          {/* Письма, вложенные целиком («Переслать как вложение»). Плашка
+              отличается значком: файл и письмо ведут себя по-разному, и
+              путать их в одном ряду нельзя. */}
+          {attachedMessages.map((m) => (
+            <span key={m.id} className={cx(styles.attachChip, styles.attachChipMessage)}>
+              <IconForward size={14} />
+              {m.label}
+              <button
+                type="button"
+                className={styles.attachChipRemove}
+                aria-label={`Убрать письмо ${m.label}`}
+                onClick={() =>
+                  patch((current) => ({
+                    attachedMessages: current.attachedMessages.filter((x) => x.id !== m.id),
+                  }))
+                }
+              >
+                <IconClose size={12} />
+              </button>
+            </span>
+          ))}
         </div>
 
         {/*
@@ -735,7 +882,11 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
         {/* Нижняя панель */}
         <div className={styles.footer}>
           <Button mode="primary" className={styles.sendButton} onClick={send} disabled={sendMessage.isPending}>
-            {sendMessage.isPending ? 'Отправка…' : 'Отправить'}
+            {sendMessage.isPending
+              ? 'Отправка…'
+              : draft.sendAt
+                ? 'Отправить позже'
+                : 'Отправить'}
           </Button>
           <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
             {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
@@ -748,23 +899,52 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
               Сохранено в {new Date(savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
             </span>
           )}
+          {/* Назначенное время видно всегда, а не только внутри меню:
+              письмо, которое уйдёт завтра, не должно выглядеть как обычное */}
+          {draft.sendAt && (
+            <span className={styles.sendAtNote}>Уйдёт {formatSendAt(draft.sendAt)}</span>
+          )}
           <div className={styles.footerSpacer} />
-          <Tooltip text="Уведомить о прочтении">
+          {/*
+            Обе кнопки раньше только писали в консоль браузера. Теперь:
+            первая ставит в письмо заголовок Disposition-Notification-To
+            (RFC 8098), вторая отдаёт письмо серверной очереди — и оно уйдёт,
+            даже если браузер закрыть (apps/api/src/mail/deferred-send.ts).
+          */}
+          <Tooltip text={readReceiptHint}>
             <IconButton
               label="Уведомить о прочтении"
-              onClick={() => console.info('Уведомления о прочтении появятся вместе с бэкендом')}
+              // Своя подсказка браузера: без неё всплывающая подсказка
+              // говорила бы «не запрашивать», а системная — «уведомить»
+              title={readReceiptHint}
+              active={draft.requestReadReceipt}
+              aria-pressed={draft.requestReadReceipt}
+              onClick={() => patch({ requestReadReceipt: !draft.requestReadReceipt })}
             >
               <IconMailRead />
             </IconButton>
           </Tooltip>
-          <Tooltip text="Отложенная отправка">
-            <IconButton
-              label="Отложенная отправка"
-              onClick={() => console.info('Отложенная отправка появится вместе с бэкендом')}
-            >
-              <IconEvent />
-            </IconButton>
-          </Tooltip>
+          <Dropdown
+            align="right"
+            menuClassName={styles.sendLaterMenu}
+            trigger={({ toggle }) => (
+              <Tooltip text="Отложенная отправка">
+                <IconButton
+                  label="Отложенная отправка"
+                  active={Boolean(draft.sendAt)}
+                  onClick={toggle}
+                >
+                  <IconEvent />
+                </IconButton>
+              </Tooltip>
+            )}
+          >
+            <SendLaterMenu
+              value={draft.sendAt}
+              onPick={(iso) => patch({ sendAt: iso })}
+              onClear={() => patch({ sendAt: null })}
+            />
+          </Dropdown>
         </div>
       </section>
 

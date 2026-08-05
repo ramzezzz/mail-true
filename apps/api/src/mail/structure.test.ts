@@ -6,6 +6,7 @@ import {
   collectAttachments,
   decodedPartSize,
   hasRealAttachments,
+  looksLikeFilename,
   pickTextPart,
 } from './structure.js';
 
@@ -123,6 +124,90 @@ test('обычное вложение с именем файла по-прежн
   assert.equal(list.length, 1);
   assert.equal(list[0]?.filename, 'счёт.pdf');
   assert.equal(list[0]?.inline, false);
+});
+
+/*
+ * Обломок разбора RFC 2231 в имени файла.
+ *
+ * Письмо с `Content-Disposition: attachment; filename*=UTF-8` (значение
+ * обрезано, апострофов нет) разбирается в filename = «UTF-8». Раньше
+ * бралось первое непустое значение — и это «UTF-8» уходило человеку
+ * как имя файла, хотя рядом, в Content-Type, лежало настоящее имя.
+ * Проверено на живом стенде: вложение показывалось как «UTF-8», без
+ * расширения, и скачанный файл было нечем открыть.
+ */
+test('имя файла не берётся из обломка разбора: побеждает настоящее имя', () => {
+  const structure = {
+    type: 'multipart/mixed',
+    childNodes: [
+      { part: '1', type: 'text/plain', size: 10 },
+      {
+        part: '2',
+        type: 'application/pdf',
+        size: 100,
+        disposition: 'attachment',
+        // Так выглядит обрезанный параметр RFC 2231 после разбора
+        dispositionParameters: { filename: 'UTF-8' },
+        parameters: { name: 'отчёт.pdf' },
+      },
+    ],
+  } as MessageStructureObject;
+  const list = collectAttachments(structure);
+  assert.equal(list.length, 1);
+  assert.equal(list[0]?.filename, 'отчёт.pdf');
+});
+
+test('обломок без запасного имени не выдаётся за имя файла', () => {
+  const structure = {
+    type: 'multipart/mixed',
+    childNodes: [
+      { part: '1', type: 'text/plain', size: 10 },
+      {
+        part: '2',
+        type: 'application/octet-stream',
+        size: 100,
+        disposition: 'attachment',
+        dispositionParameters: { filename: 'windows-1251' },
+      },
+    ],
+  } as MessageStructureObject;
+  const list = collectAttachments(structure);
+  assert.equal(list.length, 1);
+  // Лучше честное «attachment», чем название кодировки вместо имени файла
+  assert.equal(list[0]?.filename, 'attachment');
+});
+
+test('обломок разбора у вложенного письма уступает его теме', () => {
+  const structure = {
+    type: 'multipart/mixed',
+    childNodes: [
+      { part: '1', type: 'text/plain', size: 10 },
+      {
+        part: '2',
+        type: 'message/rfc822',
+        size: 100,
+        disposition: 'attachment',
+        dispositionParameters: { filename: 'utf-8' },
+        envelope: { subject: 'Отчёт за июль' },
+      },
+    ],
+  } as MessageStructureObject;
+  assert.equal(collectAttachments(structure)[0]?.filename, 'Отчёт за июль.eml');
+});
+
+test('пригодность имени файла: обломки кодировок и пустое значение', () => {
+  assert.equal(looksLikeFilename('отчёт.pdf'), true);
+  assert.equal(looksLikeFilename('UTF-8'), false);
+  assert.equal(looksLikeFilename('utf8'), false);
+  assert.equal(looksLikeFilename('koi8-r'), false);
+  assert.equal(looksLikeFilename('windows-1251'), false);
+  assert.equal(looksLikeFilename('cp1251'), false);
+  assert.equal(looksLikeFilename('iso-8859-5'), false);
+  assert.equal(looksLikeFilename('us-ascii'), false);
+  assert.equal(looksLikeFilename('   '), false);
+  assert.equal(looksLikeFilename(undefined), false);
+  // Настоящее имя, в котором кодировка лишь упоминается, остаётся годным
+  assert.equal(looksLikeFilename('utf-8.txt'), true);
 });
 
 test('встроенная картинка остаётся inline и попадает в карту cid', () => {

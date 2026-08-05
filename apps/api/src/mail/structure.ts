@@ -28,9 +28,44 @@ function embeddedMessageFilename(node: MessageStructureObject): string {
   return `${trimmed}.eml`;
 }
 
+/**
+ * Названия кодировок, которые попадают в имя файла обломком разбора.
+ *
+ * Параметр RFC 2231 записывается как `filename*=UTF-8''%D0%BE...`: сначала
+ * кодировка, потом язык, потом само значение. Кривые клиенты (и посредники,
+ * обрезающие длинные заголовки) присылают `filename*=UTF-8` без апострофов
+ * и без значения — и разборщик честно отдаёт «UTF-8» как имя файла.
+ *
+ * Такое письмо разобрано на живом стенде: вложение показывалось с именем
+ * «UTF-8», без расширения, при том что в соседнем `Content-Type` лежало
+ * настоящее имя. Человек скачивал файл, который нечем открыть.
+ */
+const ENCODING_NAMES =
+  /^(utf-?8|utf-?7|koi8-[ru]|windows-\d{3,4}|cp\d{3,4}|iso-8859-\d{1,2}|us-ascii|ascii)$/i;
+
+/**
+ * Годится ли значение как имя файла.
+ *
+ * Риск отбросить настоящий файл, названный «UTF-8», ничтожен, а запасное
+ * имя у нас есть всегда — либо `name` из Content-Type, либо тема вложенного
+ * письма, либо «attachment».
+ */
+export function looksLikeFilename(value: string | undefined | null): boolean {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return false;
+  return !ENCODING_NAMES.test(trimmed);
+}
+
 function nodeFilename(node: MessageStructureObject): string | null {
-  const named = node.dispositionParameters?.['filename'] ?? node.parameters?.['name'] ?? null;
-  if (named) return named;
+  // Источники перебираются по порядку, а негодные пропускаются: раньше
+  // бралось первое непустое, и обломок разбора из `filename` побеждал
+  // совершенно годное имя из `name`.
+  for (const candidate of [
+    node.dispositionParameters?.['filename'],
+    node.parameters?.['name'],
+  ]) {
+    if (looksLikeFilename(candidate)) return (candidate as string).trim();
+  }
   // У вложенного письма нет ни Content-Disposition, ни имени файла: почтовые
   // клиенты пересылают его голой частью message/rfc822. Раньше из-за этого
   // такое вложение не попадало в список вовсе — при том, что сама часть

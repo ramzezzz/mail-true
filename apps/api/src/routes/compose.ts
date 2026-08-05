@@ -3,7 +3,12 @@
  * Письмо собирается MailComposer'ом в RFC822, отправляется через Postfix
  * submission (nodemailer SMTP) и тем же байтовым представлением
  * сохраняется копия в «Отправленные» (IMAP APPEND).
+ *
+ * Здесь же живут две соседние возможности, потому что обе — это отправка
+ * письма, а не чтение почты: отложенная отправка (очередь на диске,
+ * mail/deferred-send.ts) и уведомление о прочтении (mail/read-receipt.ts).
  */
+import { dirname, join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
@@ -14,19 +19,32 @@ import type { Folder, MailAddress } from '@mail-true/shared';
 import {
   BadRequestError,
   MessageTooLargeError,
+  NotFoundError,
   SendRejectedError,
   UnauthorizedError,
   UpstreamUnavailableError,
 } from '../errors.js';
-import { listFolders, markAnswered } from '../imap/service.js';
+import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
 import { findFolderById } from '../mail/folders.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
+import {
+  checkSendAt,
+  DeferredSender,
+  DeferredSpool,
+  type DeferredEntry,
+  type DeliveryOutcome,
+} from '../mail/deferred-send.js';
+import { parseMessageHeaders } from '../mail/parse.js';
+import { buildReadReceipt, readReceiptRequest } from '../mail/read-receipt.js';
 import { classifySmtpError, readSendOutcome, type RejectedRecipient } from '../mail/send-result.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import type { MailSession } from '../types.js';
 import type { UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
+
+/** Как часто работник очереди смотрит, не пора ли кому-то уходить. */
+const DEFERRED_TICK_MS = 30_000;
 
 /**
  * Адрес в письме, которое ЕЩЁ ПИШУТ.
@@ -61,8 +79,15 @@ const draftPayloadSchema = z.object({
   subject: z.string().max(1000),
   bodyHtml: z.string().max(10 * 1024 * 1024),
   attachmentIds: z.array(z.string().min(1).max(100)).max(50),
+  /**
+   * Письма, вложенные целиком, — «Переслать как вложение». Пересылают
+   * обычно одно-два, поэтому предел небольшой: каждое такое вложение
+   * тянет за собой весь исходник письма вместе с его вложениями.
+   */
+  attachMessageIds: z.array(z.string().min(1).max(200)).max(10).optional(),
   inReplyTo: z.string().max(1000).optional(),
   references: z.array(z.string().max(1000)).max(100).optional(),
+  requestReadReceipt: z.boolean().optional(),
   sendAt: z.string().datetime({ offset: true }).optional(),
 });
 
@@ -72,11 +97,48 @@ function formatAddresses(list: MailAddress[]): Mail.Address[] {
   return list.map((a) => ({ name: a.name ?? '', address: a.address }));
 }
 
+/** Письмо, вложенное в другое письмо целиком (message/rfc822). */
+export interface ForwardedMessage {
+  /** Имя файла вложения — обычно тема исходного письма с «.eml». */
+  filename: string;
+  /** Исходник письма как он лежит в ящике. */
+  raw: Buffer;
+}
+
+/**
+ * Вложение-письмо для MailComposer.
+ *
+ * Кодировать пересылаемое письмо в base64 нельзя: RFC 2046 (§5.2.1)
+ * разрешает для `message/rfc822` только 7bit, 8bit и binary. А nodemailer
+ * по умолчанию ставит любому вложению именно base64 — проверено на
+ * собранном письме: часть уезжала как `Content-Transfer-Encoding: base64`,
+ * и заголовки пересланного письма внутри неё становились нечитаемыми для
+ * всего, что смотрит на письмо не через полный разбор MIME.
+ *
+ * `contentTransferEncoding: false` снимает этот умолчательный base64 —
+ * тогда nodemailer отдаёт содержимое как есть. Если в исходнике есть
+ * восьмибитные байты (кириллица в теле без кодирования), объявлять
+ * подразумеваемый 7bit было бы неправдой, поэтому заголовок проставляется
+ * явно — своим заголовком вложения, до того как nodemailer решит сам.
+ */
+export function forwardedAttachment(item: ForwardedMessage): Mail.Attachment {
+  const eightBit = item.raw.some((byte) => byte > 127);
+  return {
+    filename: item.filename,
+    content: item.raw,
+    contentType: 'message/rfc822',
+    contentDisposition: 'attachment',
+    contentTransferEncoding: false,
+    ...(eightBit ? { headers: { 'Content-Transfer-Encoding': '8bit' } } : {}),
+  };
+}
+
 /** Собирает письмо в RFC822-байты. */
 async function composeRaw(
   payload: DraftBody,
   from: string,
-  uploads: UploadStore
+  uploads: UploadStore,
+  forwarded: readonly ForwardedMessage[] = []
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
   for (const id of payload.attachmentIds) {
@@ -88,6 +150,7 @@ async function composeRaw(
       contentType: found.meta.mimeType,
     });
   }
+  for (const item of forwarded) attachments.push(forwardedAttachment(item));
 
   // Пользовательский HTML тоже прогоняем через санитайзер:
   // composer не должен рассылать скрипты даже по ошибке фронтенда
@@ -108,9 +171,29 @@ async function composeRaw(
   if (payload.references && payload.references.length > 0) {
     options.references = payload.references;
   }
+  /**
+   * Просьба уведомить о прочтении (RFC 8098). Адрес — свой же: просить
+   * сообщать кому-то третьему интерфейс не предлагает и не должен, иначе
+   * почта превращается в средство подтверждения чужих адресов.
+   */
+  if (payload.requestReadReceipt) {
+    options.headers = { 'Disposition-Notification-To': `<${from}>` };
+  }
 
   const composer = new MailComposer(options);
   return composer.compile().build();
+}
+
+/** Имя файла для вложенного письма: тема + «.eml». */
+export function forwardedFilename(subject: string): string {
+  const clean = subject
+    .replace(/[\r\n]+/g, ' ')
+    // В имени файла эти символы означают путь или запрещены в файловых
+    // системах — а тема письма приходит снаружи и содержит что угодно
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .trim()
+    .slice(0, 100);
+  return `${clean || 'Письмо'}.eml`;
 }
 
 function allRecipients(payload: DraftBody): string[] {
@@ -166,10 +249,19 @@ async function requireDraftsFolder(client: ImapFlow): Promise<Folder> {
 }
 
 export async function composeRoutes(app: FastifyInstance): Promise<void> {
-  const { config, pool, uploads } = app.deps;
+  const { config, pool, secretBox, uploads } = app.deps;
   // Сохранения черновика одного окна написания идут строго по очереди —
   // иначе автосохранение вместе с явным «сохранить» плодит копии письма
   const drafts = new DraftSequencer();
+
+  /**
+   * Очередь отложенной отправки лежит рядом с загруженными вложениями —
+   * на том же постоянном томе (см. infra: `api-uploads:/srv/data`). Своей
+   * настройки для неё нет намеренно: заводить переменную окружения ради
+   * соседнего каталога значило бы менять развёртывание там, где ничего
+   * менять не нужно.
+   */
+  const spool = new DeferredSpool(join(dirname(config.UPLOAD_DIR), 'deferred'));
 
   /**
    * Тело письма с картинками законно бывает в разы больше обычного запроса,
@@ -232,16 +324,180 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     }
   }
 
+  /**
+   * Убирает черновик письма, которое уже принято к отправке.
+   *
+   * Через ту же очередь, что и автосохранение: иначе таймер успеет положить
+   * новую копию уже отправленного письма. Неудача сюда не поднимается —
+   * письмо-то ушло.
+   */
+  async function dropDraftAfterSend(
+    session: MailSession,
+    payload: DraftBody,
+    log: { warn: (obj: unknown, msg: string) => void }
+  ): Promise<void> {
+    if (!payload.draftUid && !payload.draftKey) return;
+    const key = payload.draftKey ? `${session.email}:${payload.draftKey}` : session.email;
+    await drafts
+      .save(key, payload.draftUid, Boolean(payload.draftKey), async (previousUid) => {
+        if (previousUid === undefined) return { uid: null, result: null };
+        await pool.withClient(session.email, session.password, async (client) => {
+          const folders = await listFolders(client);
+          const draftsFolder = findFolderById(folders, 'drafts');
+          if (!draftsFolder) return;
+          const lock = await client.getMailboxLock(draftsFolder.path);
+          try {
+            await client.messageDelete([previousUid], { uid: true });
+          } finally {
+            lock.release();
+          }
+        });
+        return { uid: null, result: null };
+      })
+      .catch((err: unknown) => {
+        log.warn(errorInfo(err), 'Не удалось удалить черновик отправленного письма');
+      });
+  }
+
+  /** Соединение с Postfix submission от имени ящика. */
+  function openTransport(email: string, password: string) {
+    return nodemailer.createTransport({
+      host: config.SMTP_HOST,
+      port: config.SMTP_PORT,
+      secure: config.SMTP_SECURE,
+      auth: { user: email, pass: password },
+      // В dev-стеке сертификаты самоподписанные (см. TLS_REJECT_UNAUTHORIZED)
+      tls: { rejectUnauthorized: config.TLS_REJECT_UNAUTHORIZED },
+    });
+  }
+
+  /**
+   * Достаёт из ящика исходники писем, которые пересылают вложением.
+   *
+   * Именно с сервера, а не из браузера: письмо уже лежит в ящике целиком,
+   * и гонять его вниз и обратно — лишний трафик и лишний способ испортить
+   * байты. Имя файла берётся из темы (см. forwardedFilename).
+   */
+  async function loadForwardedMessages(
+    session: MailSession,
+    ids: readonly string[]
+  ): Promise<ForwardedMessage[]> {
+    if (ids.length === 0) return [];
+    return pool.withClient(session.email, session.password, async (client) => {
+      const found: ForwardedMessage[] = [];
+      for (const id of ids) {
+        const { folderId, uid } = splitMessageId(id);
+        const folder = await requireFolder(client, folderId);
+        const lock = await client.getMailboxLock(folder.path);
+        try {
+          const msg = await client.fetchOne(
+            String(uid),
+            { uid: true, source: true, envelope: true },
+            { uid: true }
+          );
+          if (!msg || !msg.source) {
+            throw new NotFoundError(`Письмо для пересылки не найдено: ${id}`);
+          }
+          found.push({
+            filename: forwardedFilename(msg.envelope?.subject ?? ''),
+            raw: msg.source,
+          });
+        } finally {
+          lock.release();
+        }
+      }
+      return found;
+    });
+  }
+
+  /**
+   * Копия отправленного письма в «Отправленных».
+   *
+   * Неудача здесь — не неудача отправки: письмо уже у получателя. Поэтому
+   * функция не бросает, а отвечает признаком.
+   */
+  async function appendToSent(
+    email: string,
+    password: string,
+    raw: Buffer
+  ): Promise<{ uid?: number } | false> {
+    return pool.withClient(email, password, async (client) => {
+      const folders = await listFolders(client);
+      const sent = findFolderById(folders, 'sent');
+      if (!sent) return false;
+      return client.append(sent.path, raw, ['\\Seen']);
+    });
+  }
+
+  /* --- Отложенная отправка ------------------------------------------
+   * Работник очереди живёт при этом наборе маршрутов, а не в server.ts:
+   * очередь целиком принадлежит написанию письма, и разносить её по двум
+   * файлам значило бы, что остановка одного не останавливает второй. */
+
+  const deferred = new DeferredSender({
+    spool,
+    deliver: async (entry: DeferredEntry, raw: Buffer): Promise<DeliveryOutcome> => {
+      const password = secretBox.decrypt(entry.passwordEnc);
+      const transport = openTransport(entry.owner, password);
+      try {
+        await transport.sendMail({
+          envelope: { from: entry.owner, to: entry.envelopeTo },
+          raw,
+        });
+      } catch (err) {
+        const failure = classifySmtpError(err);
+        app.log.warn(
+          errorInfo(err, { deferredId: entry.id }),
+          'Отложенное письмо не ушло с этой попытки'
+        );
+        return failure.permanent ? 'failed' : 'retry';
+      } finally {
+        transport.close();
+      }
+      // Письмо ушло. Копию в «Отправленные» кладём отдельно и не считаем
+      // её неудачу неудачей отправки — по той же причине, что и при
+      // обычной отправке: письмо уже у получателя.
+      await appendToSent(entry.owner, password, raw).catch((err: unknown) => {
+        app.log.warn(errorInfo(err), 'Отложенное письмо ушло, копия в «Отправленные» не легла');
+      });
+      return 'sent';
+    },
+    onGiveUp: async (entry, raw) => {
+      // Письмо не ушло и не уйдёт — кладём в черновики. Молча потерять
+      // написанное нельзя: человек его уже отдал почте и ушёл.
+      const password = secretBox.decrypt(entry.passwordEnc);
+      await pool.withClient(entry.owner, password, async (client) => {
+        const folder = await requireDraftsFolder(client);
+        await client.append(folder.path, raw, ['\\Draft']);
+      });
+    },
+    log: {
+      info: (obj, msg) => app.log.info(obj, msg),
+      warn: (obj, msg) => app.log.warn(obj, msg),
+    },
+  });
+  deferred.start(DEFERRED_TICK_MS);
+  /**
+   * Работник виден на этом наборе маршрутов: иначе проверить отправку из
+   * очереди можно было бы только ожиданием полуминуты — то есть на деле
+   * никак. Декорация живёт в области видимости плагина (наружу, в корневой
+   * экземпляр, Fastify её не поднимает) — ровно там, где ей и место.
+   */
+  app.decorate('deferredSender', deferred);
+  // Остановка сервера не должна оставлять за собой работающий таймер:
+  // в тестах он держал бы процесс и путал бы соседние проверки.
+  app.addHook('onClose', () => {
+    deferred.stop();
+  });
+
   // Отправка письма
   app.post('/messages/send', composeRoute, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
     const payload = draftPayloadSchema.parse(request.body);
 
-    if (payload.sendAt && new Date(payload.sendAt).getTime() > Date.now() + 60_000) {
-      // Планировщик отложенной отправки пока не реализован
-      throw new BadRequestError('Отложенная отправка пока не поддерживается');
-    }
+    const schedule = checkSendAt(payload.sendAt, new Date());
+    if (schedule.kind === 'invalid') throw new BadRequestError(schedule.reason);
     if (payload.to.length === 0 && payload.cc.length === 0 && payload.bcc.length === 0) {
       throw new BadRequestError('Не указан ни один получатель');
     }
@@ -250,7 +506,8 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     // непонятно ни что не так, ни где. Здесь можно назвать сам адрес.
     checkSendableAddresses(payload);
 
-    const raw = await composeRaw(payload, session.email, uploads);
+    const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
+    const raw = await composeRaw(payload, session.email, uploads, forwarded);
 
     // Предел письма известен заранее — незачем узнавать его от SMTP отказом
     if (raw.length > config.MESSAGE_MAX_BYTES) {
@@ -262,14 +519,43 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       );
     }
 
-    const transport = nodemailer.createTransport({
-      host: config.SMTP_HOST,
-      port: config.SMTP_PORT,
-      secure: config.SMTP_SECURE,
-      auth: { user: session.email, pass: session.password },
-      // В dev-стеке сертификаты самоподписанные (см. TLS_REJECT_UNAUTHORIZED)
-      tls: { rejectUnauthorized: config.TLS_REJECT_UNAUTHORIZED },
-    });
+    /**
+     * Отложенная отправка. Письмо уже собрано целиком — вместе с вложениями,
+     * подписью и заголовками, — поэтому в очередь кладутся готовые байты:
+     * позже пересобирать нечего и не из чего. Черновик убирается сразу,
+     * иначе одно письмо оказалось бы и в очереди, и в «Черновиках», и
+     * человек отправил бы его второй раз руками.
+     */
+    if (schedule.kind === 'later') {
+      const entry = await spool.add(
+        {
+          owner: session.email,
+          passwordEnc: secretBox.encrypt(session.password),
+          sendAt: schedule.at.toISOString(),
+          envelopeTo: allRecipients(payload),
+          subject: payload.subject,
+        },
+        raw
+      );
+      await dropDraftAfterSend(session, payload, request.log);
+      await Promise.all(payload.attachmentIds.map((id) => uploads.delete(id)));
+      request.log.info(
+        { deferredId: entry.id, sendAt: entry.sendAt },
+        'Письмо принято к отложенной отправке'
+      );
+      return {
+        ok: true,
+        scheduled: true,
+        sendAt: entry.sendAt,
+        sentMessageId: null,
+        accepted: [],
+        rejected: [],
+        savedToSent: false,
+        warning: null,
+      };
+    }
+
+    const transport = openTransport(session.email, session.password);
 
     let rejected: RejectedRecipient[] = [];
     let accepted: string[] = [];
@@ -342,15 +628,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     let appended: { uid?: number } | false = false;
     let savedToSent = true;
     try {
-      appended = await pool.withClient(session.email, session.password, async (client) => {
-        const folders = await listFolders(client);
-        const sent = findFolderById(folders, 'sent');
-        let result: { uid?: number } | false = false;
-        if (sent) {
-          result = await client.append(sent.path, raw, ['\\Seen']);
-        }
-        return result;
-      });
+      appended = await appendToSent(session.email, session.password, raw);
       if (!appended) savedToSent = false;
     } catch (err) {
       savedToSent = false;
@@ -376,30 +654,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    if (payload.draftUid || payload.draftKey) {
-      // Через ту же очередь, что и автосохранение: иначе таймер успеет
-      // положить новую копию уже отправленного письма
-      const key = payload.draftKey ? `${session.email}:${payload.draftKey}` : session.email;
-      await drafts
-        .save(key, payload.draftUid, Boolean(payload.draftKey), async (previousUid) => {
-          if (previousUid === undefined) return { uid: null, result: null };
-          await pool.withClient(session.email, session.password, async (client) => {
-            const folders = await listFolders(client);
-            const draftsFolder = findFolderById(folders, 'drafts');
-            if (!draftsFolder) return;
-            const lock = await client.getMailboxLock(draftsFolder.path);
-            try {
-              await client.messageDelete([previousUid], { uid: true });
-            } finally {
-              lock.release();
-            }
-          });
-          return { uid: null, result: null };
-        })
-        .catch((err: unknown) => {
-          request.log.warn(errorInfo(err), 'Не удалось удалить черновик отправленного письма');
-        });
-    }
+    await dropDraftAfterSend(session, payload, request.log);
 
     // Загруженные вложения больше не нужны
     await Promise.all(payload.attachmentIds.map((id) => uploads.delete(id)));
@@ -429,7 +684,10 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     if (!session) throw new UnauthorizedError();
     const payload = draftPayloadSchema.parse(request.body);
 
-    const raw = await composeRaw(payload, session.email, uploads);
+    // Пересылаемые вложением письма попадают и в черновик: иначе сохранение
+    // черновика молча выбрасывало бы их, а отправить потом было бы нечего.
+    const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
+    const raw = await composeRaw(payload, session.email, uploads, forwarded);
     const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
 
     return {
@@ -437,6 +695,99 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       draftId: uid ? `drafts:${uid}` : null,
       draftUid: uid,
     };
+  });
+
+  /**
+   * Ответ на просьбу уведомить о прочтении.
+   *
+   * Маршрут живёт здесь, а не среди маршрутов чтения писем: его работа —
+   * отправить письмо, и он делает это тем же способом и тем же соединением,
+   * что и обычная отправка.
+   *
+   * `send: false` — человек отказался. Уведомление не уходит, но ключевое
+   * слово `$MDNSent` ставится всё равно (RFC 3503 предписывает именно так):
+   * иначе отказ ничего не значил бы и вопрос возвращался бы при каждом
+   * открытии письма — на любом устройстве и в любой почтовой программе.
+   */
+  app.post('/messages/:id/read-receipt', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    const { id } = z.object({ id: z.string().min(1).max(200) }).parse(request.params);
+    const { send } = z.object({ send: z.boolean() }).parse(request.body ?? {});
+    const { folderId, uid } = splitMessageId(id);
+
+    const found = await pool.withClient(session.email, session.password, async (client) => {
+      const folder = await requireFolder(client, folderId);
+      const lock = await client.getMailboxLock(folder.path);
+      try {
+        const msg = await client.fetchOne(
+          String(uid),
+          { uid: true, headers: true, envelope: true, flags: true },
+          { uid: true }
+        );
+        if (!msg) return null;
+        return {
+          path: folder.path,
+          headerBlock: msg.headers ?? Buffer.alloc(0),
+          subject: msg.envelope?.subject ?? '',
+          messageId: msg.envelope?.messageId ?? null,
+          already: msg.flags?.has('$MDNSent') ?? false,
+        };
+      } finally {
+        lock.release();
+      }
+    });
+    if (!found) throw new NotFoundError('Письмо не найдено');
+    // Второй раз уведомлять не о чем: письмо прочитано один раз, и повтор
+    // означал бы, что кнопка «не отправлять» ничего не значит.
+    if (found.already) return { ok: true, sent: false, alreadyAnswered: true };
+
+    const headers = await parseMessageHeaders(found.headerBlock);
+    const asked = readReceiptRequest(headers);
+    if (!asked) throw new BadRequestError('Это письмо не просит уведомления о прочтении');
+
+    let sent = false;
+    if (send) {
+      const raw = buildReadReceipt({
+        from: session.email,
+        to: asked.address,
+        originalSubject: found.subject,
+        originalMessageId: found.messageId,
+        hostname: session.email.split('@')[1] ?? 'localhost',
+      });
+      const transport = openTransport(session.email, session.password);
+      try {
+        await transport.sendMail({
+          envelope: { from: session.email, to: [asked.address] },
+          raw,
+        });
+        sent = true;
+      } catch (err) {
+        const failure = classifySmtpError(err);
+        request.log.warn(errorInfo(err), 'Не удалось отправить уведомление о прочтении');
+        // Отказ виден человеку: молчаливое «ничего не произошло» здесь —
+        // ровно та беда, из-за которой эта кнопка и переделывалась.
+        throw failure.permanent
+          ? new SendRejectedError(`${failure.message}. Уведомление не отправлено.`)
+          : new UpstreamUnavailableError(
+              'Почтовый сервер сейчас недоступен, уведомление не отправлено.'
+            );
+      } finally {
+        transport.close();
+      }
+    }
+
+    // Ставится и после отправки, и после отказа — см. комментарий выше
+    await pool.withClient(session.email, session.password, async (client) => {
+      const lock = await client.getMailboxLock(found.path);
+      try {
+        await client.messageFlagsAdd([uid], ['$MDNSent'], { uid: true });
+      } finally {
+        lock.release();
+      }
+    });
+
+    return { ok: true, sent, alreadyAnswered: false };
   });
 }
 

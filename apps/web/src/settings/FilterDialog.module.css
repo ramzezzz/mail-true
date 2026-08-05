@@ -13,28 +13,47 @@
   margin-top: 0;
 }
 
-/* Строка «поле · оператор · значение · ×» */
+/*
+ * Строка «поле · оператор · значение · ×».
+ *
+ * Ширина списков — ОТ СОДЕРЖИМОГО, а не числом. Числом стояло 200 и 130
+ * точек, и текст в них не помещался: «больше чем» упирался в стрелку,
+ * «Оставить во «Входящих»» обрезалось на «Входящ». Подобрать одно число
+ * под все варианты нельзя — они разной длины, а после перевода или
+ * добавления условия любое подобранное снова окажется мало.
+ *
+ * Перенос строки нужен вместе с этим: на узком экране три поля в ряд не
+ * помещаются, и без переноса они бы снова сжались до обрезки.
+ */
 .condition {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 8px;
   margin-bottom: 8px;
 }
 
-.conditionField {
-  flex: 0 0 200px;
+.conditionField,
+.conditionOperator {
+  flex: 0 1 auto;
 }
 
-.conditionOperator {
-  flex: 0 0 130px;
+.conditionField select,
+.conditionOperator select,
+.actionFolder select {
+  width: auto;
+  /* Иначе длинный вариант растянет список за края диалога */
+  max-width: 100%;
 }
 
 .conditionValue {
-  flex: 1 1 auto;
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .actionFolder {
   flex: 1 1 auto;
+  min-width: 0;
 }
 
 .removeCondition {

@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useFolders, useMoveMessages } from '../api/queries';
 import { useUiStore } from '../app/store';
-import { Dropdown, IconButton, MenuItem, Spinner } from '../components';
+import { Spinner } from '../components';
 import { cx } from '../lib/cx';
 import { getDragMessages, isMessageDrag } from '../lib/dragMessages';
 import { IconCompose, IconFolderRole } from '../mail/icons';
@@ -38,6 +38,16 @@ export function Sidebar() {
 
   return (
     <aside className={styles.sidebar}>
+      {/*
+        Стрелки с меню «Открытку · Опрос · Видеовстречу» здесь больше нет.
+        Ни одного из этих трёх продуктов у нас нет и не будет — заказчик
+        сказал об этом прямо, ровно как и о соседних сервисах, из-за которых
+        отсюда уже убирали чужие кнопки (см. tests/noCloudCalendar.test.tsx).
+        Пункты не делали ничего: нажатие просто закрывало меню. Кнопка,
+        которая молча ничего не делает, хуже её отсутствия — человек не
+        понимает, сломалось ли. Вместе с пунктами ушла и сама стрелка:
+        пустое меню было бы ровно такой же пустышкой.
+      */}
       <div className={styles.composeRow}>
         <button
           type="button"
@@ -49,28 +59,6 @@ export function Sidebar() {
             <span>Написать письмо</span>
           </span>
         </button>
-        <Dropdown
-          align="right"
-          className={cx(styles.composeDropdownHost)}
-          trigger={({ toggle }) => (
-            <IconButton
-              label="Ещё варианты письма"
-              onClick={toggle}
-              className={styles.composeArrow}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M4.15 6.15a.9.9 0 0 1 1.27 0L8 8.72l2.58-2.57a.9.9 0 0 1 1.27 1.27l-3.21 3.22a.9.9 0 0 1-1.28 0L4.15 7.42a.9.9 0 0 1 0-1.27Z"
-                  fill="currentColor"
-                />
-              </svg>
-            </IconButton>
-          )}
-        >
-          <MenuItem>Открытку</MenuItem>
-          <MenuItem>Опрос</MenuItem>
-          <MenuItem>Видеовстречу</MenuItem>
-        </Dropdown>
       </div>
 
       <nav className={styles.nav} aria-label="Папки">

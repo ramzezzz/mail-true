@@ -6,7 +6,7 @@
  * администратор его разрешил (см. src/ai/aiVisibility.ts).
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { Message } from '@mail-true/shared';
 import {
@@ -16,7 +16,14 @@ import {
   AiTranslatedBody,
   useMessageAi,
 } from '../ai/MessageAi';
-import { useFolders, useMessage, useMessages, useMoveMessages, useSetFlags } from '../api/queries';
+import {
+  useFolders,
+  useMessage,
+  useMessages,
+  useMoveMessages,
+  useSendReadReceipt,
+  useSetFlags,
+} from '../api/queries';
 import { MESSAGES_PAGE_SIZE } from '../api/client';
 import { useUiStore } from '../app/store';
 import { Button, Dropdown, IconButton, MenuItem, Spinner, Tooltip } from '../components';
@@ -25,6 +32,13 @@ import { forwardInit, quoteHtml, replyInit } from '../lib/composeFromMessage';
 import { errorText, isNotFoundError } from '../lib/errorText';
 import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
+import {
+  annotatePrintLinks,
+  printAddress,
+  printAddresses,
+  printDate,
+} from '../lib/printMessage';
+import { readReceiptAsk, readReceiptWho } from '../lib/readReceipt';
 import { unsubscribeLinks } from '../lib/unsubscribe';
 import { hotkeyFor } from '../lib/hotkeys';
 import { useSwipeBack } from '../lib/useSwipeBack';
@@ -124,9 +138,27 @@ export function MessagePage() {
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
   const openCompose = useUiStore((s) => s.openCompose);
+  const readReceipt = useSendReadReceipt(id);
   const preferences = useGeneralPreferences();
 
   const [showDetails, setShowDetails] = useState(false);
+  /** Тело письма в DOM — по нему размечаются ссылки для печати. */
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Пока открыто письмо, на `body` висит метка режима печати.
+   *
+   * По ней действуют правила `@media print` (MessagePage.module.css):
+   * они снимают с бумаги весь интерфейс и оставляют только лист письма.
+   * Метка нужна именно потому, что правила глобальные: без неё печать
+   * списка писем давала бы пустой лист.
+   */
+  useEffect(() => {
+    document.body.dataset.mtPrint = 'message';
+    return () => {
+      delete document.body.dataset.mtPrint;
+    };
+  }, []);
 
   // Открытое письмо помечаем прочитанным
   useEffect(() => {
@@ -137,6 +169,16 @@ export function MessagePage() {
   }, [message?.id]);
 
   useEffect(() => setShowImages(false), [id]);
+
+  /**
+   * Адреса ссылок для печати. Тело письма вставляется готовой разметкой,
+   * поэтому разметить ссылки можно только по факту — уже в DOM. Делается
+   * это один раз на письмо, а не при каждой печати: печать вызывается и
+   * горячей клавишей, и из меню браузера, где перехватить её нечем.
+   */
+  useEffect(() => {
+    annotatePrintLinks(bodyRef.current);
+  }, [message?.id, message?.bodyHtml]);
 
   // Соседние письма в папке — стрелки перехода
   const { prevId, nextId } = useMemo(() => {
@@ -221,6 +263,20 @@ export function MessagePage() {
   const forward = () => {
     if (!message) return;
     openCompose(forwardInit(message));
+  };
+
+  /**
+   * «Переслать как вложение»: письмо прикладывается целиком (message/rfc822),
+   * а не пересказывается цитатой. Так доходят и заголовки исходного письма,
+   * и его вложения, и подпись, — это единственный способ переслать письмо
+   * без искажений, и именно за ним сюда и приходят.
+   */
+  const forwardAsAttachment = () => {
+    if (!message) return;
+    openCompose({
+      subject: message.subject.startsWith('Fwd:') ? message.subject : `Fwd: ${message.subject}`,
+      attachMessages: [{ id: message.id, label: message.subject || '(без темы)' }],
+    });
   };
 
   // Горячие клавиши письма: R, F, Delete, U, I, Shift+J, Shift+L, Ctrl+P, Esc
@@ -332,6 +388,13 @@ export function MessagePage() {
   // регистра и понимаем сводный `list` от mailparser (см. lib/unsubscribe.ts)
   const unsubscribe = unsubscribeLinks(message.headers);
   const toMe = message.to.length === 1 ? 'вам' : message.to.map((a) => a.name ?? a.address).join(', ');
+  /**
+   * Отправитель просит уведомить о прочтении. Плашка показывается, пока
+   * человек не ответил: флаг `$MDNSent` сервер ставит и на «отправить»,
+   * и на «не отправлять» (RFC 3503), поэтому вопрос не возвращается ни
+   * после перезагрузки, ни в другой почтовой программе.
+   */
+  const receiptAsk = message.flags.mdnSent ? null : readReceiptAsk(message.headers);
 
   /**
    * Отписка. Своего маршрута для неё в API нет (в отчёте это отмечено),
@@ -441,6 +504,9 @@ export function MessagePage() {
           >
             Найти все письма отправителя
           </MenuItem>
+          <MenuItem before={<IconForward />} onClick={forwardAsAttachment}>
+            Переслать как вложение
+          </MenuItem>
           <AiTranslateMenuItem controller={ai} />
         </Dropdown>
 
@@ -476,6 +542,45 @@ export function MessagePage() {
       </div>
 
       <div className={styles.scroll}>
+        {/*
+          Шапка листа. На экране её нет вовсе (display:none), она существует
+          ради печати: на бумаге нужны отправитель, адресаты, дата и перечень
+          вложений — на экране всё это разбросано по блокам, часть спрятана
+          за «подробности», а «Кому: вам» на листе не значит ничего.
+
+          Это НЕ копия разметки в отдельном окне: тот же компонент, те же
+          данные одного рендера, поэтому разъехаться с письмом ей не с чем.
+        */}
+        <header className={styles.printHead}>
+          <h1 className={styles.printSubject}>{message.subject || '(без темы)'}</h1>
+          <dl className={styles.printMeta}>
+            <dt>От кого</dt>
+            <dd>{printAddress(message.from)}</dd>
+            <dt>Кому</dt>
+            <dd>{printAddresses(message.to)}</dd>
+            {message.cc.length > 0 && (
+              <>
+                <dt>Копия</dt>
+                <dd>{printAddresses(message.cc)}</dd>
+              </>
+            )}
+            <dt>Дата</dt>
+            <dd>{printDate(message.date)}</dd>
+            {message.attachments.length > 0 && (
+              <>
+                {/* Самих файлов на бумаге не будет, но знать, что они были
+                    и как назывались, человеку нужно */}
+                <dt>Вложения</dt>
+                <dd>
+                  {message.attachments
+                    .map((a) => `${a.filename} (${formatSize(a.size)})`)
+                    .join(', ')}
+                </dd>
+              </>
+            )}
+          </dl>
+        </header>
+
         {/* Плашка надёжного отправителя */}
         {reliable && (
           <div className={styles.reliableBanner}>
@@ -483,9 +588,53 @@ export function MessagePage() {
               <IconShield />
             </span>
             Это письмо от надёжного отправителя
-            <button type="button" className={styles.reliableMore}>
+            {/*
+              «Подробнее» раньше не делало ничего: обработчика у кнопки не
+              было вовсе. У mail.ru она ведёт в справку, а справки у нас нет
+              — зато есть то, на чём эта плашка и держится: результаты
+              проверки подлинности отправителя (SPF, DKIM, DMARC) и его
+              настоящий адрес. Их и раскрываем — это и есть «подробнее».
+            */}
+            <button
+              type="button"
+              className={styles.reliableMore}
+              aria-expanded={showDetails}
+              onClick={() => setShowDetails(true)}
+            >
               Подробнее
             </button>
+          </div>
+        )}
+
+        {/*
+          Отправитель просит уведомить о прочтении. Уведомление уходит
+          ТОЛЬКО по нажатию: молча подтверждать, что письмо открыто и когда,
+          нельзя — это чужое знание о человеке, и заодно подтверждение
+          живого адреса для рассылок. Отказ здесь такое же полноценное
+          решение, как согласие, и запоминается он так же.
+        */}
+        {receiptAsk && (
+          <div className={styles.receiptBanner}>
+            <span className={styles.receiptText}>
+              Отправитель просит уведомить о прочтении письма. Уведомление уйдёт на{' '}
+              {readReceiptWho(receiptAsk)}.
+            </span>
+            <Button
+              mode="secondary"
+              size="s"
+              disabled={readReceipt.isPending}
+              onClick={() => readReceipt.mutate(true)}
+            >
+              Уведомить
+            </Button>
+            <Button
+              mode="tertiary"
+              size="s"
+              disabled={readReceipt.isPending}
+              onClick={() => readReceipt.mutate(false)}
+            >
+              Не уведомлять
+            </Button>
           </div>
         )}
 
@@ -622,7 +771,11 @@ export function MessagePage() {
         {ai.translationShown && ai.translation ? (
           <AiTranslatedBody controller={ai} />
         ) : message.bodyHtml ? (
-          <div className={styles.body} dangerouslySetInnerHTML={{ __html: message.bodyHtml }} />
+          <div
+            ref={bodyRef}
+            className={styles.body}
+            dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
+          />
         ) : hasBodyText(message) ? (
           <pre className={styles.bodyText}>{message.bodyText}</pre>
         ) : (

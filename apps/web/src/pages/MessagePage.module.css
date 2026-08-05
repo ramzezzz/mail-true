@@ -75,6 +75,27 @@
   cursor: pointer;
 }
 
+/*
+  Просьба уведомить о прочтении. Геометрия — как у плашки надёжного
+  отправителя (они стоят одна под другой), но подложка нейтральная:
+  это не хорошая и не плохая новость, а вопрос, на который надо ответить.
+*/
+.receiptBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 8px 12px;
+  padding: 10px 16px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.receiptText {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Тема: h2 24px/28px, вес 500; рядом чип категории */
 .subjectRow {
   display: flex;
@@ -519,6 +540,7 @@
   .senderBlock,
   .imagesBar,
   .reliableBanner,
+  .receiptBanner,
   .attachments,
   .bottomBar {
     margin-left: 4px;
@@ -560,5 +582,255 @@
     padding: 12px 4px;
     margin-top: -12px;
     margin-bottom: -12px;
+  }
+}
+
+/* ==================================================================
+   ПЕЧАТЬ ПИСЬМА
+   ==================================================================
+
+   Раньше «Распечатать» отправляла на принтер страницу почты как есть:
+   колонку папок, панель действий, кнопки, строку поиска — и письмо
+   где-то посреди всего этого. В тёмной теме лист вдобавок уходил
+   залитым чёрным.
+
+   Здесь лист собирается по образцу почтовых клиентов (Gmail, Outlook
+   Web, mail.ru): шапка письма (тема, отправитель, адресаты, дата,
+   перечень вложений) и текст письма — и больше ничего.
+
+   Отдельного окна с копией разметки нет намеренно: такое окно закрывают
+   блокировщики всплывающих окон, а копия разметки расходится с оригиналом
+   при первой же правке. Печатается тот же самый DOM.
+
+   Все правила действуют ТОЛЬКО при метке `data-mt-print="message"` на
+   `body` — её ставит страница письма, пока открыта (см. MessagePage.tsx).
+   Без метки правила молчат, и печать списка писем работает как прежде.
+*/
+
+/* Шапка листа: на экране её нет */
+.printHead,
+.printRunningHead {
+  display: none;
+}
+
+@media print {
+  /*
+    Поля листа. Заданы здесь, а не в глобальных стилях: печать письма —
+    единственное место продукта, где размер полей вообще имеет значение.
+  */
+  @page {
+    margin: 15mm 14mm;
+  }
+
+  /*
+    Белый лист независимо от темы.
+    Тёмная тема задаёт цвета через переменные на :root; переопределяем
+    ровно те, что участвуют в листе. Собственные цвета письма (они в его
+    разметке) при этом остаются — это содержимое, а не оформление почты.
+  */
+  :global(body[data-mt-print='message']) {
+    color-scheme: light;
+    background: #fff !important;
+
+    --mt-color-text-primary: #000;
+    --mt-color-text-secondary: #333;
+    --mt-color-text-tertiary: #444;
+    --mt-color-text-link: #000;
+    --mt-color-separator-primary: #999;
+    --mt-color-separator-secondary: #ccc;
+    --mt-color-background-content: #fff;
+    --mt-color-background-secondary: #fff;
+    --mt-color-background-app: #fff;
+  }
+
+  :global(html:has(body[data-mt-print='message'])) {
+    background: #fff !important;
+  }
+
+  /*
+    С бумаги снимается всё, кроме листа письма.
+
+    Скрывается видимостью, а не `display: none`: у интерфейса почты
+    сложная раскладка (сетка, прокручиваемые области), и выключение
+    показа у её кусков ломает положение самого письма. Видимость
+    наследуется, поэтому лист включается обратно одной строкой.
+  */
+  :global(body[data-mt-print='message']) * {
+    visibility: hidden !important;
+  }
+
+  :global(body[data-mt-print='message']) .page,
+  :global(body[data-mt-print='message']) .page * {
+    visibility: visible !important;
+  }
+
+  /* Лист занимает страницу целиком и не прокручивается */
+  :global(body[data-mt-print='message']) .page {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: auto;
+    background: #fff;
+    color: #000;
+  }
+
+  .scroll {
+    overflow: visible !important;
+    height: auto !important;
+    padding: 0 !important;
+  }
+
+  /* Интерфейс письма: панель действий, плашки, кнопки, переписка */
+  .toolbar,
+  .senderBlock,
+  .imagesBar,
+  .reliableBanner,
+  .receiptBanner,
+  .bottomBar,
+  .subjectRow,
+  .attachments {
+    display: none !important;
+  }
+
+  /* Шапка листа — вместо всего перечисленного выше */
+  .printHead {
+    display: block;
+    margin: 0 0 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #999;
+    /* Шапку нельзя отрывать от начала письма */
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .printSubject {
+    margin: 0 0 10px;
+    font-size: 18pt;
+    line-height: 1.25;
+    font-weight: 600;
+    color: #000;
+    overflow-wrap: anywhere;
+  }
+
+  .printMeta {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 12px;
+    margin: 0;
+    font-size: 10pt;
+    line-height: 1.4;
+    color: #000;
+  }
+
+  .printMeta dt {
+    color: #444;
+  }
+
+  .printMeta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /*
+    Колонтитула с темой на каждом листе НЕТ, и это проверено, а не забыто.
+
+    Единственный способ повторить строку на каждом печатном листе по CSS —
+    краевые блоки страницы (`@page { @top-center { … } }`), а их Chrome не
+    поддерживает. Обычный приём с `position: fixed` в нём не работает:
+    на распечатанном PDF двухстраничного письма такая строка появилась
+    ОДИН раз и внизу первого листа — то есть выглядела как часть письма,
+    а на втором листе её не было вовсе. Хуже, чем ничего.
+
+    Поэтому на бумаге держится другое: шапка не отрывается от начала
+    текста (break-after: avoid), строки не рвутся пополам (orphans/widows),
+    а строки таблиц не делятся между листами.
+  */
+  .printRunningHead {
+    display: none;
+  }
+
+  /* Текст письма */
+  .body,
+  .bodyText,
+  .emptyBody {
+    padding: 0 !important;
+    color: #000;
+    font-size: 11pt;
+    line-height: 1.45;
+    /* Строку нельзя резать разрывом страницы пополам */
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Картинки — по ширине листа и целиком, а не обрезанные краем */
+  .body :global(img) {
+    max-width: 100% !important;
+    height: auto !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /*
+    Вёрстка письма таблицами шире листа.
+
+    Письма рассылок свёрстаны таблицами с жёсткой шириной в пикселях —
+    600, 700 и больше. На листе такая таблица обрезалась правым краем
+    вместе с половиной текста. Раскладка с фиксированными колонками плюс
+    перенос по любому месту загоняет её в ширину листа.
+  */
+  .body :global(table) {
+    max-width: 100% !important;
+    width: auto !important;
+    table-layout: fixed;
+  }
+
+  /*
+    Перенос в ячейках — по словам (`break-word`), а не по любому месту.
+
+    С `anywhere` браузер учитывает разрыв внутри слова при расчёте
+    минимальной ширины колонки, и колонки схлопывались до нескольких
+    букв: на распечатанной накладной «Позиция 1» стояло как «Позици/я 1».
+    `break-word` рвёт слово только тогда, когда оно и правда не влезает.
+  */
+  .body :global(td),
+  .body :global(th) {
+    max-width: 100% !important;
+    overflow-wrap: break-word;
+  }
+
+  /* Строку таблицы нельзя делить между листами */
+  .body :global(tr) {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .body :global(pre) {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  /* Цитаты прошлых писем: рамка вместо цвета — цвет на печать не идёт */
+  .body :global(blockquote) {
+    border-left: 2px solid #999;
+    color: #333;
+  }
+
+  /*
+    Адрес ссылки рядом с её текстом: на бумаге не видно, куда она ведёт.
+    Атрибут проставляет lib/printMessage.ts — и только там, где адрес
+    действительно что-то добавляет: `mailto:`, якоря и ссылки, чей адрес
+    и так виден в тексте, остаются как есть.
+  */
+  .body :global(a[data-mt-print-href])::after {
+    content: ' (' attr(data-mt-print-href) ')';
+    font-size: 0.85em;
+    color: #444;
+    overflow-wrap: anywhere;
+  }
+
+  .body :global(a) {
+    color: #000;
+    text-decoration: underline;
   }
 }
