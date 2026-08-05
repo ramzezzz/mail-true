@@ -69,6 +69,53 @@ function createClient(endpoint: ImapEndpoint, logger: MigrateMailboxOptions['log
   });
 }
 
+/**
+ * Подключиться и, если не вышло, сказать ЧТО именно не так.
+ *
+ * Без этого отказ на входе выглядел как «ошибка: Command failed» — ровно
+ * так и получилось на стенде при неверном пароле. Перенос ящика идёт часами
+ * и запускается обычно ночью; человек, увидевший утром такую строку, не
+ * знает даже, к какому из двух серверов она относится, и начинает гадать:
+ * сеть? порт? пароль? не тот адрес?
+ *
+ * Разбор ответа сервера у нас уже есть (describeImapError), но он применялся
+ * только к операциям с письмами. Вход остался без него — и оказался самым
+ * частым местом отказа: адрес и пароль вводят руками.
+ */
+async function connectWithReason(
+  client: ImapFlow,
+  endpoint: ImapEndpoint,
+  role: 'исходному' | 'целевому',
+): Promise<void> {
+  const where = `${endpoint.user}@${endpoint.host}:${String(
+    endpoint.port ?? (endpoint.secure ? 993 : 143),
+  )}`;
+  try {
+    await client.connect();
+  } catch (err) {
+    const detail = describeImapError(err);
+    const code = (err as { code?: string } | null)?.code ?? '';
+    let hint = '';
+    if (/AUTHENTICATIONFAILED|Authentication failed|Invalid credentials/i.test(detail)) {
+      hint = 'сервер не принял логин или пароль';
+    } else if (code === 'ENOTFOUND' || /ENOTFOUND/.test(detail)) {
+      hint = 'имя сервера не разрешается — проверьте адрес';
+    } else if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(detail)) {
+      hint = 'сервер отказал в соединении — проверьте порт и что служба запущена';
+    } else if (code === 'ETIMEDOUT' || /ETIMEDOUT|timed? out/i.test(detail)) {
+      hint = 'сервер не ответил — проверьте адрес, порт и то, что путь не закрыт межсетевым экраном';
+    } else if (/certificate|self.signed|DEPTH_ZERO/i.test(detail)) {
+      hint =
+        'сертификат сервера не принят — для собственного сертификата добавьте --source-insecure-tls или --dest-insecure-tls';
+    }
+    // Подсказку не повторяем: часть кодов (AUTHENTICATIONFAILED) уже
+    // объяснена разбором ответа, и дважды одна фраза в одной строке —
+    // это шум, из-за которого пропускают вторую половину сообщения.
+    const reason = hint && !detail.includes(hint) ? `${hint}; ${detail}` : detail;
+    throw new Error(`Не удалось подключиться к ${role} серверу (${where}): ${reason}`);
+  }
+}
+
 /** Привести ответ LIST к нашему описанию папки. */
 function toSourceFolder(item: ListResponse): SourceFolder {
   const noSelect = item.flags instanceof Set && item.flags.has('\\Noselect');
@@ -319,7 +366,7 @@ export class MailboxMigrator extends EventEmitter {
     this.source = createClient(this.options.source, this.options.logger);
     // Ошибки соединения ловим сами при выполнении операций
     this.source.on('error', () => undefined);
-    await this.source.connect();
+    await connectWithReason(this.source, this.options.source, 'исходному');
     return this.source;
   }
 
@@ -327,7 +374,7 @@ export class MailboxMigrator extends EventEmitter {
     if (this.dest?.usable) return this.dest;
     this.dest = createClient(this.options.dest, this.options.logger);
     this.dest.on('error', () => undefined);
-    await this.dest.connect();
+    await connectWithReason(this.dest, this.options.dest, 'целевому');
     return this.dest;
   }
 
