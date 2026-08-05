@@ -67,13 +67,22 @@
   );
 }
 
-/* Наведение и нажатие — ступенями подложки, как у кнопок mail.ru */
-.wrapper:hover .input:not(:disabled) + .track {
-  background: var(--mt-switch-track-off-hover);
+/*
+ * Наведение и нажатие — ступенями подложки, как у кнопок mail.ru.
+ *
+ * Наведение только там, где есть мышь: на касании `:hover` залипает, и
+ * переключатель остаётся подсвеченным после того, как палец убрали.
+ */
+@media (hover: hover) {
+  .wrapper:hover .input:not(:disabled) + .track {
+    background: var(--mt-switch-track-off-hover);
+  }
 }
 
-.wrapper:hover .input:not(:disabled):checked + .track {
-  background: var(--mt-switch-track-on-hover);
+@media (hover: hover) {
+  .wrapper:hover .input:not(:disabled):checked + .track {
+    background: var(--mt-switch-track-on-hover);
+  }
 }
 
 .wrapper:active .input:not(:disabled) + .track {
