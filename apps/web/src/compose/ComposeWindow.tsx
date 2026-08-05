@@ -23,6 +23,7 @@ import {
   signatureHtml,
 } from '../settings/generalSettings';
 import { ComposeAiPanel } from './ComposeAiPanel';
+import { MailAttachmentPicker } from './MailAttachmentPicker';
 import styles from './ComposeWindow.module.css';
 
 /**
@@ -81,6 +82,8 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
 
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Открыт ли выбор вложения из уже пришедших писем («Из Почты»). */
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const editorRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -336,6 +339,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
   }
 
   return (
+    <>
     <section
       className={cx(styles.window, maximized && styles.maximized)}
       /* Каскад задаётся переменной, а не свойством right: на узком экране
@@ -470,10 +474,13 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
           <IconAttach />
           Прикрепить файл
         </button>
+        {/* «Из Почты» — прикрепить файл, который уже приходил в другом
+            письме. Кнопка была пустышкой (писала в консоль); теперь
+            открывает выбор — см. MailAttachmentPicker. */}
         <button
           type="button"
           className={styles.attachButton}
-          onClick={() => console.info('Из Почты: появится вместе с бэкендом')}
+          onClick={() => setPickerOpen(true)}
         >
           Из Почты
         </button>
@@ -677,5 +684,27 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
         </Tooltip>
       </div>
     </section>
+
+    {/* Выбор вложения из уже пришедших писем. Окно стоит РЯДОМ с окном
+        написания, а не внутри: иначе Escape в нём всплывал бы до
+        обработчика окна и заодно закрывал бы само письмо. */}
+    {pickerOpen && (
+      <MailAttachmentPicker
+        onClose={() => setPickerOpen(false)}
+        onPick={(files) => {
+          if (files.length === 0) return;
+          patch((current) => ({
+            // Одно и то же вложение, выбранное дважды, прикрепится дважды —
+            // это разные загрузки с разными id. Сравнение по id защищает
+            // только от повторного добавления одной и той же загрузки.
+            attachments: [
+              ...current.attachments,
+              ...files.filter((f) => !current.attachments.some((a) => a.id === f.id)),
+            ],
+          }));
+        }}
+      />
+    )}
+    </>
   );
 }

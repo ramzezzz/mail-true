@@ -66,9 +66,13 @@ export function rawHeaderValue(block: Buffer, name: string): Buffer | null {
   const value = first.slice(first.indexOf(':') + 1);
   const parts = [value];
   for (let i = start + 1; i <= end; i += 1) parts.push(lines[i] ?? '');
-  // Развёрнутая строка склеивается пробелом: перенос в заголовке — это
-  // разделитель, а не часть текста.
-  return Buffer.from(parts.join(' ').replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''), 'latin1');
+  /*
+   * Разворачивание убирает ТОЛЬКО сам перенос строки. Отступ, с которого
+   * начинается продолжение, — уже часть значения и служит разделителем слов;
+   * добавлять к нему ещё один пробел нельзя, иначе в теме появляются двойные
+   * пробелы. Ошибку поймала собственная проверка на переносе темы.
+   */
+  return Buffer.from(parts.join('').replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''), 'latin1');
 }
 
 /** Есть ли в значении байты вне ASCII — то есть то, что могло испортиться. */

@@ -136,6 +136,16 @@ export interface ParsedMessageResult {
 }
 
 /** Собирает полное Message из исходника письма и данных FETCH. */
+/** Блок заголовков письма — всё до первой пустой строки. */
+function headerBlockOf(source: Buffer): Buffer {
+  const end = source.indexOf('\r\n\r\n');
+  if (end >= 0) return source.subarray(0, end + 2);
+  // Письма с одиночным переводом строки встречаются: так их сохраняют
+  // некоторые почтовые программы и так их отдают некоторые серверы.
+  const endLf = source.indexOf('\n\n');
+  return endLf >= 0 ? source.subarray(0, endLf + 1) : source;
+}
+
 export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMessageResult> {
   const { folderId, msg, source, allowRemote } = args;
   // skipImageLinks: cid-ссылки не заменяются на data:URI —
@@ -165,7 +175,16 @@ export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMe
   const bodyText = parsed.text ?? (rawHtml ? htmlToText(rawHtml) : null);
   const snippet = makeSnippet(bodyText ?? '');
 
-  const summary = buildSummary({ folderId, msg, snippet });
+  /*
+   * Заголовки для восстановления темы берём из самого письма: у полного
+   * письма исходник уже на руках, отдельный запрос не нужен. Блок заголовков
+   * кончается первой пустой строкой.
+   *
+   * Без этого страница письма показывала кашу там, где список уже показывал
+   * тему правильно, — то есть в двух местах одно и то же письмо выглядело
+   * по-разному.
+   */
+  const summary = buildSummary({ folderId, msg, snippet, rawHeaders: headerBlockOf(source) });
 
   const references = Array.isArray(parsed.references)
     ? parsed.references

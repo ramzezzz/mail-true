@@ -4,7 +4,7 @@
  */
 
 import type { Account, Folder, MessageListQuery } from '@mail-true/shared';
-import { apiFetch, buildQuery } from './http';
+import { apiFetch, apiFetchBlob, buildQuery } from './http';
 import { connectWithRetry } from '../lib/reconnectingSocket';
 import type {
   AiClassification,
@@ -66,6 +66,13 @@ export interface MailApi {
   sendMessage(request: SendRequest): Promise<SendResponse>;
   saveDraft(request: SendRequest): Promise<DraftSaveResponse>;
   uploadAttachment(file: File): Promise<UploadResponse>;
+  /**
+   * Байты части письма — вложения или встроенной картинки. Тот же маршрут,
+   * по которому вложение скачивается со страницы письма. Нужен «Из Почты»
+   * в окне написания: выбранное вложение сначала скачивается отсюда,
+   * а потом загружается обратно обычным `POST /api/uploads`.
+   */
+  getMessagePart(messageId: string, partId: string): Promise<Blob>;
   /** Подписка на серверные события; возвращает функцию отписки. */
   subscribe(onEvent: (event: WsEvent) => void): () => void;
 
@@ -185,6 +192,11 @@ export const httpApi: MailApi = {
     if (!uploaded) throw new Error('Сервер не вернул загруженный файл');
     return uploaded;
   },
+
+  getMessagePart: (messageId, partId) =>
+    apiFetchBlob(
+      `/api/messages/${encodeURIComponent(messageId)}/parts/${encodeURIComponent(partId)}`,
+    ),
 
   /* --- Помощник на основе ИИ ---------------------------------------- */
 

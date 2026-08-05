@@ -143,3 +143,29 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
+
+/**
+ * То же самое, но ответ — байты, а не JSON.
+ *
+ * Нужно для частей письма (`/api/messages/:id/parts/:partId`): их отдают
+ * как файл, и `apiFetch` на таком ответе споткнулся бы о `response.json()`.
+ * Разбор отказа и реакция на истёкшую сессию — общие с `apiFetch`.
+ */
+export async function apiFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const response = await fetch(path, init);
+  if (!response.ok) {
+    let detail = response.statusText;
+    let code: string | null = null;
+    try {
+      const body = (await response.json()) as { error?: string; message?: string };
+      if (typeof body.error === 'string' && body.error) code = body.error;
+      if (typeof body.message === 'string' && body.message) detail = body.message;
+      else if (code) detail = code;
+    } catch {
+      /* тело не JSON — оставляем statusText */
+    }
+    if (response.status === 401 && isSessionExpiry(path, code)) unauthorizedHandler?.();
+    throw new ApiError(response.status, path, detail, code);
+  }
+  return await response.blob();
+}

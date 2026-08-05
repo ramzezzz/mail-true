@@ -80,14 +80,36 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Без этого flex-строка растягивалась под самое длинное слово темы:
+     на теме в 11 000 символов без пробелов её scrollWidth был 7264px
+     при контейнере 1134px, и горизонтальную прокрутку получала вся
+     страница письма — вместе с шапкой, отправителем и телом */
+  min-width: 0;
   margin: 8px 8px 16px;
 }
 
+/*
+ * Тема письма.
+ *
+ * Ссылка отслеживания заказа в теме — это одно «слово» на сотни символов,
+ * переносить его по пробелам не по чему, поэтому разрешаем разрыв в любом
+ * месте. И ограничиваем тему тремя строками: без предела блок темы
+ * разрастался до 644px высоты и выдавливал отправителя и текст письма
+ * за нижний край экрана. Полная тема остаётся в подсказке (`title`).
+ */
 .subject {
+  min-width: 0;
   margin: 0;
   font-size: var(--mt-font-h1-size, 24px);
   line-height: var(--mt-font-h1-line-height, 28px);
   font-weight: 500;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
 .categoryChip {
@@ -235,6 +257,21 @@
   white-space: pre-wrap;
   font-family: inherit;
   margin: 0;
+}
+
+/*
+ * Письмо без текста. Раньше на его месте рисовался пустой <pre> — ни одного
+ * слова, и отличить «в письме нет текста» от «письмо не удалось разобрать»
+ * было нельзя. Подпись серая и наклонная: это не текст письма, а сообщение
+ * интерфейса о том, что текста нет.
+ */
+.emptyBody {
+  padding: 20px 32px 40px;
+  margin: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  font-style: italic;
 }
 
 /* Вложения */
@@ -455,6 +492,10 @@
      ширины телефона, и слова переносились по три-четыре буквы */
   .body,
   .bodyText {
+    padding: 16px 8px 32px;
+  }
+
+  .emptyBody {
     padding: 16px 8px 32px;
   }
 

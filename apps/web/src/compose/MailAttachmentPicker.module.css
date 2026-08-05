@@ -1,0 +1,165 @@
+/*
+ * Окно «Прикрепить из Почты». Ширина шире обычного модального окна раздела
+ * настроек: в строке умещаются отправитель, тема, имена вложений и дата.
+ * Все цвета — только из токенов --mt-*.
+ */
+
+.card {
+  max-width: 720px;
+}
+
+.folderRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.folderLabel {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.folderSelect {
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-content);
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* Список писем прокручивается внутри окна, а не растит его до края экрана */
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.item {
+  border-bottom: 1px solid var(--mt-color-separator-secondary, var(--mt-color-separator-primary));
+}
+
+.itemHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 4px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.itemHead:hover,
+.itemHeadOpen {
+  background: var(--mt-color-background-secondary);
+}
+
+/* Каждая колонка ужимается сама: без min-width: 0 длинная тема или длинное
+   имя файла растянули бы строку и завели окну горизонтальную прокрутку */
+.itemFrom,
+.itemSubject,
+.itemNames {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemFrom {
+  flex: 0 0 24%;
+  font-weight: 500;
+}
+
+.itemSubject {
+  flex: 1 1 0;
+}
+
+.itemNames {
+  flex: 0 0 26%;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.itemDate {
+  flex: 0 0 auto;
+  min-width: 44px;
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.parts {
+  padding: 4px 4px 8px 12px;
+}
+
+.part {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.partName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.partSize {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.error {
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+/* --- Узкий экран ------------------------------------------------------ */
+
+@media (max-width: 600px) {
+  .itemHead {
+    flex-wrap: wrap;
+  }
+
+  .itemFrom {
+    flex: 1 1 auto;
+  }
+
+  .itemSubject {
+    flex: 1 1 100%;
+    order: 3;
+  }
+
+  /* Имена вложений в строке дублируют список под ней — на телефоне лишние */
+  .itemNames {
+    display: none;
+  }
+}

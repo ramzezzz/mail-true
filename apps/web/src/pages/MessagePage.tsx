@@ -69,6 +69,26 @@ function partUrl(messageId: string, partId: string): string {
   return `/api/messages/${encodeURIComponent(messageId)}/parts/${encodeURIComponent(partId)}`;
 }
 
+/** Есть ли в письме текст. Пробелы и переводы строк текстом не считаются. */
+export function hasBodyText(message: Pick<Message, 'bodyText'>): boolean {
+  return (message.bodyText ?? '').trim() !== '';
+}
+
+/**
+ * Что написать вместо тела, когда его нет.
+ *
+ * Пустое письмо и письмо, у которого сервер не смог разобрать ни одной
+ * текстовой части, выглядели одинаково — пустым местом. Разделять эти два
+ * случая интерфейсу нечем (в обоих `bodyHtml` и `bodyText` пусты), поэтому
+ * подпись говорит ровно то, что известно наверняка: текста нет. Если при
+ * письме есть вложения, это сразу и объясняет, почему.
+ */
+export function emptyBodyText(message: Pick<Message, 'attachments'>): string {
+  return message.attachments.length > 0
+    ? 'В этом письме нет текста — только вложения.'
+    : 'В этом письме нет текста.';
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 ** 2) return `${Math.round(bytes / 1024)} КБ`;
@@ -466,7 +486,11 @@ export function MessagePage() {
 
         {/* Тема с чипом категории */}
         <div className={styles.subjectRow}>
-          <h2 className={styles.subject}>{message.subject || '(без темы)'}</h2>
+          {/* Длинная тема обрезается тремя строками — целиком её видно
+              в подсказке, иначе обрезанное было бы недоступно вовсе */}
+          <h2 className={styles.subject} title={message.subject || undefined}>
+            {message.subject || '(без темы)'}
+          </h2>
           {category && (
             <span className={styles.categoryChip}>
               <span
@@ -591,8 +615,12 @@ export function MessagePage() {
           <AiTranslatedBody controller={ai} />
         ) : message.bodyHtml ? (
           <div className={styles.body} dangerouslySetInnerHTML={{ __html: message.bodyHtml }} />
-        ) : (
+        ) : hasBodyText(message) ? (
           <pre className={styles.bodyText}>{message.bodyText}</pre>
+        ) : (
+          /* Тела нет вовсе. Раньше здесь оставался пустой <pre>, и пустое
+             письмо выглядело точно так же, как не разобранное. */
+          <p className={styles.emptyBody}>{emptyBodyText(message)}</p>
         )}
 
         {/* Вложения */}

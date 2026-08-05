@@ -322,11 +322,21 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
         bodyStructure: true,
         size: true,
         internalDate: true,
+        // Сырой заголовок темы — чтобы восстановить её, если отправитель
+        // прислал восьмибитные байты без кодирования по RFC 2047 (старые
+        // почтовые программы так делают до сих пор). Стоит несколько
+        // десятков байт на письмо; см. mail/header-charset.ts.
+        headers: ['subject'],
       }, { uid: true });
       fetched.sort((a, b) => b.uid - a.uid);
       for (const msg of fetched) {
         const snippet = withSnippets ? await fetchSnippet(client, msg) : '';
-        items.push(buildSummary({ folderId: folder.id, msg, snippet }));
+        items.push(buildSummary({
+          folderId: folder.id,
+          msg,
+          snippet,
+          rawHeaders: msg.headers,
+        }));
       }
     }
 

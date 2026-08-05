@@ -1,7 +1,13 @@
 /**
  * Формирование MessageSummary — строки списка писем — из данных IMAP FETCH.
  */
-import type { FetchMessageObject, MessageAddressObject, MessageEnvelopeObject } from 'imapflow';
+import type {
+  FetchMessageObject,
+  MessageAddressObject,
+  MessageEnvelopeObject,
+  MessageStructureObject,
+} from 'imapflow';
+import { repairHeader } from './header-charset.js';
 import type { MailAddress, MessageFlags, MessageSummary } from '@mail-true/shared';
 import { collectAttachments } from './structure.js';
 
@@ -52,14 +58,63 @@ export function threadIdOf(envelope: MessageEnvelopeObject | undefined, fallback
   return 't-' + Buffer.from(root.replace(/[<>]/g, ''), 'utf8').toString('base64url');
 }
 
+/**
+ * Кодировка текстовой части письма — подсказка для восстановления заголовка.
+ *
+ * Берётся с первой попавшейся текстовой части: отправитель, который написал
+ * тему в KOI8-R, тело почти наверняка написал в ней же.
+ */
+function textCharsetOf(node: MessageStructureObject | undefined): string | null {
+  if (!node) return null;
+  const type = (node.type ?? '').toLowerCase();
+  if (type.startsWith('text/')) {
+    const charset = node.parameters?.['charset'];
+    if (typeof charset === 'string' && charset) return charset;
+  }
+  for (const child of node.childNodes ?? []) {
+    const found = textCharsetOf(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Тема письма, восстановленная по кодировке тела, если её испортили.
+ *
+ * Заголовок, присланный сырыми байтами в KOI8-R или CP1251 без кодирования
+ * по RFC 2047, разбирался как строка ромбиков — и такой в списке и видел
+ * человек, хотя тело письма читалось правильно. Письмо к тому же не
+ * находилось поиском по собственной теме.
+ */
+function repairSubject(
+  fallback: string,
+  rawHeaders: Buffer | undefined,
+  structure: MessageStructureObject | undefined,
+): string {
+  return repairHeader(rawHeaders, 'Subject', textCharsetOf(structure)) ?? fallback;
+}
+
 export interface BuildSummaryArgs {
   folderId: string;
   msg: FetchMessageObject;
   snippet?: string | undefined;
+  /**
+   * Сырые байты заголовков письма. Нужны, чтобы восстановить тему, если
+   * отправитель прислал её в восьмибитной кодировке без положенного
+   * кодирования по RFC 2047 — см. header-charset.ts.
+   *
+   * Необязательны: без них тема берётся как раньше.
+   */
+  rawHeaders?: Buffer | undefined;
 }
 
 /** Собирает MessageSummary из ответа IMAP FETCH. */
-export function buildSummary({ folderId, msg, snippet }: BuildSummaryArgs): MessageSummary {
+export function buildSummary({
+  folderId,
+  msg,
+  snippet,
+  rawHeaders,
+}: BuildSummaryArgs): MessageSummary {
   const attachments = collectAttachments(msg.bodyStructure);
   const realAttachments = attachments.filter((a) => !a.inline);
   const envelope = msg.envelope;
@@ -76,7 +131,7 @@ export function buildSummary({ folderId, msg, snippet }: BuildSummaryArgs): Mess
     from: mapAddress(envelope?.from?.[0]),
     to: mapAddressList(envelope?.to),
     cc: mapAddressList(envelope?.cc),
-    subject: envelope?.subject ?? '',
+    subject: repairSubject(envelope?.subject ?? '', rawHeaders, msg.bodyStructure),
     snippet: snippet ?? '',
     date: (Number.isNaN(date.getTime()) ? new Date() : date).toISOString(),
     flags: flagsFromSet(msg.flags),
