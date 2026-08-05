@@ -121,6 +121,37 @@ else
     ok "неверный пароль отклонён"
 fi
 
+echo "=== 7. Юникод в заголовках: обещание сервера должно совпадать с тем, что он умеет ==="
+# Postfix по умолчанию анонсирует SMTPUTF8, а Dovecot 2.3 в LMTP его не умеет.
+# Получалась ложь с последствиями: сервер соглашался принять письмо, а на
+# доставке отбивал его НАВСЕГДА (5.6.7 «SMTPUTF8 is required, but was not
+# offered»). Проверяем обе стороны разом — согласованность, а не настройку.
+LMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "LHLO proba
+QUIT
+" | timeout 5 nc 172.28.0.54 24' 2>/dev/null || true)
+SMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "EHLO proba
+QUIT
+" | timeout 5 nc 127.0.0.1 25' 2>/dev/null || true)
+if echo "$LMTP_CAPS" | grep -qi SMTPUTF8; then
+    # Dovecot научился — тогда и Postfix обязан анонсировать.
+    echo "$SMTP_CAPS" | grep -qi SMTPUTF8         && ok "SMTPUTF8 умеют оба (можно убрать smtputf8_enable = no)"         || fail "Dovecot умеет SMTPUTF8, а Postfix его не анонсирует — возможности теряются"
+else
+    echo "$SMTP_CAPS" | grep -qi SMTPUTF8         && fail "Postfix обещает SMTPUTF8, которого Dovecot не умеет: письма будут отбиваться навсегда"         || ok "SMTPUTF8 не обещается, раз доставить такое письмо нечем"
+fi
+
+# И само письмо: тема кириллицей БЕЗ MIME-кодирования — ровно тот случай,
+# который отбивался с 5.6.7.
+UTOKEN="utf8-$(date +%s)"
+"${COMPOSE[@]}" exec -T postfix sh -c     "printf 'Subject: \320\237\321\200\320\276\320\262\320\265\321\200\320\272\320\260 $UTOKEN\r\nFrom: $TEST_USER\r\nTo: $TEST_USER\r\n\r\ntelo\r\n' | sendmail -f $TEST_USER $TEST_USER" >/dev/null 2>&1
+UFOUND=""
+for i in $(seq 1 20); do
+    if "${COMPOSE[@]}" exec -T dovecot doveadm search -u "$TEST_USER" mailbox INBOX text "$UTOKEN" 2>/dev/null | grep -q .; then
+        UFOUND=yes; break
+    fi
+    sleep 1
+done
+[ -n "$UFOUND" ]     && ok "письмо с восьмибитным заголовком доставлено (~${i}s)"     || fail "письмо с восьмибитным заголовком не дошло — проверьте smtputf8_enable"
+
 echo
 echo "=== ИТОГ: OK=$PASS, FAIL=$FAIL ==="
 [ "$FAIL" -eq 0 ] || exit 1
