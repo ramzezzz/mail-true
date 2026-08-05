@@ -5,8 +5,9 @@
  */
 
 import { create } from 'zustand';
+import { isThemeName, type ThemeName, type ThemeSetting } from '../appearance/themes';
 
-export type ThemeName = 'light' | 'dark' | 'wallpaper';
+export type { ThemeName, ThemeSetting };
 
 const THEME_KEY = 'mt-theme';
 
@@ -20,9 +21,27 @@ function storage(): Storage | null {
   }
 }
 
-function readSavedTheme(): ThemeName {
+/**
+ * Пока пользователь не выбирал тему явно, действует системная
+ * (prefers-color-scheme). Явный выбор сохраняется в localStorage;
+ * всё нераспознанное считается «как в системе».
+ */
+function readSavedSetting(): ThemeSetting {
   const saved = storage()?.getItem(THEME_KEY);
-  return saved === 'dark' || saved === 'wallpaper' ? saved : 'light';
+  return isThemeName(saved) ? saved : 'system';
+}
+
+/** Системная тема ОС/браузера; вне браузера (тесты) — светлая. */
+export function systemTheme(): ThemeName {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+  }
+  return 'light';
+}
+
+/** Что реально применять при данном выборе. */
+export function resolveTheme(setting: ThemeSetting): ThemeName {
+  return setting === 'system' ? systemTheme() : setting;
 }
 
 export function applyTheme(theme: ThemeName): void {
@@ -121,8 +140,11 @@ export function emptyDraft(init: ComposeInit): ComposeDraft {
 let composeSeq = 0;
 
 interface UiState {
+  /** Выбор пользователя: конкретная тема или «как в системе». */
+  themeSetting: ThemeSetting;
+  /** Применённая тема (для 'system' — текущая системная). */
   theme: ThemeName;
-  setTheme(theme: ThemeName): void;
+  setTheme(setting: ThemeSetting): void;
 
   /** Компактный список писем (у mail.ru — «pony mode», строки 40px). */
   compactList: boolean;
@@ -160,11 +182,15 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
-  theme: readSavedTheme(),
-  setTheme(theme) {
-    storage()?.setItem(THEME_KEY, theme);
+  themeSetting: readSavedSetting(),
+  theme: resolveTheme(readSavedSetting()),
+  setTheme(setting) {
+    // «Как в системе» храним явной строкой: отличать «не выбирал» от
+    // «выбрал следовать системе» не нужно — поведение одно и то же
+    storage()?.setItem(THEME_KEY, setting);
+    const theme = resolveTheme(setting);
     applyTheme(theme);
-    set({ theme });
+    set({ themeSetting: setting, theme });
   },
 
   compactList: false,
@@ -215,3 +241,15 @@ export const useUiStore = create<UiState>((set) => ({
   showNotice: (text) => set({ notice: text }),
   clearNotice: () => set({ notice: null }),
 }));
+
+// Пока действует «как в системе», смена системной темы (день/ночь в ОС)
+// подхватывается на лету — без перезагрузки страницы.
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+    const state = useUiStore.getState();
+    if (state.themeSetting !== 'system') return;
+    const theme = systemTheme();
+    applyTheme(theme);
+    useUiStore.setState({ theme });
+  });
+}

@@ -1,0 +1,66 @@
+/* Панель выбора темы: сетка образцов 3 в ряд */
+
+.panel {
+  width: 252px;
+}
+
+.title {
+  padding: 4px 16px 8px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-color-text-primary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 0 8px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.option:hover {
+  background: var(--mt-ph-color-transparent-hover);
+}
+
+.optionActive {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.swatch {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  /* Ободок, чтобы белая половина образца не сливалась с панелью */
+  box-shadow: inset 0 0 0 1px var(--mt-color-image-border-alpha, rgba(0, 16, 61, 0.08));
+}
+
+/* Выбранная тема помечена кольцом акцентного цвета вокруг образца */
+.optionActive .swatch {
+  box-shadow:
+    0 0 0 2px var(--mt-color-background-modal, #fff),
+    0 0 0 4px var(--mt-color-icon-accent);
+}
+
+.optionTitle {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}

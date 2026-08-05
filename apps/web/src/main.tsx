@@ -11,6 +11,7 @@ import './styles/global.css';
 
 import { useMocks } from './api';
 import { shouldRetryQuery } from './api/http';
+import { initWallpaper } from './appearance/wallpapers';
 import { applyTheme, useUiStore } from './app/store';
 import { router } from './app/router';
 
@@ -28,6 +29,9 @@ const queryClient = new QueryClient({
 
 // применяем сохранённую тему до первого рендера, чтобы не мигало
 applyTheme(useUiStore.getState().theme);
+// и восстанавливаем выбранные обои (своя картинка читается из IndexedDB
+// асинхронно; до неё «обойная» тема показывает градиент-заглушку)
+void initWallpaper();
 
 // Серверные события (пришло письмо, изменились счётчики) подключает
 // SessionProvider: подписка нужна только при живой сессии, а сокет должен

@@ -13,6 +13,7 @@ import { mapFolders, findFolderById, type RawFolderInfo } from '../mail/folders.
 import { buildSummary } from '../mail/summary.js';
 import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText, makeSnippet } from '../mail/text.js';
+import { parseSearch } from '../mail/search-query.js';
 
 /** Загружает список папок с счётчиками. */
 export async function listFolders(client: ImapFlow): Promise<Folder[]> {
@@ -116,11 +117,34 @@ export function buildSearchQuery(filter: MessageFilter, search: string | undefin
       query.all = true;
       break;
   }
-  if (search && search.trim()) {
+  /*
+   * Поисковая строка разбирается на операторы. Раньше она целиком уходила
+   * в IMAP как поиск по тексту, поэтому `от:волкова` не находило ничего:
+   * сервер честно искал письмо, содержащее подстроку «от:волкова». То есть
+   * попытка уточнить запрос делала поиск ХУЖЕ, чем его отсутствие.
+   *
+   * Операторы складываются с фильтром списка: выбранное «непрочитанные» и
+   * написанное `от:иванов` работают вместе, а не спорят.
+   */
+  const parsed = parseSearch(search);
+  if (parsed.from) query.from = parsed.from;
+  if (parsed.to) query.to = parsed.to;
+  if (parsed.cc) query.cc = parsed.cc;
+  if (parsed.subject) query.subject = parsed.subject;
+  if (parsed.since) query.since = parsed.since;
+  if (parsed.before) query.before = parsed.before;
+  if (parsed.seen !== null) query.seen = parsed.seen;
+  if (parsed.flagged !== null) query.flagged = parsed.flagged;
+  if (parsed.text) {
     // TEXT ищет и по заголовкам, и по телу
-    query.text = search.trim();
+    query.text = parsed.text;
   }
   return query;
+}
+
+/** Нужен ли отбор по вложениям после поиска — по фильтру или по оператору. */
+export function wantsAttachments(filter: MessageFilter, search: string | undefined): boolean {
+  return filter === 'with-attachments' || parseSearch(search).hasAttachment;
 }
 
 /**
@@ -306,7 +330,7 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
     // Новые письма первыми: UID возрастает со временем
     uids.sort((a, b) => b - a);
 
-    if (filter === 'with-attachments' && uids.length > 0) {
+    if (wantsAttachments(filter, search) && uids.length > 0) {
       const kept = await selectUidsWithAttachments(client, uids);
       uids = uids.filter((uid) => kept.has(uid));
     }

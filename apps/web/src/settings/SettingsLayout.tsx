@@ -27,6 +27,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/settings', title: 'Главная', end: true },
   { to: '/settings/general', title: 'Общие' },
+  { to: '/settings/appearance', title: 'Оформление' },
   { to: '/settings/filters', title: 'Фильтры' },
   { to: '/settings/folders', title: 'Папки' },
   { to: '/settings/collector', title: 'Почта с других ящиков' },

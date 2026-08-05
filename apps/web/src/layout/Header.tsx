@@ -13,13 +13,13 @@
  */
 
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useUiStore, type ThemeName } from '../app/store';
-import { Dropdown, IconButton, MenuItem, Tooltip } from '../components';
+import { IconButton, Tooltip } from '../components';
 import { cx } from '../lib/cx';
 import { IconSettings } from '../mail/icons';
 import { SEARCH_PATH } from '../search/searchParams';
 import { AccountMenu } from './AccountMenu';
 import { SearchBar } from './SearchBar';
+import { ThemeMenu } from './ThemeMenu';
 import styles from './Header.module.css';
 
 /**
@@ -35,17 +35,9 @@ export interface HeaderProps {
   onToggleNav(): void;
 }
 
-const THEME_TITLES: Record<ThemeName, string> = {
-  light: 'Светлая',
-  dark: 'Тёмная',
-  wallpaper: 'С фоновой картинкой',
-};
-
 export function Header({ navOpen, onToggleNav }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
-  const theme = useUiStore((s) => s.theme);
-  const setTheme = useUiStore((s) => s.setTheme);
 
   // В режиме поиска логотип уступает место кнопке «‹ Сбросить поиск»
   const inSearch = location.pathname.startsWith(SEARCH_PATH.replace(/\/$/u, ''));
@@ -93,28 +85,7 @@ export function Header({ navOpen, onToggleNav }: HeaderProps) {
           </IconButton>
         </Tooltip>
 
-        <Dropdown
-          align="right"
-          trigger={({ toggle }) => (
-            <Tooltip text={`Тема: ${THEME_TITLES[theme]}`}>
-              <IconButton label="Тема оформления" onClick={toggle} className={styles.headerButton}>
-                <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
-                  <path
-                    d="M10 2a8 8 0 1 0 0 16c.94 0 1.35-.62 1.35-1.19 0-.32-.12-.6-.31-.85a1.5 1.5 0 0 1 1.17-2.46h1.61A4.18 4.18 0 0 0 18 9.32 7.7 7.7 0 0 0 10 2Zm-4.5 8.75a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm2.75-4a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm4.5 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"
-                    fill="currentColor"
-                  />
-                </svg>
-              </IconButton>
-            </Tooltip>
-          )}
-        >
-          {(Object.keys(THEME_TITLES) as ThemeName[]).map((name) => (
-            <MenuItem key={name} onClick={() => setTheme(name)}>
-              {THEME_TITLES[name]}
-              {name === theme ? ' ✓' : ''}
-            </MenuItem>
-          ))}
-        </Dropdown>
+        <ThemeMenu buttonClassName={styles.headerButton} />
 
         <AccountMenu />
       </div>

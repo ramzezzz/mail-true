@@ -22,6 +22,7 @@ import { SessionProvider, useSession } from './session';
 import { AppLayout } from '../layout/AppLayout';
 import { Spinner } from '../components';
 import { AiSettingsPage } from '../pages/AiSettingsPage';
+import { AppearancePage } from '../pages/settings/AppearancePage';
 import { ComposePage } from '../pages/ComposePage';
 import { FolderPage } from '../pages/FolderPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -82,6 +83,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <SettingsHomePage /> },
           { path: 'general', element: <GeneralSettingsPage /> },
+          { path: 'appearance', element: <AppearancePage /> },
           { path: 'filters', element: <FiltersPage /> },
           { path: 'folders', element: <FoldersPage /> },
           { path: 'collector', element: <CollectorPage /> },
