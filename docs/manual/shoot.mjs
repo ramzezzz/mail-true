@@ -185,7 +185,17 @@ async function login(url, body, extraHeaders) {
 /* Снимок                                                            */
 /* ---------------------------------------------------------------- */
 
-async function shoot(chrome, { name, url, wait, settle = 1200, hide = [] }) {
+async function shoot(chrome, { name, url, wait, settle = 1200, hide = [], viewport }) {
+  // Свой размер окна — для снимков мобильного вида: тот же интерфейс на
+  // 390 точках выглядит иначе, и показывать его растянутым на 1440 значит
+  // показывать не то, что человек увидит на телефоне.
+  if (viewport) {
+    await chrome.send('Emulation.setDeviceMetricsOverride', {
+      ...viewport,
+      deviceScaleFactor: 2,
+      mobile: true,
+    });
+  }
   await chrome.send('Page.navigate', { url });
 
   // Ждём не «загрузку страницы», а появление того, ради чего снимок:
@@ -218,6 +228,16 @@ async function shoot(chrome, { name, url, wait, settle = 1200, hide = [] }) {
   const file = join(OUT, `${name}.png`);
   await writeFile(file, Buffer.from(data, 'base64'));
   console.log(`  ${name}.png`);
+
+  // Свой размер окна не должен утечь в следующий снимок: иначе один
+  // мобильный кадр перекашивает всё, что снимается после него.
+  if (viewport) {
+    await chrome.send('Emulation.setDeviceMetricsOverride', {
+      ...VIEWPORT,
+      deviceScaleFactor: 2,
+      mobile: false,
+    });
+  }
 }
 
 /* ---------------------------------------------------------------- */
@@ -234,6 +254,12 @@ const SHOTS = [
   { name: '09-admin-users', url: `${ADMIN}/users`, wait: 'main', admin: true },
   { name: '10-admin-domains', url: `${ADMIN}/domains`, wait: 'main', admin: true },
   { name: '11-admin-audit', url: `${ADMIN}/audit`, wait: 'main', admin: true },
+  { name: '14-appearance', url: `${WEB}/settings/appearance`, wait: 'main' },
+  // Мобильный вид — своим размером окна: тот же экран на 390 точках
+  // выглядит иначе, и растянутый на 1440 он показывал бы не то.
+  { name: '15-mobile', url: `${WEB}/inbox`, wait: 'main', viewport: { width: 390, height: 780 } },
+  { name: '12-admin-flow', url: `${ADMIN}/flow`, wait: 'main', admin: true },
+  { name: '13-admin-logs', url: `${ADMIN}/logs`, wait: 'main', admin: true },
 ];
 
 /**

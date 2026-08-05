@@ -71,6 +71,18 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.get('/auth/session', { preHandler: app.requireSession }, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
-    return { authenticated: true, email: session.email };
+    // Пределы отдаём вместе с сессией, а не отдельным запросом: без них
+    // интерфейс узнаёт о слишком большом вложении ТОЛЬКО после того, как
+    // гигабайты уже уехали по сети, — человек ждёт впустую и получает отказ
+    // в конце. Предел вложения — производная предела письма (вложение при
+    // кодировании растёт), см. ENCODING_OVERHEAD в config.ts.
+    return {
+      authenticated: true,
+      email: session.email,
+      limits: {
+        attachmentBytes: config.ATTACHMENT_MAX_BYTES,
+        messageBytes: config.MESSAGE_MAX_BYTES,
+      },
+    };
   });
 }
