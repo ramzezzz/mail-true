@@ -17,7 +17,15 @@ export function Spinner({ size = 24, className, label = 'Загрузка' }: Sp
   const c = 2 * Math.PI * r;
   return (
     <span role="progressbar" aria-label={label} className={cx(styles.spinner, className)}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className={styles.svg}>
+      {/* data-motion="keep" выводит крутилку из-под глобального выключателя
+          движения: остановленная, она перестаёт означать «идёт работа» */}
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        className={styles.svg}
+        data-motion="keep"
+      >
         <circle
           cx={size / 2}
           cy={size / 2}

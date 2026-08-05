@@ -8,6 +8,20 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px;
+  /* Список монтируется заново при смене папки и после загрузки — этот
+     проблеск и есть ответ на «папка переключилась» */
+  animation: listShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+@keyframes listShow {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .inner {
@@ -51,8 +65,18 @@
   font-size: var(--mt-font-paragraph-size, 15px);
   line-height: var(--mt-font-paragraph-line-height, 20px);
   cursor: pointer;
-  transition: background-color var(--mt-anim-duration-s, 0.1s)
-    var(--mt-anim-easing-default, ease);
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    opacity var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),
+    transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+/* Письмо уехало в другую папку: строка гаснет сразу, не дожидаясь сервера.
+   Если перенос не удался, класс снимается и строка возвращается на место. */
+.row.leaving {
+  opacity: 0;
+  transform: translateX(24px);
+  pointer-events: none;
 }
 
 /* Компактный режим («pony mode»): 40px, шрифт 13px */

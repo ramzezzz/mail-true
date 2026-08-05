@@ -10,7 +10,13 @@
   border-radius: var(--mt-size-border-radius, 8px);
   cursor: pointer;
   user-select: none;
-  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.iconButton:active:not(:disabled) {
+  transform: scale(0.92);
 }
 
 .size_m {

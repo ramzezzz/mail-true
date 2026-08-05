@@ -105,6 +105,8 @@
   text-decoration: none;
   cursor: pointer;
   text-align: left;
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
 }
 
 .item:hover {

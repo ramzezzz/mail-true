@@ -15,6 +15,20 @@
   background: var(--mt-color-background-accent, #0070f0);
   color: var(--mt-color-text-contrast, #fff);
   box-shadow: var(--mt-elevation-1);
+  animation: noticeShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+/* Плашка выезжает снизу. Сдвиг по X здесь тот же, что в .notice: без него
+   центрирование сбилось бы на время хода. */
+@keyframes noticeShow {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
 }
 
 .text {

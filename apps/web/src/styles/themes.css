@@ -35,6 +35,29 @@
   --mt-compose-shadow: 0 4px 32px rgba(0, 16, 61, 0.16);
 
   /*
+   * Переключатель (BaseSwitch mail.ru). Размеры сняты пиксель в пиксель с
+   * research/mailru/05-filters.png: дорожка 32×20, бегунок 16 с полем 2 со
+   * всех сторон, ход 12px, подпись через 16px.
+   *
+   * Сырые --mt-size-switch-* из tokens.css сюда НЕ годятся: это размеры
+   * вкуишного Switch (дорожка 34×14 при бегунке 20), которого мейл не
+   * применяет. С ними бегунок вылезал за дорожку на 8px вниз и на 2px вправо.
+   */
+  --mt-switch-width: 32px;
+  --mt-switch-height: 20px;
+  --mt-switch-pin: 16px;
+  --mt-switch-inset: 2px;
+  --mt-switch-label-gap: 16px;
+
+  --mt-switch-track-off: var(--mt-color-icon-tertiary);
+  --mt-switch-track-off-hover: var(--mt-color-icon-tertiary-hover);
+  --mt-switch-track-off-press: var(--mt-color-icon-tertiary-press);
+  --mt-switch-track-on: var(--mt-color-background-accent);
+  --mt-switch-track-on-hover: var(--mt-color-background-accent-hover);
+  --mt-switch-track-on-press: var(--mt-color-background-accent-press);
+  --mt-switch-thumb: var(--mt-color-background-content);
+
+  /*
    * Помощник на основе ИИ. Отдельные семантические переменные нужны потому,
    * что его плашки лежат на белой карточке контента: подложка должна быть
    * заметна во всех трёх темах, а в тёмной фон карточки и
@@ -285,6 +308,13 @@
   --mt-drop-target-bg: rgba(92, 168, 245, 0.16);
   --mt-skeleton-bg: #2c2d2e;
   --mt-skeleton-shine: #3a3a3b;
+
+  /* Переключатель: у --mt-color-icon-tertiary тёмного варианта есть только
+     базовое значение, поэтому ступени наведения и нажатия задаём здесь —
+     иначе на тёмном они вспыхивали светлыми. Бегунок остаётся светлым. */
+  --mt-switch-track-off-hover: #7b7e84;
+  --mt-switch-track-off-press: #8a8d93;
+  --mt-switch-thumb: var(--mt-color-text-primary);
 }
 
 /* ------------------------------------------------------------------ */

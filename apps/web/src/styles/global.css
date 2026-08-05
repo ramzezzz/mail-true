@@ -54,6 +54,29 @@ button {
   scrollbar-color: var(--mt-color-separator-primary) transparent;
 }
 
+/*
+ * Движение в интерфейсе — только обратная связь, а не содержание. Кому оно
+ * мешает (вестибулярные расстройства, укачивание), тот получает ровно тот же
+ * интерфейс без переходов: длительности гасятся здесь одним правилом, и оно
+ * действует на всё, что появится позже, — за каждым новым переходом
+ * следить не нужно.
+ *
+ * Исключение — элементы с data-motion="keep" (крутилка загрузки): без
+ * вращения она не сообщает, что работа идёт.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *:not([data-motion='keep']),
+  *:not([data-motion='keep'])::before,
+  *:not([data-motion='keep'])::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Экран ожидания во весь рост — пока проверяется сессия */
 .mt-center-screen {
   display: flex;

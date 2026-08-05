@@ -32,7 +32,13 @@
   color: var(--mt-color-text-contrast, #fff);
   transition:
     background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
-    box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+    box-shadow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+/* Осадка при нажатии — 16px квадратику этого хватает, чтобы отклик заметили */
+.wrapper:active .input:not(:disabled) + .box {
+  transform: scale(0.88);
 }
 
 .mark {

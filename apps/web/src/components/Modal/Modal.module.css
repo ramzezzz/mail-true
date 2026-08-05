@@ -8,6 +8,23 @@
   padding: 24px;
   background: var(--mt-modal-overlay);
   overflow-y: auto;
+  animation: overlayShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+/* Закрытие: обратный ход, столько же — MODAL_EXIT_MS в Modal.tsx */
+.overlayClosing {
+  animation: overlayShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease)
+    reverse forwards;
+  pointer-events: none;
+}
+
+@keyframes overlayShow {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .card {
@@ -20,6 +37,23 @@
   border-radius: var(--mt-size-card-border-radius, 16px);
   box-shadow: var(--mt-elevation-3);
   outline: none;
+  animation: cardShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+.cardClosing {
+  animation: cardShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease)
+    reverse forwards;
+}
+
+@keyframes cardShow {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .head {

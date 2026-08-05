@@ -473,13 +473,6 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
         <button
           type="button"
           className={styles.attachButton}
-          onClick={() => console.info('Из Облака: появится вместе с облаком')}
-        >
-          Из Облака
-        </button>
-        <button
-          type="button"
-          className={styles.attachButton}
           onClick={() => console.info('Из Почты: появится вместе с бэкендом')}
         >
           Из Почты

@@ -30,7 +30,6 @@ import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from '../mail/Cont
 import {
   IconArchive,
   IconCheckAll,
-  IconEvent,
   IconFilter,
   IconFlag,
   IconFolder,
@@ -74,6 +73,8 @@ export function FolderPage() {
 
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  /** Письма, уже уезжающие из папки: перенос отправлен, ответа ещё нет. */
+  const [leavingIds, setLeavingIds] = useState<readonly string[]>([]);
 
   const messages = page.items;
 
@@ -83,7 +84,15 @@ export function FolderPage() {
     setFocusedId(null);
     setFilter('all');
     setContextMenu(null);
+    setLeavingIds([]);
   }, [folderId, clearSelection]);
+
+  // Уехавшие письма пропали из списка — метку можно снять
+  useEffect(() => {
+    if (leavingIds.length === 0) return;
+    if (leavingIds.some((id) => messages.some((m) => m.id === id))) return;
+    setLeavingIds([]);
+  }, [messages, leavingIds]);
 
   /** Письма, к которым применяется действие: выделенные, иначе — под курсором. */
   const targetIds = useCallback((): string[] => {
@@ -104,7 +113,13 @@ export function FolderPage() {
   const moveTo = useCallback(
     (ids: string[], targetFolderId: string) => {
       if (ids.length === 0) return;
-      moveMessages.mutate({ ids, targetFolderId });
+      // Строки гаснут сразу: ждать ответа сервера, чтобы показать отклик,
+      // нельзя — при неудаче метка снимается и письма возвращаются на место.
+      setLeavingIds(ids);
+      moveMessages.mutate(
+        { ids, targetFolderId },
+        { onError: () => setLeavingIds([]) },
+      );
       clearSelection();
       setFocusedId(null);
     },
@@ -330,8 +345,12 @@ export function FolderPage() {
 
       {messages.length > 0 && (
         <MessageList
+          /* Ключ по папке: список монтируется заново — и прокрутка начинается
+             сверху, и появление новой папки видно */
+          key={folderId}
           messages={messages}
           focusedId={focusedId}
+          leavingIds={leavingIds}
           onEndReached={loadMore}
           onContextMenu={(message, x, y) => {
             setFocusedId(message.id);
@@ -418,12 +437,6 @@ export function FolderPage() {
               </ContextMenuItem>
               <ContextMenuSeparator />
               {/* Группа 4 */}
-              <ContextMenuItem
-                before={<IconEvent />}
-                onClick={() => console.info('Создание события появится вместе с календарём')}
-              >
-                Создать событие
-              </ContextMenuItem>
               <ContextMenuItem
                 before={<IconFilter />}
                 hint="Shift+L"

@@ -32,7 +32,6 @@ import {
   IconArchive,
   IconArrowLeft,
   IconArrowRight,
-  IconEvent,
   IconFilter,
   IconFlag,
   IconFolder,
@@ -565,17 +564,9 @@ export function MessagePage() {
             )}
           </div>
           <div className={styles.senderActions}>
-            <Tooltip text="Создать событие">
-              <IconButton
-                label="Создать событие"
-                onClick={() => console.info('Календарь появится позже')}
-              >
-                <IconEvent size={20} />
-              </IconButton>
-            </Tooltip>
             <Tooltip text="Распечатать">
-              {/* 20px, как размер значка в шапке mail.ru: при 16px кнопки
-                  печати и календаря терялись — пользователь их не находил. */}
+              {/* 20px, как размер значка в шапке mail.ru: при 16px кнопка
+                  печати терялась — пользователь её не находил. */}
               <IconButton label="Распечатать" onClick={() => window.print()}>
                 <IconPrint size={20} />
               </IconButton>

@@ -20,6 +20,14 @@ import styles from './Dropdown.module.css';
 const CloseContext = createContext<() => void>(() => {});
 
 /**
+ * Сколько уезжает меню, от которого отказались, мс — столько же длится
+ * обратный ход в Dropdown.module.css (--mt-anim-duration-s).
+ */
+export const MENU_EXIT_MS = 100;
+
+type MenuState = 'closed' | 'open' | 'closing';
+
+/**
  * Закрыть меню изнутри — для пунктов, которые нарисованы не через
  * `MenuItem` (тот закрывается сам). Без этого собственная строка меню
  * оставляла бы его открытым поверх уже изменившейся страницы.
@@ -46,18 +54,32 @@ export function Dropdown({
   className,
   menuClassName,
 }: DropdownProps) {
-  const [open, setOpen] = useState(false);
+  const [state, setState] = useState<MenuState>('closed');
+  const open = state === 'open';
   const hostRef = useRef<HTMLDivElement>(null);
-  const close = useCallback(() => setOpen(false), []);
-  const toggle = useCallback(() => setOpen((v) => !v), []);
+  /**
+   * Выбранный пункт закрывает меню мгновенно: страница уже меняется, и
+   * досматривать нечего. А отказ от выбора (Escape, клик мимо, повторное
+   * нажатие) уезжает с ходом — тогда видно, что меню именно закрылось.
+   */
+  const close = useCallback(() => setState('closed'), []);
+  const dismiss = useCallback(() => setState((s) => (s === 'open' ? 'closing' : s)), []);
+  const toggle = useCallback(() => setState((s) => (s === 'open' ? 'closing' : 'open')), []);
+
+  // Уехавшее меню убирается из разметки — иначе оно осталось бы в обходе Tab
+  useEffect(() => {
+    if (state !== 'closing') return;
+    const timer = setTimeout(() => setState('closed'), MENU_EXIT_MS);
+    return () => clearTimeout(timer);
+  }, [state]);
 
   useEffect(() => {
     if (!open) return;
     const onPointerDown = (e: PointerEvent) => {
-      if (hostRef.current && !hostRef.current.contains(e.target as Node)) close();
+      if (hostRef.current && !hostRef.current.contains(e.target as Node)) dismiss();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close();
+      if (e.key === 'Escape') dismiss();
     };
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -65,15 +87,21 @@ export function Dropdown({
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [open, close]);
+  }, [open, dismiss]);
 
   return (
     <div ref={hostRef} className={cx(styles.host, className)}>
       {trigger({ open, toggle })}
-      {open && (
+      {state !== 'closed' && (
         <div
           role="menu"
-          className={cx(styles.menu, align === 'right' && styles.alignRight, menuClassName)}
+          aria-hidden={state === 'closing' || undefined}
+          className={cx(
+            styles.menu,
+            state === 'closing' && styles.menuClosing,
+            align === 'right' && styles.alignRight,
+            menuClassName,
+          )}
         >
           <CloseContext.Provider value={close}>{children}</CloseContext.Provider>
         </div>

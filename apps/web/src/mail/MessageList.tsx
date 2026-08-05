@@ -41,6 +41,11 @@ export interface MessageListProps {
   messages: readonly MessageSummary[];
   /** id письма, на котором стоит клавиатурный курсор. */
   focusedId?: string | null;
+  /**
+   * Письма, которые уже уезжают из папки: перенос или удаление отправлены,
+   * ответа сервера ещё нет. Строки гаснут сразу, не дожидаясь его.
+   */
+  leavingIds?: readonly string[];
   onContextMenu?(message: MessageSummary, x: number, y: number): void;
   /**
    * Долистали до конца — пора просить следующую страницу.
@@ -68,6 +73,8 @@ interface RowProps {
   message: MessageSummary;
   selection: RowSelectionState;
   focused: boolean;
+  /** Письмо уезжает из папки — строка гаснет и сдвигается. */
+  leaving: boolean;
   /** Единственная строка списка, попадающая в обход по Tab (roving tabindex). */
   tabbable: boolean;
   threadCount: number;
@@ -80,6 +87,7 @@ function Row({
   message,
   selection,
   focused,
+  leaving,
   tabbable,
   threadCount,
   onContextMenu,
@@ -104,7 +112,9 @@ function Row({
         selection.firstSelected && styles.firstSelected,
         selection.lastSelected && styles.lastSelected,
         focused && styles.focused,
+        leaving && styles.leaving,
       )}
+      aria-hidden={leaving || undefined}
       /* Roving tabindex: Tab заводит в список один раз, дальше — стрелки.
          Раньше в обход попадали все сто строк подряд. */
       tabIndex={tabbable ? 0 : -1}
@@ -205,6 +215,7 @@ function Row({
 export function MessageList({
   messages,
   focusedId,
+  leavingIds,
   onContextMenu,
   onEndReached,
 }: MessageListProps) {
@@ -213,6 +224,7 @@ export function MessageList({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => flattenRows(messages), [messages]);
+  const leavingSet = useMemo(() => new Set(leavingIds ?? []), [leavingIds]);
 
   /** Счётчик писем в цепочке в пределах загруженного списка. */
   const threadCounts = useMemo(() => {
@@ -315,6 +327,7 @@ export function MessageList({
                   message={row.message}
                   selection={selectionStates.get(row.message.id) ?? emptySelection}
                   focused={row.message.id === focusedId}
+                  leaving={leavingSet.has(row.message.id)}
                   tabbable={row.message.id === tabbableId}
                   rowRef={row.message.id === focusedId ? focusedRowRef : undefined}
                   threadCount={threadCounts.get(row.message.threadId) ?? 1}

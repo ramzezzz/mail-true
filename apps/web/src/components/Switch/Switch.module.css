@@ -1,7 +1,14 @@
+/*
+ * Геометрия и цвета — из --mt-switch-* (themes.css), там же измерения.
+ * Дорожка 32×20, бегунок 16 с полем 2, ход 12px = ширина − бегунок − два поля.
+ */
+
 .wrapper {
   display: inline-flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: var(--mt-switch-label-gap, 16px);
+  /* Иначе длинная подпись растягивает inline-flex за края колонки настроек */
+  max-width: 100%;
   cursor: pointer;
   user-select: none;
 }
@@ -27,32 +34,54 @@
 .track {
   flex: none;
   position: relative;
-  width: var(--mt-size-switch-width, 34px);
-  height: var(--mt-size-switch-height, 20px);
+  width: var(--mt-switch-width, 32px);
+  height: var(--mt-switch-height, 20px);
   border-radius: 999px;
-  background: var(--mt-color-background-secondary-alpha);
-  transition: background-color var(--mt-anim-duration-s, 0.1s)
+  background: var(--mt-switch-track-off);
+  transition: background-color var(--mt-anim-duration-m, 0.2s)
     var(--mt-anim-easing-default, ease);
 }
 
 .thumb {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: var(--mt-size-switch-pin, 16px);
-  height: var(--mt-size-switch-pin, 16px);
+  top: var(--mt-switch-inset, 2px);
+  left: var(--mt-switch-inset, 2px);
+  width: var(--mt-switch-pin, 16px);
+  height: var(--mt-switch-pin, 16px);
   border-radius: 50%;
-  background: var(--mt-color-background-content);
+  background: var(--mt-switch-thumb);
   box-shadow: var(--mt-elevation-1);
-  transition: transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  transition: transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
 }
 
 .input:checked + .track {
-  background: var(--mt-color-background-accent);
+  background: var(--mt-switch-track-on);
 }
 
 .input:checked + .track .thumb {
-  transform: translateX(14px);
+  transform: translateX(
+    calc(
+      var(--mt-switch-width, 32px) - var(--mt-switch-pin, 16px) - 2 *
+        var(--mt-switch-inset, 2px)
+    )
+  );
+}
+
+/* Наведение и нажатие — ступенями подложки, как у кнопок mail.ru */
+.wrapper:hover .input:not(:disabled) + .track {
+  background: var(--mt-switch-track-off-hover);
+}
+
+.wrapper:hover .input:not(:disabled):checked + .track {
+  background: var(--mt-switch-track-on-hover);
+}
+
+.wrapper:active .input:not(:disabled) + .track {
+  background: var(--mt-switch-track-off-press);
+}
+
+.wrapper:active .input:not(:disabled):checked + .track {
+  background: var(--mt-switch-track-on-press);
 }
 
 .input:focus-visible + .track {
@@ -67,9 +96,10 @@
   min-width: 0;
 }
 
+/* Интерлиньяж равен высоте дорожки — первая строка подписи встаёт по её центру */
 .label {
   font-size: var(--mt-font-paragraph-size, 15px);
-  line-height: var(--mt-size-switch-height, 20px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
   color: var(--mt-color-text-primary);
 }
 

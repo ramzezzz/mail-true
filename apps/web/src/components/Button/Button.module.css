@@ -13,7 +13,15 @@
   user-select: none;
   white-space: nowrap;
   text-decoration: none;
-  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+  /* Подложка красится за 0.1s, а осадка при нажатии — быстрее самого клика,
+     чтобы кнопка отвечала мгновенно, а не «догоняла» палец */
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    transform var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.button:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .button:disabled {

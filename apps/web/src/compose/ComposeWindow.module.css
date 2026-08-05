@@ -18,6 +18,20 @@
   background: var(--mt-color-background-content);
   box-shadow: var(--mt-compose-shadow);
   color: var(--mt-color-text-primary);
+  /* Окно выезжает снизу. То же самое проигрывается при разворачивании
+     свёрнутой плашки: React монтирует окно заново, и ход повторяется. */
+  animation: composeShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+@keyframes composeShow {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .maximized {
@@ -168,6 +182,8 @@
   font: inherit;
   font-size: var(--mt-font-subhead-size, 14px);
   cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
 }
 
 .fmtButton:hover {
@@ -293,6 +309,20 @@
   background: var(--mt-color-background-content);
   box-shadow: var(--mt-compose-shadow);
   color: var(--mt-color-text-primary);
+  /* Плашка выезжает снизу — это и есть «окно свернулось» */
+  animation: composeMinimize var(--mt-anim-duration-m, 0.2s)
+    var(--mt-anim-easing-default, ease);
+}
+
+@keyframes composeMinimize {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .minimizedTitle {

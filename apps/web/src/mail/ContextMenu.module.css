@@ -8,13 +8,14 @@
   border-radius: 12px;
   background: var(--mt-color-background-modal);
   box-shadow: var(--mt-elevation-3);
+  transform-origin: top left;
   animation: menuShow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
 @keyframes menuShow {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-4px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -39,6 +40,8 @@
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
+  transition: background-color var(--mt-anim-duration-s, 0.1s)
+    var(--mt-anim-easing-default, ease);
 }
 
 .item:hover {
