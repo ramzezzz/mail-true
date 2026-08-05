@@ -92,6 +92,7 @@ echo "=== 7. Уборка ==="
 for m in "$USER_MAIL" "$FWD_TO"; do
     MSYS_NO_PATHCONV=1 $COMPOSE exec -T postgres psql -U "${POSTGRES_USER:-mailserver}" \
         -d "${POSTGRES_DB:-mailserver}" -c "DELETE FROM virtual_users WHERE email='$m';" >/dev/null 2>&1
+    bash "$HERE/scripts/drop-mailbox.sh" "$m" >/dev/null 2>&1
 done
 dov "rm -rf /var/mail/vhosts/mail.local/fwdtest /var/mail/vhosts/mail.local/fwdrecv" >/dev/null 2>&1
 echo "  временные ящики удалены"

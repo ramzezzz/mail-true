@@ -101,9 +101,11 @@ fi
 echo "=== 6. Уборка ==="
 rm -f "$JAR"
 dov "doveadm mailbox delete -u '$USER_MAIL' -r '$TRAP_FOLDER'" >/dev/null 2>&1
-MSYS_NO_PATHCONV=1 $COMPOSE exec -T postgres psql -U "${POSTGRES_USER:-mailserver}" \
-    -d "${POSTGRES_DB:-mailserver}" -c "DELETE FROM virtual_users WHERE email='$USER_MAIL';" >/dev/null 2>&1
-dov "rm -rf /var/mail/vhosts/mail.local/spamrule" >/dev/null 2>&1
+# Уборка общим скриптом: он знает ВСЕ таблицы, где остаются следы ящика.
+# Прежняя уборка сносила только строку virtual_users, а правила фильтрации,
+# подписи и настройки оставались. Дожив до следующей проверки, этот мусор
+# был принят за дефект продукта — разбирались с ним дольше, чем стоило.
+bash "$HERE/scripts/drop-mailbox.sh" "$USER_MAIL" >/dev/null 2>&1
 echo "  временный ящик удалён"
 
 echo
