@@ -59,6 +59,13 @@ export interface FlowFilters {
   /** Курсор: строки строго старее этой пары «время + идентификатор». */
   beforeTime?: Date | undefined;
   beforeId?: string | undefined;
+  /**
+   * Обратный курсор: строки строго НОВЕЕ этой пары. Нужен автообновлению —
+   * дочитать появившееся с прошлого раза, не перезапрашивая всё, что человек
+   * уже подгрузил прокруткой.
+   */
+  afterTime?: Date | undefined;
+  afterId?: string | undefined;
   limit: number;
 }
 
@@ -230,6 +237,10 @@ export class FlowStore {
     if (filters.beforeTime && filters.beforeId) {
       values.push(filters.beforeTime, filters.beforeId);
       where.push(`(occurred_at, id) < ($${values.length - 1}, $${values.length}::bigint)`);
+    }
+    if (filters.afterTime && filters.afterId) {
+      values.push(filters.afterTime, filters.afterId);
+      where.push(`(occurred_at, id) > ($${values.length - 1}, $${values.length}::bigint)`);
     }
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
     values.push(filters.limit);

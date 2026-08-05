@@ -737,3 +737,47 @@ test('дочитывание журнала не разрывает недопи
   assert.equal(second.lines.length, 1, 'дописанная строка приходит следующим заходом');
   assert.ok(second.lines[0]?.includes('user2@'));
 });
+
+test('обратный курсор отбирает записи строго новее верхней строки', async () => {
+  // Автообновление истории дочитывает ТОЛЬКО появившееся: перезапрос всей
+  // ленты схлопнул бы то, что человек подгрузил прокруткой.
+  const seen: Array<{ text: string; values: unknown[] }> = [];
+  const fakeDb = {
+    query: async (text: string, values: unknown[] = []) => {
+      seen.push({ text, values });
+      return [];
+    },
+    one: async () => null,
+  };
+  const store = new FlowStore(fakeDb as unknown as AdminDb);
+  const at = new Date('2026-08-05T20:30:03.000Z');
+  await store.listEvents({ afterTime: at, afterId: '42', limit: 10 });
+  const q = seen[0];
+  assert.ok(q);
+  assert.ok(
+    /\(occurred_at, id\) > \(\$\d+, \$\d+::bigint\)/.test(q.text),
+    `сравнение пары «время + идентификатор» не по возрастанию: ${q.text}`,
+  );
+  assert.ok(!q.text.includes('id) < ('), 'в один запрос попали оба курсора сразу');
+  assert.ok(q.values.includes(at) && q.values.includes('42'), 'курсор не доехал до запроса');
+});
+
+test('порядок выдачи не зависит от направления курсора', async () => {
+  // Свежие сверху и на дочитывании тоже: иначе новые записи легли бы в
+  // ленту задом наперёд.
+  const seen: string[] = [];
+  const fakeDb = {
+    query: async (text: string) => {
+      seen.push(text);
+      return [];
+    },
+    one: async () => null,
+  };
+  const store = new FlowStore(fakeDb as unknown as AdminDb);
+  await store.listEvents({ afterTime: new Date(), afterId: '42', limit: 10 });
+  await store.listEvents({ beforeTime: new Date(), beforeId: '42', limit: 10 });
+  assert.equal(seen.length, 2);
+  for (const text of seen) {
+    assert.ok(text.includes('ORDER BY occurred_at DESC, id DESC'), text);
+  }
+});

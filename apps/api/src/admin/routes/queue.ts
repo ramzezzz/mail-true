@@ -43,6 +43,9 @@ const historySchema = z.object({
   /** Курсор ленивой подгрузки: пара «время + идентификатор» последней строки. */
   beforeTime: z.string().datetime().optional(),
   beforeId: z.string().regex(/^\d+$/).max(20).optional(),
+  /** Обратный курсор автообновления: что появилось новее верхней строки. */
+  afterTime: z.string().datetime().optional(),
+  afterId: z.string().regex(/^\d+$/).max(20).optional(),
 });
 
 function queueView(message: QueueMessage): Record<string, unknown> {
@@ -176,6 +179,8 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
       search: q.search?.toLowerCase(),
       beforeTime: q.beforeTime ? new Date(q.beforeTime) : undefined,
       beforeId: q.beforeId,
+      afterTime: q.afterTime ? new Date(q.afterTime) : undefined,
+      afterId: q.afterId,
       limit: q.limit + 1,
     });
     const hasMore = rows.length > q.limit;

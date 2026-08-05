@@ -11,11 +11,14 @@
  *
  * На старом коде падают все проверки: автообновления не существовало.
  */
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   STICK_SLACK_PX,
   autoRefreshKey,
   isPinnedToBottom,
+  isPinnedToTop,
+  scrollParent,
+  scrollTopNear,
   keepWindow,
   loadAutoRefresh,
   saveAutoRefresh,
@@ -152,5 +155,58 @@ describe('память о выборе', () => {
     expect(loadAutoRefresh('logs:postfix')).toBe(false);
     expect(() => saveAutoRefresh('logs:postfix', true)).not.toThrow();
     if (original) Object.defineProperty(globalThis, 'localStorage', original);
+  });
+});
+
+describe('прилипание к началу списка (история почтового потока)', () => {
+  // История растёт СВЕРХУ: свежие письма новее верхней строки. «Следить за
+  // новым» там означает стоять в начале, а не в конце.
+  it('лента в самом верху считается прилипшей', () => {
+    expect(isPinnedToTop({ scrollTop: 0 })).toBe(true);
+  });
+
+  it('запас на дрожание работает и здесь', () => {
+    expect(isPinnedToTop({ scrollTop: STICK_SLACK_PX })).toBe(true);
+    expect(isPinnedToTop({ scrollTop: STICK_SLACK_PX + 1 })).toBe(false);
+  });
+
+  it('человек, отмотавший вниз к старым записям, не считается прилипшим', () => {
+    expect(isPinnedToTop({ scrollTop: 1200 })).toBe(false);
+  });
+});
+
+describe('кто на самом деле прокручивается', () => {
+  // Поймано на живом стенде: в панели прокручивается <main> со своим
+  // overflow, а не окно. Прилипание по window.scrollY было всегда истинным,
+  // то есть лента дёргалась бы и у того, кто читает старые записи.
+  function withScrollable(extra: number, scrollTop: number): HTMLElement {
+    const main = document.createElement('main');
+    main.style.overflowY = 'auto';
+    const inner = document.createElement('div');
+    main.append(inner);
+    document.body.append(main);
+    Object.defineProperty(main, 'clientHeight', { value: 600, configurable: true });
+    Object.defineProperty(main, 'scrollHeight', { value: 600 + extra, configurable: true });
+    Object.defineProperty(main, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+    return inner;
+  }
+
+  afterEach(() => {
+    document.body.innerHTML = '';
+    globalThis.scrollY = 0;
+  });
+
+  it('прокрутка берётся у ближайшего прокручиваемого предка, а не у окна', () => {
+    const inner = withScrollable(900, 700);
+    globalThis.scrollY = 0;
+    expect(scrollTopNear(inner)).toBe(700);
+    expect(isPinnedToTop({ scrollTop: scrollTopNear(inner) })).toBe(false);
+  });
+
+  it('предок, которому нечего прокручивать, не считается прокручиваемым', () => {
+    const inner = withScrollable(0, 0);
+    globalThis.scrollY = 500;
+    expect(scrollParent(inner)).toBeNull();
+    expect(scrollTopNear(inner), 'запасной путь — сама страница').toBe(500);
   });
 });

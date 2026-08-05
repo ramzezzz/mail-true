@@ -48,6 +48,50 @@ export function isPinnedToBottom(
 }
 
 /**
+ * Стоит ли лента в самом верху (с тем же запасом).
+ *
+ * Нужно там, где новое приписывается СВЕРХУ, а не снизу: история обработанных
+ * писем идёт от свежих к старым, и «следить за новым» там означает стоять в
+ * начале списка, а не в конце.
+ */
+export function isPinnedToTop(position: Pick<ScrollPosition, 'scrollTop'>, slack = STICK_SLACK_PX): boolean {
+  return position.scrollTop <= slack;
+}
+
+/**
+ * Кто на самом деле прокручивается вокруг этого узла.
+ *
+ * Поймано на живом стенде, и юнит-тест этого не показал: в панели
+ * управления прокручивается не окно, а `<main>` с собственным overflow.
+ * Прилипание, считанное по `window.scrollY`, было ВСЕГДА истинным — то
+ * есть лента дёргалась бы и у человека, отмотавшего к старым записям, а
+ * счётчик непрочитанного не появился бы никогда.
+ *
+ * Ищем ближайшего предка, который действительно прокручивается. `null`
+ * означает «прокручивается сама страница» — так тоже бывает, и завязываться
+ * на разметку макета здесь нельзя: она меняется.
+ */
+export function scrollParent(node: Element | null): Element | null {
+  for (let el = node?.parentElement ?? null; el; el = el.parentElement) {
+    const overflow = globalThis.getComputedStyle?.(el).overflowY ?? '';
+    if (/(auto|scroll|overlay)/.test(overflow) && el.scrollHeight > el.clientHeight) return el;
+  }
+  return null;
+}
+
+/** Насколько прокручен тот, кто прокручивается вокруг узла. */
+export function scrollTopNear(node: Element | null): number {
+  return scrollParent(node)?.scrollTop ?? globalThis.scrollY ?? 0;
+}
+
+/** Вернуть к началу того, кто прокручивается вокруг узла. */
+export function scrollToTopNear(node: Element | null): void {
+  const parent = scrollParent(node);
+  if (parent) parent.scrollTo({ top: 0, behavior: 'smooth' });
+  else globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+}
+
+/**
  * Окно записей в памяти.
  *
  * Копить без предела нельзя: сутки на открытой вкладке — это сотни тысяч

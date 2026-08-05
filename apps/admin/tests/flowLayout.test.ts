@@ -96,3 +96,17 @@ describe('таблицы на узком экране убирают колон�
     expect(markup).toMatch(/<th>Ответ принимающей стороны<\/th>/);
   });
 });
+
+describe('FlowPage: счётчик новых записей', () => {
+  it('не занимает места в потоке — таблица под ним не сдвигается', () => {
+    // Появившись, счётчик иначе уводит вниз ту самую строку, которую в этот
+    // момент читают, — ровно у того человека, ради которого он показан.
+    const body = rule(css('FlowPage'), '.unread');
+    expect(body).toMatch(/height:\s*0/);
+    expect(body).toMatch(/position:\s*sticky/);
+  });
+
+  it('счётчик не перехватывает нажатия мимо самой кнопки', () => {
+    expect(rule(css('FlowPage'), '.unread')).toMatch(/pointer-events:\s*none/);
+  });
+});

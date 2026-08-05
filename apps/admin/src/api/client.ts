@@ -237,6 +237,8 @@ export const api = {
     limit?: number | undefined;
     beforeTime?: string | undefined;
     beforeId?: string | undefined;
+    afterTime?: string | undefined;
+    afterId?: string | undefined;
   }) => get<FlowHistoryPage>(`/queue/history${query(params)}`),
   flowStats: (hours: number) => get<FlowHistoryStats>(`/queue/history/stats${query({ hours })}`),
 

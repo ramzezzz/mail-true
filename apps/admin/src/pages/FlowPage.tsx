@@ -32,12 +32,40 @@ import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Modal, Notice, Pager, Toolbar, ToolbarSpacer } from '../components/ui';
 import { can } from '../lib/access';
-import { loadAutoRefresh, saveAutoRefresh, shouldPoll } from '../lib/autoRefresh';
+import {
+  isPinnedToTop,
+  loadAutoRefresh,
+  saveAutoRefresh,
+  scrollToTopNear,
+  scrollTopNear,
+  shouldPoll,
+  unreadLabel,
+} from '../lib/autoRefresh';
 import { formatBytes, formatDateTime } from '../lib/format';
 import styles from './FlowPage.module.css';
 
 const QUEUE_LIMIT = 50;
 const HISTORY_LIMIT = 50;
+/** Как часто опрашивать сервер при включённом автообновлении. */
+const POLL_MS = 10_000;
+
+/**
+ * Видна ли сейчас вкладка браузера.
+ *
+ * Забытая на сутки панель иначе молотила бы запросами тот же сервер, что
+ * возит почту. Нужно обеим вкладкам раздела, поэтому вынесено сюда.
+ */
+function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() =>
+    typeof document === 'undefined' ? true : document.visibilityState !== 'hidden',
+  );
+  useEffect(() => {
+    const onChange = (): void => setVisible(document.visibilityState !== 'hidden');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+  return visible;
+}
 
 /** Состояния обработанного письма — словами, а не кодами. */
 const STATUS_LABEL: Readonly<Record<FlowStatus, string>> = {
@@ -142,16 +170,7 @@ function QueueTab() {
   // Автообновление — по флажку, а не всегда: список, который шевелится сам,
   // решает человек. Память своя у этого раздела (см. lib/autoRefresh.ts).
   const [auto, setAuto] = useState(() => loadAutoRefresh('queue'));
-  // Невидимая вкладка не опрашивается вовсе: забытая на сутки панель иначе
-  // молотила бы запросами тот же сервер, что возит почту.
-  const [visible, setVisible] = useState(
-    () => (typeof document === 'undefined' ? true : document.visibilityState !== 'hidden'),
-  );
-  useEffect(() => {
-    const onChange = (): void => setVisible(document.visibilityState !== 'hidden');
-    document.addEventListener('visibilitychange', onChange);
-    return () => document.removeEventListener('visibilitychange', onChange);
-  }, []);
+  const visible = usePageVisible();
   const client = useQueryClient();
   const [search, setSearch] = useState('');
   const [queueName, setQueueName] = useState('');
@@ -175,7 +194,7 @@ function QueueTab() {
     // Очередь живёт своей жизнью: письмо уходит из неё само, без нашего
     // участия. Но дёргать список без спросу нельзя — только по флажку и
     // только на видимой вкладке.
-    refetchInterval: shouldPoll(auto, visible ? 'visible' : 'hidden') ? 10_000 : false,
+    refetchInterval: shouldPoll(auto, visible ? 'visible' : 'hidden') ? POLL_MS : false,
     placeholderData: keepPreviousData,
   });
 
@@ -432,6 +451,9 @@ function HistoryTab() {
   const [direction, setDirection] = useState('');
   const [search, setSearch] = useState('');
   const [applied, setApplied] = useState('');
+  const [auto, setAuto] = useState(() => loadAutoRefresh('flow-history'));
+  const visible = usePageVisible();
+  const client = useQueryClient();
 
   // Поиск применяем с задержкой: иначе каждый набранный символ — это
   // запрос к базе на сотнях тысяч строк.
@@ -489,6 +511,76 @@ function HistoryTab() {
     return () => observer.disconnect();
   }, [onIntersect]);
 
+  /* --- Автообновление ------------------------------------------------ */
+  //
+  // История растёт СВЕРХУ: свежие письма новее верхней строки. Поэтому
+  // перезапрашивать весь список нельзя — человек мог подгрузить прокруткой
+  // тысячу записей, и обновление схлопнуло бы их обратно в пятьдесят,
+  // выдернув из-под глаз то, что он читает. Вместо этого дочитываем ТОЛЬКО
+  // появившееся после верхней строки (обратный курсор afterTime/afterId).
+  //
+  // Прилипание — как в журналах, по положению прокрутки: стоит человек в
+  // начале списка — новое вливается само; отмотал вниз, разбирается в
+  // старом — копим и показываем счётчик, а ленту не трогаем.
+  const historyKey = useMemo(
+    () => ['flow-history', hours, status, direction, applied] as const,
+    [hours, status, direction, applied],
+  );
+  const top = items[0];
+  const [pendingItems, setPendingItems] = useState<FlowEvent[]>([]);
+
+  const fresh = useQuery({
+    queryKey: ['flow-history-new', hours, status, direction, applied, top?.id],
+    queryFn: () =>
+      api.flowHistory({
+        hours,
+        status: status || undefined,
+        direction: direction || undefined,
+        search: applied || undefined,
+        limit: HISTORY_LIMIT,
+        afterTime: top?.occurredAt,
+        afterId: top?.id,
+      }),
+    enabled: auto && visible && top !== undefined,
+    refetchInterval: shouldPoll(auto, visible ? 'visible' : 'hidden') ? POLL_MS : false,
+  });
+
+  // Вливание новых записей в начало ленты. Отдельная функция, потому что
+  // вызывается из двух мест: сама (когда список стоит в начале) и по кнопке.
+  const merge = useCallback(
+    (fresh: FlowEvent[], gapped: boolean) => {
+      setPendingItems([]);
+      // Записей набежало больше страницы — значит между ними и показанными
+      // есть пропуск, и склейка дала бы дыру в ленте. Честнее перечитать.
+      if (gapped) {
+        void client.invalidateQueries({ queryKey: historyKey });
+        return;
+      }
+      client.setQueryData(historyKey, (old: { pages: { items: FlowEvent[] }[] } | undefined) => {
+        if (!old || old.pages.length === 0) return old;
+        const [first, ...rest] = old.pages;
+        const seen = new Set(first!.items.map((item) => item.id));
+        const added = fresh.filter((item) => !seen.has(item.id));
+        if (added.length === 0) return old;
+        return { ...old, pages: [{ ...first!, items: [...added, ...first!.items] }, ...rest] };
+      });
+      void stats.refetch();
+    },
+    [client, historyKey, stats],
+  );
+
+  const freshItems = fresh.data?.items;
+  const freshGapped = fresh.data?.hasMore ?? false;
+  useEffect(() => {
+    if (!freshItems || freshItems.length === 0) return;
+    // Прокручивается не окно, а колонка содержимого панели — считаем по ней.
+    if (isPinnedToTop({ scrollTop: scrollTopNear(sentinel.current) })) merge(freshItems, freshGapped);
+    else setPendingItems(freshItems);
+  }, [freshItems, freshGapped, merge]);
+
+  // Смена фильтра начинает историю заново — накопленное к ней не относится.
+  useEffect(() => setPendingItems([]), [hours, status, direction, applied]);
+
   const counts = stats.data?.counts ?? {};
 
   return (
@@ -536,8 +628,46 @@ function HistoryTab() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <label className={styles.auto}>
+          <input
+            type="checkbox"
+            checked={auto}
+            onChange={(e) => {
+              setAuto(e.target.checked);
+              saveAutoRefresh('flow-history', e.target.checked);
+              if (!e.target.checked) setPendingItems([]);
+            }}
+          />
+          <span>Автообновление</span>
+        </label>
         <ToolbarSpacer />
+        <Button
+          mode="secondary"
+          size="s"
+          onClick={() => {
+            setPendingItems([]);
+            void client.invalidateQueries({ queryKey: historyKey });
+            void stats.refetch();
+          }}
+        >
+          Обновить
+        </Button>
       </Toolbar>
+
+      {pendingItems.length > 0 && (
+        <div className={styles.unread}>
+          <Button
+            mode="secondary"
+            size="s"
+            onClick={() => {
+              merge(pendingItems, freshGapped);
+              scrollToTopNear(sentinel.current);
+            }}
+          >
+            ↑ {unreadLabel(pendingItems.length)}
+          </Button>
+        </div>
+      )}
 
       <ErrorNotice error={history.error ?? stats.error} />
 
