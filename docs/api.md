@@ -109,6 +109,7 @@ user+IP exceeded`), — это 503. Иначе при упоре в предел
 | GET | `/api/messages` | `MessageListPage`. Параметры: `folderId`, `offset`, `limit` (<=100), `filter` (`all/unread/flagged/with-attachments`), `search`, `snippets=0/1` |
 | GET | `/api/messages/:id` | Полное `Message` + `blockedRemote`. `?images=1` — разрешить внешние картинки. `bodyRecovered: true` означает, что разбор не дал ни одной части и текст взят из исходника как есть |
 | GET | `/api/messages/:id/parts/:partId` | Вложение/встроенная картинка (inline для картинок, attachment для остального) |
+| GET | `/api/messages/:id/source` | Исходник письма целиком, файлом `.eml` (`message/rfc822`, всегда `attachment`). Нужен там, где разбор не помогает: письмо с испорченным разделителем частей иначе недостижимо |
 | POST | `/api/messages/:id/unsubscribe` | Отписка от рассылки (RFC 8058) -> `{ok, method, …}` |
 | POST | `/api/messages/flags` | `{ids[], seen?, flagged?, deleted?}` (true — установить, false — снять) -> `{updated}` |
 | POST | `/api/messages/move` | `{ids[], targetFolderId}` -> `{moved}`. Отсутствующая системная папка (архив) создаётся автоматически |

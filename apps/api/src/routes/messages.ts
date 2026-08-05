@@ -235,6 +235,49 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     });
   });
 
+  /**
+   * Исходник письма целиком — файл .eml.
+   *
+   * Нужен там, где разбор не помогает. Письмо с испорченным разделителем
+   * частей показывалось пустым, и добраться до его содержимого было нельзя
+   * ничем: ни «показать исходник», ни скачиванием. Теперь можно — и заодно
+   * такое письмо можно переслать вложением или открыть в другой почтовой
+   * программе.
+   *
+   * Отдаётся строго файлом, а не для показа в браузере: письмо — чужое
+   * содержимое, и открывать его как страницу нельзя ни при каких условиях.
+   * Отсюда и `nosniff`, и запрет на рамки: браузер не должен решать за нас,
+   * что это за файл.
+   */
+  app.get('/messages/:id/source', { preHandler: app.requireSession }, async (request, reply) => {
+    const session = requireMailSession(request.mailSession);
+    const { id } = messageParamsSchema.parse(request.params);
+    const { folderId, uid } = splitMessageId(id);
+
+    const source = await pool.withClient(session.email, session.password, async (client) => {
+      const folder = await requireFolder(client, folderId);
+      const lock = await client.getMailboxLock(folder.path);
+      try {
+        const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+        return msg && msg.source ? msg.source : null;
+      } finally {
+        lock.release();
+      }
+    });
+    if (!source) throw new NotFoundError('Письмо не найдено');
+
+    reply.header('content-type', 'message/rfc822');
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('content-security-policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
+    // Имя файла — из идентификатора письма, а не из темы: тема бывает
+    // пустой, очень длинной и содержит что угодно, включая символы, которые
+    // в имени файла означают путь.
+    const filename = `${id.replace(/[^\w.-]+/g, '_')}.eml`;
+    reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    reply.header('cache-control', 'private, max-age=3600');
+    return reply.send(source);
+  });
+
   // Вложение или встроенная картинка
   app.get('/messages/:id/parts/:partId', { preHandler: app.requireSession }, async (request, reply) => {
     const session = requireMailSession(request.mailSession);

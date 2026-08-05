@@ -129,6 +129,20 @@ class FakeClient {
     }));
   }
 
+  /** Одно письмо целиком: нужно выдаче исходника (.eml). */
+  async fetchOne(seq: string): Promise<{ uid: number; source: Buffer } | false> {
+    const uid = Number(seq);
+    const present = this.boxes.get(this.selected) ?? new Set<number>();
+    if (!present.has(uid)) return false;
+    return {
+      uid,
+      source: Buffer.from(`Subject: Pismo ${String(uid)}
+
+Telo pisma.
+`, 'utf8'),
+    };
+  }
+
   async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
     this.calls.push(`flagsAdd ${this.selected} ${uids.join(',')} ${flags.join(',')}`);
     return true;
@@ -380,6 +394,43 @@ test('несуществующий путь отвечает в форме ко�
     const res = await app.inject({ method: 'GET', url: '/api/такого-нет' });
     assert.equal(res.statusCode, 404);
     assert.deepEqual(res.json(), { error: 'NOT_FOUND', message: 'Ресурс не найден' });
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * Исходник письма отдаётся файлом.
+ *
+ * Нужен там, где разбор не помогает: письмо с испорченным разделителем
+ * частей показывалось пустым, и добраться до содержимого было нельзя ничем.
+ *
+ * Отдавать его для показа в браузере нельзя ни при каких условиях: это чужое
+ * содержимое, и решать за нас, что это за файл, браузер не должен.
+ */
+test('исходник письма отдаётся вложением и не показывается в браузере', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/messages/inbox:1/source' });
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.headers['content-type'], 'message/rfc822');
+    assert.equal(res.headers['x-content-type-options'], 'nosniff');
+    assert.match(String(res.headers['content-disposition']), /^attachment;/);
+    assert.match(String(res.headers['content-disposition']), /\.eml/);
+    assert.match(res.body, /Telo pisma/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('исходника несуществующего письма нет, а не пустой файл', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/messages/inbox:999/source' });
+    assert.equal(res.statusCode, 404);
+    assert.equal(res.json().error, 'NOT_FOUND');
   } finally {
     await app.close();
   }
