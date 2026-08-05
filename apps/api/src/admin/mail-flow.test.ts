@@ -781,3 +781,49 @@ test('порядок выдачи не зависит от направлени�
     assert.ok(text.includes('ORDER BY occurred_at DESC, id DESC'), text);
   }
 });
+
+test('повторная попытка наследует направление первой, а не становится «неизвестно»', () => {
+  // Повторные попытки Postfix пишет псевдотранспортом `error`: «delivery
+  // temporarily suspended». Направления он не несёт, и в разделе такие
+  // строки показывались как «неизвестно» — при том что первая попытка того
+  // же письма честно назвала его исходящим. Письмо одно, направление одно.
+  const at = new Date('2026-08-05T20:00:00.000Z');
+  const first = parseLogLine(
+    'postfix',
+    'Aug 05 20:00:00 mail postfix/smtp[9015]: 01F1543FC6: to=<kuda@example.org>,' +
+      ' relay=none, delay=21, dsn=4.4.1, status=deferred (connect refused)',
+    at,
+  );
+  const firstEvent = toFlowEvent(first, { sender: 'test@mail.local', sizeBytes: 100 });
+  assert.equal(firstEvent?.direction, 'out', 'первая попытка определяется по транспорту');
+
+  const retry = parseLogLine(
+    'postfix',
+    'Aug 05 20:05:00 mail postfix/error[9099]: 01F1543FC6: to=<kuda@example.org>,' +
+      ' relay=none, delay=321, dsn=4.4.1, status=deferred' +
+      ' (delivery temporarily suspended: connect refused)',
+    at,
+  );
+  const blind = toFlowEvent(retry, { sender: 'test@mail.local', sizeBytes: 100 });
+  assert.equal(blind?.direction, 'unknown', 'сам по себе транспорт error направления не несёт');
+
+  const withMemory = toFlowEvent(retry, {
+    sender: 'test@mail.local',
+    sizeBytes: 100,
+    direction: 'out',
+  });
+  assert.equal(withMemory?.direction, 'out', 'известное направление письма должно унаследоваться');
+});
+
+test('известное направление не перебивает то, что сказал транспорт', () => {
+  // Память — только запасной путь. Если строка сама называет транспорт,
+  // верить надо ей: письмо могло вернуться в очередь и пойти иначе.
+  const entry = parseLogLine(
+    'postfix',
+    'Aug 05 20:10:00 mail postfix/lmtp[9100]: 01F1543FC6: to=<user@mail.local>,' +
+      ' relay=dovecot[172.28.0.54]:24, delay=1, dsn=2.0.0, status=sent (250 ok)',
+    new Date('2026-08-05T20:10:00.000Z'),
+  );
+  const event = toFlowEvent(entry, { sender: 'a@b', sizeBytes: 1, direction: 'out' });
+  assert.equal(event?.direction, 'in');
+});

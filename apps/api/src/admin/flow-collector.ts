@@ -155,11 +155,21 @@ export class FlowCollector {
       // отправителя с размером: в самих строках доставки их нет.
       const meta = toQueueMeta(entry);
       if (meta && entry.queueId) {
-        this.meta.set(entry.queueId, meta);
+        // Направление, если оно уже было определено, переносим в новую
+        // запись: строка `from=…` приходит и при возврате письма в очередь.
+        const known = this.meta.get(entry.queueId)?.direction;
+        this.meta.set(entry.queueId, known ? { ...meta, direction: known } : meta);
         continue;
       }
-      const event = toFlowEvent(entry, this.meta.get(entry.queueId));
+      const known = this.meta.get(entry.queueId);
+      const event = toFlowEvent(entry, known);
       if (event) events.push(event);
+      // Направление, определённое по транспорту, запоминаем: повторные
+      // попытки того же письма идут транспортом `error` и своего
+      // направления не несут.
+      if (event && entry.queueId && event.direction !== 'unknown' && known) {
+        this.meta.set(entry.queueId, { ...known, direction: event.direction });
+      }
       // Письмо ушло из очереди — помнить о нём больше нечего.
       if (isQueueRemoval(entry) && entry.queueId) this.meta.delete(entry.queueId);
     }

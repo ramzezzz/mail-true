@@ -296,6 +296,18 @@ export interface FlowEvent {
 export interface QueueMeta {
   sender: string | null;
   sizeBytes: number | null;
+  /**
+   * Направление, если оно уже было определено по более ранней строке того
+   * же письма.
+   *
+   * Повторные попытки Postfix пишет псевдотранспортом `error`:
+   * «delivery temporarily suspended: …». По нему направление не определить
+   * никак — и в разделе такие строки показывались как «неизвестно», хотя
+   * первая попытка того же письма честно назвала его исходящим. Письмо в
+   * очереди одно, направление у него одно: берём уже известное, а не гадаем
+   * по адресу (адрес врёт — алиас, пересылка, ящик на чужом домене).
+   */
+  direction?: FlowDirection;
 }
 
 const STATUS_MAP: Readonly<Record<string, FlowStatus>> = {
@@ -398,10 +410,13 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
   // ровно то, что человек ищет, когда спрашивает «почему не дошло».
   const reason = /\(([\s\S]*)\)\s*$/.exec(text)?.[1] ?? null;
 
+  // Транспорт `error` (повторные попытки) направления не несёт — тогда
+  // берём то, что уже известно об этом же письме из очереди.
+  const byTransport = directionOf(entry.component, relay);
   return {
     occurredAt: entry.at,
     queueId: entry.queueId,
-    direction: directionOf(entry.component, relay),
+    direction: byTransport === 'unknown' ? (meta?.direction ?? 'unknown') : byTransport,
     status: mapped,
     sender: meta?.sender ?? null,
     recipient: address(to),
