@@ -12,6 +12,16 @@ import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { QuotaInput } from '../components/QuotaInput';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
+import { RowActions } from '../components/RowActions';
+import {
+  IconEnterMailbox,
+  IconKey,
+  IconLock,
+  IconPencil,
+  IconSettings,
+  IconTrash,
+  IconUnlock,
+} from '../components/icons';
 import {
   ActiveBadge,
   ErrorNotice,
@@ -144,6 +154,21 @@ export function UsersPage() {
             Действия над {pluralize(selectedIds.length, 'ящиком', 'ящиками', 'ящиками')}
           </Button>
         )}
+        {/*
+          Отмеченные ящики уезжают на страницу подписей состоянием
+          перехода, а не в адресе: список номеров в адресной строке
+          при сотне ящиков не помещается и в закладку не годится —
+          выборка живёт ровно один переход.
+        */}
+        {can('usersettings.bulk') && (
+          <Link to="/users/signatures" state={{ ids: selectedIds }}>
+            <Button mode="secondary" size="s">
+              {selectedIds.length > 0
+                ? `Подпись по шаблону (${selectedIds.length})`
+                : 'Подписи по шаблону'}
+            </Button>
+          </Link>
+        )}
         {can('users.write') && (
           <>
             <Link to="/users/import">
@@ -204,37 +229,83 @@ export function UsersPage() {
                 <td><ActiveBadge active={user.active} /></td>
                 <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>{formatDateTime(user.createdAt)}</td>
                 <td>
-                  <div className={tableStyles.actions}>
-                    {can('users.write') && (
-                      <Button mode="tertiary" size="s" onClick={() => setEditing(user)}>
-                        Изменить
-                      </Button>
-                    )}
-                    {can('users.password') && (
-                      <Button mode="tertiary" size="s" onClick={() => setPasswordFor(user)}>
-                        Пароль
-                      </Button>
-                    )}
-                    {can('users.write') && (
-                      <Button
-                        mode="tertiary"
-                        size="s"
-                        onClick={() => toggleActive.mutate({ id: user.id, active: !user.active })}
-                      >
-                        {user.active ? 'Заблокировать' : 'Разблокировать'}
-                      </Button>
-                    )}
-                    {canEnterMailbox && (
-                      <Button mode="tertiary" size="s" onClick={() => setEnterFor(user)}>
-                        Войти в ящик
-                      </Button>
-                    )}
-                    {can('users.delete') && (
-                      <Button mode="tertiary" size="s" onClick={() => setDeleting(user)}>
-                        Удалить
-                      </Button>
-                    )}
-                  </div>
+                  {/*
+                    Значки, раскрывающиеся в подписи при наведении и фокусе
+                    (см. components/RowActions.tsx). Шесть текстовых кнопок
+                    в строку не помещались: на 1440 не хватало 47 точек,
+                    на 1280 — 207, и «Войти в ящик» с «Удалить» уезжали
+                    за правый край внутрь прокрутки.
+                  */}
+                  <RowActions
+                    subject={user.email}
+                    actions={[
+                      ...(can('usersettings.read')
+                        ? [
+                            {
+                              id: 'settings',
+                              icon: <IconSettings />,
+                              label: 'Настройки',
+                              // Ссылка, а не кнопка: это переход на страницу,
+                              // и открыть его в новой вкладке — законное желание.
+                              to: `/users/${String(user.id)}/settings`,
+                            },
+                          ]
+                        : []),
+                      ...(canEnterMailbox
+                        ? [
+                            {
+                              id: 'enter',
+                              icon: <IconEnterMailbox />,
+                              label: 'Войти в ящик',
+                              onClick: () => setEnterFor(user),
+                            },
+                          ]
+                        : []),
+                      ...(can('users.write')
+                        ? [
+                            {
+                              id: 'edit',
+                              icon: <IconPencil />,
+                              label: 'Изменить',
+                              onClick: () => setEditing(user),
+                            },
+                          ]
+                        : []),
+                      ...(can('users.password')
+                        ? [
+                            {
+                              id: 'password',
+                              icon: <IconKey />,
+                              label: 'Пароль',
+                              onClick: () => setPasswordFor(user),
+                            },
+                          ]
+                        : []),
+                      ...(can('users.write')
+                        ? [
+                            {
+                              id: 'active',
+                              icon: user.active ? <IconLock /> : <IconUnlock />,
+                              label: user.active ? 'Заблокировать' : 'Разблокировать',
+                              danger: true,
+                              onClick: () =>
+                                toggleActive.mutate({ id: user.id, active: !user.active }),
+                            },
+                          ]
+                        : []),
+                      ...(can('users.delete')
+                        ? [
+                            {
+                              id: 'delete',
+                              icon: <IconTrash />,
+                              label: 'Удалить',
+                              danger: true,
+                              onClick: () => setDeleting(user),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
                 </td>
               </tr>
             ))}

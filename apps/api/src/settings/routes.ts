@@ -17,12 +17,17 @@ import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
 import { applyRuleToMailbox } from './apply.js';
-import { isUndefinedTable } from './db.js';
-import { MIGRATION_HINT, SettingsUnavailableError, type SettingsService } from './service.js';
-import type { MailSession } from '../types.js';
-import type { Signature } from './types.js';
+import { getAppearance, saveAppearance } from './appearance.js';
+import { isUndefinedColumn, isUndefinedTable } from './db.js';
+import { saveGeneralWithSignatures } from './general.js';
 import {
-  fromWebGeneral,
+  APPEARANCE_MIGRATION_HINT,
+  MIGRATION_HINT,
+  SettingsUnavailableError,
+  type SettingsService,
+} from './service.js';
+import type { MailSession } from '../types.js';
+import {
   fromWebRule,
   pathOfFolderId,
   toWebGeneral,
@@ -41,7 +46,7 @@ const signatureSchema = z.object({
   text: z.string().max(100_000).default(''),
 });
 
-const generalSchema = z.object({
+export const generalSchema = z.object({
   senderName: z.string().max(255).default(''),
   signatures: z.array(signatureSchema).max(20).default([]),
   defaultSignatureId: z.string().max(64).nullable().default(null),
@@ -78,7 +83,7 @@ const actionsSchema = z.object({
   applyToSpam: z.boolean().default(false),
 });
 
-const ruleSchema = z.object({
+export const ruleSchema = z.object({
   id: z.string().max(64).default(''),
   enabled: z.boolean().default(true),
   auto: z.boolean().default(false),
@@ -86,7 +91,7 @@ const ruleSchema = z.object({
   actions: actionsSchema,
 });
 
-const orderSchema = z.object({ ids: z.array(z.string().min(1).max(64)).max(200) });
+export const orderSchema = z.object({ ids: z.array(z.string().min(1).max(64)).max(200) });
 
 const idParam = z.object({ id: z.string().min(1).max(64) });
 
@@ -140,55 +145,56 @@ export async function settingsUserRoutes(
   /**
    * Сохранение общих настроек вместе с подписями.
    *
-   * Подписи приходят полным списком — так устроена форма настроек, где
-   * их добавляют и удаляют, а сохраняют одной кнопкой. Поэтому здесь
-   * согласование списков: что пропало — удаляем, что осталось —
-   * обновляем, что появилось — заводим. Идентификаторы существующих
-   * подписей сохраняются, иначе выбор подписи по умолчанию слетал бы
-   * при каждом сохранении.
+   * Само согласование списка подписей живёт в general.ts: те же настройки
+   * правит админка, и второй экземпляр этого правила рано или поздно
+   * разошёлся бы с первым.
    */
   app.put('/general', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const dto = generalSchema.parse(request.body) as WebGeneralSettings;
     const db = service.requireDb();
 
-    const result = await guard(async () => {
-      await db.saveSettings(session.email, fromWebGeneral(dto));
-
-      const existing = await db.listSignatures(session.email);
-      const keptIds = new Set<number>();
-      for (const item of dto.signatures) {
-        const id = Number(item.id);
-        const found = Number.isInteger(id) ? existing.find((s) => s.id === id) : undefined;
-        const isDefault = dto.defaultSignatureId !== null && item.id === dto.defaultSignatureId;
-        if (found) {
-          keptIds.add(found.id);
-          await db.updateSignature(session.email, found.id, {
-            name: item.name,
-            bodyHtml: item.text,
-            isDefault,
-            position: dto.signatures.indexOf(item),
-          });
-        } else {
-          const after: Signature[] = await db.createSignature(session.email, {
-            name: item.name,
-            bodyHtml: item.text,
-            isDefault,
-          });
-          const created = after[after.length - 1];
-          if (created) keptIds.add(created.id);
-        }
-      }
-      for (const old of existing) {
-        if (!keptIds.has(old.id)) await db.deleteSignature(session.email, old.id);
-      }
-
-      return toWebGeneral(await db.getSettings(session.email), await db.listSignatures(session.email));
-    });
+    const result = await guard(() => saveGeneralWithSignatures(db, session.email, dto));
 
     // Автоответчик живёт в том же файле Sieve, что и правила.
     await service.syncSieve(session.email);
     return result;
+  });
+
+  /* -------------------------------------------------------------- */
+  /* Оформление                                                       */
+  /* -------------------------------------------------------------- */
+
+  /*
+   * Тема и фон живут за учётной записью, а не в браузере: требование
+   * заказчика — «тема оформления должна запоминаться для каждого юзера»
+   * (см. appearance.ts и миграцию 0009).
+   *
+   * Отдельный `appearanceGuard` вместо общего `guard`: если 0009 ещё не
+   * применена, таблицы настроек НА МЕСТЕ и всё остальное работает —
+   * не работает только запоминание оформления, и подсказка про миграцию
+   * тут своя.
+   */
+  const appearanceGuard = async <T>(fn: () => Promise<T>): Promise<T> => {
+    try {
+      return await fn();
+    } catch (err) {
+      if (isUndefinedTable(err)) throw new SettingsUnavailableError(MIGRATION_HINT);
+      if (isUndefinedColumn(err)) throw new SettingsUnavailableError(APPEARANCE_MIGRATION_HINT);
+      throw err;
+    }
+  };
+
+  app.get('/appearance', { preHandler: app.requireSession }, async (request) => {
+    const session = sessionOf(request);
+    return appearanceGuard(() => getAppearance(service.requireDb(), session.email));
+  });
+
+  app.put('/appearance', { preHandler: app.requireSession }, async (request) => {
+    const session = sessionOf(request);
+    return appearanceGuard(() =>
+      saveAppearance(service.requireDb(), session.email, request.body),
+    );
   });
 
   /* -------------------------------------------------------------- */

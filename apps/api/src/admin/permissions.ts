@@ -25,6 +25,37 @@ export const PERMISSIONS = [
   'domains.dnscheck',
   'audit.read',
   'mailbox.impersonate',
+  /**
+   * Настройки ЧУЖОГО ящика: подписи, фильтры, автоответчик, пересылка.
+   *
+   * Права три, а не одно, и это не педантизм. Посмотреть, почему у
+   * человека письма уезжают не в ту папку, должен уметь и дежурный
+   * «только чтение» — это разбор обращения. Изменить чужой фильтр —
+   * уже вмешательство в работу человека, и делает его тот, кто отвечает
+   * за ящики. А групповая установка подписи трогает разом сотни ящиков
+   * и откатывается только руками, поэтому остаётся за владельцем.
+   */
+  'usersettings.read',
+  'usersettings.write',
+  'usersettings.bulk',
+  /**
+   * Своё оформление входа (OEM): логотип и подписи на страницах входа.
+   * Смотреть настройку может кто угодно из вошедших — логотип и так виден
+   * всему интернету на странице входа. Менять — только владелец: подмена
+   * логотипа на входе это подмена лица продукта для всех разом.
+   */
+  'branding.read',
+  'branding.write',
+  /**
+   * Резервная копия настроек. Права два, и оба у владельца.
+   *
+   * Выгрузка отделена от восстановления не для симметрии: в файле копии
+   * лежат хэши паролей ящиков и администраторов, то есть скачать копию —
+   * само по себе действие с секретами, а не «чтение». Восстановление же
+   * перезаписывает учётные записи, включая ту, под которой работают.
+   */
+  'backup.export',
+  'backup.restore',
   'admins.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -36,6 +67,8 @@ const READ_ONLY: readonly Permission[] = [
   'aliases.read',
   'domains.read',
   'audit.read',
+  'usersettings.read',
+  'branding.read',
 ];
 
 const USER_MANAGER: readonly Permission[] = [
@@ -45,12 +78,17 @@ const USER_MANAGER: readonly Permission[] = [
   'aliases.write',
   'domains.dnscheck',
   'mailbox.impersonate',
+  'usersettings.write',
 ];
 
 const OWNER: readonly Permission[] = [
   ...USER_MANAGER,
   'users.delete',
   'domains.write',
+  'usersettings.bulk',
+  'branding.write',
+  'backup.export',
+  'backup.restore',
   'admins.manage',
 ];
 

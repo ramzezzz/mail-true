@@ -1,0 +1,104 @@
+/* Настройки чужого ящика из админки. Своей палитры нет: только раскладка. */
+
+.grid {
+  display: grid;
+  gap: 12px;
+}
+
+/* Подпись: имя слева, текст под ним на всю ширину. */
+.signature {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--mt-color-border-primary);
+  border-radius: var(--mt-radius-m, 8px);
+}
+
+.signatureHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.signatureName {
+  flex: 1 1 200px;
+  min-width: 140px;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* Условие фильтра: поле, оператор, значение, крестик. */
+.condition {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: var(--mt-color-text-secondary);
+}
+
+/* Текст файла правил: моноширинный, со своей прокруткой. */
+.script {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/*
+ * Предпросмотр подписи. Рамка и белый фон нужны, чтобы было видно
+ * пустые строки в начале и в конце: именно ими и портится подпись,
+ * собранная по шаблону с незаполненной подстановкой.
+ */
+.preview {
+  border: 1px solid var(--mt-color-border-primary);
+  border-radius: var(--mt-radius-m, 8px);
+  padding: 10px;
+  background: var(--mt-color-bg-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 60px;
+}
+
+.counts {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+}
+
+.count {
+  display: grid;
+}
+
+.countValue {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.countLabel {
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Число, о котором нельзя молчать: сколько чужих подписей будет затёрто. */
+.countDanger .countValue {
+  color: var(--mt-color-text-error, #c02a2a);
+}

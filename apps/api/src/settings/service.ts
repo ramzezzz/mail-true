@@ -34,6 +34,15 @@ export interface SieveSyncState {
   activeRules: number;
   /** Файл записан и скомпилирован. */
   ok: boolean;
+  /**
+   * Файл правил лежит в ящике и будет применён к почте.
+   *
+   * Отдельно от `ok`: без компилятора рядом (в контейнере нет sievec)
+   * правила ЗАПИСАНЫ и работают, их соберёт сам Dovecot при доставке.
+   * Пока признак был один, интерфейс сообщал «правила не работают» и в
+   * этом случае — то есть пугал впустую в самом частом из них.
+   */
+  written: boolean;
   /** Что пошло не так (пусто — всё хорошо). */
   error: string;
 }
@@ -103,6 +112,7 @@ export class SettingsService {
       path: this.#store.activePath(email),
       activeRules: active.length,
       ok: false,
+      written: false,
       error: '',
     };
 
@@ -115,11 +125,14 @@ export class SettingsService {
       if (!needsScript) {
         await this.#store.remove(email);
         state.ok = true;
+        // Правил нет вовсе — и файла быть не должно: это тоже «доехало».
+        state.written = true;
         return state;
       }
       const script = buildSieveScript(rules, { accountEmail: email, settings });
       const result = await this.#store.write(email, script);
       state.ok = result.compiled;
+      state.written = result.written;
       state.path = result.activePath;
       if (!result.compiled) state.error = result.compilerOutput || 'Скрипт не скомпилирован';
       return state;
@@ -145,3 +158,14 @@ export class SettingsService {
 export const MIGRATION_HINT =
   'Таблиц настроек нет. Примените infra/postgres/migrations/0005_settings_accounts.sql ' +
   'к работающей базе — до этого настройки и фильтры недоступны.';
+
+/**
+ * Подсказка для случая «таблицы есть, колонок оформления нет».
+ *
+ * Отдельно от MIGRATION_HINT нарочно: здесь работает всё, кроме
+ * запоминания темы, и отправлять человека применять 0005 (которая уже
+ * применена) — значит завести его в тупик.
+ */
+export const APPEARANCE_MIGRATION_HINT =
+  'Оформление не запоминается: в таблице настроек нет колонок theme/wallpaper. ' +
+  'Примените infra/postgres/migrations/0009_appearance.sql к работающей базе.';

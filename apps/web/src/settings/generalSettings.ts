@@ -26,6 +26,9 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   quoteOriginalOnReply: true,
   afterDelete: 'list',
   autoCollectContacts: true,
+  // Выключено, как и на сервере: включение означает, что сервер пойдёт
+  // в интернет за картинками, и это решение человека.
+  showSenderLogos: false,
 };
 
 /** Настройки для любого экрана: пока их нет — значения по умолчанию. */

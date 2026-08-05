@@ -1,0 +1,183 @@
+/*
+ * Действия в строке таблицы: значок, раскрывающийся в подпись.
+ *
+ * Зачем так. Шесть текстовых кнопок в строке списка ящиков не помещались:
+ * на окне 1440 таблице не хватало 47 точек, на 1280 — 207, и «Войти в ящик»
+ * с «Удалить» уезжали за правый край внутрь прокрутки. Заказчик просил
+ * оставить именно кнопки в строке (а не прятать их в меню «…») и сделать
+ * так, чтобы значок при наведении раскрывался вправо, показывая подпись.
+ *
+ * Три вещи, без которых это было бы красиво и непригодно:
+ *
+ *  1. Ширина места под раскрытие ЗАРЕЗЕРВИРОВАНА в самой полосе действий
+ *     (--mt-row-action-reveal). Поэтому раскрытие никогда не расширяет
+ *     колонку: таблица не перекладывается, соседние столбцы не дёргаются,
+ *     а самая правая кнопка не вылезает за край обёртки.
+ *  2. Раскрытие живёт только там, где есть настоящее наведение
+ *     (@media hover: hover). На касании наведение залипает, поэтому там
+ *     подписи показаны ВСЕГДА: догадаться о смысле значка пальцем нельзя,
+ *     а места на телефоне и так хватает — полоса действий переносится.
+ *  3. Доступное имя у кнопки задаётся aria-label, а не этой подписью:
+ *     раскрывающийся текст помечен aria-hidden, иначе экранный диктор
+ *     читал бы имя дважды.
+ */
+
+.actions {
+  /* Размеры собраны здесь, чтобы ширину полосы считала одна формула. */
+  --mt-row-action-size: 26px;
+  --mt-row-action-gap: 2px;
+  /*
+   * Запас под самую длинную подпись («Разблокировать»). Считается один раз
+   * на всю админку: подписи короткие, а переменный запас на каждую кнопку
+   * означал бы, что ширина колонки зависит от роли смотрящего.
+   */
+  --mt-row-action-reveal: 8.5rem;
+
+  display: flex;
+  align-items: center;
+  gap: var(--mt-row-action-gap);
+  /*
+   * Ровно столько, сколько нужно значкам плюс запас под одно раскрытие.
+   * Число кнопок приходит из разметки: оно зависит от прав смотрящего.
+   */
+  width: calc(
+    var(--mt-row-action-count, 1) * var(--mt-row-action-size) +
+      (var(--mt-row-action-count, 1) - 1) * var(--mt-row-action-gap) +
+      var(--mt-row-action-reveal)
+  );
+  /* Раскрытие не имеет права менять высоту строки. */
+  height: var(--mt-row-action-size);
+}
+
+/* Отступ перед опасной группой: промах мыши не должен стоить ящика. */
+.separator {
+  flex: 0 0 auto;
+  width: 10px;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  height: var(--mt-row-action-size);
+  min-width: var(--mt-row-action-size);
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--mt-admin-radius, 6px);
+  background: none;
+  color: var(--mt-color-text-secondary);
+  cursor: pointer;
+  text-decoration: none;
+  font: inherit;
+  font-size: var(--mt-font-footnote-size, 13px);
+  white-space: nowrap;
+  overflow: hidden;
+  transition:
+    background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease),
+    color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+.action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/*
+ * Подпись. Схлопнута по max-width, а не спрятана display:none: скрытое
+ * так не анимируется, а «появление» без хода — это мигание.
+ */
+.label {
+  display: inline-block;
+  max-width: 0;
+  margin-left: 0;
+  opacity: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition:
+    max-width var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),
+    margin-left var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),
+    opacity var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+/*
+ * Раскрытие. Наведение — только там, где оно настоящее; фокус — везде,
+ * иначе идущий табом не видит, на чём стоит.
+ */
+@media (hover: hover) {
+  .action:hover {
+    background: var(--mt-color-background-secondary);
+    color: var(--mt-color-text-primary);
+  }
+
+  .action:hover .label {
+    max-width: var(--mt-row-action-reveal);
+    margin-left: 5px;
+    opacity: 1;
+  }
+
+  .action_danger:hover {
+    color: var(--mt-color-text-error, #c02a2a);
+  }
+}
+
+.action:focus-visible {
+  outline: 2px solid var(--mt-color-icon-accent-themed, #0a7cff);
+  outline-offset: 1px;
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-primary);
+}
+
+.action:focus-visible .label {
+  max-width: var(--mt-row-action-reveal);
+  margin-left: 5px;
+  opacity: 1;
+}
+
+/*
+ * Узкое окно с мышью. Запас под раскрытие здесь не по карману: замер на
+ * стенде показал, что при окне 390 он один выталкивал за правый край всю
+ * полосу действий домена — не было видно даже первой кнопки. Поэтому
+ * запаса нет, полоса ровно по значкам, а раскрытие ненадолго расширяет
+ * колонку. На узком окне таблица и так прокручивается вбок внутри своей
+ * рамки, и эта прокрутка — меньшая беда, чем недостижимое действие.
+ */
+@media (hover: hover) and (max-width: 900px) {
+  .actions {
+    width: auto;
+  }
+}
+
+/*
+ * Касание. Наведение здесь залипает после нажатия, поэтому раскрытия нет
+ * вовсе — подписи показаны сразу. Значок без подписи на телефоне
+ * не объяснить ничем: подсказки по наведению там не существует.
+ */
+@media (hover: none) {
+  .actions {
+    flex-wrap: wrap;
+    width: auto;
+    height: auto;
+  }
+
+  .label {
+    max-width: none;
+    margin-left: 5px;
+    opacity: 1;
+  }
+}
+
+/*
+ * Меньше движения. Подпись всё равно появляется — просто сразу:
+ * требование заказчика к движению не отменяет доступа к действиям.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .action,
+  .label {
+    transition: none;
+  }
+}

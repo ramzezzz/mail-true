@@ -65,6 +65,17 @@ export interface SieveWriteResult {
   activePath: string;
   /** Скрипт скомпилирован без ошибок. */
   compiled: boolean;
+  /**
+   * Файл правил лежит в ящике и будет применён к почте.
+   *
+   * Отдельно от `compiled`, потому что случаи разные и лечатся по-разному:
+   * без компилятора рядом (sievec нет в контейнере) правила ЗАПИСАНЫ и
+   * работают — их соберёт сам Dovecot при первой доставке, — а вот при
+   * ошибке компиляции действующий файл намеренно не подменяется.
+   * Пока признак был один, интерфейс объявлял «правила не работают»
+   * в обоих случаях, то есть пугал впустую в самом частом из них.
+   */
+  written: boolean;
   /** Сообщение компилятора, если он ругался. */
   compilerOutput: string;
 }
@@ -179,7 +190,12 @@ export class SieveStore {
     const dir = this.mailboxDir(email);
     const activePath = `${dir}/.dovecot.sieve`;
     if (!this.enabled) {
-      return { activePath, compiled: false, compilerOutput: 'Транспорт Sieve выключен' };
+      return {
+        activePath,
+        compiled: false,
+        written: false,
+        compilerOutput: 'Транспорт Sieve выключен',
+      };
     }
     if (this.#opts.transport === 'docker') {
       const res = await run(
@@ -192,7 +208,7 @@ export class SieveStore {
           `Не удалось сохранить правила Sieve: ${res.stderr.trim() || res.stdout.trim()}`,
         );
       }
-      return { activePath, compiled: true, compilerOutput: res.stderr.trim() };
+      return { activePath, compiled: true, written: true, compilerOutput: res.stderr.trim() };
     }
     // Локальный доступ к хранилищу: собираем во временном файле, проверяем
     // компилятором и только потом делаем действующим. Отсутствие sievec
@@ -220,6 +236,8 @@ export class SieveStore {
       return {
         activePath,
         compiled: false,
+        // Действующий файл не тронут: в ящике остаются прежние правила.
+        written: false,
         compilerOutput: res.stderr.trim() || res.stdout.trim(),
       };
     }
@@ -246,13 +264,14 @@ export class SieveStore {
       return {
         activePath,
         compiled: false,
+        written: true,
         compilerOutput:
           'Правила записаны, но проверить их не удалось: рядом нет компилятора Sieve (sievec). ' +
           'Скрипт соберёт сам Dovecot при первой доставке; ошибка в нём будет видна ' +
           'только в .dovecot.sieve.log внутри ящика',
       };
     }
-    return { activePath, compiled: true, compilerOutput: res.stderr.trim() };
+    return { activePath, compiled: true, written: true, compilerOutput: res.stderr.trim() };
   }
 
   /** Читает действующий скрипт (для показа «что лежит в ящике»). */
