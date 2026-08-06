@@ -283,6 +283,8 @@ const SHOTS = [
     wait: 'main',
   },
   { name: '28-disposable', url: `${WEB}/settings/disposable`, wait: 'main' },
+  { name: '29-muted', url: `${WEB}/muted/`, wait: 'main' },
+  { name: '30-awaiting', url: `${WEB}/sent/`, wait: 'main' },
   { name: '26-admin-spam', url: `${ADMIN}/spam`, wait: 'main', admin: true },
   { name: '27-admin-monitoring', url: `${ADMIN}/monitoring`, wait: 'main', admin: true },
 ];
