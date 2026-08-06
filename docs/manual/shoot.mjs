@@ -258,6 +258,10 @@ const SHOTS = [
   // Мобильный вид — своим размером окна: тот же экран на 390 точках
   // выглядит иначе, и растянутый на 1440 он показывал бы не то.
   { name: '15-mobile', url: `${WEB}/inbox`, wait: 'main', viewport: { width: 390, height: 780 } },
+  { name: '16-notifications', url: `${WEB}/settings/notifications`, wait: 'main' },
+  { name: '17-admin-dashboard', url: `${ADMIN}/`, wait: 'main', admin: true },
+  { name: '18-admin-migrate', url: `${ADMIN}/migrate`, wait: 'main', admin: true },
+  { name: '19-admin-backup', url: `${ADMIN}/backups`, wait: 'main', admin: true },
   { name: '12-admin-flow', url: `${ADMIN}/flow`, wait: 'main', admin: true },
   { name: '13-admin-logs', url: `${ADMIN}/logs`, wait: 'main', admin: true },
 ];
