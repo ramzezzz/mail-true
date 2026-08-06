@@ -317,30 +317,70 @@
   gap: 8px;
 }
 
+/*
+ * Карточка вложения — теперь два действия в одной карточке: посмотреть
+ * (или скачать, если смотреть нечем) и скачать. Поэтому сама карточка
+ * стала контейнером, а нажимаемое — вложенными .attachmentMain и
+ * .attachmentDownload: вложить ссылку в ссылку разметка не позволяет.
+ */
 .attachment {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  align-items: stretch;
   border-radius: var(--mt-size-border-radius, 8px);
   background: var(--mt-color-background-content);
   box-shadow: var(--mt-elevation-1);
-  /* Вложение — ссылка на скачивание, но выглядит карточкой, а не текстом */
-  color: inherit;
-  text-decoration: none;
-  cursor: pointer;
+  overflow: hidden;
   transition: background-color 0.1s ease-out;
 }
 
+.attachmentMain {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 4px 8px 12px;
+  border: 0;
+  background: none;
+  /* Вложение — ссылка или кнопка, но выглядит карточкой, а не текстом */
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.attachmentDownload {
+  display: flex;
+  align-items: center;
+  padding: 0 12px 0 4px;
+  color: var(--mt-color-text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+}
+
 @media (hover: hover) {
-  .attachment:hover {
+  .attachmentMain:hover,
+  .attachmentDownload:hover {
     background: var(--mt-color-background-secondary);
+  }
+
+  .attachmentDownload:hover {
+    color: var(--mt-color-text-primary);
   }
 }
 
-.attachment:focus-visible {
+.attachmentMain:focus-visible,
+.attachmentDownload:focus-visible {
   outline: var(--mt-focus-ring-width, 2px) solid var(--mt-focus-ring-color);
-  outline-offset: var(--mt-focus-ring-offset, 2px);
+  outline-offset: calc(-1 * var(--mt-focus-ring-width, 2px));
+}
+
+/* Глаз на карточке — признак «это можно посмотреть, не скачивая».
+   Стоит только там, где предпросмотр действительно есть. */
+.attachmentEye {
+  display: flex;
+  flex: none;
+  color: var(--mt-color-text-secondary);
 }
 
 .attachmentExt {

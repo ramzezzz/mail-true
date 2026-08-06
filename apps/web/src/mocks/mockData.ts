@@ -79,7 +79,9 @@ const inboxSeeds: Seed[] = [
     snippet: 'Привет! Отправляю финальную версию отчёта, посмотри вкладку «Сводка» — там основные цифры по кварталу.',
     hoursAgo: 3,
     unread: true,
-    attachments: ['Отчёт_июль.xlsx'],
+    // Таблица и текстовый файл рядом — на этом письме видно оба исхода
+    // предпросмотра: XLSX смотреть нечем (только скачать), TXT открывается.
+    attachments: ['Отчёт_июль.xlsx', 'Примечания.txt'],
   },
   {
     from: ['GitHub', 'noreply@github.com'],
@@ -302,7 +304,9 @@ export function expandMessage(summary: MessageSummary): Message {
         ? 'application/pdf'
         : filename.endsWith('.xlsx')
           ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-          : 'image/jpeg',
+          : filename.endsWith('.txt')
+            ? 'text/plain'
+            : 'image/jpeg',
       size: 120_000 + i * 34_567,
       contentId: null,
       inline: false,

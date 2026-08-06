@@ -45,7 +45,15 @@ import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
 import { restoreScrollTop, rowIndexOf } from '../lib/listPosition';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
 import { usePhone } from '../lib/useMediaQuery';
-import { IconArchive, IconAttach, IconClock, IconFlagFilled, IconShield, IconTrash } from './icons';
+import {
+  IconArchive,
+  IconAttach,
+  IconAwaitReply,
+  IconClock,
+  IconFlagFilled,
+  IconShield,
+  IconTrash,
+} from './icons';
 import { LabelPills } from './LabelPill';
 import type { MailLabel } from './labelsApi';
 import styles from './MessageList.module.css';
@@ -73,6 +81,17 @@ const NO_LABELS: readonly MailLabel[] = [];
 
 /** Заголовок группы вернувшихся писем — над всеми периодами. */
 export const RETURNED_GROUP_LABEL = 'Вернулись к вам';
+
+/**
+ * Заголовок группы писем, на которые не ответили к сроку.
+ *
+ * Отдельно от «Вернулись к вам», хотя обе группы стоят наверху: вернувшееся
+ * из «Отложенных» — это ЧУЖОЕ письмо, которое человек убрал с глаз сам,
+ * а здесь — его СОБСТВЕННОЕ письмо, на которое промолчал собеседник.
+ * Свалить их в одну группу значило бы объяснить и то, и другое одним
+ * словом, которое не подходит ни к одному.
+ */
+export const NO_REPLY_GROUP_LABEL = 'Ответа не было';
 
 /**
  * Плоский список строк: заголовки периодов + письма.
@@ -103,12 +122,27 @@ export const RETURNED_GROUP_LABEL = 'Вернулись к вам';
  */
 export function flattenRows(messages: readonly MessageSummary[], now?: Date): ListRow[] {
   const rows: ListRow[] = [];
+  const lifted = (m: MessageSummary): boolean =>
+    Boolean(m.returnedFromSnooze) || m.awaitReply === 'overdue';
   const returned = messages.filter((m) => m.returnedFromSnooze);
-  const rest = returned.length > 0 ? messages.filter((m) => !m.returnedFromSnooze) : messages;
+  /*
+   * Письма, на которые не ответили, поднимаются наверх ровно по той же
+   * причине, что и вернувшиеся из «Отложенных»: сервер кладёт во «Входящие»
+   * КОПИЮ отправленного письма, а дата у неё — старая, та самая, когда его
+   * отправляли. Оставь его на своём месте по дате — и письмо, отправленное
+   * неделю назад, окажется на седьмом экране списка, то есть напоминания
+   * не будет вовсе.
+   */
+  const overdue = messages.filter((m) => !m.returnedFromSnooze && m.awaitReply === 'overdue');
+  const rest = returned.length + overdue.length > 0 ? messages.filter((m) => !lifted(m)) : messages;
 
   if (returned.length > 0) {
     rows.push({ type: 'header', label: RETURNED_GROUP_LABEL });
     for (const message of returned) rows.push({ type: 'message', message });
+  }
+  if (overdue.length > 0) {
+    rows.push({ type: 'header', label: NO_REPLY_GROUP_LABEL });
+    for (const message of overdue) rows.push({ type: 'message', message });
   }
   for (const group of groupMessagesByPeriod(rest, now)) {
     rows.push({ type: 'header', label: group.label });
@@ -518,6 +552,24 @@ function Row({
         {message.returnedFromSnooze && !snoozeLabel && (
           <span className={styles.returnedBadge} title="Письмо вернулось из «Отложенных»">
             <IconClock size={14} />
+          </span>
+        )}
+        {/*
+          Ожидание ответа. Без этой пометки поднятое письмо — это
+          СОБСТВЕННОЕ письмо человека, внезапно оказавшееся во «Входящих»
+          непрочитанным: он не поймёт ни откуда оно, ни что с ним делать.
+          Подпись словами, а не одним значком: «ответа нет» — это вывод,
+          который сделал сервер, и читаться он должен без догадок.
+        */}
+        {message.awaitReply === 'overdue' && (
+          <span className={styles.awaitBadge} title="Собеседник не ответил к сроку">
+            <IconAwaitReply size={12} />
+            ответа нет
+          </span>
+        )}
+        {message.awaitReply === 'waiting' && (
+          <span className={styles.returnedBadge} title="Ждём ответа на это письмо">
+            <IconAwaitReply size={14} />
           </span>
         )}
         {category && (

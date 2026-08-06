@@ -130,7 +130,15 @@ class FakeClient {
   }
 
   /** Одно письмо целиком: нужно выдаче исходника (.eml). */
-  async fetchOne(seq: string): Promise<{ uid: number; source: Buffer } | false> {
+  async fetchOne(seq: string): Promise<
+    | {
+        uid: number;
+        source: Buffer;
+        envelope: { subject: string; date: Date };
+        internalDate: Date;
+      }
+    | false
+  > {
     const uid = Number(seq);
     const present = this.boxes.get(this.selected) ?? new Set<number>();
     if (!present.has(uid)) return false;
@@ -140,6 +148,9 @@ class FakeClient {
 
 Telo pisma.
 `, 'utf8'),
+      // Тема с косой чертой и датой — ровно то, из чего собирается имя файла
+      envelope: { subject: 'Акт 12/2026', date: new Date('2026-07-31T09:15:00Z') },
+      internalDate: new Date('2026-08-01T00:00:00Z'),
     };
   }
 
@@ -419,6 +430,46 @@ test('исходник письма отдаётся вложением и не 
     assert.match(String(res.headers['content-disposition']), /^attachment;/);
     assert.match(String(res.headers['content-disposition']), /\.eml/);
     assert.match(res.body, /Telo pisma/);
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * Имя скачиваемого файла.
+ *
+ * Раньше оно собиралось из идентификатора письма (`inbox_1.eml`), и найти
+ * нужное письмо среди десятка таких файлов в «Загрузках» было нельзя.
+ * Теперь это тема и дата — и косая черта в теме («Акт 12/2026») не должна
+ * превращаться в путь.
+ */
+test('файл .eml называется темой и датой письма', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/messages/inbox:1/source' });
+    const disposition = String(res.headers['content-disposition']);
+    const encoded = /filename\*=UTF-8''(.+)$/u.exec(disposition)?.[1] ?? '';
+    assert.equal(decodeURIComponent(encoded), 'Акт 12 2026 2026-07-31.eml');
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * Байты письма не меняются по дороге.
+ *
+ * Файл .eml открывают в другой почтовой программе и по нему проверяют
+ * подпись DKIM — а она считается по исходным байтам. Любое приведение
+ * переводов строки или перекодировка делают такой файл бесполезным.
+ */
+test('исходник отдаётся байт в байт', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/messages/inbox:1/source' });
+    const expected = Buffer.from('Subject: Pismo 1\n\nTelo pisma.\n', 'utf8');
+    assert.deepEqual(res.rawPayload, expected);
   } finally {
     await app.close();
   }

@@ -1,0 +1,54 @@
+# Концы строк.
+#
+# ЧТО БЫЛО НЕ ТАК. Файла не было вовсе, а разрабатывают продукт на Windows,
+# где git обычно стоит с core.autocrlf=true: при выдаче файлов из хранилища
+# он дописывает в каждую строку возврат каретки. Работает продукт при этом
+# в Linux. Скрипт с CRLF там не запускается совсем — оболочка видит первой
+# строкой «#!/usr/bin/env bash\r» и отвечает:
+#
+#     set: -: invalid option
+#     syntax error near unexpected token `&&'
+#
+# Поймано делом: infra/test-spam-rule.sh в рабочем каталоге оказался с CRLF
+# и не запускался ни в WSL, ни в контейнере, хотя в хранилище лежит с LF.
+# Так же молча ломались бы entrypoint-скрипты, которые монтируются в
+# контейнеры (infra/postfix/entrypoint.sh, infra/dovecot/entrypoint.sh),
+# и весь install/ — то есть установка на боевом сервере.
+#
+# Поэтому концы строк задаются здесь, а не привычками машины разработчика.
+# Отдельный список расширений, а не «* text=auto»: последнее оставляет
+# решение эвристике git, а для файлов, которые исполняет Linux, решение
+# должно быть однозначным.
+
+# Всё, что исполняет или читает построчно Linux, — только LF.
+*.sh        text eol=lf
+*.mjs       text eol=lf
+*.js        text eol=lf
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.pl        text eol=lf
+*.sieve     text eol=lf
+*.conf      text eol=lf
+*.cf        text eol=lf
+*.template  text eol=lf
+*.map       text eol=lf
+*.sql       text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+Dockerfile  text eol=lf
+.env.example text eol=lf
+
+# Двоичное не трогать: перевод концов строк испортит содержимое.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.pdf       binary
+*.docx      binary
+*.gz        binary
+*.zip       binary

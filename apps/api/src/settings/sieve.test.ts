@@ -172,24 +172,30 @@ test('actionsToCommands: «продолжать другие фильтры» о
   assert.deepEqual(cmds, ['fileinto :create "Счета";']);
 });
 
-test('requiredExtensions: используемое правилами плюс обязательные fileinto/mailbox', () => {
+test('requiredExtensions: используемое правилами плюс обязательные fileinto/mailbox/include', () => {
   // fileinto и mailbox стоят всегда: их использует блок раскладки спама,
   // который дописывается в КАЖДЫЙ личный скрипт.
+  // include — тоже всегда: каждый личный скрипт подключает файл заглушённых
+  // цепочек строкой `include :optional :personal "mt-muted"`, и объявлять
+  // расширение по факту наличия файла нельзя — тогда, чтобы заглушить
+  // переписку, пришлось бы сперва переписать все правила человека.
   assert.deepEqual(requiredExtensions([rule({ id: 1, actions: actions({ folder: 'X' }) })]), [
     'fileinto',
     'mailbox',
+    'include',
   ]);
   assert.deepEqual(
     requiredExtensions([
       rule({ id: 1, actions: actions({ markRead: true, forwardTo: ['a@b'] }) }),
     ]),
-    ['fileinto', 'mailbox', 'imap4flags', 'copy'],
+    ['fileinto', 'mailbox', 'include', 'imap4flags', 'copy'],
   );
   const settings = defaultMailSettings('u@mail.local');
   settings.autoReply = { ...settings.autoReply, enabled: true, until: '2026-09-01T00:00:00Z' };
   assert.deepEqual(requiredExtensions([], settings), [
     'fileinto',
     'mailbox',
+    'include',
     'vacation',
     'date',
     'relational',
@@ -287,7 +293,7 @@ test('buildSieveScript: require перечисляет расширения од
   ]);
   const requires = script.match(/^require \[.*\];$/m);
   assert.ok(requires);
-  assert.equal(requires[0], 'require ["fileinto", "mailbox", "imap4flags"];');
+  assert.equal(requires[0], 'require ["fileinto", "mailbox", "include", "imap4flags"];');
 });
 
 test('buildSieveScript: одинаковые правила дают побайтово одинаковый файл', () => {
@@ -493,14 +499,14 @@ test('в require попадает regex — и только когда он ну
     conditions: [{ field: 'subject', op: 'contains', value: 'ОТЧЁТ' }],
     actions: actions({ folder: 'Отчёты' }),
   });
-  assert.deepEqual(requiredExtensions([cyr]), ['fileinto', 'mailbox', 'regex']);
+  assert.deepEqual(requiredExtensions([cyr]), ['fileinto', 'mailbox', 'include', 'regex']);
 
   const latin = rule({
     id: 2,
     conditions: [{ field: 'subject', op: 'contains', value: 'report' }],
     actions: actions({ folder: 'Reports' }),
   });
-  assert.deepEqual(requiredExtensions([latin]), ['fileinto', 'mailbox']);
+  assert.deepEqual(requiredExtensions([latin]), ['fileinto', 'mailbox', 'include']);
   assert.match(buildSieveScript([cyr]), /require \[.*"regex"\];/);
 });
 
@@ -620,7 +626,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox', 'body'],
+    ['fileinto', 'mailbox', 'include', 'body'],
   );
   assert.deepEqual(
     requiredExtensions([
@@ -630,7 +636,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox', 'mime'],
+    ['fileinto', 'mailbox', 'include', 'mime'],
   );
   // Правило без этих условий остаётся ровно таким, каким было раньше.
   assert.deepEqual(
@@ -641,7 +647,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox'],
+    ['fileinto', 'mailbox', 'include'],
   );
 });
 
@@ -700,12 +706,12 @@ test('actionsToCommands: удаление отменяет папку-приём
 test('requiredExtensions: метка требует imap4flags так же, как «прочитано»', () => {
   assert.deepEqual(
     requiredExtensions([rule({ id: 1, actions: actions({ labels: ['mt-scheta'] }) })]),
-    ['fileinto', 'mailbox', 'imap4flags'],
+    ['fileinto', 'mailbox', 'include', 'imap4flags'],
   );
   // Слово, которое меткой быть не может, расширения за собой не тянет.
   assert.deepEqual(
     requiredExtensions([rule({ id: 1, actions: actions({ labels: ['$Snoozed'] }) })]),
-    ['fileinto', 'mailbox'],
+    ['fileinto', 'mailbox', 'include'],
   );
 });
 
@@ -718,6 +724,15 @@ test('requiredExtensions: метка требует imap4flags так же, ка
  * переводиться в тот же файл, что и раньше, — побайтово. Иначе первое же
  * сохранение настроек переписало бы всем ящикам их рабочие скрипты.
  */
+/*
+ * Оговорка к сказанному выше: с появлением заглушённых цепепочек файл всё же
+ * изменился — на строку `include :optional :personal "mt-muted";` и на
+ * объявление `include` в require. Это единственная допустимая правка такого
+ * рода, и допустима она потому, что `:optional` означает «файла может не
+ * быть»: у ящика, где ничего не заглушали, скрипт ведёт себя ровно как
+ * прежде, а сами правила не тронуты ни одним символом — что и проверяется
+ * ниже построчно.
+ */
 test('buildSieveScript: старое правило даёт ровно прежний файл', () => {
   const script = buildSieveScript([
     rule({
@@ -729,7 +744,7 @@ test('buildSieveScript: старое правило даёт ровно преж
   ]);
   assert.equal(
     script.match(/^require \[.*\];$/m)?.[0],
-    'require ["fileinto", "mailbox", "imap4flags"];',
+    'require ["fileinto", "mailbox", "include", "imap4flags"];',
   );
   assert.ok(
     script.includes(

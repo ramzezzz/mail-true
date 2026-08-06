@@ -548,10 +548,24 @@ if [ -f "$STATE_FILE" ]; then
 fi
 [ -n "$ADMIN_LOGIN_SC" ] || ADMIN_LOGIN_SC="${ADMIN_EMAIL%@*}"
 
-ADMIN_HASH_SC="$(dc exec -T -e A_LOGIN="$ADMIN_LOGIN_SC" postgres \
-    sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
-           -v login="$A_LOGIN" -c "SELECT password_hash FROM admin_users WHERE login = :'"'"'login'"'"'"' \
-    2>/dev/null | tr -d '\r' | head -1)"
+# Запрос подаётся ЧЕРЕЗ stdin, а не ключом -c, и это не стиль.
+#
+# В аргументе -c psql свои переменные (:'login') НЕ подставляет — строка
+# уходит на сервер как есть, и Postgres отвечает «syntax error at or near
+# ":"». Ошибка гасилась 2>/dev/null, хэш всегда получался пустым, и эта
+# проверка НИ РАЗУ не выполнялась ни на одном сервере: она молча
+# вырождалась в предупреждение «не удалось прочитать хэш». То есть сервер
+# с паролем-заглушкой из install/answers.example.env выглядел ровно так
+# же, как сервер со своим паролем, — а ради этого различия проверка и
+# писалась. Ту же ловушку install/lib/common.sh уже описывает у журнала
+# миграций: подстановка работает только для потока ввода и файлов.
+#
+# Проверено на стенде: с -c psql отвечает «syntax error at or near ":"»,
+# через stdin возвращает scrypt$16384$…
+ADMIN_HASH_SC="$(printf '%s\n' \
+        "SELECT password_hash FROM admin_users WHERE login = :'login';" | \
+    dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
+        -v login="$ADMIN_LOGIN_SC" 2>/dev/null | tr -d '\r' | head -1)"
 
 if [ -z "$ADMIN_HASH_SC" ]; then
     warn "не удалось прочитать хэш пароля администратора «$ADMIN_LOGIN_SC» из базы"

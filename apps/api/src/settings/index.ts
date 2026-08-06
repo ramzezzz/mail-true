@@ -17,6 +17,7 @@ import { SettingsDb } from './db.js';
 import { folderManagementRoutes } from './folders.js';
 import { settingsUserRoutes } from './routes.js';
 import { SettingsService, SettingsUnavailableError } from './service.js';
+import { SieveIncludeStore } from './sieve-include.js';
 import { SieveStore } from './store.js';
 import { ExportRunner } from './export-runner.js';
 import { OwnerDb } from './owner-db.js';
@@ -65,7 +66,21 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     logger,
   });
 
-  const service = new SettingsService({ config, db, store, logger });
+  /*
+   * Хранилище включаемых файлов Sieve — то же почтовое хранилище, те же
+   * настройки транспорта. Второй набор переменных окружения для того же
+   * каталога — прямая дорога к «настроил, а не работает».
+   */
+  const includes = new SieveIncludeStore({
+    transport: config.transport,
+    root: config.SIEVE_ROOT,
+    container: config.SIEVE_DOCKER_CONTAINER,
+    scriptName: config.SIEVE_SCRIPT_NAME,
+    owner: config.SIEVE_OWNER,
+    logger,
+  });
+
+  const service = new SettingsService({ config, db, store, includes, logger });
   app.decorate('settingsService', service);
 
   // Ранняя диагностика: скажем в лог, применена ли миграция и виден ли
@@ -275,5 +290,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 export { RecoveryService } from './recovery-service.js';
 export { SettingsService } from './service.js';
 export * from './sieve.js';
+export * from './sieve-muted.js';
 export * from './types.js';
+export { SieveIncludeStore } from './sieve-include.js';
 export { SieveStore } from './store.js';

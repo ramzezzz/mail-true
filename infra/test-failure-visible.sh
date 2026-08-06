@@ -133,11 +133,54 @@ else
 fi
 
 JAR="$(mktemp)"
-curl -s -c "$JAR" -H "Host: $ADMIN_HOST" -H 'Content-Type: application/json' \
+LOGIN_ANSWER="$(curl -s -c "$JAR" -H "Host: $ADMIN_HOST" -H 'Content-Type: application/json' \
      -d "{\"login\":\"$ADMIN_LOGIN\",\"password\":\"$ADMIN_PASSWORD\"}" \
-     "$BASE/api/admin/auth/login" >/dev/null 2>&1
+     "$BASE/api/admin/auth/login" 2>/dev/null)"
 OVERVIEW="$(curl -s -b "$JAR" -H "Host: $ADMIN_HOST" "$BASE/api/admin/overview")"
 
+# Разбор сводки. python3 — потому что на Ubuntu Server 22.04 (той самой ОС,
+# под которую делается продукт) команды `python` НЕТ вовсе: пакет
+# python-is-python3 в неё не входит. Здесь стояло `python`, ошибка
+# «command not found» гасилась в 2>/dev/null, состояние всегда выходило
+# пустым — и три проверки ниже проваливались ВСЕГДА, на любом стенде,
+# обвиняя при этом сводку админки. Запасной `python` оставлен для машин,
+# где наоборот.
+PY="$(command -v python3 || command -v python || true)"
+
+# Состояние службы из сводки. Объявлена ДО развилки ниже: ею пользуется и
+# проверка «после возвращения rspamd подпись снова зелёная» за развилкой.
+python_state() { # python_state <id> -> состояние службы из сводки
+    [ -n "$PY" ] || return 0
+    printf '%s' "$OVERVIEW" | "$PY" -c "
+import json,sys
+d=json.load(sys.stdin)
+print(next((s['state'] for s in d['services'] if s['id']==sys.argv[1]),'НЕТ'))
+" "$1" 2>/dev/null
+}
+
+# Вход в админку раньше не проверялся вовсе. При чужом логине или пароле
+# (логин по умолчанию — «rukovodstvo», и на конкретном стенде его может
+# не быть) сводка приходит как {"error":"UNAUTHORIZED"}, а тест выдавал
+# семь отказов подряд: «в сводке нет строки rspamd», «антиспам показан
+# исправным, хотя он остановлен» и так далее. Все семь — неправда: сводку
+# просто не показали. Причину теперь называем один раз и прямо.
+if printf '%s' "$OVERVIEW" | grep -q '"error":"UNAUTHORIZED"'; then
+    if printf '%s' "$LOGIN_ANSWER" | grep -q '"ok":true'; then
+        # Вход приняли, а сводку не отдали — значит до неё не доехала cookie
+        # сессии. На боевой установке она помечена Secure (COOKIE_SECURE=true),
+        # и по обычному http curl её не отправляет: разница между стендом
+        # разработки и боевым сервером, а не поломка продукта.
+        fail "вход принят, но сводка пришла без него — cookie сессии не доехала"
+        note "на боевой установке cookie помечена Secure, а $BASE — обычный HTTP"
+        note "запускайте по HTTPS (MAIL_URL=https://…) либо на стенде с COOKIE_SECURE=false"
+    else
+        fail "не удалось войти в админку как «$ADMIN_LOGIN» — сводку проверить нечем"
+        note "ответ входа: $(printf '%s' "$LOGIN_ANSWER" | head -c 120)"
+        note "свои задаются переменными ADMIN_LOGIN и ADMIN_PASSWORD"
+    fi
+elif [ -z "$PY" ]; then
+    fail "нет ни python3, ни python — сводку админки нечем разобрать"
+else
 # Три службы обязаны быть в сводке — до этого их там не было вовсе.
 for id in rspamd redis unbound dkim; do
     printf '%s' "$OVERVIEW" | grep -q "\"id\":\"$id\"" \
@@ -145,13 +188,6 @@ for id in rspamd redis unbound dkim; do
         || fail "в сводке админки нет строки «$id»"
 done
 # И обязаны быть красными: молчащий антиспам — это почта без проверки.
-python_state() { # python_state <id> -> состояние службы из сводки
-    printf '%s' "$OVERVIEW" | python -c "
-import json,sys
-d=json.load(sys.stdin)
-print(next((s['state'] for s in d['services'] if s['id']==sys.argv[1]),'НЕТ'))
-" "$1" 2>/dev/null
-}
 [ "$(python_state rspamd)" = "fail" ] && ok "антиспам показан отказавшим" \
                                       || fail "антиспам показан исправным, хотя он остановлен"
 [ "$(python_state dkim)" = "fail" ] \
@@ -159,6 +195,7 @@ print(next((s['state'] for s in d['services'] if s['id']==sys.argv[1]),'НЕТ')
     || fail "подпись исходящих показана исправной, хотя rspamd остановлен"
 [ "$(python_state unbound)" = "fail" ] && ok "свой резольвер показан отказавшим" \
                                        || fail "свой резольвер показан исправным"
+fi
 
 dc start rspamd unbound >/dev/null 2>&1
 wait_healthy rspamd
@@ -181,7 +218,19 @@ check_json_error() { # check_json_error <заголовок Host> <путь> <ч
     else
         fail "$what: пришло не по договору (статус $code): $(printf '%s' "$body" | head -c 120)"
     fi
-    printf '%s' "$body" | grep -qE '[А-Яа-я]' \
+    # Кириллицу ищем ПО БАЙТАМ, а не диапазоном [А-Яа-я].
+    #
+    # Диапазон из многобайтных букв — это выражение по правилам сортировки
+    # текущей локали. На сервере локаль обычно C/POSIX (ни LANG, ни LC_ALL
+    # в systemd-юните и в docker exec не заданы), и GNU grep отвечает на
+    # такой диапазон «Invalid collation character», выходя с ошибкой. То
+    # есть проверка «в ответе есть русский текст» на боевой машине падала
+    # ВСЕГДА — независимо от того, что там на самом деле пришло.
+    #
+    # В UTF-8 кириллица U+0400…U+04FF — это два байта, первый из D0..D3.
+    # Такой поиск не зависит от локали вовсе, поэтому LC_ALL=C здесь не
+    # обход, а условие: он выключает разбор байтов как символов.
+    printf '%s' "$body" | LC_ALL=C grep -qE $'[\xd0-\xd3][\x80-\xbf]' \
         && ok "$what: текст по-русски" \
         || fail "$what: в сообщении нет русского текста"
     printf '%s' "$body" | grep -qi '<html' \

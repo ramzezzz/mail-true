@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { useAiState } from '../../api/aiQueries';
 import { AI_SETTINGS_PATH, aiVisible } from '../../ai/aiVisibility';
 import { IconChevronRight } from '../../mail/icons';
+import { useDisposable } from '../../settings/disposableQueries';
 import { useAccessLog, useExports, useRecovery } from '../../settings/ownerQueries';
 import { SettingsTitle } from '../../settings/ui';
 import styles from './SettingsHomePage.module.css';
@@ -75,14 +76,22 @@ const EXPORT_CARD: Card = {
   text: 'Забрать всю переписку одним архивом: папки каталогами, письма файлами .eml',
 };
 
+const DISPOSABLE_CARD: Card = {
+  to: '/settings/disposable',
+  title: 'Одноразовые адреса',
+  text: 'Адрес для сайта вместо основного — выключается одним нажатием, когда пойдёт спам',
+};
+
 export function SettingsHomePage() {
   const { data: aiState } = useAiState();
   const access = useAccessLog();
   const exports = useExports();
   const recovery = useRecovery();
+  const disposable = useDisposable();
 
   const owner = [
     ...(recovery.available ? [RECOVERY_CARD] : []),
+    ...(disposable.available ? [DISPOSABLE_CARD] : []),
     ...(access.available ? [ACCESS_CARD] : []),
     ...(exports.available ? [EXPORT_CARD] : []),
   ];

@@ -32,6 +32,7 @@ import { aiRoutes } from './ai/index.js';
 import { settingsRoutes } from './settings/index.js';
 import { accountsRoutes } from './accounts/index.js';
 import { contactsRoutes } from './contacts/index.js';
+import { disposableRoutes } from './disposable/index.js';
 import { templatesRoutes } from './templates/index.js';
 import { senderLogosRoutes } from './logos/index.js';
 import { pushNotificationRoutes } from './push/index.js';
@@ -284,6 +285,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
    * Поэтому место в этом списке у них произвольное.
    */
   await templatesRoutes(app);
+
+  /*
+   * Одноразовые адреса (см. src/disposable/). Место в списке произвольно:
+   * ни от кого не зависят и ни от кого не зависимы. Сам адрес кладётся
+   * строкой в virtual_aliases — ту самую таблицу, которую читает карта
+   * алиасов Postfix, — поэтому в путь доставки модуль не вмешивается
+   * вовсе и настроек почтового сервера не меняет.
+   */
+  await disposableRoutes(app);
 
   // Логотипы доменов отправителей (см. src/logos/). Регистрируются ПОСЛЕ
   // настроек: маршрут спрашивает у них, разрешил ли человек эту возможность,

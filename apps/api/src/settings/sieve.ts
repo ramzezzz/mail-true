@@ -144,6 +144,26 @@ function oneLine(value: string): string {
 /** Расширение Sieve, нужное таким условиям. */
 export const REGEX_EXTENSION = 'regex';
 
+/* ------------------------------------------------------------------ */
+/* Заглушённые цепочки: включаемый файл                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Имя включаемого файла (без расширения) со списком заглушённых цепочек.
+ *
+ * Сам файл собирает settings/sieve-muted.ts, а кладёт в ящик
+ * settings/sieve-include.ts. Здесь — только имя и строка подключения:
+ * личный скрипт обязан ссылаться на файл ровно тем же именем, каким его
+ * пишут, и хранить это имя в двух местах нельзя.
+ *
+ * Префикс `mt-` — чтобы файл нельзя было спутать с личным скриптом самого
+ * человека, если он когда-нибудь получит доступ по ManageSieve.
+ */
+export const MUTED_INCLUDE_NAME = 'mt-muted';
+
+/** Расширение Sieve, которым подключается этот файл (RFC 6609). */
+export const INCLUDE_EXTENSION = 'include';
+
 /** Символы, особые для POSIX ERE. */
 function escapeRegexChar(ch: string): string {
   return /[.[\]{}()*+?^$|\\/]/.test(ch) ? `\\${ch}` : ch;
@@ -523,6 +543,22 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
    */
   need.add('fileinto');
   need.add('mailbox');
+  /*
+   * include — тоже всегда, по той же причине и с той же ценой ошибки.
+   *
+   * Личный скрипт подключает файл заглушённых цепочек строкой
+   * `include :optional :personal "mt-muted";`, и строка эта стоит в КАЖДОМ
+   * файле, а не только у тех, кто что-то заглушил. Иначе получилась бы
+   * зависимость наоборот: чтобы заглушить переписку, пришлось бы сперва
+   * переписать личный файл правил — то есть перекомпилировать все правила
+   * человека ради нашей возможности, да ещё и в момент, когда он ждёт
+   * от кнопки мгновенного ответа.
+   *
+   * Отсутствующий файл при этом не стоит ничего: `:optional` велит
+   * Pigeonhole молча пропустить строку (проверено компилятором на живом
+   * стенде — ни ошибки, ни предупреждения).
+   */
+  need.add(INCLUDE_EXTENSION);
   if (settings?.autoReply.enabled) {
     need.add('vacation');
     if (settings.autoReply.from || settings.autoReply.until) {
@@ -535,6 +571,7 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
   const order = [
     'fileinto',
     'mailbox',
+    INCLUDE_EXTENSION,
     'imap4flags',
     'copy',
     BODY_EXTENSION,
@@ -648,6 +685,27 @@ export function buildSieveScript(rules: FilterRule[], options: BuildSieveOptions
   if (extensions.length > 0) {
     lines.push(`require [${extensions.map(quoteSieveString).join(', ')}];`, '');
   }
+
+  /*
+   * Заглушённые цепочки — ПЕРВЫМИ, до правил пользователя.
+   *
+   * Порядок здесь и есть смысл возможности. «Заглушить» — это решение
+   * человека о переписке ЦЕЛИКОМ, и оно сильнее любого правила про
+   * отдельное письмо: если правило разложило бы письмо по папке, а человек
+   * сказал «эта переписка меня не касается», побеждает человек. Файл
+   * заканчивается командой stop, поэтому дальше заглушённое письмо не идёт
+   * ни в правила, ни в раскладку спама.
+   *
+   * Строка стоит в файле всегда, даже когда заглушать нечего: см. пояснение
+   * к include в requiredExtensions.
+   */
+  lines.push(
+    '# === Заглушённые цепочки ===',
+    '# Список ведётся отдельным файлом (settings/sieve-muted.ts): он меняется',
+    '# кнопкой в почте, а этот файл — только сохранением настроек.',
+    `include :optional :personal ${quoteSieveString(MUTED_INCLUDE_NAME)};`,
+    '',
+  );
 
   for (const rule of active) {
     const commands = actionsToCommands(rule.actions, { trashFolder: options.trashFolder });

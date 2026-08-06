@@ -667,7 +667,7 @@ function stubApi() {
 /** Даём react-query доехать: список папок приходит отдельным запросом. */
 async function flush() {
   for (let i = 0; i < 8; i += 1) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await act(async () => {
       await new Promise((done) => setTimeout(done, 0));
     });

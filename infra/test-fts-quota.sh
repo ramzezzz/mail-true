@@ -107,9 +107,38 @@ send "$FTS_USER" "Договор аренды $TOKEN" "В теле письма 
 send "$FTS_USER" "Новогодняя ёлка" "Ёлка стоит в приёмной, ещё есть подарки" >/dev/null
 
 # Вложения с заведомо уникальными словами внутри (генерируются заново)
+#
+# Генератор — обычный node-скрипт без зависимостей, и раньше он звался
+# просто «node». На машине разработчика node есть, а на Ubuntu Server 22.04,
+# под которую делается продукт, его НЕТ: весь стек живёт в контейнерах, и
+# ставить node на хост незачем. Ошибка гасилась в 2>/dev/null, и проверка
+# отвечала «не удалось создать вложения», не называя причину, — то есть на
+# сервере эта строка падала всегда.
+#
+# Если node на хосте нет, гоним тот же скрипт в контейнере autoconfig: это
+# node-служба нашего же стека, и лишних образов тянуть не нужно. Файлы
+# возвращаем на хост, потому что дальше они всё равно едут в postfix через
+# docker cp, а копировать из контейнера в контейнер напрямую нечем.
 ATT_DIR="$INFRA_DIR/data/fts-test"
-node "$INFRA_DIR/scripts/make-test-attachments.mjs" "$ATT_DIR" >/dev/null 2>&1 \
-    && ok "тестовые вложения созданы" || fail "не удалось создать вложения"
+mkdir -p "$ATT_DIR"
+make_attachments() {
+    if command -v node >/dev/null 2>&1; then
+        node "$INFRA_DIR/scripts/make-test-attachments.mjs" "$ATT_DIR" >/dev/null 2>&1
+        return $?
+    fi
+    local ac; ac="$(cid autoconfig)"
+    [ -n "$ac" ] || return 1
+    docker cp "$INFRA_DIR/scripts/make-test-attachments.mjs" "$ac:/tmp/mk-att.mjs" >/dev/null 2>&1 || return 1
+    dex autoconfig node /tmp/mk-att.mjs /tmp/fts-att >/dev/null 2>&1 || return 1
+    docker cp "$ac:/tmp/fts-att/fts-test.pdf"  "$ATT_DIR/fts-test.pdf"  >/dev/null 2>&1 || return 1
+    docker cp "$ac:/tmp/fts-att/fts-test.docx" "$ATT_DIR/fts-test.docx" >/dev/null 2>&1 || return 1
+    return 0
+}
+if make_attachments && [ -s "$ATT_DIR/fts-test.pdf" ] && [ -s "$ATT_DIR/fts-test.docx" ]; then
+    ok "тестовые вложения созданы"
+else
+    fail "не удалось создать вложения (нужен node на хосте или живой контейнер autoconfig)"
+fi
 POSTFIX_CID="$(cid postfix)"
 docker cp "$ATT_DIR/fts-test.pdf"  "$POSTFIX_CID:/tmp/fts-test.pdf"  >/dev/null 2>&1
 docker cp "$ATT_DIR/fts-test.docx" "$POSTFIX_CID:/tmp/fts-test.docx" >/dev/null 2>&1

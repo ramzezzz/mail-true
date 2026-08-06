@@ -14,9 +14,11 @@ import { Button, Dropdown, IconButton, MenuItem, MenuSeparator } from '../compon
 import { LabelPill } from './LabelPill';
 import type { MailLabel } from './labelsApi';
 import { SnoozeMenu } from './SnoozeMenu';
+import { AwaitReplyMenu } from './AwaitReplyMenu';
 import type { SnoozePreset } from './snoozeApi';
 import {
   IconArchive,
+  IconAwaitReply,
   IconCheckAll,
   IconClock,
   IconClose,
@@ -27,6 +29,7 @@ import {
   IconMailRead,
   IconMailUnread,
   IconMore,
+  IconMuted,
   IconPrint,
   IconRefresh,
   IconSpam,
@@ -113,6 +116,30 @@ export interface ListToolbarProps {
    * «Отложенные»: в остальных возвращать нечего.
    */
   onReturnNow?: (() => void) | undefined;
+  /**
+   * Заглушить переписки выделенных писем.
+   *
+   * Проп необязательный, и кнопки без него нет вовсе. Причина здесь
+   * жёстче обычной: заглушка, не доехавшая до правил доставки, работала
+   * бы только в списке — то есть человек нажал бы кнопку, а письма
+   * продолжили бы приходить во «Входящие». Такую кнопку продукт не
+   * показывает (см. muteApi.ts, признак `delivery`).
+   */
+  onMute?: (() => void) | undefined;
+  /**
+   * Снять заглушку с переписок выделенных писем. Есть только в папке
+   * «Заглушённые»: в остальных снимать нечего.
+   */
+  onUnmute?: (() => void) | undefined;
+  /**
+   * Ждать ответа на выделенные письма. Есть только в «Отправленных»:
+   * ждать ответа можно на то, что написал сам.
+   */
+  onAwaitReply?: ((choice: { preset: SnoozePreset; until?: string }) => void) | undefined;
+  /** Сервер проверит срок сам; иначе меню честно предупреждает. */
+  awaitScheduledCheck?: boolean | undefined;
+  /** «Больше не ждать» — для писем, на которые ожидание уже поставлено. */
+  onCancelAwaitReply?: (() => void) | undefined;
   /**
    * Меню «Метки» для выделенных писем — готовой разметкой.
    *
@@ -267,6 +294,35 @@ export function ListToolbar(props: ListToolbarProps) {
       {props.onReturnNow && (
         <Button mode="tertiary" before={<IconClock />} onClick={props.onReturnNow}>
           Вернуть сейчас
+        </Button>
+      )}
+
+      {/* «Ждать ответа» — только в «Отправленных», и там оно занимает то же
+          место, что «Отложить» во «Входящих»: это одно и то же движение —
+          «вернуть это к сроку», — только условие возврата другое. */}
+      {props.onAwaitReply && (
+        <AwaitReplyMenu
+          onWait={props.onAwaitReply}
+          scheduledCheck={props.awaitScheduledCheck ?? true}
+        />
+      )}
+      {props.onCancelAwaitReply && (
+        <Button mode="tertiary" before={<IconAwaitReply />} onClick={props.onCancelAwaitReply}>
+          Больше не ждать
+        </Button>
+      )}
+
+      {/* «Заглушить» — рядом с «Отложить» и «В архив», в том же ряду
+          «убрать с глаз»: разница в том, что заглушка убирает не письмо,
+          а весь дальнейший разговор. */}
+      {props.onMute && (
+        <Button mode="tertiary" before={<IconMuted />} onClick={props.onMute}>
+          Заглушить
+        </Button>
+      )}
+      {props.onUnmute && (
+        <Button mode="tertiary" before={<IconMuted />} onClick={props.onUnmute}>
+          Вернуть переписку
         </Button>
       )}
 

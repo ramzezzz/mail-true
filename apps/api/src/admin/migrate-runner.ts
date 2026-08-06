@@ -54,7 +54,6 @@ import {
   sourceEndpointFor,
   unpackSecrets,
   type DestSettings,
-  type MigrationSecrets,
   type SourceSettings,
 } from './migrate-jobs.js';
 import type { SecretBox } from '../crypto.js';

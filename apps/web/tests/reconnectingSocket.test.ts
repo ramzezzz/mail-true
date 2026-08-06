@@ -201,7 +201,7 @@ describe('настоящий клиент', () => {
     }
     vi.stubGlobal('WebSocket', StubSocket);
     vi.stubGlobal('location', { protocol: 'http:', host: 'localhost:5173' });
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     return import('../src/api/client').then(({ httpApi }) => {
       const stop = httpApi.subscribe(() => undefined);
       expect(typeof stop).toBe('function');

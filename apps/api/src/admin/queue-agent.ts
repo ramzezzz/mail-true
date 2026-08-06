@@ -18,8 +18,8 @@
  */
 import type { Logger } from 'pino';
 import { ApiError } from '../errors.js';
-import { errorInfo } from '../log.js';
-import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
+
+import { RepeatGuard, warnOnce } from './repeat-log.js';
 
 /** Адресат письма в очереди и последняя причина отсрочки для него. */
 export interface QueueRecipient {

@@ -12,7 +12,8 @@ import { ApiError } from '../errors.js';
 import type { SettingsConfig } from './config.js';
 import type { SettingsDb } from './db.js';
 import { isUndefinedTable } from './db.js';
-import { buildSieveScript } from './sieve.js';
+import { buildSieveScript, MUTED_INCLUDE_NAME } from './sieve.js';
+import type { SieveIncludeStore } from './sieve-include.js';
 import { SieveStore, SieveStoreError } from './store.js';
 import type { FilterRule, MailSettings } from './types.js';
 import { errorInfo } from '../log.js';
@@ -51,6 +52,15 @@ export interface SettingsServiceOptions {
   config: SettingsConfig;
   db: SettingsDb | null;
   store: SieveStore;
+  /**
+   * Хранилище вспомогательных файлов Sieve (заглушённые цепочки).
+   *
+   * Живёт здесь, а не при службе заглушек, ровно по одной причине: личный
+   * файл правил и включаемые файлы кладутся в один каталог ящика, и два
+   * хранилища с разными настройками транспорта разъехались бы при первой
+   * же правке окружения.
+   */
+  includes: SieveIncludeStore;
   logger: Logger;
 }
 
@@ -58,12 +68,14 @@ export class SettingsService {
   readonly #config: SettingsConfig;
   readonly #db: SettingsDb | null;
   readonly #store: SieveStore;
+  readonly #includes: SieveIncludeStore;
   readonly #logger: Logger;
 
   constructor(opts: SettingsServiceOptions) {
     this.#config = opts.config;
     this.#db = opts.db;
     this.#store = opts.store;
+    this.#includes = opts.includes;
     this.#logger = opts.logger;
   }
 
@@ -73,6 +85,10 @@ export class SettingsService {
 
   get store(): SieveStore {
     return this.#store;
+  }
+
+  get includes(): SieveIncludeStore {
+    return this.#includes;
   }
 
   /** База настроек или понятный отказ. */
@@ -106,7 +122,19 @@ export class SettingsService {
     }
 
     const active = rules.filter((r) => r.enabled);
-    const needsScript = active.length > 0 || settings.autoReply.enabled;
+    /*
+     * Заглушённые цепочки — третья причина держать личный скрипт.
+     *
+     * Список заглушённого лежит отдельным включаемым файлом, но подключает
+     * его строка `include` из личного скрипта. Пока причина была одна на
+     * двоих (правила и автоответчик), у человека без единого правила
+     * личного скрипта не было вовсе — а значит, и подключать файл было
+     * нечем: он заглушал переписку, а письма продолжали приходить.
+     * Спрашиваем ХРАНИЛИЩЕ, а не базу: файл в ящике и есть то, от чего
+     * зависит доставка, и лишней связи между модулями это не заводит.
+     */
+    const muted = await this.#includes.has(email, MUTED_INCLUDE_NAME).catch(() => false);
+    const needsScript = active.length > 0 || settings.autoReply.enabled || muted;
     const state: SieveSyncState = {
       transport: this.#store.transport,
       path: this.#store.activePath(email),

@@ -39,7 +39,7 @@ import { LabelMenu } from '../mail/LabelMenu';
 import { LabelPills } from '../mail/LabelPill';
 import { useApplyLabels, useLabelsState } from '../mail/useLabels';
 import { isReliable, messageCategory } from '../lib/categories';
-import { forwardInit, quoteHtml, replyInit } from '../lib/composeFromMessage';
+import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { errorText, isNotFoundError } from '../lib/errorText';
 import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
@@ -60,6 +60,8 @@ import {
   IconArrowRight,
   IconClock,
   IconCode,
+  IconDownload,
+  IconEye,
   IconFilter,
   IconFlag,
   IconFolder,
@@ -75,6 +77,8 @@ import {
   IconTrash,
   IconUnsubscribe,
 } from '../mail/icons';
+import { AttachmentViewer } from '../mail/AttachmentViewer';
+import { canPreview } from '../mail/attachments';
 import { MessageSource } from '../mail/MessageSource';
 import { SnoozeMenu } from '../mail/SnoozeMenu';
 import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
@@ -101,6 +105,11 @@ function formatAddress(a: { name: string | null; address: string }): string {
 /** Ссылка на часть письма: вложение или встроенная картинка. */
 function partUrl(messageId: string, partId: string): string {
   return `/api/messages/${encodeURIComponent(messageId)}/parts/${encodeURIComponent(partId)}`;
+}
+
+/** Ссылка на письмо целиком — файл .eml, байт в байт как оно пришло. */
+function sourceUrl(messageId: string): string {
+  return `/api/messages/${encodeURIComponent(messageId)}/source`;
 }
 
 /** Есть ли в письме текст. Пробелы и переводы строк текстом не считаются. */
@@ -178,6 +187,12 @@ export function MessagePage() {
   /** Открыто окно «Исходный текст письма». */
   const [showSource, setShowSource] = useState(false);
   /**
+   * Какое вложение открыто в предпросмотре (номер в `message.attachments`)
+   * или null, если окно закрыто. Именно номер, а не сам файл: из окна
+   * вложения листаются стрелками, и номер — то, что при этом меняется.
+   */
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  /**
    * Дописывание черновика. Сюда попадают по прямой ссылке, из поиска или
    * из «открыть в новой вкладке»: щелчок по строке в папке «Черновики»
    * открывает окно написания сразу, минуя просмотр.
@@ -223,6 +238,11 @@ export function MessagePage() {
   }, [message?.id]);
 
   useEffect(() => setShowImages(false), [id]);
+
+  /* Перешли к соседнему письму — окно предпросмотра закрывается вместе с
+     письмом: его вложений в новом письме нет, а номер части остался бы
+     прежним и открыл бы чужой файл. */
+  useEffect(() => setPreviewIndex(null), [id]);
 
   /**
    * Адреса ссылок для печати. Тело письма вставляется готовой разметкой,
@@ -500,6 +520,29 @@ export function MessagePage() {
    * веб-адрес открываем в новой вкладке, а mailto — готовым письмом
    * в окне написания. Молчаливой заглушки здесь больше нет.
    */
+  /**
+   * Сохранить письмо файлом .eml.
+   *
+   * Скачивается ИСХОДНИК с сервера, а не собранное в браузере из разобранных
+   * полей: файл .eml открывают в другой почтовой программе и им же проверяют
+   * подпись DKIM, а она считается по исходным байтам. Любая пересборка —
+   * другие переводы строки, другой порядок заголовков — делает файл
+   * бесполезным ровно там, где он нужнее всего.
+   *
+   * Имя файла (тема и дата) ставит сервер заголовком Content-Disposition,
+   * поэтому у ссылки `download` без значения: с пустым значением браузер
+   * берёт имя с сервера, а не выдумывает своё из адреса.
+   */
+  const saveEml = () => {
+    const link = document.createElement('a');
+    link.href = sourceUrl(message.id);
+    link.download = '';
+    link.rel = 'noopener';
+    document.body.append(link);
+    link.click();
+    link.remove();
+  };
+
   const doUnsubscribe = () => {
     if (!unsubscribe) return;
     if (unsubscribe.http) {
@@ -648,6 +691,16 @@ export function MessagePage() {
           */}
           <MenuItem before={<IconCode />} onClick={() => setShowSource(true)}>
             Исходный текст письма
+          </MenuItem>
+          {/*
+            Скачивание стоит рядом с показом исходника, а не внутри него:
+            это одно и то же письмо, но разные надобности. Исходник читают
+            глазами; файл .eml забирают, чтобы положить в дело, открыть
+            другой почтовой программой или переслать целиком. Прежде за
+            файлом приходилось сперва открывать окно исходника.
+          */}
+          <MenuItem before={<IconDownload />} onClick={saveEml}>
+            Сохранить письмо (.eml)
           </MenuItem>
           <AiTranslateMenuItem controller={ai} />
         </Dropdown>
@@ -979,27 +1032,72 @@ export function MessagePage() {
               Вложения ({message.attachments.length})
             </div>
             <div className={styles.attachmentsList}>
-              {message.attachments.map((a) => (
-                // Именно ссылка, а не блок: раньше вложение было нарисовано
-                // обычным div-ом без обработчика, поэтому не открывалось и
-                // не скачивалось — при том что маршрут отдачи части письма
-                // в API есть и работает.
-                <a
-                  key={a.partId}
-                  className={styles.attachment}
-                  href={partUrl(message.id, a.partId)}
-                  download={a.filename}
-                  title={`${a.filename} — ${a.mimeType}`}
-                >
-                  <span className={styles.attachmentExt}>
-                    {(a.filename.split('.').pop() ?? '?').toUpperCase()}
-                  </span>
-                  <span className={styles.attachmentInfo}>
-                    <span className={styles.attachmentName}>{a.filename}</span>
-                    <span className={styles.attachmentSize}>{formatSize(a.size)}</span>
-                  </span>
-                </a>
-              ))}
+              {message.attachments.map((a, i) => {
+                /*
+                 * Что делает нажатие на карточку, зависит от того, умеем ли
+                 * мы показать этот файл. Кнопка появляется вместе с
+                 * поведением: у архива и таблицы «глаза» нет вовсе, и
+                 * нажатие на карточку по-прежнему скачивает — а не открывает
+                 * окно с извинениями.
+                 *
+                 * Скачивание при этом есть ВСЕГДА, отдельной кнопкой справа:
+                 * посмотреть и сохранить — разные надобности, и заставлять
+                 * открывать окно ради второй было бы шагом назад.
+                 */
+                const previewable = canPreview(a);
+                const face = (
+                  <>
+                    <span className={styles.attachmentExt}>
+                      {(a.filename.split('.').pop() ?? '?').toUpperCase()}
+                    </span>
+                    <span className={styles.attachmentInfo}>
+                      <span className={styles.attachmentName}>{a.filename}</span>
+                      <span className={styles.attachmentSize}>{formatSize(a.size)}</span>
+                    </span>
+                    {previewable && (
+                      <span className={styles.attachmentEye} aria-hidden="true">
+                        <IconEye size={16} />
+                      </span>
+                    )}
+                  </>
+                );
+                return (
+                  <div key={a.partId} className={styles.attachment}>
+                    {previewable ? (
+                      <button
+                        type="button"
+                        className={styles.attachmentMain}
+                        onClick={() => setPreviewIndex(i)}
+                        title={`Посмотреть ${a.filename} — ${a.mimeType}`}
+                      >
+                        {face}
+                      </button>
+                    ) : (
+                      // Именно ссылка, а не блок: раньше вложение было
+                      // нарисовано обычным div-ом без обработчика, поэтому
+                      // не открывалось и не скачивалось — при том что
+                      // маршрут отдачи части письма в API есть и работает.
+                      <a
+                        className={styles.attachmentMain}
+                        href={partUrl(message.id, a.partId)}
+                        download={a.filename}
+                        title={`Скачать ${a.filename} — ${a.mimeType}`}
+                      >
+                        {face}
+                      </a>
+                    )}
+                    <a
+                      className={styles.attachmentDownload}
+                      href={partUrl(message.id, a.partId)}
+                      download={a.filename}
+                      title="Скачать"
+                      aria-label={`Скачать ${a.filename}`}
+                    >
+                      <IconDownload size={16} />
+                    </a>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1030,6 +1128,18 @@ export function MessagePage() {
           messageId={message.id}
           subject={message.subject}
           onClose={() => setShowSource(false)}
+        />
+      )}
+
+      {/* Предпросмотр вложения — там же и по той же причине, что окно
+          исходника: правила печати не должны утащить его на бумагу. */}
+      {previewIndex !== null && message.attachments[previewIndex] && (
+        <AttachmentViewer
+          messageId={message.id}
+          attachments={message.attachments}
+          index={previewIndex}
+          onIndexChange={setPreviewIndex}
+          onClose={() => setPreviewIndex(null)}
         />
       )}
     </article>

@@ -23,6 +23,7 @@ import { AppLayout } from '../layout/AppLayout';
 import { Spinner } from '../components';
 import { AiSettingsPage } from '../pages/AiSettingsPage';
 import { AccessLogPage } from '../pages/settings/AccessLogPage';
+import { DisposablePage } from '../pages/settings/DisposablePage';
 import { AppearancePage } from '../pages/settings/AppearancePage';
 import { ExportPage } from '../pages/settings/ExportPage';
 import { RecoveryPage } from '../pages/settings/RecoveryPage';
@@ -97,6 +98,7 @@ export const router = createBrowserRouter([
           { path: 'templates', element: <TemplatesPage /> },
           { path: 'recovery', element: <RecoveryPage /> },
           { path: 'collector', element: <CollectorPage /> },
+          { path: 'disposable', element: <DisposablePage /> },
           { path: 'access-log', element: <AccessLogPage /> },
           { path: 'export', element: <ExportPage /> },
           { path: 'ai', element: <AiSettingsPage /> },

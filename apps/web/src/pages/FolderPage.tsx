@@ -44,6 +44,7 @@ import {
   IconFlag,
   IconFolder,
   IconMailUnread,
+  IconMuted,
   IconNewTab,
   IconSearch,
   IconSpam,
@@ -54,9 +55,10 @@ import { MailboxReview, type ReviewTab } from '../mail/MailboxReview';
 import { useMailboxReviewAvailable } from '../mail/useMailings';
 import { MessageList } from '../mail/MessageList';
 import { chunkIds, expandThreadIds, isRowFlagged, rowLabelKeys } from '../mail/threadList';
-import { SnoozeMenu } from '../mail/SnoozeMenu';
 import { PRESET_TITLES, formatWakeAt, type SnoozePreset } from '../mail/snoozeApi';
 import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
+import { useMuteThreads, useMutedState, useUnmuteThreads } from '../mail/useMute';
+import { useAwaitReply, useAwaitingState, useCancelAwaitReply } from '../mail/useAwaitReply';
 import styles from './FolderPage.module.css';
 import { folderTitle } from '../lib/folderNames';
 
@@ -536,6 +538,96 @@ export function FolderPage() {
     }
     return map;
   }, [snoozedFolder, snoozeState.items]);
+
+  /* --- Заглушить цепочку -----------------------------------------------
+   *
+   * Кнопки нет, пока сервер не сказал ДВА раза: возможность есть И она
+   * доедет до доставки. Второе условие здесь важнее первого: заглушка,
+   * которая прячет письма только в списке, — это ровно та мёртвая кнопка,
+   * ради отказа от которой всё и делалось (см. muteApi.ts).
+   */
+  const mutedState = useMutedState();
+  const muteThreads = useMuteThreads();
+  const unmuteThreads = useUnmuteThreads();
+  /** Мы в самой папке «Заглушённые»: здесь действие обратное. */
+  const mutedFolder = (currentFolder?.role ?? folderId) === 'muted';
+
+  const muteRows = useCallback(
+    (rowIds: string[]) => {
+      // Заглушается весь разговор целиком — это и есть смысл действия,
+      // поэтому строка разворачивается в переписку, как и везде.
+      const ids = expand(rowIds);
+      if (ids.length === 0) return;
+      // Строки гаснут сразу: письма уезжают в «Заглушённые», и делать вид,
+      // что нажатие не сработало, пока идёт запрос, нельзя.
+      setLeavingIds(ids);
+      for (const chunk of chunkIds(ids)) {
+        muteThreads.mutate(chunk, { onError: () => setLeavingIds([]) });
+      }
+      clearSelection();
+      setFocusedId(null);
+    },
+    [expand, muteThreads, clearSelection],
+  );
+
+  /**
+   * Снятие заглушки в самой папке «Заглушённые».
+   *
+   * Ключи переписок берутся из подборки: в письме их нет — заглушена
+   * ПЕРЕПИСКА, а не письмо, и по одному письму сервер не смог бы понять,
+   * какую именно запись снимать. Пока подборка не загрузилась, кнопки нет.
+   */
+  const unmuteAll = useCallback(() => {
+    const keys = mutedState.items.map((item) => item.key);
+    if (keys.length === 0) return;
+    unmuteThreads.mutate(keys);
+    clearSelection();
+  }, [mutedState.items, unmuteThreads, clearSelection]);
+
+  /* --- Напомнить, если не ответили -------------------------------------
+   *
+   * Только в «Отправленных»: ждать ответа можно на то, что написал сам.
+   * Сервер это же и проверяет — здесь условие стоит ради кнопки, а не
+   * вместо замка.
+   */
+  const awaitingState = useAwaitingState();
+  const awaitReply = useAwaitReply();
+  const cancelAwaitReply = useCancelAwaitReply();
+  const sentFolder = (currentFolder?.role ?? folderId) === 'sent';
+
+  const waitReply = useCallback(
+    (rowIds: string[], choice: { preset: SnoozePreset; until?: string }) => {
+      /*
+       * Здесь строка НЕ разворачивается в переписку, и это не забывчивость.
+       * Ждут ответа на конкретное отправленное письмо: у переписки из трёх
+       * своих писем ответ ждут на последнее, а поставить ожидание на все
+       * три значило бы три напоминания об одном и том же.
+       */
+      if (rowIds.length === 0) return;
+      awaitReply.mutate({
+        ids: rowIds,
+        preset: choice.preset,
+        ...(choice.until ? { until: choice.until } : {}),
+      });
+      clearSelection();
+    },
+    [awaitReply, clearSelection],
+  );
+
+  const stopWaiting = useCallback(
+    (rowIds: string[]) => {
+      if (rowIds.length === 0) return;
+      cancelAwaitReply.mutate(rowIds);
+      clearSelection();
+    },
+    [cancelAwaitReply, clearSelection],
+  );
+
+  /** Есть ли среди выделенного письмо, на котором уже стоит ожидание. */
+  const someAwaiting = useMemo(() => {
+    if (selectedIds.size === 0) return false;
+    return messages.some((m) => selectedIds.has(m.id) && m.awaitReply === 'waiting');
+  }, [messages, selectedIds]);
   /* --- Разбор ящика ---------------------------------------------------
    *
    * Окно поверх списка, а не отдельная страница: разбор — это ответ на
@@ -605,6 +697,28 @@ export function FolderPage() {
         }
         snoozeScheduledReturn={snoozeState.scheduledReturn}
         onReturnNow={snoozedFolder ? () => returnNow(targetIds()) : undefined}
+        /* «Заглушить» — там же, где «Отложить», и по тем же правилам: не в
+           самих «Заглушённых» и только когда заглушка доедет до доставки. */
+        onMute={
+          mutedState.available && mutedState.delivery && !mutedFolder
+            ? () => muteRows(targetIds())
+            : undefined
+        }
+        onUnmute={mutedFolder && mutedState.items.length > 0 ? unmuteAll : undefined}
+        /* «Ждать ответа» — только в «Отправленных» и только когда сервер
+           обещает проверить срок сам. */
+        onAwaitReply={
+          awaitingState.available && awaitingState.scheduledCheck && sentFolder && !someAwaiting
+            ? (choice) => waitReply(targetIds(), choice)
+            : undefined
+        }
+        awaitScheduledCheck={awaitingState.scheduledCheck}
+        /* А если ожидание уже стоит — на том же месте обратное действие.
+           Две кнопки разом означали бы, что человек может нажать «ждать»
+           на письме, которое уже ждёт, и получить отказ базы. */
+        onCancelAwaitReply={
+          awaitingState.available && someAwaiting ? () => stopWaiting(targetIds()) : undefined
+        }
         /* Метки на всю пачку выделенных строк. Галочка считается по
            СТРОКАМ (выделяли их), а правятся все письма их переписок. */
         labelMenu={
@@ -791,6 +905,17 @@ export function FolderPage() {
                   onClick={() => returnNow([contextMenu.message.id])}
                 >
                   Вернуть сейчас
+                </ContextMenuItem>
+              )}
+              {/* «Заглушить переписку» — в той же группе, что «В архив» и
+                  «Отложить»: все три про «убрать с глаз», и человек ищет
+                  их рядом. Пункта нет, пока заглушка не доедет до доставки. */}
+              {mutedState.available && mutedState.delivery && !mutedFolder && (
+                <ContextMenuItem
+                  before={<IconMuted />}
+                  onClick={() => muteRows([contextMenu.message.id])}
+                >
+                  Заглушить переписку
                 </ContextMenuItem>
               )}
               <ContextMenuSeparator />

@@ -282,8 +282,6 @@ export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMe
       ? [parsed.references]
       : [];
 
-  const authHeader = parsed.headers.get('authentication-results');
-
   const message: Message = {
     ...summary,
     messageId: parsed.messageId ?? null,

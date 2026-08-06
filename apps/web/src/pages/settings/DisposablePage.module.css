@@ -1,0 +1,121 @@
+/* Одноразовые адреса. Метрика списка — как у «Меток» и «Папок». */
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 0 12px;
+}
+
+.counter {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 12px 0;
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+/* Выключенный адрес виден, но приглушён: он не ошибка, а нормальное
+   состояние — и при этом отличим от работающего с одного взгляда. */
+.rowOff .address {
+  color: var(--mt-color-text-tertiary);
+  text-decoration: line-through;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.addressLine {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.address {
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--mt-font-body-size, 14px);
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--mt-color-bg-secondary);
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption2-size, 11px);
+  white-space: nowrap;
+}
+
+.note {
+  margin-top: 2px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 4px;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.traffic {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+.quiet {
+  color: var(--mt-color-text-tertiary);
+}
+
+.rejected {
+  color: var(--mt-color-text-tertiary);
+}
+
+.senders {
+  overflow-wrap: anywhere;
+  color: var(--mt-color-text-tertiary);
+}
+
+.sender {
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.dialogText {
+  margin: 0 0 12px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-body-size, 14px);
+  line-height: 20px;
+}

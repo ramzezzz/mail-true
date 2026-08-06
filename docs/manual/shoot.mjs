@@ -279,6 +279,7 @@ const SHOTS = [
     url: `${WEB}/search/?q=${encodeURIComponent('от:волкова')}`,
     wait: 'main',
   },
+  { name: '28-disposable', url: `${WEB}/settings/disposable`, wait: 'main' },
   { name: '26-admin-spam', url: `${ADMIN}/spam`, wait: 'main', admin: true },
   { name: '27-admin-monitoring', url: `${ADMIN}/monitoring`, wait: 'main', admin: true },
 ];

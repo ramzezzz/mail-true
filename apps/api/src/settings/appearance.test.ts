@@ -39,8 +39,7 @@ class FakeDb {
   }
 }
 
-/* eslint-disable-next-line @typescript-eslint/no-explicit-any -- у подделки только
-   два метода из SettingsDb, и больше здесь не нужно */
+ 
 const asDb = (fake: FakeDb): any => fake;
 
 test('новый ящик: тема системная, фон не выбран', () => {

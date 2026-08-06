@@ -16,6 +16,7 @@ import { ApiError } from '../api/http';
 import type { MessageFull, MessagesPage, SendFailureNotice } from '../api/types';
 import { DEFAULT_UNDO_SEND_SECONDS } from '../api/settingsTypes';
 import { blockRemoteImages } from '../lib/externalImages';
+import { mockPartBytes } from './mockAttachments';
 import { expandMessage, mockAccount, mockFolders, mockMessages } from './mockData';
 import {
   mockAiClassify,
@@ -341,8 +342,19 @@ export const mockApi: MailApi = {
     return { id: `upload-${Date.now()}`, filename: file.name, size: file.size, mimeType: file.type };
   },
 
-  // Настоящих байтов в заглушках нет — отдаём столько, сколько заявлено
-  // в описании вложения, чтобы «Из Почты» можно было посмотреть без бэкенда.
+  /*
+   * Байты вложения.
+   *
+   * Раньше отдавались нули — для «Из Почты» этого хватало (там файл только
+   * пересылается дальше), но предпросмотр на нулях показывал бы пустой
+   * квадрат и на заглушках выглядел бы сломанным. Поэтому картинка,
+   * PDF и текст отдаются НАСТОЯЩИМИ — маленькими, но такими, какими их
+   * видит браузер: только так «интерфейс работает без сервера» остаётся
+   * правдой и для предпросмотра.
+   *
+   * Всё остальное (таблицы, архивы) по-прежнему нули: их предпросмотра нет
+   * ни здесь, ни на сервере, и содержимое ни на что не влияет.
+   */
   async getMessagePart(messageId, partId) {
     await delay(200);
     const message = messages.find((m) => m.id === messageId);
@@ -353,7 +365,8 @@ export const mockApi: MailApi = {
     if (!part) {
       throw new ApiError(404, `/api/messages/${messageId}/parts/${partId}`, 'Часть письма не найдена', 'NOT_FOUND');
     }
-    return new Blob([new Uint8Array(Math.min(part.size, 4096))], { type: part.mimeType });
+    const sample = mockPartBytes(part.filename, part.mimeType);
+    return new Blob([sample ?? new Uint8Array(Math.min(part.size, 4096))], { type: part.mimeType });
   },
 
   /**

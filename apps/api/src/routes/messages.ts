@@ -18,7 +18,7 @@ import {
 } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { parseFullMessage, parseMessageHeaders } from '../mail/parse.js';
-import { decidePartDelivery } from '../mail/part-delivery.js';
+import { decidePartDelivery, emlFileName } from '../mail/part-delivery.js';
 import { loadAccountsConfig } from '../accounts/config.js';
 import { SnoozeDb } from '../mail/snooze-db.js';
 import {
@@ -34,6 +34,12 @@ import {
   SAVED_SEARCHES_MIGRATION_HINT,
 } from '../mail/saved-searches-routes.js';
 import { mailingsRoutes } from '../mail/mailings-routes.js';
+import { MuteDb } from '../mail/mute-db.js';
+import { MUTE_MIGRATION_HINT, MuteService } from '../mail/mute-service.js';
+import { muteRoutes } from '../mail/mute-routes.js';
+import { AwaitingDb } from '../mail/await-reply-db.js';
+import { AWAIT_MIGRATION_HINT, AwaitReplyService } from '../mail/await-reply-service.js';
+import { awaitReplyRoutes } from '../mail/await-reply-routes.js';
 import { performUnsubscribe, type UnsubscribeSmtp } from '../mail/unsubscribe-request.js';
 import type { MailSession } from '../types.js';
 
@@ -248,28 +254,47 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const { id } = messageParamsSchema.parse(request.params);
     const { folderId, uid } = splitMessageId(id);
 
-    const source = await pool.withClient(session.email, session.password, async (client) => {
+    const found = await pool.withClient(session.email, session.password, async (client) => {
       const folder = await requireFolder(client, folderId);
       const lock = await client.getMailboxLock(folder.path);
       try {
-        const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
-        return msg && msg.source ? msg.source : null;
+        /*
+         * Конверт и дату берём тем же запросом, что и байты письма: они
+         * нужны только ради имени файла, а второй заход в ящик за темой
+         * стоил бы ещё одной блокировки папки.
+         */
+        const msg = await client.fetchOne(
+          String(uid),
+          { uid: true, source: true, envelope: true, internalDate: true },
+          { uid: true },
+        );
+        if (!msg || !msg.source) return null;
+        return {
+          source: msg.source,
+          subject: msg.envelope?.subject ?? '',
+          // Дата из заголовка письма, а не время доставки: человек ищет
+          // файл по той дате, которую видел в списке писем. Времени
+          // доставки хватает как запасного варианта — заголовка Date
+          // у письма может не быть вовсе.
+          date: msg.envelope?.date ?? msg.internalDate ?? null,
+        };
       } finally {
         lock.release();
       }
     });
-    if (!source) throw new NotFoundError('Письмо не найдено');
+    if (!found) throw new NotFoundError('Письмо не найдено');
 
     reply.header('content-type', 'message/rfc822');
     reply.header('x-content-type-options', 'nosniff');
     reply.header('content-security-policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
-    // Имя файла — из идентификатора письма, а не из темы: тема бывает
-    // пустой, очень длинной и содержит что угодно, включая символы, которые
-    // в имени файла означают путь.
-    const filename = `${id.replace(/[^\w.-]+/g, '_')}.eml`;
+    // Имя файла — тема и дата, вычищенные тем же правилом, что и имена
+    // внутри выгрузки ящика (mail/part-delivery.ts → settings/zip.ts).
+    // Раньше здесь стоял идентификатор письма, и в «Загрузках» лежал
+    // `inbox_209.eml`, о котором назавтра нельзя было сказать ничего.
+    const filename = emlFileName(found.subject, found.date);
     reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     reply.header('cache-control', 'private, max-age=3600');
-    return reply.send(source);
+    return reply.send(found.source);
   });
 
   // Вложение или встроенная картинка
@@ -608,11 +633,113 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
    */
   await mailingsRoutes(app, { smtp: unsubscribeSmtp });
 
+  /* ------------------------------------------------------------------ */
+  /* Заглушённые цепочки                                                 */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Подключается здесь по той же причине, что метки и отложенные письма:
+   * своих переменных окружения не заводит, база берётся оттуда же, проба
+   * схемы асинхронная и не задерживает сборку маршрутов.
+   *
+   * Файл правил Sieve при этом пишется через раздел настроек
+   * (`app.settingsService`): каталог скриптов ящика один, и второе
+   * хранилище со своими настройками транспорта разъехалось бы с первым
+   * при первой же правке окружения.
+   */
+  const mute = new MuteService({
+    logger,
+    includes: () => app.settingsService.includes,
+    syncSieve: async (email) => {
+      const state = await app.settingsService.syncSieve(email);
+      return { written: state.written, error: state.error };
+    },
+  });
+
+  let muteDb: MuteDb | null = null;
+  if (accountsConfig.databaseUrl) {
+    muteDb = new MuteDb({ connectionString: accountsConfig.databaseUrl, logger });
+    const db = muteDb;
+    db.schemaReady()
+      .then((ready) => {
+        if (!ready) {
+          mute.disable(MUTE_MIGRATION_HINT);
+          app.log.error(MUTE_MIGRATION_HINT);
+          return;
+        }
+        mute.attachStore(db);
+      })
+      .catch((err: unknown) => {
+        mute.disable('Не удалось проверить схему заглушённых цепочек');
+        app.log.error(errorInfo(err), 'Не удалось проверить схему заглушённых цепочек');
+      });
+  } else {
+    mute.disable(
+      'Заглушить переписку нельзя: не настроена база данных (DATABASE_URL). ' +
+        'Почта при этом работает как обычно.',
+    );
+    app.log.warn(mute.unavailableReason);
+  }
+
+  await muteRoutes(app, mute);
+
+  /* ------------------------------------------------------------------ */
+  /* Напомнить, если не ответили                                         */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Служебный вход в Dovecot — тот же, что у возврата отложенных писем:
+   * проверять ответ и поднимать письмо надо и тогда, когда человека нет
+   * в сети, а пароля владельца для этого не нужно и не хранится.
+   */
+  const awaitReply = new AwaitReplyService({
+    config,
+    logger,
+    master: accountsConfig.masterConfigured
+      ? {
+          user: accountsConfig.DOVECOT_MASTER_USER,
+          password: accountsConfig.DOVECOT_MASTER_PASSWORD,
+          separator: accountsConfig.DOVECOT_MASTER_SEPARATOR,
+        }
+      : null,
+  });
+
+  let awaitingDb: AwaitingDb | null = null;
+  if (accountsConfig.databaseUrl) {
+    awaitingDb = new AwaitingDb({ connectionString: accountsConfig.databaseUrl, logger });
+    const db = awaitingDb;
+    db.schemaReady()
+      .then((ready) => {
+        if (!ready) {
+          awaitReply.disable(AWAIT_MIGRATION_HINT);
+          app.log.error(AWAIT_MIGRATION_HINT);
+          return;
+        }
+        awaitReply.attachStore(db);
+        awaitReply.start();
+      })
+      .catch((err: unknown) => {
+        awaitReply.disable('Не удалось проверить схему ожидаемых ответов');
+        app.log.error(errorInfo(err), 'Не удалось проверить схему ожидаемых ответов');
+      });
+  } else {
+    awaitReply.disable(
+      'Ждать ответа нельзя: не настроена база данных (DATABASE_URL). ' +
+        'Почта при этом работает как обычно.',
+    );
+    app.log.warn(awaitReply.unavailableReason);
+  }
+
+  await awaitReplyRoutes(app, awaitReply);
+
   app.addHook('onClose', async () => {
     snooze.stop();
+    awaitReply.stop();
     if (snoozeDb) await snoozeDb.shutdown().catch(() => undefined);
     if (labelsDb) await labelsDb.shutdown().catch(() => undefined);
     if (savedSearchesDb) await savedSearchesDb.shutdown().catch(() => undefined);
+    if (muteDb) await muteDb.shutdown().catch(() => undefined);
+    if (awaitingDb) await awaitingDb.shutdown().catch(() => undefined);
   });
 
   /**
@@ -621,6 +748,9 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
    * живёт в области видимости плагина, ровно как у отложенной отправки.
    */
   app.decorate('snoozeService', snooze);
+  /* По той же причине: проверить напоминание иначе можно было бы только
+     ожиданием суток. */
+  app.decorate('awaitReplyService', awaitReply);
 
   /**
    * Что лежит в «Отложенных» и работает ли возможность вообще.
@@ -684,5 +814,10 @@ declare module 'fastify' {
      * таймера.
      */
     snoozeService: SnoozeService;
+    /**
+     * Служба ожидания ответа. Наружу выведена по той же причине: иначе
+     * проверить напоминание можно было бы только ожиданием суток.
+     */
+    awaitReplyService: AwaitReplyService;
   }
 }

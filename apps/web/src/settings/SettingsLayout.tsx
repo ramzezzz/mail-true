@@ -17,6 +17,7 @@ import { cx } from '../lib/cx';
 import { IconArrowLeft } from '../mail/icons';
 import { useLabelsState } from '../mail/useLabels';
 import { useTemplatesState } from '../mail/useTemplates';
+import { useDisposable } from './disposableQueries';
 import { useAccessLog, useExports, useRecovery } from './ownerQueries';
 import styles from './SettingsLayout.module.css';
 
@@ -71,6 +72,15 @@ const ACCESS_ITEM: NavItem = { to: '/settings/access-log', title: 'Вход и �
 const EXPORT_ITEM: NavItem = { to: '/settings/export', title: 'Выгрузка ящика' };
 
 /**
+ * «Одноразовые адреса» стоят сразу за «Почтой с других ящиков»: оба пункта
+ * про АДРЕСА, с которых и на которые ходит почта, а не про то, как она
+ * раскладывается по папкам. У mail.ru «Анонимайзер» лежит там же — рядом с
+ * настройками сбора почты, а не среди правил.
+ */
+const DISPOSABLE_ITEM: NavItem = { to: '/settings/disposable', title: 'Одноразовые адреса' };
+const DISPOSABLE_AFTER = '/settings/collector';
+
+/**
  * Адрес без хвостовых косых: `/settings/` и `/settings` — одно и то же место.
  *
  * Именно на этом ломалась подсветка «Главной»: в меню стоит `/settings`, а
@@ -99,6 +109,7 @@ export function SettingsLayout() {
   const access = useAccessLog();
   const exports = useExports();
   const recovery = useRecovery();
+  const disposable = useDisposable();
 
   /*
    * Разделы, которых может не быть.
@@ -129,8 +140,18 @@ export function SettingsLayout() {
         item.to === RECOVERY_AFTER ? [item, RECOVERY_ITEM] : [item],
       )
     : withTemplates;
+  /*
+   * Одноразовые адреса — по тому же правилу: нет применённой миграции
+   * 0028 (или базы вовсе) — нет и пункта. Раздел, который умеет сказать
+   * только «недоступно», в меню не показывается.
+   */
+  const withDisposable = disposable.available
+    ? withRecovery.flatMap((item) =>
+        item.to === DISPOSABLE_AFTER ? [item, DISPOSABLE_ITEM] : [item],
+      )
+    : withRecovery;
   const withOwner = [
-    ...withRecovery,
+    ...withDisposable,
     ...(access.available ? [ACCESS_ITEM] : []),
     ...(exports.available ? [EXPORT_ITEM] : []),
   ];
