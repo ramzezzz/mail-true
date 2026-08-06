@@ -10,6 +10,8 @@ import type { Folder, MessageFilter } from '@mail-true/shared';
 import { useUiStore } from '../app/store';
 import { folderTitle } from '../lib/folderNames';
 import { Button, Dropdown, IconButton, MenuItem, MenuSeparator } from '../components';
+import { LabelPill } from './LabelPill';
+import type { MailLabel } from './labelsApi';
 import { SnoozeMenu } from './SnoozeMenu';
 import type { SnoozePreset } from './snoozeApi';
 import {
@@ -103,6 +105,14 @@ export interface ListToolbarProps {
    * осталась бы посредником, который передаёт данные, не пользуясь ими.
    */
   labelMenu?: ReactNode;
+  /**
+   * Свои метки для меню «Фильтр». Пусто — группы меток в меню нет вовсе:
+   * заголовок над пустотой ничего не сообщает.
+   */
+  labels?: readonly MailLabel[] | undefined;
+  /** Ключ метки, по которой сейчас отбирают, или null — отбора нет. */
+  labelFilter?: string | null | undefined;
+  onLabelFilterChange?: ((key: string | null) => void) | undefined;
 }
 
 export function ListToolbar(props: ListToolbarProps) {
@@ -159,6 +169,33 @@ export function ListToolbar(props: ListToolbarProps) {
               {FILTER_TITLES[f]}
             </MenuItem>
           ))}
+          {/*
+            Отбор по своей метке — в том же меню, что и признаки письма:
+            человек ищет «показать только помеченное» там же, где ищет
+            «показать только непрочитанное».
+
+            Метка не заменяет признак, а сужает поверх него: «непрочитанные»
+            и «с меткой Оплатить» вместе — это непрочитанные с меткой.
+            Поэтому у меток свой признак выбранного и своё «Все письма».
+          */}
+          {props.labels && props.labels.length > 0 && props.onLabelFilterChange && (
+            <>
+              <MenuSeparator />
+              {props.labels.map((label) => (
+                <MenuItem
+                  key={label.key}
+                  onClick={() =>
+                    props.onLabelFilterChange?.(
+                      props.labelFilter === label.key ? null : label.key,
+                    )
+                  }
+                  hint={props.labelFilter === label.key ? '✓' : undefined}
+                >
+                  <LabelPill label={label} />
+                </MenuItem>
+              ))}
+            </>
+          )}
           <MenuSeparator />
           <MenuItem onClick={toggleCompactList} hint={compactList ? '✓' : undefined}>
             Компактный список

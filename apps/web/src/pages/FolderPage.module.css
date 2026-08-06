@@ -37,3 +37,34 @@
 .loadErrorText {
   margin: 0;
 }
+
+/*
+ * Строка о пределах отбора по метке.
+ *
+ * Стоит НАД списком, а не под ним: она объясняет, почему в списке три
+ * письма вместо сорока, и прочитать её надо до того, как человек сделает
+ * из увиденного вывод.
+ */
+.labelFilterNote {
+  padding: 8px 12px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.labelFilterReset {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-text-accent, #005ff9);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Подчёркивание только там, где есть мышь: на касании :hover «залипает»
+   после нажатия и ссылка остаётся подчёркнутой навсегда. */
+@media (hover: hover) {
+  .labelFilterReset:hover {
+    text-decoration: underline;
+  }
+}

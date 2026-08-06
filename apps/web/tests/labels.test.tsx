@@ -35,6 +35,7 @@ import {
   type MailLabel,
 } from '../src/mail/labelsApi';
 import { LabelMenu } from '../src/mail/LabelMenu';
+import { ListToolbar } from '../src/mail/ListToolbar';
 import { LabelPills } from '../src/mail/LabelPill';
 import { MessageList, ROW_HEIGHT } from '../src/mail/MessageList';
 import { LabelsPage } from '../src/pages/settings/LabelsPage';
@@ -301,6 +302,24 @@ describe('метка на строке-переписке', () => {
   });
 });
 
+/**
+ * jsdom не считает размеров: offsetWidth/offsetHeight у него всегда нули,
+ * а виртуализация меряет контейнер прокрутки именно ими — при нулевой
+ * высоте она не отрисовывает ни одной строки. Выдаём ей окно 1200×800,
+ * ровно как в tests/listAnatomy.test.tsx.
+ */
+function stubLayout() {
+  if (!('ResizeObserver' in globalThis)) {
+    (globalThis as { ResizeObserver?: unknown }).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 800 });
+}
+
 describe('пилюля в строке не растит строку', () => {
   const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
   const listCss = readFileSync(join(SRC, 'mail/MessageList.module.css'), 'utf8');
@@ -326,6 +345,24 @@ describe('пилюля в строке не растит строку', () => {
     expect(height).toBeLessThanOrEqual(badge);
   });
 
+  it('название метки — цветом темы, а цвет метки — только в кружке', () => {
+    /*
+     * Тем оформления девять. Замерено на стенде: если печатать название
+     * цветом самой метки, контраст к её подложке падает до 2.13 (жёлтая)
+     * при требуемых 4.5 для мелкого текста — то есть половина палитры
+     * не читается. Обычный цвет текста берёт контраст у темы (11.5 на
+     * светлых, 9.5 на тёмной) и не требует девяти оттенков на каждую тему.
+     */
+    const pill = rule(pillCss, '.pill');
+    expect(pill).toContain('color: var(--mt-color-text-primary)');
+    expect(pill, 'название печаталось бы цветом метки').not.toMatch(
+      /\n\s*color:\s*var\(--mt-label-color\)/u,
+    );
+    // А цвет метки при этом никуда не делся — он в кружке и в подложке
+    expect(rule(pillCss, '.dot')).toContain('var(--mt-label-color)');
+    expect(pill).toContain('--mt-label-color');
+  });
+
   it('ряд меток не переносится на вторую строку', () => {
     // Перенос — единственный способ, которым ряд пилюль мог бы вырасти
     // выше своей высоты и растянуть строку.
@@ -334,6 +371,7 @@ describe('пилюля в строке не растит строку', () => {
   });
 
   it('строка списка рисует метку названием, а не только цветом', () => {
+    stubLayout();
     useUiStore.setState({ selectedIds: new Set<string>() });
     const message = summary('1', ['mt-oplatit']);
     act(() => {
@@ -355,6 +393,7 @@ describe('пилюля в строке не растит строку', () => {
   });
 
   it('без справочника строка выглядит как прежде', () => {
+    stubLayout();
     // Список рисуется и в проверках, где запроса к серверу нет вовсе:
     // требовать провайдер запросов ради украшения строки нельзя.
     useUiStore.setState({ selectedIds: new Set<string>() });
@@ -366,6 +405,82 @@ describe('пилюля в строке не растит строку', () => {
       );
     });
     expect(host.querySelector('[class*="rowLabels"]')).toBeNull();
+  });
+});
+
+describe('отбор списка по метке', () => {
+  /** Обязательные свойства панели, до которых этой проверке дела нет. */
+  const toolbarStub = {
+    selectedCount: 0,
+    filter: 'all' as const,
+    folders: [],
+    onFilterChange: () => {},
+    onSelectAll: () => {},
+    onClearSelection: () => {},
+    onMarkAllRead: () => {},
+    onDelete: () => {},
+    onArchive: () => {},
+    onMoveTo: () => {},
+    onUnsubscribe: () => {},
+    onMarkUnread: () => {},
+    onToggleFlag: () => {},
+    onSpam: () => {},
+    onPrint: () => {},
+    onCreateFilter: () => {},
+    onForwardAsAttachment: () => {},
+  };
+
+  it('метка стоит в меню «Фильтр» и переключается нажатием', () => {
+    const calls: Array<string | null> = [];
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <ListToolbar
+            {...toolbarStub}
+            labels={[OPLATIT]}
+            labelFilter={null}
+            onLabelFilterChange={(key) => calls.push(key)}
+          />
+        </MemoryRouter>,
+      );
+    });
+    click(button('Фильтр')!);
+    // Метка названа, а не показана одним кружком: цвет различают не все
+    expect(button('Оплатить')).toBeDefined();
+    click(button('Оплатить')!);
+    expect(calls).toEqual(['mt-oplatit']);
+  });
+
+  it('повторное нажатие снимает отбор', () => {
+    const calls: Array<string | null> = [];
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <ListToolbar
+            {...toolbarStub}
+            labels={[OPLATIT]}
+            labelFilter="mt-oplatit"
+            onLabelFilterChange={(key) => calls.push(key)}
+          />
+        </MemoryRouter>,
+      );
+    });
+    click(button('Фильтр')!);
+    click(button('Оплатить')!);
+    expect(calls).toEqual([null]);
+  });
+
+  it('без меток группы в меню нет вовсе', () => {
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <ListToolbar {...toolbarStub} labels={[]} onLabelFilterChange={() => {}} />
+        </MemoryRouter>,
+      );
+    });
+    click(button('Фильтр')!);
+    // Заголовок над пустотой ничего не сообщает
+    expect(button('Оплатить')).toBeUndefined();
   });
 });
 

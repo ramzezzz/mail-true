@@ -60,8 +60,14 @@ export function LabelMenu({ messages, targetIds, onApplied }: LabelMenuProps) {
 
   return (
     <div className={styles.menu}>
+      {/*
+        Заголовок называет число ПИСЕМ, которых коснётся нажатие, а не
+        число выделенных строк. Разница видна как раз там, где она важна:
+        одна строка-переписка — это «Метки для 3 писем», и человек узнаёт
+        об этом ДО нажатия, а не по счётчику в извещении после.
+      */}
       <div className={styles.title}>
-        {messages.length > 1 ? `Метки для ${String(messages.length)} писем` : 'Метки'}
+        {ids.length > 1 ? `Метки для ${String(ids.length)} писем` : 'Метки'}
       </div>
 
       {items.length === 0 && (

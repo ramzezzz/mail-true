@@ -111,6 +111,8 @@ export function FolderPage() {
    * полного было бы просто неправильным местом.
    */
   const scrollKey = `${folderId}:${filter}`;
+  /* Отбор по метке входит в ключ прокрутки ниже (labelFilter объявлен
+     после хуков списка) — список с отбором это другой список. */
 
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -187,6 +189,34 @@ export function FolderPage() {
       rowIds.map((id) => ({ id, labels: rowLabels.get(id) ?? [] })),
     [rowLabels],
   );
+
+  /**
+   * Отбор списка по метке.
+   *
+   * ВРЕМЕННОЕ РЕШЕНИЕ, и вот почему. Отбор идёт по УЖЕ ЗАГРУЖЕННЫМ строкам,
+   * а не по всей папке: `GET /api/messages` умеет отбирать по признакам
+   * письма (`filter=unread|flagged|with-attachments`), но не по ключевому
+   * слову — сборка запроса к IMAP живёт в imap/service.ts
+   * (`buildSearchQuery`), и поля `keyword` в ней нет. Как только оно
+   * появится, отбор переедет в параметр запроса, а этот код исчезнет
+   * целиком: снаружи ничего не изменится.
+   *
+   * Пока этого нет, честность важнее полноты — над списком стоит строка
+   * о том, по скольким письмам отбор идёт, и кнопка «Показать ещё»
+   * остаётся на месте. Молча показать три письма из сорока помеченных
+   * было бы хуже, чем не иметь отбора вовсе.
+   */
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+
+  // Метка, которой больше нет (удалили в настройках), отбором быть не может
+  useEffect(() => {
+    if (labelFilter && !labelDictionary.some((l) => l.key === labelFilter)) setLabelFilter(null);
+  }, [labelFilter, labelDictionary]);
+
+  const visibleMessages = useMemo(() => {
+    if (!labelFilter) return messages;
+    return messages.filter((m) => (rowLabels.get(m.id) ?? []).includes(labelFilter));
+  }, [messages, rowLabels, labelFilter]);
 
   const applyFlags = useCallback(
     (rowIds: string[], set: Parameters<typeof setFlags.mutate>[0]['set']) => {
@@ -571,7 +601,31 @@ export function FolderPage() {
             />
           ) : undefined
         }
+        labels={labelsAvailable ? labelDictionary : undefined}
+        labelFilter={labelFilter}
+        onLabelFilterChange={(key) => {
+          setLabelFilter(key);
+          clearVisitedMessage();
+        }}
       />
+
+      {/*
+        Честная строка о пределах отбора по метке. Без неё «Найдено: 3»
+        в папке на четыреста писем читалось бы как «помечено три» — а на
+        деле это «три среди загруженных ста». Пока отбор не переехал на
+        сервер (см. labelFilter выше), молчать об этом нельзя.
+      */}
+      {labelFilter && !page.isPending && (
+        <div className={styles.labelFilterNote} role="status">
+          С меткой «{labelDictionary.find((l) => l.key === labelFilter)?.name ?? labelFilter}»:{' '}
+          {visibleMessages.length} из загруженных {messages.length}
+          {page.hasMore ? '. Долистайте список, чтобы охватить остальные письма папки' : ''}
+          {'. '}
+          <button type="button" className={styles.labelFilterReset} onClick={() => setLabelFilter(null)}>
+            Показать все
+          </button>
+        </div>
+      )}
 
       {/* Скелетоны вместо пустого экрана: строки встают на те же места,
           что и настоящие письма, поэтому список не «прыгает» при загрузке */}
@@ -601,7 +655,10 @@ export function FolderPage() {
           /* Ключ по папке: список монтируется заново — и прокрутка начинается
              сверху, и появление новой папки видно */
           key={folderId}
-          messages={messages}
+          /* Отбор по метке сужает СПИСОК, но не то, что загружено: строки
+             остаются в памяти страницы, и снятие отбора возвращает их
+             мгновенно, без запроса к серверу. */
+          messages={visibleMessages}
           focusedId={focusedId}
           leavingIds={leavingIds}
           onEndReached={loadMore}
@@ -620,7 +677,7 @@ export function FolderPage() {
              которой ушли, подсвечивает: без этого при просмотре нескольких
              писем подряд место в списке приходится искать заново после
              каждого. */
-          scrollKey={scrollKey}
+          scrollKey={labelFilter ? `${scrollKey}:${labelFilter}` : scrollKey}
           highlightId={highlightId}
           /* Срок возврата в строке — только в папке «Отложенные»: в
              остальных его нет и показывать нечего. */
