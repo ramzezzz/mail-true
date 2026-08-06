@@ -567,3 +567,274 @@ test('правило «применять к спаму» стоит выше б
   assert.ok(posRule >= 0 && posSpam >= 0, 'оба блока должны присутствовать');
   assert.ok(posRule < posSpam, 'правило должно стоять до общей раскладки спама');
 });
+
+/* ---------------------------------------------------------------- */
+/* Текст письма и вложение                                           */
+/* ---------------------------------------------------------------- */
+
+test('conditionToTest: условие по тексту письма — это тест body :text', () => {
+  assert.equal(
+    conditionToTest({ field: 'body', op: 'contains', value: 'invoice' }),
+    'body :text :contains "invoice"',
+  );
+  assert.equal(
+    conditionToTest({ field: 'body', op: 'not-contains', value: 'unsubscribe' }),
+    'not body :text :contains "unsubscribe"',
+  );
+});
+
+/*
+ * Главное про кириллицу в теле, проверенное на живом Dovecot через
+ * sieve-test: `body :text :contains "счёт"` НЕ находит письмо со словом
+ * «СЧЁТ», потому что компаратор по умолчанию сворачивает регистр только
+ * латиницы. Условие обязано вести себя так же, как условия по заголовкам,
+ * — то есть переводиться в :regex с перечислением регистров.
+ */
+test('conditionToTest: русское слово в теле переводится в :regex, как и в теме', () => {
+  assert.equal(
+    conditionToTest({ field: 'body', op: 'contains', value: 'счёт' }),
+    'body :text :regex "(с|С)(ч|Ч)(ё|Ё)(т|Т)"',
+  );
+  // Латиница в переводе не нуждается: с ней компаратор справляется сам.
+  assert.ok(
+    !conditionToTest({ field: 'body', op: 'contains', value: 'invoice' }).includes(':regex'),
+  );
+});
+
+test('conditionToTest: «есть вложение» и «нет вложения»', () => {
+  const has = conditionToTest({ field: 'attachment', op: 'has', value: '' });
+  const hasNot = conditionToTest({ field: 'attachment', op: 'has-not', value: '' });
+  assert.ok(has.startsWith('anyof ('), 'условие собирается из нескольких тестов MIME');
+  assert.ok(has.includes(':mime :anychild'), 'обход частей письма — RFC 5703');
+  assert.equal(hasNot, `not ${has}`);
+  // Значение условия в переводе не участвует вовсе: спрашивается наличие.
+  assert.equal(conditionToTest({ field: 'attachment', op: 'has', value: 'что угодно' }), has);
+});
+
+test('requiredExtensions: body и mime объявляются только когда нужны', () => {
+  assert.deepEqual(
+    requiredExtensions([
+      rule({
+        id: 1,
+        conditions: [{ field: 'body', op: 'contains', value: 'invoice' }],
+        actions: actions({ folder: 'X' }),
+      }),
+    ]),
+    ['fileinto', 'mailbox', 'body'],
+  );
+  assert.deepEqual(
+    requiredExtensions([
+      rule({
+        id: 1,
+        conditions: [{ field: 'attachment', op: 'has', value: '' }],
+        actions: actions({ folder: 'X' }),
+      }),
+    ]),
+    ['fileinto', 'mailbox', 'mime'],
+  );
+  // Правило без этих условий остаётся ровно таким, каким было раньше.
+  assert.deepEqual(
+    requiredExtensions([
+      rule({
+        id: 1,
+        conditions: [{ field: 'from', op: 'contains', value: 'a@b' }],
+        actions: actions({ folder: 'X' }),
+      }),
+    ]),
+    ['fileinto', 'mailbox'],
+  );
+});
+
+/* ---------------------------------------------------------------- */
+/* Метки и удаление                                                  */
+/* ---------------------------------------------------------------- */
+
+test('actionsToCommands: метка ставится тем же addflag и до fileinto', () => {
+  const cmds = actionsToCommands(actions({ folder: 'Счета', labels: ['mt-scheta', 'mt-srochno'] }));
+  assert.deepEqual(cmds, [
+    'addflag "mt-scheta";',
+    'addflag "mt-srochno";',
+    'fileinto :create "Счета";',
+  ]);
+});
+
+/*
+ * Самое опасное место всей возможности. `addflag` принимает ЛЮБОЕ слово,
+ * и правило с «меткой» `\Deleted` стирало бы почту, а с `$Snoozed` —
+ * прятало письма в «Отложенные». Через API такое не пройдёт, но файл
+ * Sieve собирается из базы, а в базу правило может попасть и мимо API.
+ */
+test('actionsToCommands: служебное ключевое слово меткой стать не может', () => {
+  const cmds = actionsToCommands(
+    actions({ labels: ['\\Deleted', '$Snoozed', 'reliable', 'mt-ok', 'mt-ok'] }),
+  );
+  assert.deepEqual(cmds, ['addflag "mt-ok";'], 'остаётся только своя метка, и без повторов');
+});
+
+test('actionsToCommands: удаление в корзину — это fileinto в неё и stop', () => {
+  assert.deepEqual(actionsToCommands(actions({ deleteMessage: 'trash' })), [
+    'fileinto :create "Trash";',
+    'stop;',
+  ]);
+  assert.deepEqual(
+    actionsToCommands(actions({ deleteMessage: 'trash' }), { trashFolder: 'Корзина' }),
+    ['fileinto :create "Корзина";', 'stop;'],
+  );
+});
+
+test('actionsToCommands: безвозвратное удаление — discard, и папка уже не пишется', () => {
+  const cmds = actionsToCommands(
+    actions({ deleteMessage: 'purge', folder: 'Счета', markRead: true, continueFiltering: true }),
+  );
+  assert.deepEqual(cmds, ['addflag "\\\\Seen";', 'discard;', 'stop;']);
+  // stop обязателен и при «продолжать другие фильтры»: разбираться с
+  // письмом, которого уже нет, следующим правилам незачем.
+  assert.equal(cmds[cmds.length - 1], 'stop;');
+});
+
+test('actionsToCommands: удаление отменяет папку-приёмник, а не соседствует с ней', () => {
+  const cmds = actionsToCommands(actions({ deleteMessage: 'trash', folder: 'Счета' }));
+  assert.ok(!cmds.some((c) => c.includes('"Счета"')), 'письмо нельзя и положить, и выбросить');
+});
+
+test('requiredExtensions: метка требует imap4flags так же, как «прочитано»', () => {
+  assert.deepEqual(
+    requiredExtensions([rule({ id: 1, actions: actions({ labels: ['mt-scheta'] }) })]),
+    ['fileinto', 'mailbox', 'imap4flags'],
+  );
+  // Слово, которое меткой быть не может, расширения за собой не тянет.
+  assert.deepEqual(
+    requiredExtensions([rule({ id: 1, actions: actions({ labels: ['$Snoozed'] }) })]),
+    ['fileinto', 'mailbox'],
+  );
+});
+
+/* ---------------------------------------------------------------- */
+/* Уже написанные правила                                            */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Правила, заведённые до появления новых условий и действий, обязаны
+ * переводиться в тот же файл, что и раньше, — побайтово. Иначе первое же
+ * сохранение настроек переписало бы всем ящикам их рабочие скрипты.
+ */
+test('buildSieveScript: старое правило даёт ровно прежний файл', () => {
+  const script = buildSieveScript([
+    rule({
+      id: 1,
+      name: 'Счета',
+      conditions: [{ field: 'from', op: 'contains', value: 'buh@example.com' }],
+      actions: actions({ folder: 'Счета', flag: true, continueFiltering: false }),
+    }),
+  ]);
+  assert.equal(
+    script.match(/^require \[.*\];$/m)?.[0],
+    'require ["fileinto", "mailbox", "imap4flags"];',
+  );
+  assert.ok(
+    script.includes(
+      'if allof (not header :is "X-Spam" "Yes", header :contains "from" "buh@example.com") {',
+    ),
+  );
+  assert.ok(script.includes('\taddflag "\\\\Flagged";'));
+  assert.ok(script.includes('\tfileinto :create "Счета";'));
+  assert.ok(script.includes('\tstop;'));
+  assert.ok(!script.includes(':mime'), 'ничего нового в старом правиле появиться не должно');
+  assert.ok(!script.includes('body :text'));
+});
+
+/* ---------------------------------------------------------------- */
+/* Обратный разбор новых условий и действий                          */
+/* ---------------------------------------------------------------- */
+
+test('parseSieveScript: условие по тексту письма переживает оборот', () => {
+  const source = [
+    rule({
+      id: 11,
+      name: 'Счета по тексту',
+      conditions: [
+        { field: 'body', op: 'contains', value: 'счёт на оплату' },
+        { field: 'body', op: 'not-contains', value: 'отменён' },
+      ],
+      actions: actions({ folder: 'Счета' }),
+    }),
+  ];
+  const parsed = parseSieveScript(buildSieveScript(source));
+  assert.deepEqual(parsed[0]?.conditions, source[0]?.conditions);
+});
+
+test('parseSieveScript: «есть вложение» и «нет вложения» переживают оборот', () => {
+  const source = [
+    rule({
+      id: 12,
+      name: 'С вложением',
+      conditions: [{ field: 'attachment', op: 'has', value: '' }],
+      actions: actions({ folder: 'Документы' }),
+    }),
+    rule({
+      id: 13,
+      name: 'Без вложения',
+      position: 1,
+      conditions: [{ field: 'attachment', op: 'has-not', value: '' }],
+      actions: actions({ markRead: true }),
+    }),
+  ];
+  const parsed = parseSieveScript(buildSieveScript(source));
+  assert.deepEqual(parsed[0]?.conditions, [{ field: 'attachment', op: 'has', value: '' }]);
+  assert.deepEqual(parsed[1]?.conditions, [{ field: 'attachment', op: 'has-not', value: '' }]);
+});
+
+test('parseSieveScript: метки и безвозвратное удаление восстанавливаются', () => {
+  const source = [
+    rule({
+      id: 14,
+      name: 'Метки',
+      conditions: [{ field: 'from', op: 'contains', value: 'a@b' }],
+      actions: actions({ labels: ['mt-scheta'], markRead: true }),
+    }),
+    rule({
+      id: 15,
+      name: 'Вычистить',
+      position: 1,
+      conditions: [{ field: 'subject', op: 'contains', value: 'spam' }],
+      actions: actions({ deleteMessage: 'purge' }),
+    }),
+  ];
+  const parsed = parseSieveScript(buildSieveScript(source));
+  assert.deepEqual(parsed[0]?.actions.labels, ['mt-scheta']);
+  assert.equal(parsed[0]?.actions.markRead, true);
+  assert.equal(parsed[1]?.actions.deleteMessage, 'purge');
+});
+
+/*
+ * Удаление в корзину в файле неотличимо от перекладывания в неё — это
+ * одна и та же команда Sieve. Так и должно быть: источник истины у правил
+ * не файл, а база. Проверка закрепляет именно это, чтобы «неожиданное»
+ * поведение разбора не показалось однажды дефектом.
+ */
+test('parseSieveScript: удаление в корзину читается как папка «Trash»', () => {
+  const parsed = parseSieveScript(
+    buildSieveScript([
+      rule({ id: 16, name: 'В корзину', actions: actions({ deleteMessage: 'trash' }) }),
+    ]),
+  );
+  assert.equal(parsed[0]?.actions.folder, 'Trash');
+  assert.equal(parsed[0]?.actions.deleteMessage, null);
+});
+
+test('parseSieveScript: чужой тест по частям MIME не роняет разбор', () => {
+  const parsed = parseSieveScript(`
+require ["mime", "fileinto"];
+# === Правило: Чужое ===
+if header :mime :anychild :type :is "Content-Type" "application" {
+    fileinto "Файлы";
+}
+# === Правило: Наше ===
+if header :contains "from" "a@b" {
+    fileinto :create "Наша";
+}
+`);
+  assert.equal(parsed.length, 2);
+  assert.equal(parsed[1]?.name, 'Наше');
+  assert.equal(parsed[1]?.actions.folder, 'Наша');
+});

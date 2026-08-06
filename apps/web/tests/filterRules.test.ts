@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { Folder } from '@mail-true/shared';
 import {
   buildRule,
+  conditionNeedsValue,
   describeActions,
   describeConditions,
   emptyRule,
@@ -220,5 +221,122 @@ describe('moveRule', () => {
 
   it('неизвестный id ничего не ломает', () => {
     expect(moveRule(rules, 'нет такого', 'up').map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('текст письма и вложение', () => {
+  it('у «Вложения» свои операторы и нет значения', () => {
+    expect(operatorsFor('attachment')).toEqual(['has', 'has-not']);
+    expect(conditionNeedsValue('attachment')).toBe(false);
+    expect(conditionNeedsValue('body')).toBe(true);
+  });
+
+  it('условие «Вложение» сохраняется без значения, а не выбрасывается как пустое', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'attachment', operator: 'has', value: '' }],
+      actions: { ...emptyRule().actions, markRead: true },
+    });
+    expect(rule.conditions).toEqual([{ field: 'attachment', operator: 'has', value: '' }]);
+    expect(isRuleComplete(rule)).toBe(true);
+  });
+
+  it('оператор, оставшийся от прежнего поля, чинится', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'attachment', operator: 'contains', value: 'мусор' }],
+      actions: { ...emptyRule().actions, markRead: true },
+    });
+    expect(rule.conditions[0]?.operator).toBe('has');
+    expect(rule.conditions[0]?.value).toBe('');
+  });
+
+  it('правило «письма со счетами» описывается словами', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [
+        { field: 'body', operator: 'contains', value: 'счёт' },
+        { field: 'attachment', operator: 'has', value: '' },
+      ],
+      actions: { ...emptyRule().actions, markFlagged: true },
+    });
+    expect(describeConditions(rule)).toBe('Текст письма содержит счёт, Вложение есть');
+  });
+});
+
+describe('метки и удаление', () => {
+  const LABELS = [
+    { key: 'mt-scheta', name: 'Счета' },
+    { key: 'mt-srochno', name: 'Срочно' },
+  ];
+
+  it('одной метки достаточно, чтобы правило можно было сохранить', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: { ...emptyRule().actions, labelKeys: ['mt-scheta'] },
+    });
+    expect(isRuleComplete(rule)).toBe(true);
+    expect(describeActions(rule, FOLDERS, LABELS)).toContain('Поставить метку: Счета');
+  });
+
+  it('метка называется именем, а без справочника — ключом, а не пропадает', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: { ...emptyRule().actions, labelKeys: ['mt-scheta'] },
+    });
+    expect(describeActions(rule, FOLDERS, [])).toContain('Поставить метку: mt-scheta');
+  });
+
+  it('повторы меток схлопываются', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: { ...emptyRule().actions, labelKeys: ['mt-scheta', 'mt-scheta'] },
+    });
+    expect(rule.actions.labelKeys).toEqual(['mt-scheta']);
+  });
+
+  /*
+   * Удаление отменяет папку-приёмник: письмо нельзя одновременно положить
+   * в «Счета» и выбросить. То же правило стоит и на сервере (webdto.ts) —
+   * иначе список правил и файл Sieve поняли бы одно правило по-разному.
+   */
+  it('удаление отменяет папку-приёмник', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: { ...emptyRule().actions, moveToFolderId: '1', deleteMode: 'trash' },
+    });
+    expect(rule.actions.moveToFolderId).toBeNull();
+    expect(describeActions(rule, FOLDERS)).toEqual(['Удалить (в корзину)']);
+  });
+
+  it('безвозвратное удаление называется в списке прямо', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: { ...emptyRule().actions, deleteMode: 'purge' },
+    });
+    expect(describeActions(rule, FOLDERS)).toEqual(['Удалить безвозвратно, минуя корзину']);
+  });
+
+  it('умолчание — не удалять: правило не должно стирать почту само собой', () => {
+    expect(emptyRule().actions.deleteMode).toBeNull();
+    expect(emptyRule().actions.labelKeys).toEqual([]);
+  });
+
+  it('прогон по уже полученным письмам имеет смысл и без папки-приёмника', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+      actions: {
+        ...emptyRule().actions,
+        deleteMode: 'trash',
+        applyToExistingFolderIds: ['inbox'],
+      },
+    });
+    expect(rule.actions.applyToExistingFolderIds).toEqual(['inbox']);
   });
 });

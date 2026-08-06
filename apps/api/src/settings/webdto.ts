@@ -171,9 +171,25 @@ export function folderIdOfPath(folders: readonly Folder[], path: string | null):
  * и возвращает: правило, заведённое расширенным API, не должно молча
  * терять условие при первом же открытии формы.
  */
-export type WebFilterField = 'from' | 'to' | 'subject' | 'cc' | 'size' | 'resent-from' | 'resent-to';
+export type WebFilterField =
+  | 'from'
+  | 'to'
+  | 'subject'
+  | 'cc'
+  | 'size'
+  | 'body'
+  | 'attachment'
+  | 'resent-from'
+  | 'resent-to';
 
-export type WebFilterOperator = 'contains' | 'not-contains' | 'equals' | 'greater' | 'less';
+export type WebFilterOperator =
+  | 'contains'
+  | 'not-contains'
+  | 'equals'
+  | 'greater'
+  | 'less'
+  | 'has'
+  | 'has-not';
 
 export interface WebFilterCondition {
   field: WebFilterField;
@@ -185,6 +201,17 @@ export interface WebFilterActions {
   moveToFolderId: string | null;
   markRead: boolean;
   markFlagged: boolean;
+  /**
+   * Ключевые слова своих меток (`mt-…`), которые ставит правило.
+   *
+   * Необязательное намеренно — по той же причине, что showSenderLogos
+   * в общих настройках: этот контракт правит и админка, а её форма правил
+   * о метках не знает. Отсутствие поля означает «не трогать», а не «снять».
+   */
+  labelKeys?: string[] | undefined;
+  /** Удалить письмо: 'trash' — в корзину, 'purge' — безвозвратно.
+   * Необязательное по той же причине, что и labelKeys выше. */
+  deleteMode?: 'trash' | 'purge' | null | undefined;
   applyToExistingFolderIds: string[];
   forwardTo: string | null;
   autoReply: string | null;
@@ -209,6 +236,8 @@ const OP_TO_WEB: Record<FilterOperator, WebFilterOperator> = {
   'not-matches': 'not-contains',
   greater: 'greater',
   less: 'less',
+  has: 'has',
+  'has-not': 'has-not',
 };
 
 const OP_FROM_WEB: Record<WebFilterOperator, FilterOperator> = {
@@ -217,7 +246,27 @@ const OP_FROM_WEB: Record<WebFilterOperator, FilterOperator> = {
   equals: 'is',
   greater: 'greater',
   less: 'less',
+  has: 'has',
+  'has-not': 'has-not',
 };
+
+/**
+ * Оператор, совместимый с полем.
+ *
+ * Форма и API — разные стороны, и поле в форме можно переключить, не тронув
+ * оператор. «Вложение содержит» перевести в Sieve нечем, а молча собрать
+ * из этого какое-нибудь условие — значит завести правило, которое ловит
+ * не то, что написано. Поэтому оператор чинится здесь, в одном месте.
+ */
+function operatorForField(field: FilterField, op: FilterOperator): FilterOperator {
+  if (field === 'attachment') return op === 'has-not' ? 'has-not' : 'has';
+  if (op === 'has' || op === 'has-not') {
+    // Обратный случай: поле сменили с «Вложения» на обычное.
+    return op === 'has-not' ? 'not-contains' : 'contains';
+  }
+  if (field === 'size') return op === 'less' ? 'less' : 'greater';
+  return op === 'greater' || op === 'less' ? 'contains' : op;
+}
 
 /** Внутреннее правило -> DTO интерфейса. */
 export function toWebRule(rule: FilterRule, folders: readonly Folder[]): WebFilterRule {
@@ -234,6 +283,8 @@ export function toWebRule(rule: FilterRule, folders: readonly Folder[]): WebFilt
       moveToFolderId: folderIdOfPath(folders, rule.actions.folder),
       markRead: rule.actions.markRead,
       markFlagged: rule.actions.flag,
+      labelKeys: [...rule.actions.labels],
+      deleteMode: rule.actions.deleteMessage,
       // Список папок «применить к уже полученным» — это разовое действие,
       // а не состояние правила: после применения он пуст.
       applyToExistingFolderIds: [],
@@ -260,19 +311,48 @@ export function ruleNameFrom(conditions: FilterCondition[]): string {
     'resent-from': 'Переадресовано от',
     'resent-to': 'Переадресовано для',
     size: 'Размер',
+    body: 'Текст письма',
+    attachment: 'Вложение',
   };
+  // У условия по вложению значения нет вовсе — называем его словами.
+  if (first.field === 'attachment') {
+    return first.op === 'has-not' ? 'Вложение: нет' : 'Вложение: есть';
+  }
   const value = first.value.length > 40 ? `${first.value.slice(0, 40)}…` : first.value;
   return `${titles[first.field]}: ${value}`;
 }
 
-/** DTO интерфейса -> внутреннее правило для сохранения. */
-export function fromWebRule(dto: WebFilterRule, folders: readonly Folder[]): FilterRuleInput {
-  const conditions: FilterCondition[] = dto.conditions.map((c) => ({
-    field: c.field as FilterField,
-    op: OP_FROM_WEB[c.operator],
-    value: c.value,
-  }));
+/**
+ * DTO интерфейса -> внутреннее правило для сохранения.
+ *
+ * `previous` — правило, каким оно лежит сейчас. Нужен ради полей, которых
+ * может не быть в запросе (метки и удаление): их присылает почтовая форма,
+ * но не присылает админка. Без previous сохранение правила из админки
+ * молча снимало бы с него метку и удаление — см. WebFilterActions.
+ * При создании правила previous, разумеется, нет.
+ */
+export function fromWebRule(
+  dto: WebFilterRule,
+  folders: readonly Folder[],
+  previous?: FilterRule | null,
+): FilterRuleInput {
+  const conditions: FilterCondition[] = dto.conditions.map((c) => {
+    const field = c.field as FilterField;
+    return {
+      field,
+      op: operatorForField(field, OP_FROM_WEB[c.operator]),
+      // Значение условия по вложению не участвует ни в чём: в базе ему
+      // место пустой строкой, а не мусором из формы.
+      value: field === 'attachment' ? '' : c.value,
+    };
+  });
   const autoReplyText = dto.actions.autoReply?.trim() ?? '';
+  // undefined — «поля в запросе нет», то есть оставить как было.
+  const deleteMode =
+    dto.actions.deleteMode === undefined
+      ? (previous?.actions.deleteMessage ?? null)
+      : dto.actions.deleteMode;
+  const labelKeys = dto.actions.labelKeys ?? previous?.actions.labels ?? [];
   return {
     name: ruleNameFrom(conditions),
     enabled: dto.enabled,
@@ -281,9 +361,14 @@ export function fromWebRule(dto: WebFilterRule, folders: readonly Folder[]): Fil
     conditions,
     actions: {
       ...DEFAULT_ACTIONS,
-      folder: pathOfFolderId(folders, dto.actions.moveToFolderId),
+      // Удаление и папка-приёмник взаимно исключают друг друга: письмо
+      // нельзя одновременно положить в «Счета» и выбросить. Сохраняем то,
+      // что человек выбрал последним осознанным действием, — удаление.
+      folder: deleteMode ? null : pathOfFolderId(folders, dto.actions.moveToFolderId),
       markRead: dto.actions.markRead,
       flag: dto.actions.markFlagged,
+      labels: [...new Set(labelKeys)],
+      deleteMessage: deleteMode,
       forwardTo: dto.actions.forwardTo ? [dto.actions.forwardTo] : [],
       autoReply: autoReplyText === '' ? null : { subject: null, text: autoReplyText, days: 7 },
       applyToSpam: dto.actions.applyToSpam,

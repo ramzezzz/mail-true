@@ -391,8 +391,11 @@ export async function adminUserSettingsRoutes(
 
       const previous = await guard(() => db.getFilter(user.email, filterId));
       if (!previous) throw new NotFoundError('Правило не найдено');
+      // previous передаётся не только ради журнала: форма правил в админке
+      // не знает про метки и удаление, и без него сохранение отсюда молча
+      // снимало бы их с чужого правила. См. fromWebRule.
       const updated = await guard(() =>
-        db.updateFilter(user.email, filterId, fromWebRule(dto, folders.folders)),
+        db.updateFilter(user.email, filterId, fromWebRule(dto, folders.folders, previous)),
       );
       if (!updated) throw new NotFoundError('Правило не найдено');
       const sieve = await settings().syncSieve(user.email);

@@ -29,6 +29,7 @@ import {
   type FilterRule,
 } from '../../lib/filterRules';
 import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '../../mail/icons';
+import { useLabelDictionary } from '../../mail/useLabels';
 import { FilterDialog } from '../../settings/FilterDialog';
 import {
   SettingsEmpty,
@@ -42,6 +43,10 @@ import styles from './FiltersPage.module.css';
 export function FiltersPage() {
   const [params, setParams] = useSearchParams();
   const { data: folders } = useFolders();
+  // Тот же справочник, что и в почте: метку правила человек выбирает из
+  // своих меток, а не заводит здесь новую. Пусто — раздела меток в окне
+  // не будет вовсе (нет базы или человек ещё ни одной не завёл).
+  const labels = useLabelDictionary();
   const { data: rules, isPending, isError } = useFilterRules();
   const saveRule = useSaveFilterRule();
   const deleteRule = useDeleteFilterRule();
@@ -144,7 +149,7 @@ export function FiltersPage() {
             </button>
 
             <ul className={styles.actions}>
-              {describeActions(rule, folders ?? []).map((line) => (
+              {describeActions(rule, folders ?? [], labels).map((line) => (
                 <li key={line}>{line}</li>
               ))}
             </ul>
@@ -165,6 +170,7 @@ export function FiltersPage() {
         <FilterDialog
           initial={editing}
           folders={folders ?? []}
+          labels={labels}
           saving={saveRule.isPending}
           error={saveRule.isError ? 'Не удалось сохранить правило' : null}
           onClose={() => setEditing(null)}

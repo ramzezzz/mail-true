@@ -18,32 +18,49 @@ import {
   FIELD_TITLES,
   OPERATOR_TITLES,
   buildRule,
+  conditionNeedsValue,
   emptyCondition,
   isRuleComplete,
   operatorsFor,
   type FilterCondition,
+  type FilterDeleteMode,
   type FilterField,
   type FilterOperator,
   type FilterRule,
 } from '../lib/filterRules';
 import { IconClose, IconPlus } from '../mail/icons';
+import type { MailLabel } from '../mail/labelsApi';
 import styles from './FilterDialog.module.css';
 
 export interface FilterDialogProps {
   /** Правило-заготовка: новое, предзаполненное или редактируемое. */
   initial: FilterRule;
   folders: readonly Folder[];
+  /** Справочник своих меток. Пуст — раздел меток в окне не показывается. */
+  labels?: readonly MailLabel[];
   saving: boolean;
   error?: string | null;
   onSave(rule: FilterRule): void;
   onClose(): void;
 }
 
-const FIELD_ORDER: readonly FilterField[] = ['from', 'to', 'subject', 'cc', 'size'];
+/** Что правило делает с самим письмом. Выбор один из трёх. */
+type ActionMode = 'none' | 'move' | 'delete';
+
+const FIELD_ORDER: readonly FilterField[] = [
+  'from',
+  'to',
+  'subject',
+  'cc',
+  'body',
+  'attachment',
+  'size',
+];
 
 export function FilterDialog({
   initial,
   folders,
+  labels = [],
   saving,
   error,
   onSave,
@@ -83,6 +100,35 @@ export function FilterDialog({
           ? [emptyCondition()]
           : d.conditions.filter((_, i) => i !== index),
     }));
+
+  /*
+   * «Куда девать письмо» — один выбор из трёх, а не два независимых
+   * переключателя: положить письмо в папку и удалить его одновременно
+   * нельзя, и предлагать такое сочетание значило бы обещать несбыточное.
+   */
+  const actionMode: ActionMode =
+    draft.actions.deleteMode !== null ? 'delete' : draft.actions.moveToFolderId === null ? 'none' : 'move';
+
+  const setActionMode = (mode: ActionMode) =>
+    patchActions({
+      moveToFolderId: mode === 'move' ? (draft.actions.moveToFolderId ?? folders[0]?.id ?? null) : null,
+      // Умолчание удаления — корзина: правило, стирающее почту насовсем,
+      // человек должен выбрать сам, а не получить по невнимательности.
+      deleteMode: mode === 'delete' ? (draft.actions.deleteMode ?? 'trash') : null,
+    });
+
+  /*
+   * Прогон по уже полученным письмам имеет смысл, только если правило с
+   * ними что-то делает. Пересылка и автоответ к старой почте не
+   * применяются намеренно (см. settings/apply.ts на сервере): разослать
+   * письма задним числом нельзя отменить.
+   */
+  const canApplyToExisting =
+    draft.actions.moveToFolderId !== null ||
+    draft.actions.deleteMode !== null ||
+    draft.actions.markRead ||
+    draft.actions.markFlagged ||
+    draft.actions.labelKeys.length > 0;
 
   const submit = () => {
     const rule = buildRule(draft);
@@ -147,13 +193,20 @@ export function FilterDialog({
               ))}
             </SelectField>
 
-            <TextField
-              aria-label="Значение"
-              wrapperClassName={styles.conditionValue}
-              type={condition.field === 'size' ? 'number' : 'text'}
-              value={condition.value}
-              onChange={(e) => patchCondition(index, { value: e.target.value })}
-            />
+            {conditionNeedsValue(condition.field) ? (
+              <TextField
+                aria-label="Значение"
+                wrapperClassName={styles.conditionValue}
+                type={condition.field === 'size' ? 'number' : 'text'}
+                value={condition.value}
+                onChange={(e) => patchCondition(index, { value: e.target.value })}
+              />
+            ) : (
+              // У «Вложения» значения нет: спрашивается наличие. Место
+              // занимаем пустым блоком, иначе строка условия съезжает и
+              // крестик оказывается посреди окна.
+              <span className={styles.conditionValue} aria-hidden="true" />
+            )}
 
             <button
               type="button"
@@ -178,31 +231,54 @@ export function FilterDialog({
         <SelectField
           aria-label="Действие"
           wrapperClassName={styles.conditionField}
-          value={draft.actions.moveToFolderId === null ? 'none' : 'move'}
-          onChange={(e) =>
-            patchActions({
-              moveToFolderId: e.target.value === 'move' ? (folders[0]?.id ?? null) : null,
-            })
-          }
+          value={actionMode}
+          onChange={(e) => setActionMode(e.target.value as ActionMode)}
         >
           <option value="none">Оставить во «Входящих»</option>
           <option value="move">Поместить в папку</option>
+          <option value="delete">Удалить</option>
         </SelectField>
 
-        <SelectField
-          aria-label="Папка"
-          wrapperClassName={styles.actionFolder}
-          disabled={draft.actions.moveToFolderId === null}
-          value={draft.actions.moveToFolderId ?? ''}
-          onChange={(e) => patchActions({ moveToFolderId: e.target.value })}
-        >
-          {folders.map((f) => (
-            <option key={f.id} value={f.id}>
-              {folderTitle(f)}
-            </option>
-          ))}
-        </SelectField>
+        {actionMode === 'delete' ? (
+          <SelectField
+            aria-label="Как удалить"
+            wrapperClassName={styles.actionFolder}
+            value={draft.actions.deleteMode ?? 'trash'}
+            onChange={(e) => patchActions({ deleteMode: e.target.value as FilterDeleteMode })}
+          >
+            <option value="trash">в корзину</option>
+            <option value="purge">безвозвратно, минуя корзину</option>
+          </SelectField>
+        ) : (
+          <SelectField
+            aria-label="Папка"
+            wrapperClassName={styles.actionFolder}
+            disabled={draft.actions.moveToFolderId === null}
+            value={draft.actions.moveToFolderId ?? ''}
+            onChange={(e) => patchActions({ moveToFolderId: e.target.value })}
+          >
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {folderTitle(f)}
+              </option>
+            ))}
+          </SelectField>
+        )}
       </div>
+
+      {/*
+        Предупреждение показывается только у безвозвратного удаления и
+        текстом, а не значком: правило, стирающее почту молча, — самое
+        опасное, что можно завести в настройках, и человек должен прочитать,
+        на что соглашается, до того как нажмёт «Сохранить».
+      */}
+      {draft.actions.deleteMode === 'purge' && (
+        <p className={styles.warning} role="alert">
+          Письма будут удаляться сразу и навсегда: в корзину они не попадут, вернуть их будет
+          нельзя. Правило сработает на каждом подходящем письме без вашего участия — проверьте
+          условия выше.
+        </p>
+      )}
 
       <div className={styles.checkRow}>
         <Checkbox
@@ -217,10 +293,36 @@ export function FilterDialog({
         />
       </div>
 
+      {/*
+        Метки — тот же список, что и в почте: справочник один на ящик
+        (mail/useLabels.ts). Своего списка окно не заводит и завести не
+        может: метка живёт в письме ключевым словом, и придумать её здесь
+        значило бы поставить письму слово, которого нет в справочнике.
+      */}
+      {labels.length > 0 && (
+        <div className={styles.labelPicker}>
+          <span className={styles.labelPickerTitle}>Поставить метку</span>
+          {labels.map((label) => (
+            <Checkbox
+              key={label.key}
+              label={label.name}
+              checked={draft.actions.labelKeys.includes(label.key)}
+              onChange={(e) =>
+                patchActions({
+                  labelKeys: e.target.checked
+                    ? [...draft.actions.labelKeys, label.key]
+                    : draft.actions.labelKeys.filter((key) => key !== label.key),
+                })
+              }
+            />
+          ))}
+        </div>
+      )}
+
       <Checkbox
         label="Применить к письмам, которые уже находятся в папках"
         checked={draft.actions.applyToExistingFolderIds.length > 0}
-        disabled={draft.actions.moveToFolderId === null}
+        disabled={!canApplyToExisting}
         onChange={(e) =>
           patchActions({ applyToExistingFolderIds: e.target.checked ? ['inbox'] : [] })
         }

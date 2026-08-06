@@ -172,6 +172,8 @@ test('правило: DTO -> внутреннее, «совпадает с» с�
       moveToFolderId: 'inbox',
       markRead: false,
       markFlagged: true,
+      labelKeys: [],
+      deleteMode: null,
       applyToExistingFolderIds: ['inbox'],
       forwardTo: 'copy@example.com',
       autoReply: '  ',
@@ -201,6 +203,8 @@ test('правило переживает оборот DTO -> внутренне
       moveToFolderId: 'f-0YHRh9C10YLQsA',
       markRead: true,
       markFlagged: false,
+      labelKeys: [],
+      deleteMode: null,
       applyToExistingFolderIds: [],
       forwardTo: null,
       autoReply: null,
@@ -315,4 +319,166 @@ test('по умолчанию отмена включена и равна пят
   // Возможность, которую надо сперва найти в настройках, не спасёт никого:
   // ошибку, от которой она спасает, иначе не исправить ничем.
   assert.equal(defaultMailSettings('a@mail.local').undoSendSeconds, 5);
+});
+
+/* ---------------------------------------------------------------- */
+/* Метки и удаление в контракте интерфейса                           */
+/* ---------------------------------------------------------------- */
+
+/*
+ * Главная опасность новых полей — не в них самих, а в том, что этот же
+ * контракт правит АДМИНКА, а её форма правил о метках и удалении не знает.
+ * Тело запроса БЕЗ этих полей не должно ни снимать метку, ни отменять
+ * удаление: ровно та же беда, что была с showSenderLogos в общих настройках.
+ */
+test('правило: тело БЕЗ меток и удаления не гасит их молча', () => {
+  const stored: FilterRule = {
+    id: 5,
+    name: 'Счета',
+    position: 0,
+    enabled: true,
+    auto: false,
+    matchMode: 'all',
+    conditions: [{ field: 'from', op: 'contains', value: 'a@b' }],
+    actions: {
+      ...DEFAULT_ACTIONS,
+      forwardTo: [],
+      labels: ['mt-scheta'],
+      deleteMessage: 'trash',
+    },
+  };
+  // Тело в точности такое, каким его шлёт админка: новых полей в нём нет.
+  const dto = {
+    id: '5',
+    enabled: true,
+    auto: false,
+    conditions: [{ field: 'from', operator: 'contains', value: 'a@b' }],
+    actions: {
+      moveToFolderId: null,
+      markRead: true,
+      markFlagged: false,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  } as WebFilterRule;
+
+  const input = fromWebRule(dto, FOLDERS, stored);
+  assert.deepEqual(input.actions.labels, ['mt-scheta'], 'метка обязана остаться');
+  assert.equal(input.actions.deleteMessage, 'trash', 'удаление обязано остаться');
+  assert.equal(input.actions.markRead, true, 'а вот известное поле правится');
+
+  // Без прежнего правила (создание) поля просто пусты — правило, которое
+  // никто не просил, не должно ни метить письма, ни стирать их.
+  const created = fromWebRule(dto, FOLDERS);
+  assert.deepEqual(created.actions.labels, []);
+  assert.equal(created.actions.deleteMessage, null);
+});
+
+test('правило: пустой список меток — это «снять все», а не «не трогать»', () => {
+  const stored: FilterRule = {
+    id: 6,
+    name: 'Счета',
+    position: 0,
+    enabled: true,
+    auto: false,
+    matchMode: 'all',
+    conditions: [],
+    actions: { ...DEFAULT_ACTIONS, forwardTo: [], labels: ['mt-scheta'] },
+  };
+  const dto = {
+    id: '6',
+    enabled: true,
+    auto: false,
+    conditions: [],
+    actions: {
+      moveToFolderId: null,
+      markRead: false,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: null,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  } as WebFilterRule;
+  assert.deepEqual(fromWebRule(dto, FOLDERS, stored).actions.labels, []);
+});
+
+test('правило: удаление и папка-приёмник не соседствуют', () => {
+  const dto = {
+    id: '',
+    enabled: true,
+    auto: false,
+    conditions: [],
+    actions: {
+      moveToFolderId: 'inbox',
+      markRead: false,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: 'purge',
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  } as WebFilterRule;
+  const input = fromWebRule(dto, FOLDERS);
+  assert.equal(input.actions.folder, null, 'письмо нельзя и положить, и выбросить');
+  assert.equal(input.actions.deleteMessage, 'purge');
+});
+
+test('правило: условие по вложению не тащит за собой значение', () => {
+  const dto = {
+    id: '',
+    enabled: true,
+    auto: false,
+    conditions: [{ field: 'attachment', operator: 'contains', value: 'мусор из формы' }],
+    actions: {
+      moveToFolderId: null,
+      markRead: true,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: null,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  } as WebFilterRule;
+  const input = fromWebRule(dto, FOLDERS);
+  // Оператор чинится под поле, значение выбрасывается.
+  assert.deepEqual(input.conditions, [{ field: 'attachment', op: 'has', value: '' }]);
+  assert.equal(input.name, 'Вложение: есть');
+});
+
+test('правило: условие по тексту письма доезжает в обе стороны', () => {
+  const dto = {
+    id: '',
+    enabled: true,
+    auto: false,
+    conditions: [{ field: 'body', operator: 'contains', value: 'счёт' }],
+    actions: {
+      moveToFolderId: null,
+      markRead: true,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: null,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  } as WebFilterRule;
+  const input = fromWebRule(dto, FOLDERS);
+  assert.deepEqual(input.conditions, [{ field: 'body', op: 'contains', value: 'счёт' }]);
+  const back = toWebRule({ id: 9, position: 0, ...input, name: input.name }, FOLDERS);
+  assert.deepEqual(back.conditions, [{ field: 'body', operator: 'contains', value: 'счёт' }]);
 });

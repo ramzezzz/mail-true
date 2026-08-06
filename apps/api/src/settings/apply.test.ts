@@ -18,6 +18,8 @@ const MESSAGE: MatchableMessage = {
   resentFrom: 'old@legacy.example',
   resentTo: 'list@example.com',
   size: 250 * 1024,
+  body: 'Здравствуйте! Во вложении СЧЁТ на оплату за август.',
+  hasAttachment: true,
 };
 
 function rule(partial: Partial<FilterRule>): FilterRule {
@@ -95,4 +97,50 @@ test('parseHeaderBlock: разворачивает перенос строки �
   );
   assert.deepEqual(headers.get('resent-from'), ['first@example.com']);
   assert.deepEqual(headers.get('resent-to'), ['a@example.com, b@example.com']);
+});
+
+/* ---------------------------------------------------------------- */
+/* Текст письма и вложение                                           */
+/* ---------------------------------------------------------------- */
+
+test('условие по тексту письма ищет в теле, а не в заголовках', () => {
+  assert.ok(matchesCondition(MESSAGE, { field: 'body', op: 'contains', value: 'во вложении' }));
+  assert.ok(!matchesCondition(MESSAGE, { field: 'body', op: 'contains', value: 'договор' }));
+  assert.ok(matchesCondition(MESSAGE, { field: 'body', op: 'not-contains', value: 'договор' }));
+});
+
+/*
+ * Правило «счёт» обязано находить письмо со словом «СЧЁТ» и здесь тоже.
+ * При доставке за это отвечает перевод условия в :regex с перечислением
+ * регистров (settings/sieve.ts), а на уже полученной почте — вот это
+ * сравнение. Разойдись они — правило вело бы себя на старых письмах
+ * не так, как на новых, и объяснить это человеку было бы нечем.
+ */
+test('русское слово в теле находится в любом регистре — как и в Sieve', () => {
+  assert.ok(matchesCondition(MESSAGE, { field: 'body', op: 'contains', value: 'счёт' }));
+  assert.ok(matchesCondition(MESSAGE, { field: 'body', op: 'contains', value: 'СЧЁТ' }));
+});
+
+test('условие по вложению не смотрит на значение вовсе', () => {
+  const withAttachment = { ...MESSAGE, hasAttachment: true };
+  const without = { ...MESSAGE, hasAttachment: false };
+  assert.ok(matchesCondition(withAttachment, { field: 'attachment', op: 'has', value: '' }));
+  assert.ok(!matchesCondition(withAttachment, { field: 'attachment', op: 'has-not', value: '' }));
+  assert.ok(!matchesCondition(without, { field: 'attachment', op: 'has', value: '' }));
+  assert.ok(matchesCondition(without, { field: 'attachment', op: 'has-not', value: '' }));
+  // Мусор в значении ничего не меняет: спрашивается наличие.
+  assert.ok(matchesCondition(withAttachment, { field: 'attachment', op: 'has', value: 'да' }));
+});
+
+test('правило «письма со счетами» собирается целиком', () => {
+  const invoices = rule({
+    matchMode: 'all',
+    conditions: [
+      { field: 'body', op: 'contains', value: 'счёт' },
+      { field: 'attachment', op: 'has', value: '' },
+    ],
+  });
+  assert.ok(matchesRule(MESSAGE, invoices));
+  assert.ok(!matchesRule({ ...MESSAGE, hasAttachment: false }, invoices));
+  assert.ok(!matchesRule({ ...MESSAGE, body: 'Просто письмо' }, invoices));
 });

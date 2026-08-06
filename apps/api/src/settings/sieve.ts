@@ -20,6 +20,7 @@
  * Не собравшийся скрипт Pigeonhole отбрасывает целиком, глобальный его не
  * подстрахует, и ящик молча остаётся вообще без фильтрации.
  */
+import { isUserLabelKey } from '../mail/labels.js';
 import {
   DEFAULT_ACTIONS,
   type FilterActions,
@@ -34,8 +35,21 @@ import {
 export const SPAM_HEADER = 'X-Spam';
 export const SPAM_HEADER_VALUE = 'Yes';
 
+/**
+ * Папка-корзина по умолчанию.
+ *
+ * Совпадает с ролью 'trash' в imap/service.ts. Вынесено в параметр сборки
+ * (BuildSieveOptions.trashFolder), потому что путь корзины — это свойство
+ * ЯЩИКА, а не генератора: узнать его можно только по списку папок IMAP,
+ * а сюда файлы и сеть не пускаются вовсе.
+ */
+export const DEFAULT_TRASH_FOLDER = 'Trash';
+
+/** Поля, которые проверяются не заголовком письма. */
+type NonHeaderField = 'size' | 'body' | 'attachment';
+
 /** Соответствие поля правила заголовку письма. */
-const FIELD_HEADER: Record<Exclude<FilterField, 'size'>, string> = {
+const FIELD_HEADER: Record<Exclude<FilterField, NonHeaderField>, string> = {
   from: 'from',
   to: 'to',
   subject: 'subject',
@@ -50,7 +64,7 @@ const HEADER_FIELD: Record<string, FilterField> = Object.fromEntries(
 
 /** Соответствие оператора компаратору Sieve и признаку отрицания. */
 const OPERATOR_MATCH: Record<
-  Exclude<FilterOperator, 'greater' | 'less'>,
+  Exclude<FilterOperator, 'greater' | 'less' | 'has' | 'has-not'>,
   { match: ':contains' | ':is' | ':matches'; negate: boolean }
 > = {
   contains: { match: ':contains', negate: false },
@@ -231,6 +245,68 @@ export function regexToValue(pattern: string): {
 /* Генерация                                                            */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* «Есть вложение»                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Как выражено условие «есть вложение».
+ *
+ * Прямого предиката «есть вложение» в Sieve нет: вложение — это не
+ * свойство письма, а вывод из строения MIME. Проверены на нашем Dovecot
+ * (2.3.19.1, Pigeonhole 0.5.19) три пути, живыми письмами через sieve-test:
+ *
+ *   1. `header :contains "Content-Type" "multipart"` — самый простой и
+ *      самый неверный: под него подходит ЛЮБОЕ письмо с версткой, потому
+ *      что html+текст — это multipart/alternative. На нашем письме без
+ *      единого вложения условие срабатывало;
+ *   2. `foreverypart` + `variables`: обход частей письма с записью ответа
+ *      в переменную. Точнее всех — разбирает даже связку «вставленная
+ *      картинка + вложение старого клиента». Отвергнут, и не из-за
+ *      сложности: расширение `variables` меняет смысл СТРОК во всём файле.
+ *      Проверено на стенде — с `require ["variables"]` уже написанное
+ *      правило со значением `${name}` (такое приходит в темах рассылок)
+ *      превращается в подстановку пустой строки, то есть в «содержит
+ *      пустоту», то есть срабатывает НА ВСЕХ письмах. Правило с действием
+ *      «удалить» после такого молча вычистило бы ящик;
+ *   3. `:mime :anychild` из RFC 5703 — обход частей внутри одного теста,
+ *      без переменных и без изменения смысла строк. Выбран он.
+ *
+ * Само условие читается так: часть письма считается вложением, если она
+ * либо прямо объявлена вложением (`Content-Disposition: attachment`), либо
+ * у неё есть имя файла (`filename=` или `name=`) и при этом нет
+ * `Content-ID`. Вторая половина — не придирка: `Content-ID` есть у
+ * картинок, вставленных в тело письма, и без этой проверки любая рассылка
+ * с логотипом считалась бы письмом со вложением. Правило совпадает с тем,
+ * по которому продукт рисует скрепку в списке писем (mail/structure.ts,
+ * collectAttachments: inline = disposition inline И есть Content-ID) —
+ * иначе правило срабатывало бы на письмах без скрепки.
+ *
+ * Известное ограничение выбранного пути: тесты внутри `allof` обходят
+ * части НЕЗАВИСИМО друг от друга, поэтому письмо, где вставленная картинка
+ * соседствует с вложением БЕЗ `Content-Disposition` (так делали почтовые
+ * программы прошлого десятилетия), под условие не подойдёт. Проверено:
+ * из восьми собранных писем расходится ровно это одно. Цена ошибки здесь —
+ * правило не сработало; цена ошибки у пути с `variables` — правило
+ * сработало на всём, и поэтому выбор такой.
+ */
+export const ATTACHMENT_TEST = [
+  'anyof (',
+  'header :mime :anychild :contains "Content-Disposition" "attachment", ',
+  'allof (',
+  'header :mime :anychild :param ["filename", "name"] ',
+  ':matches ["Content-Type", "Content-Disposition"] "?*", ',
+  'not header :mime :anychild :matches "Content-ID" "?*"',
+  ')',
+  ')',
+].join('');
+
+/** Расширение Sieve для условия «есть вложение» (RFC 5703). */
+export const MIME_EXTENSION = 'mime';
+
+/** Расширение Sieve для условия по тексту письма (RFC 5173). */
+export const BODY_EXTENSION = 'body';
+
 /** Один тест Sieve для условия правила. */
 export function conditionToTest(condition: FilterCondition): string {
   if (condition.field === 'size') {
@@ -241,16 +317,37 @@ export function conditionToTest(condition: FilterCondition): string {
     const tag = condition.op === 'less' ? ':under' : ':over';
     return `size ${tag} ${String(kb)}K`;
   }
-  const header = FIELD_HEADER[condition.field];
+  if (condition.field === 'attachment') {
+    // Значение условия здесь не участвует вовсе: спрашивается наличие.
+    return condition.op === 'has-not' ? `not ${ATTACHMENT_TEST}` : ATTACHMENT_TEST;
+  }
+
   const rule = OPERATOR_MATCH[condition.op as keyof typeof OPERATOR_MATCH] ?? OPERATOR_MATCH.contains;
   const value = oneLine(condition.value);
   // Кириллица (и любые буквы вне ASCII) — через :regex с перечислением
   // регистров: компаратор по умолчанию сворачивает регистр только латиницы
   // и правило «ОТЧЁТ» молча не срабатывает. Подробности — выше.
-  const pattern = needsRegexMatch(value)
+  //
+  // Тело письма — тот же случай и та же проверка. Убедились на стенде
+  // (sieve-test, письмо в base64 со словом «СЧЁТ»): `body :text :contains
+  // "счёт"` его НЕ находит, а `body :text :regex "(с|С)(ч|Ч)(ё|Ё)(т|Т)"` —
+  // находит, и в обоих регистрах.
+  const needsRegex = needsRegexMatch(value);
+  const pattern = needsRegex
     ? quoteSieveString(valueToRegex(value, rule.match.slice(1) as 'contains' | 'is' | 'matches'))
     : quoteSieveString(value);
-  const match = needsRegexMatch(value) ? ':regex' : rule.match;
+  const match = needsRegex ? ':regex' : rule.match;
+
+  if (condition.field === 'body') {
+    // :text — текст письма без разметки и уже раскодированный: Pigeonhole
+    // сам разбирает base64/quoted-printable и вычищает теги HTML. Проверено
+    // на трёх письмах (base64, quoted-printable, html) — условие находит
+    // слово во всех трёх, а :raw — только в незакодированном.
+    const test = `body :text ${match} ${pattern}`;
+    return rule.negate ? `not ${test}` : test;
+  }
+
+  const header = FIELD_HEADER[condition.field];
   const test = `header ${match} ${quoteSieveString(header)} ${pattern}`;
   return rule.negate ? `not ${test}` : test;
 }
@@ -280,12 +377,63 @@ export function ruleToTest(rule: FilterRule): string {
   return `allof (${parts.join(', ')})`;
 }
 
+/**
+ * Метки правила, очищенные от всего, что меткой быть не может.
+ *
+ * Проверка не формальность: `addflag` принимает ЛЮБОЕ слово, и правило
+ * с меткой «\Deleted» стирало бы почту, а с меткой «$Snoozed» — прятало
+ * письма в «Отложенные». Через API такое не пройдёт (см. routes.ts), но
+ * в базу правило может попасть и мимо API, а файл Sieve собирается из базы.
+ */
+function labelFlags(actions: FilterActions): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const key of actions.labels) {
+    const trimmed = key.trim();
+    if (!isUserLabelKey(trimmed)) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
+
+export interface ActionsToCommandsOptions {
+  /** Полный путь корзины ящика. */
+  trashFolder?: string | undefined;
+}
+
 /** Команды Sieve для действий правила, в порядке исполнения. */
-export function actionsToCommands(actions: FilterActions): string[] {
+export function actionsToCommands(
+  actions: FilterActions,
+  options: ActionsToCommandsOptions = {},
+): string[] {
   const out: string[] = [];
   // Флаги ставятся ДО fileinto: иначе письмо ляжет в папку без них.
   if (actions.markRead) out.push('addflag "\\\\Seen";');
   if (actions.flag) out.push('addflag "\\\\Flagged";');
+  // Метка — такое же ключевое слово IMAP, как «прочитано» и «флажок»
+  // (mail/labels.ts), поэтому ставится тем же addflag и там же по порядку.
+  for (const key of labelFlags(actions)) out.push(`addflag ${quoteSieveString(key)};`);
+
+  if (actions.deleteMessage === 'purge') {
+    /*
+     * Безвозвратное удаление. `discard` отменяет доставку целиком: письма
+     * не будет ни в корзине, ни в ящике вообще — его туда не положат.
+     *
+     * Всё, что стоит выше (метки, пересылка), уже отработало намеренно:
+     * пересылка копии — единственный способ узнать, что правило вообще
+     * что-то удалило. Всё, что ниже (папка), теряет смысл и не пишется.
+     *
+     * `stop` обязателен: без него следующие правила продолжали бы
+     * разбираться с письмом, которого уже нет, и, например, блок раскладки
+     * спама попытался бы положить его в «Спам».
+     */
+    out.push('discard;');
+    out.push('stop;');
+    return out;
+  }
+
   for (const address of actions.forwardTo) {
     // :copy — переслать копию, оставив письмо себе. Без :copy Sieve
     // считает redirect доставкой и отменяет сохранение в ящик.
@@ -298,6 +446,20 @@ export function actionsToCommands(actions: FilterActions): string[] {
       : '';
     out.push(`vacation :days ${String(days)}${subject} ${quoteSieveString(actions.autoReply.text)};`);
   }
+
+  if (actions.deleteMessage === 'trash') {
+    /*
+     * Удаление в корзину — это перекладывание в неё, и ничего больше.
+     * Папка-приёмник при этом не пишется: «положить в Счета» и «удалить»
+     * одновременно — противоречие, и разрешается оно в пользу удаления,
+     * потому что именно его человек выбрал последним осознанным действием.
+     */
+    const trash = options.trashFolder?.trim() ? options.trashFolder.trim() : DEFAULT_TRASH_FOLDER;
+    out.push(`fileinto :create ${quoteSieveString(trash)};`);
+    out.push('stop;');
+    return out;
+  }
+
   if (actions.folder) {
     // :create — папку могли ещё не завести; без него письмо потерялось бы.
     out.push(`fileinto :create ${quoteSieveString(actions.folder)};`);
@@ -314,12 +476,21 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
       need.add('fileinto');
       need.add('mailbox');
     }
-    if (rule.actions.markRead || rule.actions.flag) need.add('imap4flags');
+    if (rule.actions.markRead || rule.actions.flag || labelFlags(rule.actions).length > 0) {
+      need.add('imap4flags');
+    }
     if (rule.actions.forwardTo.length > 0) need.add('copy');
     if (rule.actions.autoReply) need.add('vacation');
-    // Условия с кириллицей переводятся в :regex — см. valueToRegex
     for (const condition of rule.conditions) {
-      if (condition.field !== 'size' && needsRegexMatch(oneLine(condition.value))) {
+      if (condition.field === 'body') need.add(BODY_EXTENSION);
+      if (condition.field === 'attachment') need.add(MIME_EXTENSION);
+      // Условия с кириллицей переводятся в :regex — см. valueToRegex.
+      // Размера и вложения это не касается: там нет пользовательской строки.
+      if (
+        condition.field !== 'size' &&
+        condition.field !== 'attachment' &&
+        needsRegexMatch(oneLine(condition.value))
+      ) {
         need.add(REGEX_EXTENSION);
       }
     }
@@ -362,6 +533,8 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
     'mailbox',
     'imap4flags',
     'copy',
+    BODY_EXTENSION,
+    MIME_EXTENSION,
     'vacation',
     'date',
     'relational',
@@ -434,6 +607,12 @@ export interface BuildSieveOptions {
   accountEmail?: string;
   /** Общие настройки: нужны только ради автоответчика. */
   settings?: MailSettings | null;
+  /**
+   * Полный путь корзины ящика для действия «удалить в корзину».
+   * По умолчанию — DEFAULT_TRASH_FOLDER: у нашего Dovecot корзина
+   * называется именно так (imap/service.ts, роль 'trash').
+   */
+  trashFolder?: string | undefined;
 }
 
 /**
@@ -467,7 +646,7 @@ export function buildSieveScript(rules: FilterRule[], options: BuildSieveOptions
   }
 
   for (const rule of active) {
-    const commands = actionsToCommands(rule.actions);
+    const commands = actionsToCommands(rule.actions, { trashFolder: options.trashFolder });
     if (commands.length === 0) {
       // Правило без единого действия ничего не делает — в файл не пишем,
       // но и молчать нельзя: пусть будет видно, что оно есть.
@@ -637,6 +816,58 @@ type ParsedTest =
   | { kind: 'group'; mode: 'all' | 'any'; items: ParsedTest[] }
   | { kind: 'other' };
 
+/**
+ * Лексемы обратно в строку без пробельных различий.
+ *
+ * Нужно ровно для одного: узнать условие «есть вложение». Оно собирается
+ * не из одной лексемы, а из целого дерева тестов (ATTACHMENT_TEST), и
+ * разбирать это дерево обратно по частям значило бы описать его правила
+ * дважды — а два описания одного всегда расходятся. Вместо этого разобранный
+ * кусок сравнивается с образцом, приведённым к тому же виду.
+ */
+function renderTokens(tokens: readonly Token[]): string {
+  const parts: string[] = [];
+  for (const token of tokens) {
+    switch (token.kind) {
+      case 'comment':
+        break;
+      case 'string':
+        parts.push(`"${token.value}"`);
+        break;
+      case 'number':
+        parts.push(`${String(token.value)}${token.suffix}`);
+        break;
+      default:
+        parts.push(token.value);
+    }
+  }
+  return parts.join(' ');
+}
+
+/** Образец условия «есть вложение» — с ним сравнивается разобранное. */
+let attachmentSignature: string | null = null;
+function attachmentTestSignature(): string {
+  attachmentSignature ??= renderTokens(tokenizeSieve(ATTACHMENT_TEST));
+  return attachmentSignature;
+}
+
+/** Пропускает аргументы теста до конца: запятой, скобки или начала блока. */
+function skipTestArguments(c: Cursor): void {
+  let depth = 0;
+  for (;;) {
+    const p = peek(c);
+    if (!p) return;
+    if (p.kind === 'punct') {
+      if (p.value === '[' || p.value === '(') depth += 1;
+      else if (p.value === ']' || p.value === ')') {
+        if (depth === 0) return;
+        depth -= 1;
+      } else if (depth === 0 && (p.value === ',' || p.value === '{')) return;
+    }
+    c.pos += 1;
+  }
+}
+
 function parseTest(c: Cursor, negated = false): ParsedTest {
   const t = next(c);
   if (t.kind !== 'ident') throw new SieveParseError('Ожидалось имя теста');
@@ -646,6 +877,7 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
   if (t.value === 'true') return { kind: 'true' };
 
   if (t.value === 'allof' || t.value === 'anyof') {
+    const start = c.pos - 1;
     expectPunct(c, '(');
     const items: ParsedTest[] = [];
     for (;;) {
@@ -658,26 +890,60 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
       expectPunct(c, ')');
       break;
     }
+    // «Есть вложение» — целое дерево тестов, а не один тест: узнаём его
+    // по совпадению с образцом, см. attachmentTestSignature.
+    if (renderTokens(c.tokens.slice(start, c.pos)) === attachmentTestSignature()) {
+      return {
+        kind: 'condition',
+        condition: { field: 'attachment', op: negated ? 'has-not' : 'has', value: '' },
+      };
+    }
     return { kind: 'group', mode: t.value === 'allof' ? 'all' : 'any', items };
   }
 
-  if (t.value === 'header') {
+  if (t.value === 'body' || t.value === 'header') {
     let match: ':contains' | ':is' | ':matches' = ':is';
     let regex = false;
+    let mime = false;
     while (peek(c)?.kind === 'tag') {
       const tag = next(c) as { kind: 'tag'; value: string };
       if (tag.value === ':contains' || tag.value === ':is' || tag.value === ':matches') {
         match = tag.value;
       }
       if (tag.value === ':regex') regex = true;
+      if (tag.value === ':mime') mime = true;
       // Способ сравнения задаётся тегом со строковым аргументом —
       // его нужно снять, иначе он будет принят за имя заголовка
       if (tag.value === ':comparator' && peek(c)?.kind === 'string') c.pos += 1;
+      // :param и :content тоже берут аргумент — строку или список строк.
+      // Список внутрь разбора не пускаем: тест с ним разбирается целиком
+      // выше, по образцу (см. anyof), а сюда доходит только чужой скрипт.
+      if (tag.value === ':param' || tag.value === ':content') {
+        if (peek(c)?.kind === 'string') c.pos += 1;
+        else if (peek(c)?.kind === 'punct' && peek(c)?.value === '[') skipTestArguments(c);
+      }
     }
-    const headerToken = next(c);
+    // Тест по частям MIME (RFC 5703) в одиночку мы не собираем никогда:
+    // он бывает только внутри условия «есть вложение». Значит, это чужой
+    // скрипт — пропускаем тест целиком, но разбор не роняем.
+    if (mime) {
+      skipTestArguments(c);
+      return { kind: 'other' };
+    }
+
+    // У header две строки (имя заголовка и значение), у body — одна:
+    // тело письма называть не нужно, оно у письма одно.
+    let headerName: string | null = null;
+    if (t.value === 'header') {
+      const headerToken = next(c);
+      if (headerToken.kind !== 'string') {
+        throw new SieveParseError('Тест header ожидает имя заголовка строкой');
+      }
+      headerName = headerToken.value.toLowerCase();
+    }
     const valueToken = next(c);
-    if (headerToken.kind !== 'string' || valueToken.kind !== 'string') {
-      throw new SieveParseError('Тест header ожидает две строки');
+    if (valueToken.kind !== 'string') {
+      throw new SieveParseError(`Тест ${t.value} ожидает значение строкой`);
     }
     if (regex) {
       // Обратный разбор нашего же перевода кириллицы (см. valueToRegex):
@@ -686,16 +952,6 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
       match = decoded.op === 'contains' ? ':contains' : decoded.op === 'is' ? ':is' : ':matches';
       valueToken.value = decoded.value;
     }
-    const headerName = headerToken.value.toLowerCase();
-    if (
-      negated &&
-      headerName === SPAM_HEADER.toLowerCase() &&
-      valueToken.value === SPAM_HEADER_VALUE
-    ) {
-      return { kind: 'not-spam' };
-    }
-    const field = HEADER_FIELD[headerName];
-    if (!field) return { kind: 'other' };
     const op: FilterOperator =
       match === ':contains'
         ? negated
@@ -708,6 +964,20 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
           : negated
             ? 'not-matches'
             : 'matches';
+
+    if (headerName === null) {
+      return { kind: 'condition', condition: { field: 'body', op, value: valueToken.value } };
+    }
+
+    if (
+      negated &&
+      headerName === SPAM_HEADER.toLowerCase() &&
+      valueToken.value === SPAM_HEADER_VALUE
+    ) {
+      return { kind: 'not-spam' };
+    }
+    const field = HEADER_FIELD[headerName];
+    if (!field) return { kind: 'other' };
     return { kind: 'condition', condition: { field, op, value: valueToken.value } };
   }
 
@@ -737,9 +1007,18 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
   return { kind: 'other' };
 }
 
-/** Разбирает блок команд `{ ... }` в действия правила. */
+/**
+ * Разбирает блок команд `{ ... }` в действия правила.
+ *
+ * Оговорка про удаление, которую стоит знать читателю: «удалить в корзину»
+ * возвращается сюда как папка-приёмник «Trash», а не как признак удаления.
+ * Так и должно быть — в Sieve это одна и та же команда `fileinto "Trash"`,
+ * и различить их в файле нечем. Разница живёт в базе (deleteMessage), она
+ * же и источник истины; файл — производное. Безвозвратное удаление
+ * (`discard`) двусмысленным не бывает и восстанавливается точно.
+ */
 function parseCommands(c: Cursor): FilterActions {
-  const actions: FilterActions = { ...DEFAULT_ACTIONS, forwardTo: [] };
+  const actions: FilterActions = { ...DEFAULT_ACTIONS, forwardTo: [], labels: [] };
   let sawStop = false;
   for (;;) {
     const t = peek(c);
@@ -771,11 +1050,21 @@ function parseCommands(c: Cursor): FilterActions {
           if (a.kind !== 'string') continue;
           for (const flag of a.value.split(/\s+/)) {
             if (flag === '\\Seen') actions.markRead = true;
-            if (flag === '\\Flagged') actions.flag = true;
+            else if (flag === '\\Flagged') actions.flag = true;
+            // Метка — обычное ключевое слово IMAP. Берём только СВОИ
+            // (приставка `mt-`): чужие ключевые слова, которые поставила
+            // другая почтовая программа, метками ящика не являются и
+            // показывать их в правиле было бы выдумкой.
+            else if (isUserLabelKey(flag) && !actions.labels.includes(flag)) {
+              actions.labels.push(flag);
+            }
           }
         }
         break;
       }
+      case 'discard':
+        actions.deleteMessage = 'purge';
+        break;
       case 'redirect': {
         const addr = args.find((a) => a.kind === 'string');
         if (addr && addr.kind === 'string') actions.forwardTo.push(addr.value);

@@ -127,6 +127,10 @@ export interface Signature {
  * Поле письма, по которому идёт проверка.
  * «Переадресовано от/для» — это заголовки Resent-From / Resent-To
  * (RFC 5322 §3.6.6), их и проверяет Sieve.
+ *
+ * 'body' и 'attachment' — не заголовки, а само письмо: текст (Sieve `body`)
+ * и наличие вложения (Sieve `header :mime`). Без них не выражается самое
+ * частое правило — «письма со счетами» (docs/gaps.md, раздел «Мелочи»).
  */
 export type FilterField =
   | 'from'
@@ -135,7 +139,11 @@ export type FilterField =
   | 'cc'
   | 'resent-from'
   | 'resent-to'
-  | 'size';
+  | 'size'
+  /** Текст письма целиком — как `text:` у Яндекса. */
+  | 'body'
+  /** Наличие вложения: значение условия не используется. */
+  | 'attachment';
 
 /** Оператор сравнения. По умолчанию — «содержит». */
 export type FilterOperator =
@@ -147,12 +155,15 @@ export type FilterOperator =
   | 'not-matches'
   /** Только для поля «Размер»: больше / меньше указанного числа килобайт. */
   | 'greater'
-  | 'less';
+  | 'less'
+  /** Только для поля «Вложение»: есть / нет. */
+  | 'has'
+  | 'has-not';
 
 export interface FilterCondition {
   field: FilterField;
   op: FilterOperator;
-  /** Для поля size — число килобайт в виде строки. */
+  /** Для поля size — число килобайт в виде строки; для attachment — пусто. */
   value: string;
 }
 
@@ -163,12 +174,32 @@ export interface FilterAutoReply {
   days: number;
 }
 
+/**
+ * Как правило удаляет письмо.
+ *
+ * 'trash' — в корзину: письмо на месте, его видно и можно достать.
+ * 'purge' — безвозвратно (`discard` в Sieve): письма не будет НИГДЕ, и
+ * вернуть его нельзя ничем — ни корзиной, ни поддержкой, ни резервной
+ * копией ящика, потому что оно в ящик и не попадало. Поэтому умолчанием
+ * всегда должно быть 'trash', а 'purge' — только явным выбором человека,
+ * с предупреждением в интерфейсе.
+ */
+export type FilterDeleteMode = 'trash' | 'purge';
+
 /** Действия правила. Порядок исполнения задаёт генератор Sieve. */
 export interface FilterActions {
   /** Полный IMAP-путь папки. null — не перекладывать. */
   folder: string | null;
   markRead: boolean;
   flag: boolean;
+  /**
+   * Ключевые слова IMAP своих меток (`mt-…`, см. mail/labels.ts), которые
+   * правило ставит письму. Хранятся ключи, а не имена: имя метки человек
+   * меняет когда захочет, а ключ в письме не меняется никогда.
+   */
+  labels: string[];
+  /** Удалить письмо. null — не удалять. */
+  deleteMessage: FilterDeleteMode | null;
   /** Переслать копию сообщения на эти адреса. */
   forwardTo: string[];
   autoReply: FilterAutoReply | null;
@@ -200,6 +231,8 @@ export const DEFAULT_ACTIONS: FilterActions = {
   folder: null,
   markRead: false,
   flag: false,
+  labels: [],
+  deleteMessage: null,
   forwardTo: [],
   autoReply: null,
   applyToSpam: false,

@@ -16,6 +16,7 @@ import { z } from 'zod';
 import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
+import { isUserLabelKey } from '../mail/labels.js';
 import { applyRuleToMailbox } from './apply.js';
 import { getAppearance, saveAppearance } from './appearance.js';
 import { isUndefinedColumn, isUndefinedTable } from './db.js';
@@ -100,16 +101,65 @@ export const generalSchema = z.object({
   groupByThread: z.boolean().optional(),
 });
 
-const conditionSchema = z.object({
-  field: z.enum(['from', 'to', 'subject', 'cc', 'size', 'resent-from', 'resent-to']),
-  operator: z.enum(['contains', 'not-contains', 'equals', 'greater', 'less']).default('contains'),
-  value: z.string().min(1).max(1000),
-});
+const conditionSchema = z
+  .object({
+    field: z.enum([
+      'from',
+      'to',
+      'subject',
+      'cc',
+      'size',
+      'body',
+      'attachment',
+      'resent-from',
+      'resent-to',
+    ]),
+    operator: z
+      .enum(['contains', 'not-contains', 'equals', 'greater', 'less', 'has', 'has-not'])
+      .default('contains'),
+    /*
+     * Значение больше не обязательно, и это не послабление проверки.
+     * У условия «есть вложение» значения нет вовсе — спрашивается наличие,
+     * а не совпадение. Для всех прочих полей пустое значение по-прежнему
+     * запрещено (проверка ниже): условие «Тема содержит ничего» подошло бы
+     * любому письму, а правило с таким условием человек завёл бы по ошибке.
+     */
+    value: z.string().max(1000).default(''),
+  })
+  .refine((c) => c.field === 'attachment' || c.value.trim().length > 0, {
+    message: 'Условию нужно значение',
+    path: ['value'],
+  });
 
 const actionsSchema = z.object({
   moveToFolderId: z.string().max(512).nullable().default(null),
   markRead: z.boolean().default(false),
   markFlagged: z.boolean().default(false),
+  /*
+   * Метки правила — ключевые слова IMAP, и `addflag` в Sieve примет любое
+   * слово. Поэтому здесь стоит ТА ЖЕ проверка, что и на маршруте простановки
+   * меток: прислать `\Deleted` или `$Snoozed` нельзя — правило с такой
+   * «меткой» стирало бы почту или прятало письма в «Отложенные».
+   *
+   * БЕЗ `.default()` — по той же причине, что и у showSenderLogos выше.
+   * Этот же контракт и эту же схему использует админка (admin/routes/
+   * user-settings.ts), а её форма правил о метках не знает. С умолчанием
+   * `[]` первое же сохранение чужого правила из админки молча снимало бы
+   * с него метку, и человек узнал бы об этом, только не найдя писем.
+   * `undefined` означает «не трогать» — так это и разбирает fromWebRule.
+   */
+  labelKeys: z
+    .array(z.string().max(64).refine(isUserLabelKey, { message: 'Это не ключ своей метки' }))
+    .max(20)
+    .optional(),
+  /*
+   * Удаление. Без `.default()` по той же причине — и здесь она весит
+   * больше всего: с умолчанием `null` сохранение из админки сняло бы
+   * с правила удаление и почта, которую человек велел выбрасывать, начала
+   * бы копиться; а с умолчанием 'trash' форма, не знающая о поле, завела
+   * бы правило, стирающее почту. Верно только «не трогать».
+   */
+  deleteMode: z.enum(['trash', 'purge']).nullable().optional(),
   applyToExistingFolderIds: z.array(z.string().min(1).max(512)).max(50).default([]),
   forwardTo: z.string().trim().email().max(320).nullable().default(null),
   autoReply: z.string().max(20_000).nullable().default(null),
@@ -281,8 +331,12 @@ export async function settingsUserRoutes(
     const dto = ruleSchema.parse(request.body) as WebFilterRule;
     const db = service.requireDb();
     const folders = await foldersOf(session);
+    // Правило читается ДО правки: поля, которых нет в запросе (метки,
+    // удаление), должны остаться как были, а не обнулиться. См. fromWebRule.
+    const previous = await guard(() => db.getFilter(session.email, numericId(id)));
+    if (!previous) throw new NotFoundError('Правило не найдено');
     const updated = await guard(() =>
-      db.updateFilter(session.email, numericId(id), fromWebRule(dto, folders)),
+      db.updateFilter(session.email, numericId(id), fromWebRule(dto, folders, previous)),
     );
     if (!updated) throw new NotFoundError('Правило не найдено');
     await service.syncSieve(session.email);
@@ -342,9 +396,15 @@ export async function settingsUserRoutes(
       .parse(request.body ?? {});
     const rule = await guard(() => service.requireDb().getFilter(session.email, numericId(id)));
     if (!rule) throw new NotFoundError('Правило не найдено');
-    if (rule.actions.folder === null && !rule.actions.markRead && !rule.actions.flag) {
+    if (
+      rule.actions.folder === null &&
+      !rule.actions.markRead &&
+      !rule.actions.flag &&
+      rule.actions.labels.length === 0 &&
+      rule.actions.deleteMessage === null
+    ) {
       throw new BadRequestError(
-        'К уже полученным письмам применяются только «в папку», «прочитано» и «флажок»',
+        'К уже полученным письмам применяются «в папку», «прочитано», «флажок», метки и удаление',
       );
     }
     const result = await pool.withClient(session.email, session.password, async (client) => {

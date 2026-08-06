@@ -121,6 +121,45 @@
   overflow-y: auto;
 }
 
+/*
+ * Список меток. Устроен как список папок выше: сколько бы меток человек
+ * ни завёл, окно не должно вырастать за экран.
+ */
+.labelPicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.labelPickerTitle {
+  flex: 1 0 100%;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+/*
+ * Предупреждение о безвозвратном удалении.
+ *
+ * Красным и на видном месте, а не серой сноской: это единственное
+ * действие правила, последствия которого нельзя отменить ничем.
+ */
+.warning {
+  margin: 4px 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-negative-alpha, rgb(255 59 48 / 8%));
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 18px;
+}
+
 .extraActions {
   display: flex;
   flex-direction: column;

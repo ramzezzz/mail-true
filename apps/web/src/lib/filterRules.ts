@@ -16,7 +16,7 @@
 import type { Folder } from '@mail-true/shared';
 import { folderTitle } from './folderNames';
 
-export type FilterField = 'from' | 'to' | 'subject' | 'cc' | 'size';
+export type FilterField = 'from' | 'to' | 'subject' | 'cc' | 'size' | 'body' | 'attachment';
 
 export const FIELD_TITLES: Record<FilterField, string> = {
   from: 'Поле «От»',
@@ -24,9 +24,18 @@ export const FIELD_TITLES: Record<FilterField, string> = {
   subject: 'Поле «Тема»',
   cc: 'Поле «Копия»',
   size: 'Размер, Кб',
+  body: 'Текст письма',
+  attachment: 'Вложение',
 };
 
-export type FilterOperator = 'contains' | 'not-contains' | 'equals' | 'greater' | 'less';
+export type FilterOperator =
+  | 'contains'
+  | 'not-contains'
+  | 'equals'
+  | 'greater'
+  | 'less'
+  | 'has'
+  | 'has-not';
 
 export const OPERATOR_TITLES: Record<FilterOperator, string> = {
   contains: 'содержит',
@@ -34,14 +43,29 @@ export const OPERATOR_TITLES: Record<FilterOperator, string> = {
   equals: 'совпадает с',
   greater: 'больше чем',
   less: 'меньше чем',
+  has: 'есть',
+  'has-not': 'нет',
 };
 
-/** Размер сравнивается числом, остальные поля — текстом. */
+/** Размер сравнивается числом, вложение — наличием, остальные поля — текстом. */
 export const TEXT_OPERATORS: readonly FilterOperator[] = ['contains', 'not-contains', 'equals'];
 export const SIZE_OPERATORS: readonly FilterOperator[] = ['greater', 'less', 'equals'];
+export const ATTACHMENT_OPERATORS: readonly FilterOperator[] = ['has', 'has-not'];
 
 export function operatorsFor(field: FilterField): readonly FilterOperator[] {
-  return field === 'size' ? SIZE_OPERATORS : TEXT_OPERATORS;
+  if (field === 'size') return SIZE_OPERATORS;
+  if (field === 'attachment') return ATTACHMENT_OPERATORS;
+  return TEXT_OPERATORS;
+}
+
+/**
+ * У условия есть значение, которое вводит человек.
+ *
+ * У «Вложения» его нет: спрашивается наличие, и поле ввода рядом с ним
+ * было бы окном, в которое нечего писать.
+ */
+export function conditionNeedsValue(field: FilterField): boolean {
+  return field !== 'attachment';
 }
 
 export interface FilterCondition {
@@ -50,11 +74,26 @@ export interface FilterCondition {
   value: string;
 }
 
+/**
+ * Как правило удаляет письмо.
+ *
+ * 'trash' — в корзину: письмо видно и его можно достать обратно.
+ * 'purge' — безвозвратно: письма не будет нигде и вернуть его нельзя ничем.
+ * Поэтому умолчание — всегда 'trash', а 'purge' человек выбирает сам и
+ * с предупреждением: правило, молча стирающее почту, — самое опасное,
+ * что можно завести в настройках.
+ */
+export type FilterDeleteMode = 'trash' | 'purge';
+
 export interface FilterActions {
   /** id папки-приёмника или null — не перекладывать. */
   moveToFolderId: string | null;
   markRead: boolean;
   markFlagged: boolean;
+  /** Ключи своих меток (`mt-…`), которые правило ставит письму. */
+  labelKeys: string[];
+  /** Удалить письмо или null — не удалять. */
+  deleteMode: FilterDeleteMode | null;
   /** Прогнать правило по уже полученной почте в этих папках. */
   applyToExistingFolderIds: string[];
   /** Адрес пересылки копии или null. */
@@ -80,6 +119,8 @@ export const DEFAULT_ACTIONS: FilterActions = {
   moveToFolderId: null,
   markRead: false,
   markFlagged: false,
+  labelKeys: [],
+  deleteMode: null,
   applyToExistingFolderIds: [],
   forwardTo: null,
   autoReply: null,
@@ -97,7 +138,7 @@ export function emptyRule(): FilterRule {
     id: '',
     enabled: true,
     conditions: [emptyCondition()],
-    actions: { ...DEFAULT_ACTIONS, applyToExistingFolderIds: [] },
+    actions: { ...DEFAULT_ACTIONS, applyToExistingFolderIds: [], labelKeys: [] },
     auto: false,
   };
 }
@@ -111,8 +152,9 @@ export function emptyRule(): FilterRule {
  */
 export function buildRule(draft: FilterRule): FilterRule {
   const conditions = draft.conditions
-    .map((c) => ({ ...c, value: c.value.trim() }))
-    .filter((c) => c.value.length > 0)
+    .map((c) => (conditionNeedsValue(c.field) ? { ...c, value: c.value.trim() } : { ...c, value: '' }))
+    // Условие «Вложение» остаётся без значения — оно и не нужно ему.
+    .filter((c) => !conditionNeedsValue(c.field) || c.value.length > 0)
     .map((c) =>
       operatorsFor(c.field).includes(c.operator)
         ? c
@@ -123,18 +165,31 @@ export function buildRule(draft: FilterRule): FilterRule {
 
   const forwardTo = draft.actions.forwardTo?.trim() ?? '';
   const autoReply = draft.actions.autoReply?.trim() ?? '';
+  const deleteMode = draft.actions.deleteMode;
 
   return {
     ...draft,
     conditions,
     actions: {
       ...draft.actions,
+      // Удаление и папка-приёмник исключают друг друга: письмо нельзя
+      // одновременно положить в папку и выбросить. То же правило стоит и
+      // на сервере (settings/webdto.ts) — чтобы список правил и файл Sieve
+      // не разошлись в понимании одного и того же правила.
+      moveToFolderId: deleteMode ? null : draft.actions.moveToFolderId,
+      labelKeys: [...new Set(draft.actions.labelKeys)],
       forwardTo: forwardTo.length > 0 ? forwardTo : null,
       autoReply: autoReply.length > 0 ? autoReply : null,
-      // Список папок имеет смысл только вместе с папкой-приёмником:
-      // «применить к уже полученным» — это перекладывание задним числом.
+      // Прогон по уже полученным письмам имеет смысл, только если правило
+      // с ними что-то делает: раскладывает, помечает или удаляет.
       applyToExistingFolderIds:
-        draft.actions.moveToFolderId === null ? [] : [...draft.actions.applyToExistingFolderIds],
+        draft.actions.moveToFolderId === null &&
+        deleteMode === null &&
+        !draft.actions.markRead &&
+        !draft.actions.markFlagged &&
+        draft.actions.labelKeys.length === 0
+          ? []
+          : [...draft.actions.applyToExistingFolderIds],
     },
   };
 }
@@ -153,6 +208,8 @@ export function isRuleComplete(rule: FilterRule): boolean {
     a.moveToFolderId !== null ||
     a.markRead ||
     a.markFlagged ||
+    a.labelKeys.length > 0 ||
+    a.deleteMode !== null ||
     a.forwardTo !== null ||
     a.autoReply !== null
   );
@@ -186,7 +243,13 @@ export function serializeRulePrefill(field: FilterField, value: string): string 
 export function describeConditions(rule: FilterRule): string {
   if (rule.conditions.length === 0) return 'Все письма';
   return rule.conditions
-    .map((c) => `${FIELD_TITLES[c.field]} ${OPERATOR_TITLES[c.operator]} ${c.value}`)
+    .map((c) =>
+      conditionNeedsValue(c.field)
+        ? `${FIELD_TITLES[c.field]} ${OPERATOR_TITLES[c.operator]} ${c.value}`
+        : // «Вложение есть» — значения нет, и лишний пробел в конце строки
+          // выглядел бы обрывом фразы.
+          `${FIELD_TITLES[c.field]} ${OPERATOR_TITLES[c.operator]}`,
+    )
     .join(', ');
 }
 
@@ -194,7 +257,11 @@ export function describeConditions(rule: FilterRule): string {
  * Действия правила списком — как в правой колонке списка фильтров mail.ru:
  * «Переслать на:», «Пометить прочитанным», «Применять к спаму»…
  */
-export function describeActions(rule: FilterRule, folders: readonly Folder[]): string[] {
+export function describeActions(
+  rule: FilterRule,
+  folders: readonly Folder[],
+  labels: readonly { key: string; name: string }[] = [],
+): string[] {
   const lines: string[] = [];
   const a = rule.actions;
 
@@ -204,6 +271,20 @@ export function describeActions(rule: FilterRule, folders: readonly Folder[]): s
   }
   if (a.markRead) lines.push('Пометить прочитанным');
   if (a.markFlagged) lines.push('Пометить флагом');
+  if (a.labelKeys.length > 0) {
+    // Метка называется именем, а не ключом: ключ `mt-scheta` человек не
+    // выбирал и никогда не видел — его выдал сервер (mail/labels.ts).
+    const names = a.labelKeys.map((key) => labels.find((l) => l.key === key)?.name ?? key);
+    lines.push(`Поставить метку: ${names.join(', ')}`);
+  }
+  /*
+   * Удаление называется прямо, а не «поместить в папку „Корзина“».
+   * Безвозвратное — отдельной строкой и словами, которые нельзя прочитать
+   * мельком: в списке правил это единственное место, где человек увидит,
+   * что одно из его правил стирает почту насовсем.
+   */
+  if (a.deleteMode === 'trash') lines.push('Удалить (в корзину)');
+  if (a.deleteMode === 'purge') lines.push('Удалить безвозвратно, минуя корзину');
   if (a.forwardTo !== null) lines.push(`Переслать на: ${a.forwardTo}`);
   if (a.autoReply !== null) lines.push('Отвечать автоматически');
   if (a.applyToExistingFolderIds.length > 0) {

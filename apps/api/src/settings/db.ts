@@ -15,6 +15,7 @@ import type { Logger } from 'pino';
 import { normalizeThemeSetting, normalizeWallpaperChoice } from '@mail-true/shared';
 import { errorInfo } from '../log.js';
 import { normalizeUndoSeconds } from '../mail/deferred-send.js';
+import { isUserLabelKey } from '../mail/labels.js';
 import {
   DEFAULT_ACTIONS,
   defaultMailSettings,
@@ -110,7 +111,17 @@ interface FilterRow extends QueryResultRow {
 /* Разбор JSONB                                                         */
 /* ------------------------------------------------------------------ */
 
-const FIELDS: FilterField[] = ['from', 'to', 'subject', 'cc', 'resent-from', 'resent-to', 'size'];
+const FIELDS: FilterField[] = [
+  'from',
+  'to',
+  'subject',
+  'cc',
+  'resent-from',
+  'resent-to',
+  'size',
+  'body',
+  'attachment',
+];
 const OPERATORS: FilterOperator[] = [
   'contains',
   'not-contains',
@@ -120,6 +131,8 @@ const OPERATORS: FilterOperator[] = [
   'not-matches',
   'greater',
   'less',
+  'has',
+  'has-not',
 ];
 
 /**
@@ -147,14 +160,29 @@ export function parseConditions(raw: unknown): FilterCondition[] {
   return out;
 }
 
-/** Действия из JSONB с подстановкой значений по умолчанию. */
+/**
+ * Действия из JSONB с подстановкой значений по умолчанию.
+ *
+ * Правила, записанные до появления меток и удаления, лежат в базе без этих
+ * полей — и обязаны читаться как раньше. Отсюда `DEFAULT_ACTIONS` в основе:
+ * отсутствующее поле означает «действия нет», а не «поле сломано».
+ */
 export function parseActions(raw: unknown): FilterActions {
-  const base: FilterActions = { ...DEFAULT_ACTIONS, forwardTo: [] };
+  const base: FilterActions = { ...DEFAULT_ACTIONS, forwardTo: [], labels: [] };
   if (!raw || typeof raw !== 'object') return base;
   const rec = raw as Record<string, unknown>;
   if (typeof rec['folder'] === 'string' && rec['folder'] !== '') base.folder = rec['folder'];
   if (typeof rec['markRead'] === 'boolean') base.markRead = rec['markRead'];
   if (typeof rec['flag'] === 'boolean') base.flag = rec['flag'];
+  if (Array.isArray(rec['labels'])) {
+    // Проверка ключа — здесь, а не только в маршруте: в базу правило может
+    // попасть и мимо API, а из базы собирается файл Sieve, где `addflag`
+    // примет любое слово, включая `\Deleted`. См. mail/labels.ts.
+    base.labels = rec['labels'].filter((k): k is string => typeof k === 'string' && isUserLabelKey(k));
+  }
+  if (rec['deleteMessage'] === 'trash' || rec['deleteMessage'] === 'purge') {
+    base.deleteMessage = rec['deleteMessage'];
+  }
   if (Array.isArray(rec['forwardTo'])) {
     base.forwardTo = rec['forwardTo'].filter((a): a is string => typeof a === 'string');
   }
