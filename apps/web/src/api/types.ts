@@ -65,8 +65,13 @@ export interface MoveResponse {
   moved: number;
 }
 
-/** POST /api/messages/send */
-export interface SendRequest extends DraftPayload {}
+/**
+ * POST /api/messages/send
+ *
+ * Псевдоним, а не наследник без своих полей: пустой интерфейс TypeScript
+ * считает равным родителю, и вопрос «зачем он» законен.
+ */
+export type SendRequest = DraftPayload;
 
 /** Ответ сервера на отправку: `{ ok, sentMessageId }`. */
 export interface SendResponse {

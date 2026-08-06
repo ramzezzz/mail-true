@@ -1,0 +1,47 @@
+{
+  /*
+   * Отдельный проект TypeScript — только для разбора кода линтером.
+   *
+   * Зачем он нужен. Проверки с оглядкой на типы (`no-floating-promises` и
+   * прочие, ради которых линтер и заведён) работают лишь тогда, когда файл
+   * попал в программу TypeScript. Рабочие tsconfig собирают приложения и
+   * потому включают лишь `src/**`: проверки, конфигурации сборки и мелкие
+   * сценарии в них не входят — их незачем компилировать.
+   *
+   * Без этого файла линтер отвечал «файл не найден проектом» на 88 файлов
+   * сразу, а хуже всего то, что при полном прогоне он терял и часть тех,
+   * что по одному разбирались прекрасно.
+   *
+   * `noEmit` и отсутствие `composite`: собирать отсюда ничего не нужно,
+   * сборкой занимаются рабочие tsconfig.
+   */
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "paths": {
+      "@mail-true/shared": ["./packages/shared/src/index.ts"],
+      "@mail-true/ai": ["./packages/ai/src/index.ts"],
+      "@mail-true/migrate": ["./packages/migrate/src/index.ts"],
+      "@web/*": ["./apps/web/src/*"],
+      "@shared/*": ["./packages/shared/src/*"]
+    }
+  },
+  "include": [
+    "apps/*/src/**/*.ts",
+    "apps/*/src/**/*.tsx",
+    "apps/*/tests/**/*.ts",
+    "apps/*/tests/**/*.tsx",
+    "apps/*/*.config.ts",
+    "apps/*/scripts/**/*.ts",
+    "packages/*/src/**/*.ts",
+    "*.ts",
+    "*.mts"
+  ]
+}

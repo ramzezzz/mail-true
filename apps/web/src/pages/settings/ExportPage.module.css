@@ -1,0 +1,164 @@
+/* Выгрузка ящика: заказ, ход работы и готовые архивы. */
+
+.order {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 10px;
+}
+
+.option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.optionNote {
+  display: block;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.jobs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job {
+  padding: 14px 16px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 10px;
+}
+
+.jobHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.state {
+  font-size: var(--mt-font-paragraph-size, 15px);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.state_ready {
+  color: #1a7f37;
+}
+
+.state_failed {
+  color: #c22a2a;
+}
+
+.state_expired,
+.state_cancelled {
+  color: var(--mt-color-text-tertiary);
+}
+
+.jobDate {
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+/* Полоска хода работы. Пока письма не сосчитаны, она бежит целиком —
+   так видно, что процесс жив, и не обещается доля, которой ещё нет. */
+.bar {
+  overflow: hidden;
+  height: 6px;
+  margin-bottom: 8px;
+  border-radius: 3px;
+  background: var(--mt-color-bg-secondary, #f2f3f5);
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--mt-color-accent-primary, #005ff9);
+  transition: width 0.3s ease;
+}
+
+.barIndeterminate {
+  animation: mtExportPulse 1.4s ease-in-out infinite;
+  opacity: 0.4;
+}
+
+@keyframes mtExportPulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Уважаем системную настройку «меньше движения». */
+@media (prefers-reduced-motion: reduce) {
+  .barIndeterminate {
+    animation: none;
+  }
+  .barFill {
+    transition: none;
+  }
+}
+
+.jobLine {
+  margin: 0 0 10px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.jobError {
+  margin: 0;
+  color: #c22a2a;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.skipped {
+  color: var(--mt-color-text-tertiary);
+}
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 8px;
+  background: var(--mt-color-accent-primary, #005ff9);
+  color: #fff;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 36px;
+  text-decoration: none;
+}
+
+/* Наведение — только там, где есть чем наводить: на телефоне «под
+   курсором» остаётся последняя нажатая кнопка (см. mobileMail.test.tsx). */
+@media (hover: hover) {
+  .download:hover {
+    opacity: 0.9;
+  }
+}
+
+.expires {
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}

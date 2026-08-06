@@ -19,6 +19,7 @@ import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js'
 import { listFolders } from '../imap/service.js';
 import { findFolderById, folderPathBytes, MAX_FOLDER_PATH_BYTES } from '../mail/folders.js';
 import type { MailSession } from '../types.js';
+import { originOf } from './access-record.js';
 
 const draftSchema = z.object({
   name: z.string().trim().min(1).max(255),
@@ -162,27 +163,100 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
     return { ok: true };
   });
 
-  // Очистка: письма удаляются, папка остаётся. Отдельная операция,
-  // потому что «Очистить» в интерфейсе — это именно очистка, а не
-  // удаление папки с последующим созданием заново.
+  /*
+   * Очистка: письма удаляются, папка остаётся. Отдельная операция,
+   * потому что «Очистить» в интерфейсе — это именно очистка, а не
+   * удаление папки с последующим созданием заново.
+   *
+   * У КОРЗИНЫ поведение другое, и это главное изменение возможности
+   * «восстановление после очистки». Раньше очистка звала EXPUNGE, и
+   * письма исчезали с диска в ту же секунду — восстановить их было нельзя
+   * ничем. Теперь они уезжают в служебную папку и живут там столько дней,
+   * сколько человек указал в настройках (по умолчанию семь, как у
+   * Fastmail). Ноль дней означает прежнее поведение — удалять сразу.
+   *
+   * Остальных папок это НЕ касается: «Очистить» на своей папке — это
+   * осознанное действие над тем, что человек хранил, а не над тем, что
+   * он уже выбросил. Заводить на него отсрочку значило бы удваивать
+   * место, занятое любой уборкой в ящике.
+   */
   app.post('/folders/:id/clear', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
-    const removed = await pool.withClient(session.email, session.password, async (client) => {
+    const recovery = app.recoveryService;
+
+    const result = await pool.withClient(session.email, session.password, async (client) => {
       const folders = await listFolders(client);
       const folder = findFolderById(folders, id);
       if (!folder) throw new NotFoundError(`Папка не найдена: ${id}`);
-      const lock = await client.getMailboxLock(folder.path);
-      try {
+
+      const uids = await withFolder(client, folder.path, async () => {
         const found = await client.search({ all: true }, { uid: true });
-        const uids = Array.isArray(found) ? found : [];
-        if (uids.length === 0) return 0;
-        await client.messageDelete(uids, { uid: true });
-        return uids.length;
-      } finally {
-        lock.release();
+        return Array.isArray(found) ? found : [];
+      });
+      if (uids.length === 0) return { removed: 0, kept: 0, restoreUntil: null };
+
+      const days = folder.role === 'trash' ? await recoveryDaysOf(session.email) : 0;
+      if (days > 0) {
+        const swept = await recovery.sweep(client, session.email, folder, uids, days);
+        // Письма, которые перенести не удалось (сервер не подтвердил
+        // номера), уже не в корзине — они в служебной папке, но без
+        // записи. Считаем их удалёнными: обещать возврат того, чего мы
+        // не записали, нельзя.
+        return { removed: swept.removed, kept: swept.kept, restoreUntil: swept.restoreUntil };
       }
+
+      await withFolder(client, folder.path, async () => {
+        await client.messageDelete(uids, { uid: true });
+      });
+      return { removed: uids.length, kept: 0, restoreUntil: null };
     });
-    return { removed };
+
+    app.deps.accessLog?.record({
+      accountEmail: session.email,
+      kind: 'folders',
+      /*
+       * Число вынесено в конец строки нарочно: по-русски «3 письма» и
+       * «5 писем» склоняются по-разному, а склонять в журнале действий
+       * незачем — форма «писем: 3» верна при любом числе.
+       */
+      detail:
+        result.kept > 0
+          ? `Очищена корзина, можно вернуть писем: ${result.kept}`
+          : `Очищена папка, удалено писем: ${result.removed}`,
+      ...originOf(request),
+    });
+
+    // `removed` остаётся первым полем ответа: его читает уже написанный
+    // интерфейс (apps/web/src/api/settingsApi.ts). Остальное — добавка,
+    // и старый клиент её просто не заметит.
+    return result;
   });
+
+  /** Срок хранения очищенного у этого ящика; 0 — не хранить. */
+  async function recoveryDaysOf(email: string): Promise<number> {
+    const recovery = app.recoveryService;
+    if (!recovery.available) return 0;
+    try {
+      return await recovery.daysFor(email);
+    } catch {
+      // Не смогли прочитать настройку — ведём себя как раньше и удаляем.
+      // Молча сохранить письма было бы хуже: человек просил их выбросить.
+      return 0;
+    }
+  }
+}
+
+/** Выполняет действие под блокировкой папки и всегда её отпускает. */
+async function withFolder<T>(
+  client: ImapFlow,
+  path: string,
+  action: () => Promise<T>,
+): Promise<T> {
+  const lock = await client.getMailboxLock(path);
+  try {
+    return await action();
+  } finally {
+    lock.release();
+  }
 }

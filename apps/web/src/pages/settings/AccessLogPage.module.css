@@ -1,0 +1,123 @@
+/* История входов. Метрика таблицы — как у «Меток» и «Папок». */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 4px;
+}
+
+.headCell {
+  padding: 0 12px 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  font-weight: 400;
+  line-height: 16px;
+  text-align: left;
+}
+
+.row {
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+/* Служебные подключения приглушены: они существуют, но не про чужого. */
+.rowService {
+  opacity: 0.55;
+}
+
+.timeCell {
+  padding: 10px 12px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.channelCell {
+  padding: 10px 12px;
+  width: 80px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--mt-color-bg-secondary, #f2f3f5);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+/* Неудачный вход — красным. Это единственное, ради чего сюда заходят. */
+.badgeFail {
+  background: #fde8e8;
+  color: #c22a2a;
+}
+
+.whereCell {
+  padding: 10px 12px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.whereNote {
+  display: block;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.detailCell {
+  padding: 10px 12px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+/* Строка браузера длинная и не должна распирать таблицу. */
+.agent {
+  display: block;
+  overflow: hidden;
+  max-width: 380px;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alarm {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #fdf1e5;
+  color: #8a4b08;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.toggleNote {
+  display: block;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}

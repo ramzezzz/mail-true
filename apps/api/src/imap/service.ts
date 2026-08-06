@@ -7,21 +7,21 @@ import type {
   MessageStructureObject,
   SearchObject,
 } from 'imapflow';
-import type {
-  Folder,
-  MailAddress,
-  MessageFilter,
-  MessageListPage,
-  MessageSummary,
-  ThreadSummary,
+import {
+  parseSearch,
+  type Folder,
+  type MailAddress,
+  type MessageFilter,
+  type MessageListPage,
+  type MessageSummary,
+  type ThreadSummary,
 } from '@mail-true/shared';
 import { NotFoundError, BadRequestError, UpstreamUnavailableError } from '../errors.js';
 import { mapFolders, findFolderById, type RawFolderInfo } from '../mail/folders.js';
 import { isUserLabelKey } from '../mail/labels.js';
 import { buildSummary, labelsFromSet, mapAddress } from '../mail/summary.js';
-import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
+import { collectAttachments, hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText, makeSnippet } from '../mail/text.js';
-import { parseSearch } from '../mail/search-query.js';
 import {
   THREAD_ALGORITHM,
   THREAD_CAPABILITY,
@@ -159,6 +159,24 @@ export function buildSearchQuery(
   if (parsed.before) query.before = parsed.before;
   if (parsed.seen !== null) query.seen = parsed.seen;
   if (parsed.flagged !== null) query.flagged = parsed.flagged;
+  /*
+   * Размер письма считает сам почтовый сервер (`LARGER` / `SMALLER`), а не
+   * мы после выборки: размер лежит в индексе, и отбор по нему не стоит ни
+   * одного лишнего FETCH.
+   *
+   * Речь о размере ПИСЬМА, а не вложения: в письме вложение едет в base64
+   * и весит примерно на треть больше файла. Обещать здесь «вложения больше
+   * 5 МБ» было бы неправдой, поэтому и подсказка говорит «письма тяжелее».
+   */
+  if (parsed.larger !== null) query.larger = parsed.larger;
+  if (parsed.smaller !== null) query.smaller = parsed.smaller;
+  /*
+   * `папка:` здесь намеренно НЕ применяется. У IMAP папка — не условие
+   * поиска, а то, что открыто до поиска; выбирает её вызывающий
+   * (`folderId` в маршруте, область поиска в браузере). Разбирается
+   * оператор ради одного: чтобы `папка:Рассылки` не ушло в полнотекстовый
+   * поиск обычными словами и не отдало пустоту.
+   */
   if (parsed.text) {
     // TEXT ищет и по заголовкам, и по телу
     query.text = parsed.text;
@@ -193,9 +211,46 @@ export function buildSearchQuery(
   return query;
 }
 
-/** Нужен ли отбор по вложениям после поиска — по фильтру или по оператору. */
-export function wantsAttachments(filter: MessageFilter, search: string | undefined): boolean {
-  return filter === 'with-attachments' || parseSearch(search).hasAttachment;
+/**
+ * Отбор по вложениям после поиска: нужен ли и с каким именем файла.
+ *
+ * Разбор BODYSTRUCTURE — единственный работающий способ (см.
+ * keepUidsWithAttachments), а имени файла в индексе Dovecot нет вовсе:
+ * `filename:` у Gmail — это отдельное поле их собственного индекса, у IMAP
+ * такого условия поиска не существует. Поэтому имя сверяется здесь, по той
+ * же самой BODYSTRUCTURE, которой уже отбирается «с вложениями», — лишней
+ * команды к серверу это не стоит.
+ */
+export interface AttachmentFilter {
+  /** Нужен ли отбор вообще. */
+  required: boolean;
+  /** Кусок имени файла или расширение; пусто — любое вложение. */
+  filename: string | null;
+}
+
+export function attachmentFilter(
+  filter: MessageFilter,
+  search: string | undefined,
+): AttachmentFilter {
+  const parsed = parseSearch(search);
+  return {
+    required: filter === 'with-attachments' || parsed.hasAttachment,
+    filename: parsed.filename,
+  };
+}
+
+/**
+ * Подходит ли имя файла под кусок из запроса.
+ *
+ * Сравнение по подстроке и без регистра: человек пишет `файл:.pdf`, `файл:pdf`
+ * и `файл:договор` с одним и тем же намерением — «где-то в имени это есть».
+ * Требовать точного имени значило бы, что оператором нельзя пользоваться,
+ * не помня имя файла целиком, — а помнят его почти никогда.
+ */
+export function attachmentNameMatches(names: readonly string[], needle: string): boolean {
+  const wanted = needle.trim().toLowerCase().replace(/^\*+|\*+$/gu, '');
+  if (wanted === '') return true;
+  return names.some((name) => name.toLowerCase().includes(wanted));
 }
 
 /**
@@ -303,10 +358,22 @@ export interface UidWithStructure {
  * фильтра теперь по определению совпадает с признаком `hasAttachments`
  * в строке списка — раньше они жили независимо друг от друга.
  */
-export function keepUidsWithAttachments(fetched: UidWithStructure[]): Set<number> {
+export function keepUidsWithAttachments(
+  fetched: UidWithStructure[],
+  filename: string | null = null,
+): Set<number> {
   const kept = new Set<number>();
   for (const msg of fetched) {
-    if (hasRealAttachments(msg.bodyStructure)) kept.add(msg.uid);
+    if (!hasRealAttachments(msg.bodyStructure)) continue;
+    if (filename !== null) {
+      // Встроенные картинки именем файла не отбираются: человек, спросивший
+      // `файл:.png`, ищет приложенный файл, а не подпись из письма.
+      const names = collectAttachments(msg.bodyStructure)
+        .filter((a) => !a.inline)
+        .map((a) => a.filename);
+      if (!attachmentNameMatches(names, filename)) continue;
+    }
+    kept.add(msg.uid);
   }
   return kept;
 }
@@ -315,11 +382,15 @@ export function keepUidsWithAttachments(fetched: UidWithStructure[]): Set<number
  * Запрашивает BODYSTRUCTURE по частям и оставляет письма с вложениями.
  * Разбиение по командам — обязательное: см. chunkUidSets.
  */
-async function selectUidsWithAttachments(client: ImapFlow, uids: number[]): Promise<Set<number>> {
+async function selectUidsWithAttachments(
+  client: ImapFlow,
+  uids: number[],
+  filename: string | null,
+): Promise<Set<number>> {
   const kept = new Set<number>();
   for (const range of chunkUidSets(uids)) {
     const structures = await client.fetchAll(range, { uid: true, bodyStructure: true }, { uid: true });
-    for (const uid of keepUidsWithAttachments(structures)) kept.add(uid);
+    for (const uid of keepUidsWithAttachments(structures, filename)) kept.add(uid);
   }
   return kept;
 }
@@ -580,8 +651,9 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
     // Новые письма первыми: UID возрастает со временем
     uids.sort((a, b) => b - a);
 
-    if (wantsAttachments(filter, search) && uids.length > 0) {
-      const kept = await selectUidsWithAttachments(client, uids);
+    const attachments = attachmentFilter(filter, search);
+    if (attachments.required && uids.length > 0) {
+      const kept = await selectUidsWithAttachments(client, uids, attachments.filename);
       uids = uids.filter((uid) => kept.has(uid));
     }
 

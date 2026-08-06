@@ -6,6 +6,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { newSessionId } from '../crypto.js';
 import { UnauthorizedError } from '../errors.js';
+import { originOf } from '../settings/access-record.js';
 
 const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email().max(320),
@@ -37,9 +38,33 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { email, password } = loginSchema.parse(request.body);
+      const origin = originOf(request);
 
-      // Проверяем учётные данные реальным IMAP-логином
-      await pool.verify(email, password);
+      /*
+       * Проверяем учётные данные реальным IMAP-логином.
+       *
+       * Неудача записывается в историю ящика ровно так же, как удача, и
+       * это половина смысла раздела «Вход и действия»: человек, у которого
+       * подбирают пароль, обязан увидеть три отказа подряд с чужого адреса.
+       * Записываем ДО того, как бросить ошибку, — иначе в историю попадали
+       * бы только успешные попытки, то есть только те, о которых человек
+       * и так знает.
+       *
+       * Пароля здесь нет ни в каком виде: ни введённого, ни его длины.
+       * Это журнал доступа, а не ловушка для опечаток.
+       */
+      try {
+        await pool.verify(email, password);
+      } catch (err) {
+        app.deps.accessLog?.record({
+          accountEmail: email,
+          kind: 'login.failed',
+          success: false,
+          detail: 'Неудачная попытка входа через веб-интерфейс',
+          ...origin,
+        });
+        throw err;
+      }
 
       const sessionId = newSessionId();
       await sessions.set(
@@ -48,6 +73,12 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         config.SESSION_TTL_SECONDS
       );
       setSessionCookie(app, reply, sessionId);
+      app.deps.accessLog?.record({
+        accountEmail: email,
+        kind: 'login',
+        detail: 'Вход через веб-интерфейс',
+        ...origin,
+      });
       return { ok: true, email };
     }
   );
@@ -60,7 +91,15 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       if (unsigned.valid && unsigned.value) {
         const data = await sessions.get(unsigned.value);
         await sessions.delete(unsigned.value);
-        if (data) await pool.closeUser(data.email).catch(() => undefined);
+        if (data) {
+          await pool.closeUser(data.email).catch(() => undefined);
+          app.deps.accessLog?.record({
+            accountEmail: data.email,
+            kind: 'logout',
+            detail: 'Выход из почты',
+            ...originOf(request),
+          });
+        }
       }
     }
     reply.clearCookie(config.SESSION_COOKIE_NAME, { path: '/' });

@@ -138,3 +138,31 @@ test('mapFolders: обычная папка со словом dovecot внутр
   const folders = mapFolders([raw({ path: 'INBOX' }), raw({ path: 'Про dovecot', name: 'Про dovecot' })]);
   assert.ok(folders.some((f) => f.path === 'Про dovecot'));
 });
+
+/**
+ * Папка, куда уезжает очищенная корзина (см. settings/recovery-mailbox.ts).
+ * В дереве её быть не должно: рядом с «Корзиной» появилась бы вторая
+ * корзина, из которой нельзя ни читать, ни писать. Рассказывает о ней
+ * раздел настроек «Восстановление писем».
+ */
+test('mapFolders: служебная папка восстановления в дерево не попадает', () => {
+  const folders = mapFolders([
+    raw({ path: 'INBOX' }),
+    raw({ path: 'Trash', name: 'Trash', specialUse: '\\Trash' }),
+    raw({ path: 'Recovery', name: 'Recovery' }),
+  ]);
+  assert.deepEqual(
+    folders.map((f) => f.path),
+    ['INBOX', 'Trash'],
+  );
+});
+
+test('mapFolders: папка со словом Recovery внутри имени остаётся', () => {
+  // Прячется ровно один корневой путь, а не всё похожее: «Recovery plan»
+  // — это папка человека, и терять её мы не вправе.
+  const folders = mapFolders([
+    raw({ path: 'INBOX' }),
+    raw({ path: 'Recovery plan', name: 'Recovery plan' }),
+  ]);
+  assert.ok(folders.some((f) => f.path === 'Recovery plan'));
+});

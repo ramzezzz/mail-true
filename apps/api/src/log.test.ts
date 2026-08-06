@@ -88,7 +88,19 @@ test('не-ошибки тоже пригодны к записи', () => {
   assert.equal(errorInfo('строка')['err'], 'строка');
   assert.equal(errorInfo(null)['err'], 'null');
   assert.equal(errorInfo(undefined)['err'], 'неизвестная ошибка');
-  assert.equal(errorInfo({ message: '' })['err'], '[object Object]');
+  /*
+   * Объект без внятного message раньше записывался как «[object Object]» —
+   * и это закреплялось здесь как норма. Норма плохая: журнал читают как раз
+   * в те минуты, когда случилось непонятное, и «[object Object]» означает
+   * потерянный след. Теперь такой объект разворачивается в JSON.
+   */
+  assert.equal(errorInfo({ message: '' })['err'], '{"message":""}');
+  assert.equal(errorInfo({ code: 'ECONNRESET' })['err'], '{"code":"ECONNRESET"}');
+
+  // Круговая ссылка в JSON не разворачивается — сказать о ней нужно словами.
+  const looped: Record<string, unknown> = {};
+  looped['self'] = looped;
+  assert.equal(errorInfo(looped)['err'], 'нечитаемая ошибка');
 });
 
 /* ------------------------------------------------------------------ */

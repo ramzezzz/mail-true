@@ -134,7 +134,7 @@ test('исключение в проверке — отказ с текстом,
 
 test('часть, добавленная позже, попадает в ближайший ответ', async () => {
   // Postgres регистрирует админка, уже после первых запросов пробы.
-  let clock = 0;
+  const clock = 0;
   const monitor = new HealthMonitor({ ttlMs: 60_000, now: () => clock });
   monitor.register(part('redis', true, true));
   assert.deepEqual((await monitor.report()).parts.map((p) => p.id), ['redis']);

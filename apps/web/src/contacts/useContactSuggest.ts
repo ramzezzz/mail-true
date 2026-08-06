@@ -161,7 +161,7 @@ export function useContactSuggest(options: UseContactSuggestOptions): ContactSug
     // options.exclude намеренно не в зависимостях: его заменяет
     // excludeKey — иначе новый массив с тем же содержимым перезапускал бы
     // запрос на каждое нажатие клавиши.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [query, excludeKey, enabled]);
 
   return state;

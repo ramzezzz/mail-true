@@ -41,7 +41,7 @@ export function handleFatal(logger: Logger, kind: GuardKind, err: unknown): void
     );
   } catch {
     // Журнал сломан — но и он не повод убивать процесс
-    // eslint-disable-next-line no-console
+     
     console.error('Необработанная ошибка:', err);
   }
 }

@@ -1,0 +1,103 @@
+/* Восстановление писем после очистки корзины. */
+
+/* Занятое место — самое крупное на странице: за ним сюда и приходят. */
+.summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 10px;
+}
+
+.summaryValue {
+  display: block;
+  color: var(--mt-color-text-primary);
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 28px;
+}
+
+.summaryNote {
+  display: block;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.setting {
+  max-width: 340px;
+  margin-bottom: 22px;
+}
+
+.warning {
+  margin: 10px 0 0;
+  color: #8a4b08;
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+.actions {
+  margin-bottom: 12px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.headCell {
+  padding: 0 12px 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  font-weight: 400;
+  line-height: 16px;
+  text-align: left;
+}
+
+.row {
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.checkCell {
+  width: 36px;
+  padding: 10px 0 10px 12px;
+}
+
+.mainCell {
+  padding: 10px 12px;
+}
+
+.subject {
+  display: block;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.meta {
+  display: block;
+  overflow: hidden;
+  color: var(--mt-color-text-tertiary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sizeCell,
+.leftCell {
+  padding: 10px 12px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px 0;
+}

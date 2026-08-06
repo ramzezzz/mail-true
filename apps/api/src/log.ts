@@ -51,7 +51,15 @@ function textOf(err: unknown): string {
   }
   if (err === undefined) return 'неизвестная ошибка';
   if (err === null) return 'null';
-  return String(err);
+  // Объект сюда доходит редко, но именно в такие минуты журнал и читают:
+  // «[object Object]» вместо причины — это потерянный след.
+  if (typeof err !== 'object') return String(err as number | boolean | symbol | bigint);
+  try {
+    return JSON.stringify(err) ?? 'нечитаемая ошибка';
+  } catch {
+    // Круговая ссылка — рассказать о ней иначе нечем.
+    return 'нечитаемая ошибка';
+  }
 }
 
 /**

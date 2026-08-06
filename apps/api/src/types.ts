@@ -9,6 +9,7 @@ import type { HealthMonitor } from './health.js';
 import type { SessionStore } from './session.js';
 import type { ImapPool } from './imap/pool.js';
 import type { DeferredSender } from './mail/deferred-send.js';
+import type { AccessRecorder } from './settings/access-record.js';
 import type { UploadStore } from './uploads.js';
 
 /** Аутентифицированная сессия текущего запроса. */
@@ -27,6 +28,21 @@ export interface AppDeps {
   secretBox: SecretBox;
   pool: ImapPool;
   uploads: UploadStore;
+  /**
+   * Запись в историю входов и действий владельца ящика.
+   *
+   * Живёт ЗДЕСЬ, а не декорацией Fastify, из-за порядка сборки: вход и
+   * выход из почты (routes/auth.ts) регистрируются раньше раздела
+   * настроек, который эту запись и заводит, а декорация, добавленная
+   * к корню после создания вложенной области, в ней уже не видна —
+   * запись о входе молча не делалась бы. Объект `deps` один на всё
+   * приложение и передаётся по ссылке, поэтому поле, проставленное
+   * позже, видят все.
+   *
+   * Необязательное: без базы или без применённой миграции истории нет,
+   * и почта обязана работать как обычно.
+   */
+  accessLog?: AccessRecorder;
 }
 
 declare module 'fastify' {
