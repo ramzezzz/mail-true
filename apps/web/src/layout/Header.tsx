@@ -68,6 +68,10 @@ export function Header({ navOpen, onToggleNav }: HeaderProps) {
                 не мигает при смене темы и не зависит от порядка отрисовки. */}
             <img className={styles.logoLight} src="/brand/logo-full.svg" alt="" />
             <img className={styles.logoDark} src="/brand/logo-full-dark.svg" alt="" />
+            {/* Узкий экран получает только знак: полное начертание с надписью
+                «MAIL.TRUE» отъедало у поиска половину строки — поймано на
+                снимке от заказчика. Знак читается и в 28 точек. */}
+            <img className={styles.logoMark} src="/brand/mark.svg" alt="" />
           </a>
         </div>
       )}

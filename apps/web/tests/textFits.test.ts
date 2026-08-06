@@ -74,3 +74,34 @@ describe('у стрелки списка есть своё место', () => {
     expect(Number(padding)).toBeGreaterThanOrEqual(24);
   });
 });
+
+describe('логотип в шапке на узком экране', () => {
+  const header = readFileSync(
+    fileURLToPath(new URL('../src/layout/Header.module.css', import.meta.url)),
+    'utf8',
+  );
+  const markup = readFileSync(
+    fileURLToPath(new URL('../src/layout/Header.tsx', import.meta.url)),
+    'utf8',
+  );
+
+  it('в шапке есть компактный знак, а не только полное начертание', () => {
+    // Полное «MAIL.TRUE» занимает около двухсот точек: на снимке заказчика
+    // в поле поиска помещалось «Поиск по п».
+    expect(markup).toMatch(/mark\.svg/);
+    expect(header).toMatch(/\.logoMark/);
+  });
+
+  it('на узком экране показывается знак, а полное начертание прячется', () => {
+    const narrow = header.slice(header.indexOf('@media (max-width: 1024px)'));
+    expect(narrow).toMatch(/\.logoMark\s*\{[^}]*display:\s*block/);
+    expect(narrow).toMatch(/\.logoLight[\s\S]{0,400}display:\s*none/);
+  });
+
+  it('на телефоне знак остаётся: шапка без марки теряет и путь на главную', () => {
+    const phone = header.slice(header.indexOf('@media (max-width: 480px)'));
+    expect(phone, 'зона логотипа снова скрыта целиком').not.toMatch(
+      /\.logoZone\s*\{[^}]*display:\s*none/,
+    );
+  });
+});
