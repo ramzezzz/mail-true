@@ -89,6 +89,92 @@ export function shouldRetryQuery(failureCount: number, error: unknown): boolean 
   return failureCount < 2;
 }
 
+/* --- Предел ожидания ответа -----------------------------------------
+ *
+ * У `fetch` своего предела НЕТ, и это не мелочь. Проверено на стенде:
+ * при остановленном сервере приложения запрос к `/api/folders` не
+ * разрешился и не отвергся за 24 секунды — обещание просто висело, а
+ * интерфейс всё это время показывал «загружаем». Отказа, на который можно
+ * было бы среагировать, не существовало вовсе.
+ *
+ * Ждать бесконечно нельзя ни в одном месте продукта: человек не отличает
+ * «медленно» от «сломалось» и сидит перед крутилкой. Поэтому предел есть
+ * всегда, а по его истечении приходит НАСТОЯЩАЯ ошибка с внятным текстом.
+ *
+ * Пределы разные, потому что разное и ожидание:
+ *   - обычный запрос — секунды; если ответа нет полминуты, связи нет;
+ *   - выгрузка файла на сервер — минуты: вложение на 18 МБ по слабому
+ *     каналу идёт долго, и обрывать его на тридцатой секунде значит
+ *     ломать работающую отправку;
+ *   - скачивание вложения — тоже минуты, по той же причине.
+ */
+const TIMEOUT_DEFAULT_MS = 30_000;
+const TIMEOUT_UPLOAD_MS = 10 * 60 * 1000;
+const TIMEOUT_DOWNLOAD_MS = 5 * 60 * 1000;
+
+/** Код ошибки предела ожидания — по нему интерфейс отличает «нет связи». */
+export const TIMEOUT_CODE = 'TIMEOUT';
+
+/** Сработал ли предел ожидания (а не отказ сервера). */
+export function isTimeoutError(error: unknown): boolean {
+  return isApiError(error) && error.code === TIMEOUT_CODE;
+}
+
+/**
+ * Сигнал прерывания: наш предел плюс тот, что передал вызывающий.
+ *
+ * Свой сигнал у вызова бывает (отмена поиска при новом вводе), и терять
+ * его нельзя — поэтому сигналы объединяются, а не подменяются.
+ */
+function withTimeout(init: ApiRequestInit | undefined, ms: number): AbortSignal {
+  const ours = AbortSignal.timeout(ms);
+  const theirs = init?.signal;
+  return theirs ? AbortSignal.any([theirs, ours]) : ours;
+}
+
+/**
+ * Свои параметры запроса поверх обычных.
+ *
+ * `timeoutMs` нужен там, где вызывающий знает про ожидание больше нас:
+ * заведомо долгая операция может попросить больше, заведомо быстрая —
+ * меньше. Без этого предел был бы зашит намертво, и единственным способом
+ * его проверить оставалось бы ждать полминуты в каждой проверке.
+ */
+export interface ApiRequestInit extends RequestInit {
+  timeoutMs?: number;
+}
+
+/** Предел для конкретного запроса: выгрузка файла ждёт дольше. */
+function timeoutFor(init: ApiRequestInit | undefined): number {
+  if (typeof init?.timeoutMs === 'number' && init.timeoutMs > 0) return init.timeoutMs;
+  const body = init?.body;
+  return typeof FormData !== 'undefined' && body instanceof FormData
+    ? TIMEOUT_UPLOAD_MS
+    : TIMEOUT_DEFAULT_MS;
+}
+
+/**
+ * Превращает прерывание по времени в ошибку, которую можно показать.
+ *
+ * Своё прерывание вызывающего (отмена запроса) сюда не попадает: его
+ * пробрасываем как есть, иначе отменённый поиск выглядел бы поломкой.
+ */
+function asTimeout(err: unknown, path: string, ms: number, ownSignal: AbortSignal | undefined): never {
+  const aborted = err instanceof DOMException && err.name === 'AbortError';
+  const timedOut =
+    (err instanceof DOMException && err.name === 'TimeoutError') ||
+    (aborted && ownSignal?.aborted !== true);
+  if (timedOut) {
+    throw new ApiError(
+      0,
+      path,
+      `Сервер не ответил за ${String(Math.round(ms / 1000))} с. Проверьте связь и повторите.`,
+      TIMEOUT_CODE,
+    );
+  }
+  throw err;
+}
+
 export type QueryParams = Record<string, string | number | boolean | undefined>;
 
 export function buildQuery(params: QueryParams): string {
@@ -100,7 +186,7 @@ export function buildQuery(params: QueryParams): string {
   return s ? `?${s}` : '';
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+export async function apiFetch<T>(path: string, init?: ApiRequestInit): Promise<T> {
   /*
    * Заголовок с типом содержимого ставится ТОЛЬКО когда тело действительно
    * есть и оно в формате JSON.
@@ -121,10 +207,17 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
    */
   const hasBody = init?.body !== undefined && init.body !== null;
   const withJson = hasBody && !(init.body instanceof FormData);
-  const response = await fetch(path, {
-    ...(withJson ? { headers: { 'Content-Type': 'application/json' } } : {}),
-    ...init,
-  });
+  const ms = timeoutFor(init);
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...(withJson ? { headers: { 'Content-Type': 'application/json' } } : {}),
+      ...init,
+      signal: withTimeout(init, ms),
+    });
+  } catch (err) {
+    asTimeout(err, path, ms, init?.signal ?? undefined);
+  }
   if (!response.ok) {
     let detail = response.statusText;
     let code: string | null = null;
@@ -151,8 +244,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
  * как файл, и `apiFetch` на таком ответе споткнулся бы о `response.json()`.
  * Разбор отказа и реакция на истёкшую сессию — общие с `apiFetch`.
  */
-export async function apiFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
-  const response = await fetch(path, init);
+export async function apiFetchBlob(path: string, init?: ApiRequestInit): Promise<Blob> {
+  let response: Response;
+  try {
+    const ms = init?.timeoutMs && init.timeoutMs > 0 ? init.timeoutMs : TIMEOUT_DOWNLOAD_MS;
+    response = await fetch(path, { ...init, signal: withTimeout(init, ms) });
+  } catch (err) {
+    asTimeout(err, path, init?.timeoutMs ?? TIMEOUT_DOWNLOAD_MS, init?.signal ?? undefined);
+  }
   if (!response.ok) {
     let detail = response.statusText;
     let code: string | null = null;
