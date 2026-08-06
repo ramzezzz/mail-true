@@ -27,7 +27,10 @@ import { accountsApi, api, settingsApi } from '../src/api';
 import type { GeneralSettings } from '../src/api/settingsTypes';
 import { publishMailEvent } from '../src/app/mailEvents';
 import { MailNotifications } from '../src/app/MailNotifications';
-import { newMailNotification, stripTabCounter, tabTitle } from '../src/lib/notifications';
+import { stripTabCounter, tabTitle } from '../src/lib/notifications';
+import { notificationsApi } from '../src/notifications/api';
+import { CLAIM_WINDOW_MS } from '../src/notifications/local';
+import type { NotificationView } from '../src/notifications/types';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -123,6 +126,36 @@ function setHidden(hidden: boolean) {
   Object.defineProperty(document, 'hidden', { value: hidden, configurable: true });
 }
 
+/**
+ * Готовое окно, каким его собирает СЕРВЕР.
+ *
+ * Текст уведомления клиент больше не сочиняет: уровень подробности,
+ * первые фразы письма и сводка от ИИ известны только серверу, и он же
+ * отвечает Service Worker при закрытой вкладке. Вид ответа — тот, что
+ * отдаёт GET /api/push/notifications (apps/api/src/push/routes.ts).
+ */
+function serverView(patch: Partial<NotificationView> = {}): NotificationView {
+  return {
+    title: 'Пётр',
+    body: 'Договор',
+    tag: 'mail-true:0123456789abcdef',
+    icon: '/brand/notification-icon.png',
+    badge: '/brand/notification-badge.png',
+    actions: [{ action: 'read', title: 'Прочитано' }],
+    url: '/inbox/inbox%3A296',
+    ids: ['inbox:296'],
+    degraded: null,
+    ...patch,
+  };
+}
+
+/** Дожидается окна: вкладки договариваются о показе не мгновенно. */
+async function settleClaims(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, CLAIM_WINDOW_MS + 40));
+  });
+}
+
 beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
@@ -130,6 +163,11 @@ beforeEach(() => {
   document.title = 'Почта — Mail.True';
   setHidden(true);
   vi.spyOn(api, 'getFolders').mockResolvedValue(folders);
+  vi.spyOn(notificationsApi, 'getNotification').mockResolvedValue({
+    view: serverView(),
+    pending: 1,
+  });
+  vi.spyOn(notificationsApi, 'markSeen').mockResolvedValue({ forgotten: 0, pending: 0 });
   // Счётчик считается по всем ящикам; здесь ящик один, и общее число
   // совпадает с непрочитанными в его «Входящих»
   vi.spyOn(accountsApi, 'getUnread').mockResolvedValue({
@@ -186,15 +224,7 @@ describe('заголовок вкладки', () => {
 });
 
 describe('всплывающее уведомление о новом письме', () => {
-  it('текст — от кого и о чём', () => {
-    expect(newMailNotification(newMessage)).toEqual({ title: 'Пётр', body: 'Договор' });
-    // Имени нет — показываем адрес
-    expect(
-      newMailNotification({ from: { name: null, address: 'petr@example.com' }, subject: '' }),
-    ).toEqual({ title: 'petr@example.com', body: '(без темы)' });
-  });
-
-  it('показывается, когда настройка включена и вкладка свёрнута', async () => {
+  it('текст берётся у сервера, а не сочиняется на клиенте', async () => {
     const { shown } = stubNotification('granted');
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
       serverSettings({ notifications: { browser: true, tabCounter: true } }),
@@ -203,12 +233,40 @@ describe('всплывающее уведомление о новом письм
     await waitFor(() => document.title.startsWith('(231)'), 'загрузку настроек');
 
     act(() => publishMailEvent(newMessage));
+    await settleClaims();
 
-    // Раньше настройку не читал никто: уведомления не было никогда
+    /*
+     * Событие WebSocket несёт и отправителя, и тему — соблазн собрать
+     * текст прямо здесь был велик. Но выбранный уровень подробности,
+     * первые фразы письма и сводку от ИИ знает только сервер, и он же
+     * отвечает Service Worker при закрытой вкладке. Проверяем именно
+     * это: показано то, что прислал сервер.
+     */
+    expect(notificationsApi.getNotification).toHaveBeenCalled();
     expect(shown).toEqual([{ title: 'Пётр', body: 'Договор' }]);
   });
 
-  it('с выключенной настройкой не показывается', async () => {
+  it('показывает то, что прислал сервер, а не то, что пришло в событии', async () => {
+    const { shown } = stubNotification('granted');
+    // Уровень «только факт»: сервер намеренно не выдаёт ни отправителя,
+    // ни темы — и клиент не должен подставить их из события.
+    vi.spyOn(notificationsApi, 'getNotification').mockResolvedValue({
+      view: serverView({ title: 'Новое письмо', body: 'Откройте почту, чтобы прочитать' }),
+      pending: 1,
+    });
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
+      serverSettings({ notifications: { browser: true, tabCounter: true } }),
+    );
+    render();
+    await waitFor(() => document.title.startsWith('(231)'), 'загрузку настроек');
+
+    act(() => publishMailEvent(newMessage));
+    await settleClaims();
+
+    expect(shown).toEqual([{ title: 'Новое письмо', body: 'Откройте почту, чтобы прочитать' }]);
+  });
+
+  it('с выключенной настройкой не показывается и сервер не спрашивается', async () => {
     const { shown } = stubNotification('granted');
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
       serverSettings({ notifications: { browser: false, tabCounter: true } }),
@@ -217,7 +275,9 @@ describe('всплывающее уведомление о новом письм
     await waitFor(() => document.title.startsWith('(231)'), 'загрузку настроек');
 
     act(() => publishMailEvent(newMessage));
+    await settleClaims();
     expect(shown).toHaveLength(0);
+    expect(notificationsApi.getNotification).not.toHaveBeenCalled();
   });
 
   it('на открытой вкладке не показывается — письмо и так видно в списке', async () => {
@@ -230,19 +290,33 @@ describe('всплывающее уведомление о новом письм
     await waitFor(() => document.title.startsWith('(231)'), 'загрузку настроек');
 
     act(() => publishMailEvent(newMessage));
+    await settleClaims();
     expect(shown).toHaveLength(0);
   });
 
-  it('без разрешения браузера уведомления нет, но разрешение спрашивается', async () => {
+  it('разрешение НЕ спрашивается при загрузке почты', async () => {
     const { shown, requestPermission } = stubNotification('default');
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
       serverSettings({ notifications: { browser: true, tabCounter: true } }),
     );
     render();
-    await waitFor(() => requestPermission.mock.calls.length === 1, 'запрос разрешения');
+    await waitFor(() => document.title.startsWith('(231)'), 'загрузку настроек');
 
     act(() => publishMailEvent(newMessage));
+    await settleClaims();
+
+    /*
+     * Раньше разрешение спрашивалось прямо здесь — на загрузке страницы.
+     * Так делать нельзя: Chrome с версии 80 подменяет такой запрос
+     * неприметной иконкой в адресной строке, Firefox с версии 72 гасит
+     * его совсем, а человек, которому окно выскочило на первой секунде,
+     * жмёт «Блокировать» — и вернуть это можно только руками в настройках
+     * браузера. Теперь разрешение спрашивается на странице настроек,
+     * прямо в обработчике нажатия (см. NotificationsPage).
+     */
+    expect(requestPermission).not.toHaveBeenCalled();
     expect(shown).toHaveLength(0);
+    expect(notificationsApi.getNotification).not.toHaveBeenCalled();
   });
 
   it('служебные события уведомлений не порождают', async () => {

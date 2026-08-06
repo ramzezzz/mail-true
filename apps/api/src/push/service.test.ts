@@ -102,6 +102,15 @@ function fakePushService(status = 201) {
  * (src/push/messages.ts) — без него уведомлению нечего показывать.
  */
 function fakeMailbox(subject = 'Договор поставки') {
+  /**
+   * Сколько раз соединение просили пересмотреть папку.
+   *
+   * Не любопытства ради: без NOOP соединение из пула не видит письма,
+   * пришедшего секунду назад, — а уведомление спрашивается ровно в эту
+   * секунду. На живом стенде это давало безымянное «Новое письмо»
+   * вместо темы и отправителя.
+   */
+  let noops = 0;
   const client = {
     list: async () => [
       {
@@ -116,6 +125,9 @@ function fakeMailbox(subject = 'Договор поставки') {
     ],
     status: async () => ({ messages: 1, unseen: 1, uidValidity: 1 }),
     getMailboxLock: async () => ({ release: () => undefined }),
+    noop: async () => {
+      noops += 1;
+    },
     fetchOne: async (uid: string) => ({
       uid: Number(uid),
       envelope: {
@@ -130,10 +142,11 @@ function fakeMailbox(subject = 'Договор поставки') {
       internalDate: new Date('2026-08-06T11:20:00.000Z'),
     }),
   };
-  return {
+  const pool = {
     withClient: async (_email: string, _password: string, fn: (c: unknown) => Promise<unknown>) =>
       fn(client),
   } as unknown as PushEnvironment['pool'];
+  return { pool, noops: () => noops };
 }
 
 function environment(overrides: Partial<PushEnvironment> = {}): PushEnvironment {
@@ -387,7 +400,7 @@ test('исчерпанный предел ИИ не отменяет уведо�
   const { service } = buildService({
     prefs: { push: false, level: 'ai-summary' },
     env: {
-      pool: fakeMailbox(),
+      pool: fakeMailbox().pool,
       aiAvailability: async () => ({ available: true, reason: null }),
       aiSummary: async () => ({
         text: null,
@@ -413,7 +426,7 @@ test('сводка от ИИ доходит до окна уведомления
   const { service } = buildService({
     prefs: { push: false, level: 'ai-summary' },
     env: {
-      pool: fakeMailbox(),
+      pool: fakeMailbox().pool,
       aiSummary: async () => ({
         text: 'Пётр прислал подписанный договор и ждёт согласования до пятницы.',
         degraded: null,
@@ -429,9 +442,10 @@ test('сводка от ИИ доходит до окна уведомления
 });
 
 test('письмо читается из ящика тем же путём, что и список писем', async () => {
+  const mailbox = fakeMailbox('Счёт на оплату');
   const { service } = buildService({
     prefs: { push: false, level: 'sender-subject' },
-    env: { pool: fakeMailbox('Счёт на оплату') },
+    env: { pool: mailbox.pool },
   });
   await service.init();
   await service.onNewMessage(SESSION, arrived(), { liveClientIds: new Set() });
@@ -441,6 +455,30 @@ test('письмо читается из ящика тем же путём, чт
   assert.equal(view.body, 'Счёт на оплату');
   assert.equal(view.url, '/inbox/inbox%3A296');
   assert.deepEqual(view.ids, ['inbox:296']);
+});
+
+test('перед чтением письма соединение просят пересмотреть папку', async () => {
+  /*
+   * Дефект, найденный на живом стенде, и он же — причина этой проверки.
+   *
+   * Соединение берётся из пула и живёт с уже ВЫБРАННОЙ папкой. Service
+   * Worker просыпается от push почти мгновенно и спрашивает содержимое
+   * в ту же секунду, когда письмо доставлено, — а такое соединение его
+   * ещё не видит. `fetchOne` возвращал пустоту, и вместо темы и
+   * отправителя всплывало безымянное «Новое письмо». Через десяток
+   * секунд тот же запрос отрабатывал правильно, отчего дефект и
+   * выглядел мистикой.
+   */
+  const mailbox = fakeMailbox('Акт сверки');
+  const { service } = buildService({
+    prefs: { push: false, level: 'sender-subject' },
+    env: { pool: mailbox.pool },
+  });
+  await service.init();
+  await service.onNewMessage(SESSION, arrived(), { liveClientIds: new Set() });
+  await service.buildView(SESSION);
+
+  assert.equal(mailbox.noops(), 1, 'без NOOP уведомление выйдет безымянным');
 });
 
 test('сводка не считается для группы писем: десять обращений к платному сервису — не плата за одно окно', async () => {

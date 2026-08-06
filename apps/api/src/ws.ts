@@ -2,6 +2,29 @@
  * WebSocket /ws — уведомления о новых письмах.
  * На пользователя открывается отдельное IMAP-соединение с IDLE на INBOX;
  * при появлении новых писем всем сокетам пользователя рассылается событие.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ НАБЛЮДЕНИЕ ПЕРЕЖИВАЕТ ЗАКРЫТУЮ ВКЛАДКУ
+ * ------------------------------------------------------------------
+ * Раньше наблюдение закрывалось вместе с последним сокетом — и это было
+ * ровно то, что нужно, пока уведомления показывала сама страница.
+ *
+ * С уведомлениями при ЗАКРЫТОЙ вкладке так нельзя: закрылась вкладка —
+ * закрылось наблюдение, и о новом письме просто НЕКОМУ узнать. Никакой
+ * push не уйдёт, потому что событие не случится. Возможность выглядела бы
+ * работающей (подписка есть, ключи есть, проверочное уведомление
+ * приходит) и молчала бы на настоящих письмах — худший из возможных
+ * дефектов: проверить его можно только терпением.
+ *
+ * Поэтому: пока у ящика есть подписка на доставку, наблюдение живёт и без
+ * вкладок — но не дольше `PUSH_WATCH_MAX_MS` (по умолчанию сутки).
+ *
+ * Чего здесь СОЗНАТЕЛЬНО нет: сохранения пароля. Наблюдение держится на
+ * пароле из живого сеанса и после перезапуска сервера не возобновляется
+ * само — до первого открытия почты. Хранить пароли ящиков ради того,
+ * чтобы наблюдение переживало перезапуск, — цена, несоразмерная выгоде:
+ * это почтовый сервер, который ставят как раз затем, чтобы лишнего о
+ * переписке нигде не оставалось.
  */
 import type { FastifyInstance } from 'fastify';
 import { ImapFlow } from 'imapflow';
@@ -37,10 +60,39 @@ interface Watcher {
    * браузере бывает несколько, а окно нужно одно.
    */
   clients: Map<WsLike, string>;
+  /**
+   * До какого момента наблюдение живёт без единой открытой вкладки.
+   * 0 — не живёт вовсе (подписок на доставку у ящика нет).
+   */
+  keepAliveUntil: number;
+}
+
+/**
+ * Сколько наблюдение живёт после закрытия последней вкладки.
+ *
+ * Сутки — не «побольше на всякий случай», а сознательный предел.
+ * Соединение IDLE занимает место в Dovecot и в памяти сервера приложения,
+ * а пароль ящика всё это время лежит в памяти процесса. Держать это
+ * неделями ради человека, который закрыл почту и ушёл в отпуск, — плохая
+ * сделка; сутки покрывают обычную ночь и обычные выходные не покрывают
+ * намеренно.
+ */
+export const WATCH_KEEP_ALIVE_MS = 24 * 3600 * 1000;
+
+/** Как часто проверяем, не пора ли закрыть осиротевшее наблюдение. */
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Пора ли закрыть наблюдение: вкладок нет и срок вышел. */
+export function watchExpired(
+  watcher: { sockets: { size: number }; keepAliveUntil: number },
+  now: number,
+): boolean {
+  return watcher.sockets.size === 0 && watcher.keepAliveUntil <= now;
 }
 
 export class MailNotifier {
   private readonly watchers = new Map<string, Watcher>();
+  private sweeper: NodeJS.Timeout | null = null;
   /**
    * Рассылка уведомлений. Подключается извне (см. app.ts), а не создаётся
    * здесь: наблюдатель за ящиками не должен знать ни про базу подписок,
@@ -92,6 +144,7 @@ export class MailNotifier {
       email,
       password,
       clients: new Map(),
+      keepAliveUntil: 0,
     };
 
     // Слушатели вешаются ДО подключения: необработанное событие 'error'
@@ -217,18 +270,70 @@ export class MailNotifier {
     const cleanup = (): void => {
       watcher.sockets.delete(socket);
       watcher.clients.delete(socket);
-      if (watcher.sockets.size === 0) {
-        // Последний подписчик ушёл — закрываем IDLE-соединение
-        watcher.closed = true;
-        this.watchers.delete(email);
-        watcher.client.logout().catch(() => watcher.client.close());
-      }
+      if (watcher.sockets.size > 0) return;
+      /*
+       * Ушёл последний подписчик. Раньше здесь безусловно закрывалось
+       * IDLE-соединение — и с уведомлениями при закрытой вкладке это
+       * означало бы, что о новом письме некому узнать (см. шапку файла).
+       * Спрашиваем рассылку, есть ли у ящика подписки, и если есть —
+       * продолжаем наблюдать ещё сутки.
+       */
+      void this.keepOrClose(email, watcher);
     };
     socket.on('close', cleanup);
     socket.on('error', cleanup);
   }
 
+  private async keepOrClose(email: string, watcher: Watcher): Promise<void> {
+    const keep = this.push ? await this.push.hasSubscriptions(email).catch(() => false) : false;
+    // За время запроса в базу вкладку могли открыть снова — тогда
+    // закрывать нечего и решение отменяется само.
+    if (watcher.sockets.size > 0) return;
+    if (keep) {
+      watcher.keepAliveUntil = Date.now() + WATCH_KEEP_ALIVE_MS;
+      this.startSweeper();
+      this.logger.debug({ email }, 'Вкладок нет, наблюдение оставлено ради уведомлений');
+      return;
+    }
+    this.closeWatcher(email, watcher);
+  }
+
+  private closeWatcher(email: string, watcher: Watcher): void {
+    watcher.closed = true;
+    if (this.watchers.get(email) === watcher) this.watchers.delete(email);
+    watcher.client.logout().catch(() => watcher.client.close());
+    if (this.watchers.size === 0) this.stopSweeper();
+  }
+
+  /**
+   * Уборщик осиротевших наблюдений.
+   *
+   * Без него соединение, оставленное ради уведомлений, жило бы до
+   * перезапуска сервера: сокетов у него нет, и закрыть его больше некому.
+   */
+  private startSweeper(): void {
+    if (this.sweeper) return;
+    this.sweeper = setInterval(() => {
+      const now = Date.now();
+      for (const [email, watcher] of this.watchers) {
+        if (watchExpired(watcher, now)) {
+          this.logger.debug({ email }, 'Срок наблюдения без вкладок вышел, закрываем');
+          this.closeWatcher(email, watcher);
+        }
+      }
+    }, SWEEP_INTERVAL_MS);
+    // Таймер не должен держать процесс, когда всё остальное завершилось
+    this.sweeper.unref?.();
+  }
+
+  private stopSweeper(): void {
+    if (!this.sweeper) return;
+    clearInterval(this.sweeper);
+    this.sweeper = null;
+  }
+
   async closeAll(): Promise<void> {
+    this.stopSweeper();
     for (const [email, watcher] of this.watchers) {
       this.watchers.delete(email);
       watcher.closed = true;

@@ -1,14 +1,16 @@
 /**
- * Уведомления о новой почте: что писать в всплывающем окне браузера и что
- * дописывать в заголовок вкладки.
+ * Счётчик непрочитанных в заголовке вкладки.
  *
- * Обе настройки — «Уведомления в браузере» и «Счётчик во вкладке» — до сих
- * пор никто не читал: их сохраняли, и на этом всё заканчивалось. Здесь —
- * чистые части, отдельно от работы с DOM и Notification API, чтобы их можно
- * было проверить без браузера.
+ * Раньше здесь же собирался и текст всплывающего окна
+ * (`newMailNotification`). Он отсюда убран, и это не уборка ради уборки:
+ * текст уведомления теперь собирает СЕРВЕР — он один знает выбранный
+ * уровень подробности, умеет достать первые фразы письма и сводку от ИИ,
+ * и он же отвечает Service Worker при закрытой вкладке. Вторая, клиентская
+ * реализация тех же правил неизбежно разошлась бы с серверной — и разошлась
+ * бы именно в уровнях подробности, то есть там, где ошибка означает
+ * показанное на экране письмо, которое человек просил не показывать.
+ * См. apps/api/src/push/policy.ts и notifications/local.ts.
  */
-
-import type { MailAddress } from '@mail-true/shared';
 
 /** Заголовок вкладки со счётчиком непрочитанных. */
 export function tabTitle(baseTitle: string, unread: number, enabled: boolean): string {
@@ -28,14 +30,4 @@ export function tabTitle(baseTitle: string, unread: number, enabled: boolean): s
  */
 export function stripTabCounter(title: string): string {
   return title.replace(/^\(\d+\)\s*/u, '');
-}
-
-/** Событие сервера о новом письме — в текст всплывающего уведомления. */
-export function newMailNotification(event: {
-  from: MailAddress | null;
-  subject: string;
-}): { title: string; body: string } {
-  const sender = event.from?.name?.trim() || event.from?.address || 'Неизвестный отправитель';
-  const subject = event.subject.trim();
-  return { title: sender, body: subject === '' ? '(без темы)' : subject };
 }

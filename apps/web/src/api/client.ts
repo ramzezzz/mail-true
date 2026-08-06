@@ -6,6 +6,7 @@
 import type { Account, DraftContent, Folder, MessageListQuery } from '@mail-true/shared';
 import { apiFetch, apiFetchBlob, buildQuery } from './http';
 import { connectWithRetry } from '../lib/reconnectingSocket';
+import { browserClientId } from '../notifications/api';
 import type {
   AiClassification,
   AiConsentRevokeResult,
@@ -284,7 +285,18 @@ export const httpApi: MailApi = {
     connectWithRetry({
       open: () => {
         const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
-        return new WebSocket(`${protocol}://${location.host}/ws`);
+        /*
+         * Отпечаток браузера в адресе соединения.
+         *
+         * По нему сервер понимает, что в ЭТОМ браузере почта сейчас
+         * открыта, и не шлёт сюда push-уведомление: окно покажет сама
+         * вкладка, а второе такое же от фоновой службы было бы дублем.
+         * Отпечаток — случайная строка, которую браузер придумал себе
+         * сам (см. notifications/api.ts); опознать по ней человека
+         * нельзя, и сравнивается она только с подписками этого же ящика.
+         */
+        const client = encodeURIComponent(browserClientId());
+        return new WebSocket(`${protocol}://${location.host}/ws?client=${client}`);
       },
       onMessage: (data) => {
         try {

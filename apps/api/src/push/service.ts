@@ -470,6 +470,26 @@ export class PushService {
     return result;
   }
 
+  /**
+   * Есть ли у ящика хоть одна подписка на доставку при закрытой вкладке.
+   *
+   * Спрашивает наблюдатель за почтой (ws.ts), когда закрывается последняя
+   * вкладка: если подписки есть, наблюдение за ящиком надо продолжать —
+   * иначе уведомления «при закрытой вкладке» не случатся никогда, потому
+   * что о новом письме просто некому будет узнать.
+   */
+  async hasSubscriptions(email: string): Promise<boolean> {
+    if (!this.pushAvailable || !this.#db) return false;
+    try {
+      const prefs = await this.prefs(email);
+      if (!prefs.enabled || !prefs.push) return false;
+      return (await this.#db.listSubscriptions(email)).length > 0;
+    } catch (err) {
+      this.#logger.debug(errorInfo(err), 'Не удалось проверить подписки ящика');
+      return false;
+    }
+  }
+
   /** Разовая проверка: отправляет push в подписки этого браузера. */
   async sendTestPush(email: string, clientId: string): Promise<{ sent: number; error: string | null }> {
     if (!this.pushAvailable || !this.#db || !this.#keys) {
