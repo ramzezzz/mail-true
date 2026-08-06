@@ -97,6 +97,47 @@
   color: var(--mt-color-text-secondary);
 }
 
+/* Выбор отправителя. Выглядит как текст поля, а не как кнопка: в mail.ru
+   «От кого» — такая же строка со стрелкой, а не элемент управления */
+.fromButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.fromText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .fromButton:hover {
+    color: var(--mt-color-text-primary);
+  }
+}
+
+.fromButton :global(svg) {
+  flex: none;
+  display: block;
+}
+
+/* Предупреждение об ограничениях чужого сервера — до отправки, не после */
+.fromNotice {
+  padding: 4px 16px 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
 .fieldLinks {
   display: flex;
   gap: 12px;

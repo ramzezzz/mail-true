@@ -20,7 +20,12 @@
  */
 
 import type { AccountsApi } from '../api/accountsApi';
-import type { AccountsOverview, LinkedAccount, UnreadReport } from '../api/accountsTypes';
+import type {
+  AccountsOverview,
+  ExternalAccountSummary,
+  LinkedAccount,
+  UnreadReport,
+} from '../api/accountsTypes';
 import { ApiError } from '../api/http';
 import { folders } from './mockApi';
 import { mockAccount } from './mockData';
@@ -40,6 +45,48 @@ const LINKED_UNREAD: Record<string, number> = {
 let current = mockAccount.email;
 let nextId = 1;
 const linked: LinkedAccount[] = [];
+
+/**
+ * Подключённые чужие ящики.
+ *
+ * Двух мало не бывает: один работающий и один со сломанным подключением.
+ * Без второго нельзя увидеть то, ради чего строка состояния и заводилась —
+ * причину отказа в меню ящика, а не молчание.
+ */
+const external: ExternalAccountSummary[] = [
+  {
+    id: 1,
+    address: 'staraya.pochta@yandex.ru',
+    label: 'Старая почта',
+    mode: 'collector',
+    enabled: true,
+    smtp: { host: 'smtp.yandex.ru', port: 465, secure: true, user: 'staraya.pochta@yandex.ru' },
+    state: {
+      lastRunAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+      lastOkAt: new Date(Date.now() - 6 * 60_000).toISOString(),
+      status: 'ok',
+      error: null,
+      lastCopied: 3,
+      totalCopied: 148,
+    },
+  },
+  {
+    id: 2,
+    address: 'rabota@example.com',
+    label: null,
+    mode: 'collector',
+    enabled: true,
+    smtp: null,
+    state: {
+      lastRunAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+      lastOkAt: null,
+      status: 'error',
+      error: 'Неверное имя пользователя или пароль',
+      lastCopied: 0,
+      totalCopied: 0,
+    },
+  },
+];
 
 const delay = (ms = 200) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -63,7 +110,7 @@ export const mockAccountsApi: AccountsApi = {
     return {
       current,
       linked: linked.map((a) => ({ ...a })),
-      external: [],
+      external: external.map((a) => ({ ...a, state: { ...a.state } })),
       secrets: { available: true, reason: null },
       collector: { scheduler: true, masterConfigured: true },
     };
@@ -130,5 +177,27 @@ export const mockAccountsApi: AccountsApi = {
       })),
     ];
     return { total: accounts.reduce((sum, a) => sum + a.unread, 0), accounts };
+  },
+
+  async sendAsExternal(id, request) {
+    await delay(500);
+    const account = external.find((a) => a.id === id);
+    if (!account) {
+      throw new ApiError(
+        404,
+        `/api/accounts/external/${String(id)}/send`,
+        'Подключение не найдено',
+        'NOT_FOUND',
+      );
+    }
+    if (request.to.length === 0) {
+      throw new ApiError(
+        400,
+        `/api/accounts/external/${String(id)}/send`,
+        'Не указан ни один получатель',
+        'BAD_REQUEST',
+      );
+    }
+    return { ok: true, from: account.address };
   },
 };

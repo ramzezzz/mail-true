@@ -17,6 +17,7 @@ import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js'
 import { listFolders } from '../imap/service.js';
 import { setSessionCookie } from '../routes/auth.js';
 import { detectMailSettings, type LocalMailSettings } from './autodetect.js';
+import { decodeLabel } from './collectorRoutes.js';
 import { composeExternalRaw, externalRecipients } from './compose.js';
 import { isUndefinedTable, isUniqueViolation } from './db.js';
 import { listExternalFolders, listExternalMessages, sendAsExternal } from './direct.js';
@@ -136,7 +137,14 @@ export async function accountsUserRoutes(
     return guard(async () => ({
       current: session.email,
       linked: await db.listLinked(session.email),
-      external: await db.listExternal(session.email),
+      // Метка чистится от служебной приписки: подключения, заведённые
+      // из раздела «Почта с других ящиков», держат в ней свои признаки
+      // (см. accounts/collectorRoutes.ts). Показывать человеку «mt:leave»
+      // вместо названия ящика нельзя — это наша внутренняя запись.
+      external: (await db.listExternal(session.email)).map((account) => ({
+        ...account,
+        label: decodeLabel(account.label).label,
+      })),
       secrets: { available: service.secretsAvailable, reason: service.secretsReason },
       collector: {
         scheduler: service.config.COLLECTOR_SCHEDULER && service.config.masterConfigured,

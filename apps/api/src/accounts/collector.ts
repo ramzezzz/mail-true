@@ -47,7 +47,47 @@ export interface CollectOptions {
   stateSpec: string | null;
   /** Сколько писем переносить между записями курсора. */
   batchSize: number;
+  /**
+   * Предел на весь сбор, мс. Ноль или отсутствие — без предела
+   * (так собирают вручную из мастера, где человек ждёт и видит ход).
+   */
+  timeoutMs?: number;
   logger: Logger;
+}
+
+/** Сбор не уложился в отведённое время. */
+export class CollectTimeoutError extends Error {
+  constructor(ms: number) {
+    super(
+      `Чужой сервер не ответил за ${String(Math.round(ms / 1000))} с — сбор прерван. ` +
+        'Проверьте адрес сервера, порт и доступность ящика.',
+    );
+    this.name = 'CollectTimeoutError';
+  }
+}
+
+/**
+ * Ограничивает работу по времени.
+ *
+ * Нужен именно здесь, а не в вызывающем коде: IMAP-клиент может принять
+ * соединение и замолчать на команде, и тогда обещание не разрешится
+ * никогда. Сама работа при этом продолжает висеть в фоне — оборвать её
+ * снаружи нечем, но состояние подключения мы записать обязаны.
+ */
+async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+  if (ms <= 0) return work;
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new CollectTimeoutError(ms)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export interface CollectResult {
@@ -147,12 +187,16 @@ export function buildFolderOverrides(
  */
 export async function collectOnce(options: CollectOptions): Promise<CollectResult> {
   const started = Date.now();
-  const { account, password, dest, stateSpec, batchSize, logger } = options;
+  const { account, password, dest, stateSpec, batchSize, timeoutMs = 0, logger } = options;
   const source = sourceEndpoint(account, password);
+  // Остаток времени. Ноль означает «без предела», поэтому исчерпанный
+  // остаток отдаём как 1 мс, а не как 0: иначе предел бы просто исчезал.
+  const deadline = () =>
+    timeoutMs <= 0 ? 0 : Math.max(1, timeoutMs - (Date.now() - started));
 
   let state: StateStore | null = null;
   try {
-    const sourcePaths = await listSourceFolders(source);
+    const sourcePaths = await withTimeout(listSourceFolders(source), deadline());
     const { overrides, exclude } = buildFolderOverrides(
       sourcePaths,
       account.targetFolder,
@@ -164,14 +208,17 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
       await state.init();
     }
 
-    const report = await migrateMailbox({
-      source,
-      dest,
-      mapping: { overrides, exclude },
-      batchSize,
-      logger,
-      ...(state ? { state } : {}),
-    });
+    const report = await withTimeout(
+      migrateMailbox({
+        source,
+        dest,
+        mapping: { overrides, exclude },
+        batchSize,
+        logger,
+        ...(state ? { state } : {}),
+      }),
+      deadline(),
+    );
 
     return {
       status: report.status === 'ok' ? 'ok' : report.status === 'partial' ? 'partial' : 'error',

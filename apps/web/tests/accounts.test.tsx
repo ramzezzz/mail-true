@@ -42,12 +42,18 @@ import { MemoryRouter } from 'react-router-dom';
 import type { Account, Folder } from '@mail-true/shared';
 import { accountsApi, api, settingsApi } from '../src/api';
 import { httpAccountsApi } from '../src/api/accountsApi';
-import type { AccountsOverview, UnreadReport } from '../src/api/accountsTypes';
+import type {
+  AccountsOverview,
+  ExternalAccountSummary,
+  UnreadReport,
+} from '../src/api/accountsTypes';
+import { useSenders, type SenderOption } from '../src/api/accountsQueries';
 import { ApiError, setUnauthorizedHandler } from '../src/api/http';
 import type { GeneralSettings } from '../src/api/settingsTypes';
 import { MailNotifications } from '../src/app/MailNotifications';
 import { SessionProvider } from '../src/app/session';
-import { AccountMenu, badgeText } from '../src/layout/AccountMenu';
+import { AccountMenu, badgeText, externalHint } from '../src/layout/AccountMenu';
+import { senderLabel } from '../src/compose/ComposeWindow';
 import { linkErrorText } from '../src/lib/errorText';
 import { mockAccountsApi, resetMockAccounts } from '../src/mocks/mockAccounts';
 
@@ -676,5 +682,170 @@ describe('меню ящика на узком экране', () => {
     // На сенсорном экране :hover не наступает, и спрятанная кнопка была бы
     // недоступна навсегда
     expect(css).toMatch(/@media\s*\(hover:\s*none\)\s*\{[^}]*\.unlink\s*\{[^}]*opacity:\s*1/);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Подключённые чужие ящики                                             */
+/* ------------------------------------------------------------------ */
+
+/** Подключение чужого ящика в том виде, в каком его отдаёт GET /api/accounts. */
+function externalAccount(patch: Partial<ExternalAccountSummary> = {}): ExternalAccountSummary {
+  return {
+    id: 7,
+    address: 'staraya@yandex.ru',
+    label: 'Старая почта',
+    mode: 'collector',
+    enabled: true,
+    smtp: { host: 'smtp.yandex.ru', port: 465, secure: true, user: 'staraya@yandex.ru' },
+    state: {
+      lastRunAt: '2026-08-06T16:11:32.242Z',
+      lastOkAt: '2026-08-06T16:11:32.416Z',
+      status: 'ok',
+      error: null,
+      lastCopied: 1,
+      totalCopied: 1,
+    },
+    ...patch,
+  };
+}
+
+describe('чужие ящики в меню', () => {
+  it('подключение видно в меню отдельной группой', async () => {
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue({
+      ...overview,
+      external: [externalAccount()],
+    });
+    render(<AccountMenu />);
+    await openMenu();
+    await waitFor(() => text().includes('staraya@yandex.ru'), 'чужой ящик в меню');
+    expect(text()).toContain('Почта с других ящиков');
+  });
+
+  it('сломанное подключение показывает причину, а не молчит', async () => {
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue({
+      ...overview,
+      external: [
+        externalAccount({
+          state: {
+            lastRunAt: '2026-08-06T16:11:32.242Z',
+            lastOkAt: null,
+            status: 'error',
+            error: 'Неверное имя пользователя или пароль',
+            lastCopied: 0,
+            totalCopied: 0,
+          },
+        }),
+      ],
+    });
+    render(<AccountMenu />);
+    await openMenu();
+    await waitFor(() => text().includes('staraya@yandex.ru'), 'чужой ящик в меню');
+    // Причина отказа — на виду: молчаливое подключение хуже сломанного
+    expect(text()).toContain('Неверное имя пользователя или пароль');
+    expect(host.querySelector('[title="Неверное имя пользователя или пароль"]')).not.toBeNull();
+  });
+
+  it('переключиться на чужой ящик нельзя: он не притворяется своим', async () => {
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue({
+      ...overview,
+      external: [externalAccount()],
+    });
+    const switchAccount = vi.spyOn(accountsApi, 'switchAccount');
+    render(<AccountMenu />);
+    await openMenu();
+    await waitFor(() => text().includes('staraya@yandex.ru'), 'чужой ящик в меню');
+    await act(async () => {
+      buttonWith('staraya@yandex.ru').click();
+    });
+    expect(switchAccount).not.toHaveBeenCalled();
+  });
+
+  it('состояния сбора описаны словами, а не кодами', () => {
+    expect(externalHint(externalAccount()).text).toBe('письма приходят сюда');
+    expect(externalHint(externalAccount({ enabled: false })).text).toBe('сбор выключен');
+    const failed = externalHint(
+      externalAccount({
+        state: {
+          lastRunAt: null,
+          lastOkAt: null,
+          status: 'error',
+          error: 'Сервер не отвечает',
+          lastCopied: 0,
+          totalCopied: 0,
+        },
+      }),
+    );
+    expect(failed).toEqual({ text: 'Сервер не отвечает', failed: true });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Выбор отправителя                                                    */
+/* ------------------------------------------------------------------ */
+
+describe('адреса, с которых можно отправить письмо', () => {
+  /** Хук вне компонента не работает — берём его через крошечный зонд. */
+  function probeSenders(data: AccountsOverview): Promise<SenderOption[]> {
+    let seen: SenderOption[] = [];
+    function Probe() {
+      seen = useSenders();
+      return null;
+    }
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue(data);
+    render(<Probe />);
+    return waitFor(() => seen.length > 0, 'список отправителей').then(() => seen);
+  }
+
+  it('свой ящик есть всегда и стоит первым', async () => {
+    const senders = await probeSenders({ ...overview, external: [] });
+    expect(senders).toEqual([{ address: 'demo@mail.local', label: null, externalId: null }]);
+  });
+
+  it('чужой адрес с настроенным SMTP предлагается на выбор', async () => {
+    const senders = await probeSenders({ ...overview, external: [externalAccount()] });
+    expect(senders.map((s) => s.address)).toEqual(['demo@mail.local', 'staraya@yandex.ru']);
+    expect(senders[1]?.externalId).toBe(7);
+  });
+
+  it('без чужого SMTP отправлять не с чего — адрес в список не попадает', async () => {
+    const senders = await probeSenders({
+      ...overview,
+      external: [externalAccount({ smtp: null })],
+    });
+    expect(senders.map((s) => s.address)).toEqual(['demo@mail.local']);
+  });
+
+  it('выключенное подключение отправителем не предлагается', async () => {
+    const senders = await probeSenders({
+      ...overview,
+      external: [externalAccount({ enabled: false })],
+    });
+    expect(senders.map((s) => s.address)).toEqual(['demo@mail.local']);
+  });
+
+  it('письмо от чужого адреса уходит на его собственный маршрут', async () => {
+    const calls = stubFetch({ ok: true, from: 'staraya@yandex.ru' });
+    await httpAccountsApi.sendAsExternal(7, {
+      to: [{ name: null, address: 'kto@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'тема',
+      bodyHtml: '<p>текст</p>',
+      attachmentIds: [],
+    });
+    expect(calls[0]?.url).toBe('/api/accounts/external/7/send');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]?.init?.body)).subject).toBe('тема');
+  });
+
+  it('подпись отправителя: своё имя у своего ящика, метка у чужого', () => {
+    expect(senderLabel({ address: 'demo@mail.local', label: null, externalId: null }, 'Демо')).toBe(
+      'Демо <demo@mail.local>',
+    );
+    expect(
+      senderLabel({ address: 'staraya@yandex.ru', label: 'Старая почта', externalId: 7 }, 'Демо'),
+    ).toBe('Старая почта <staraya@yandex.ru>');
+    expect(senderLabel({ address: 'x@y.z', label: null, externalId: 7 }, 'Демо')).toBe('x@y.z');
   });
 });

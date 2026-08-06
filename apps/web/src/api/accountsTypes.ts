@@ -28,11 +28,26 @@ export interface LinkedAccount {
 }
 
 /**
+ * Состояние сборщика по одному подключению.
+ * `status: 'error'` вместе с `error` — то, что интерфейс обязан показать
+ * вместо вечного «идёт синхронизация».
+ */
+export interface ExternalAccountState {
+  lastRunAt: string | null;
+  lastOkAt: string | null;
+  status: 'never' | 'running' | 'ok' | 'partial' | 'error';
+  error: string | null;
+  lastCopied: number;
+  totalCopied: number;
+}
+
+/**
  * Чужой ящик, подключённый сборщиком или напрямую.
  *
- * Меню ящика показывает только адрес и режим, поэтому здесь описано ровно
- * то, на что интерфейс опирается: выдумывать остальные поля значило бы
- * обещать типами то, чего мы не проверяли.
+ * Описано то, на что опирается интерфейс: адрес и режим для списка,
+ * состояние — для строки «когда забирали и что пошло не так», наличие
+ * `smtp` — для выбора отправителя в окне письма (без чужого SMTP
+ * отправлять с этого адреса не с чего).
  */
 export interface ExternalAccountSummary {
   id: number;
@@ -40,6 +55,8 @@ export interface ExternalAccountSummary {
   label: string | null;
   mode: 'collector' | 'direct';
   enabled: boolean;
+  state: ExternalAccountState;
+  smtp: { host: string; port: number; secure: boolean; user: string } | null;
 }
 
 /** Ответ GET /api/accounts. */
@@ -81,4 +98,30 @@ export interface LinkedListResponse {
 export interface SwitchResponse {
   ok: boolean;
   email: string;
+}
+
+/**
+ * Тело POST /api/accounts/external/:id/send.
+ *
+ * Уже, чем обычная отправка: у чужого SMTP нет ни нашей очереди
+ * (значит, ни отмены, ни отложенной отправки), ни наших черновиков.
+ * Обещать типами то, чего маршрут не умеет, — худший вид неправды.
+ */
+export interface ExternalSendRequest {
+  to: { name: string | null; address: string }[];
+  cc: { name: string | null; address: string }[];
+  bcc: { name: string | null; address: string }[];
+  subject: string;
+  bodyHtml: string;
+  attachmentIds: string[];
+  fromName?: string | null;
+  inReplyTo?: string;
+  references?: string[];
+}
+
+/** Ответ POST /api/accounts/external/:id/send. */
+export interface ExternalSendResponse {
+  ok: boolean;
+  /** Адрес, с которого письмо ушло. */
+  from: string;
 }

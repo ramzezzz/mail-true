@@ -163,6 +163,15 @@ export interface ComposeDraft {
    * пустой строкой).
    */
   signatureApplied: boolean;
+  /**
+   * С какого адреса отправлять: `null` — свой ящик, число — идентификатор
+   * подключённого чужого ящика (`/api/accounts/external/:id/send`).
+   *
+   * Живёт в черновике, как и всё остальное здесь: свернуть окно и потерять
+   * выбранного отправителя — значит отправить письмо не с того адреса,
+   * причём молча.
+   */
+  fromExternalId: number | null;
 }
 
 export interface ComposeWindowState {
@@ -206,6 +215,9 @@ export function emptyDraft(init: ComposeInit): ComposeDraft {
     bodyInitialized: continuing,
     signatureId: null,
     signatureApplied: continuing,
+    // Новое письмо всегда начинается со своего ящика: чужой адрес
+    // выбирают осознанно, а не получают по умолчанию.
+    fromExternalId: null,
   };
 }
 

@@ -222,6 +222,18 @@ export class AccountsService {
   /**
    * Выполняет сбор с одного подключения и записывает состояние.
    * Возвращает null, если сбор этого подключения уже идёт.
+   *
+   * Ни один путь отсюда не имеет права уйти, не записав итог: пометка
+   * 'running' ставится ДО работы, а снимается только {@link AccountsDb.markCollectorDone}.
+   * Раньше подготовка параметров (расшифровка пароля, проверка служебного
+   * доступа) выполнялась ВНУТРИ вызова `collectOnce(...)`, но за пределами
+   * его перехвата ошибок, и любой сбой там уводил исключение наружу мимо
+   * `markCollectorDone`. Подключение навсегда застревало в состоянии
+   * «идёт сбор»: `listDueCollectors` такие записи не выбирает, а
+   * `resetRunning` работает только при старте сервера. В интерфейсе это
+   * выглядело как вечное «Идёт первая синхронизация…» — молчание вместо
+   * причины. Наблюдалось на живом стенде: подключение с паролем,
+   * зашифрованным другим EXTERNAL_ACCOUNTS_KEY, висело так часами.
    */
   async collect(
     ownerEmail: string,
@@ -230,28 +242,42 @@ export class AccountsService {
     ownerPassword?: string,
   ): Promise<CollectResult | null> {
     const db = this.requireDb();
-    const started = await db.markCollectorStart(account.id);
+    const started = await db.markCollectorStart(account.id, this.#config.COLLECTOR_STALE_MINUTES);
     if (!started) return null;
 
-    const result = await collectOnce({
-      account,
-      password: this.requireSecretBox().decrypt(passwordEnc),
-      dest: this.destEndpoint(ownerEmail, ownerPassword),
-      stateSpec: this.stateSpec,
-      batchSize: this.#config.COLLECTOR_BATCH_SIZE,
-      logger: this.#logger,
-    }).catch((err: unknown): CollectResult => {
-      return {
-        status: 'error',
-        copied: 0,
-        skipped: 0,
-        failed: 0,
-        durationMs: 0,
-        error: err instanceof Error ? err.message : String(err),
-        report: null,
-      };
+    const startedAt = Date.now();
+    const failure = (err: unknown): CollectResult => ({
+      status: 'error',
+      copied: 0,
+      skipped: 0,
+      failed: 0,
+      durationMs: Date.now() - startedAt,
+      error: err instanceof Error ? err.message : String(err),
+      report: null,
     });
 
+    let result: CollectResult;
+    try {
+      // Подготовка параметров тоже может отказать (чужой ключ шифрования,
+      // не настроен служебный доступ) — и это ровно тот отказ, который
+      // обязан доехать до пользователя строкой, а не потеряться.
+      const password = this.requireSecretBox().decrypt(passwordEnc);
+      const dest = this.destEndpoint(ownerEmail, ownerPassword);
+      result = await collectOnce({
+        account,
+        password,
+        dest,
+        stateSpec: this.stateSpec,
+        batchSize: this.#config.COLLECTOR_BATCH_SIZE,
+        timeoutMs: this.#config.COLLECTOR_TIMEOUT_MS,
+        logger: this.#logger,
+      });
+    } catch (err) {
+      result = failure(err);
+    }
+
+    // Запись итога — тоже под защитой: если база отвалилась именно сейчас,
+    // подключение останется 'running' до перезапуска, и об этом надо знать.
     await db.markCollectorDone(account.id, {
       status: result.status,
       copied: result.copied,
@@ -259,6 +285,11 @@ export class AccountsService {
       failed: result.failed,
       durationMs: result.durationMs,
       error: result.error,
+    }).catch((err: unknown) => {
+      this.#logger.error(
+        errorInfo(err, { account: account.address }),
+        'Не удалось записать итог сбора почты: подключение останется в состоянии «идёт сбор»',
+      );
     });
     return result;
   }
@@ -305,26 +336,44 @@ export class AccountsService {
     this.#timer = null;
   }
 
-  /** Один проход планировщика: собрать с тех, кому пора. */
+  /**
+   * Один проход планировщика: собрать с тех, кому пора.
+   *
+   * Каждое подключение обрабатывается отдельно от соседей. Раньше весь
+   * проход был под одним `try`, и первое же неисправное подключение
+   * обрывало цикл: остальные ящики в этот проход не собирались, а в
+   * следующий проход история повторялась. Одна чужая опечатка в настройках
+   * останавливала сбор у всех.
+   */
   async tick(): Promise<number> {
     if (this.#ticking || !this.#db) return 0;
     this.#ticking = true;
     try {
-      const due = await this.#db.listDueCollectors(this.#config.COLLECTOR_CONCURRENCY);
+      const due = await this.#db.listDueCollectors(
+        this.#config.COLLECTOR_CONCURRENCY,
+        this.#config.COLLECTOR_STALE_MINUTES,
+      );
       let done = 0;
       for (const item of due) {
-        const result = await this.collect(item.ownerEmail, item.account, item.passwordEnc);
-        if (result) {
-          done += 1;
-          this.#logger.info(
-            {
-              account: item.account.address,
-              owner: item.ownerEmail,
-              copied: result.copied,
-              skipped: result.skipped,
-              status: result.status,
-            },
-            'Сбор почты с внешнего ящика завершён',
+        try {
+          const result = await this.collect(item.ownerEmail, item.account, item.passwordEnc);
+          if (result) {
+            done += 1;
+            this.#logger.info(
+              {
+                account: item.account.address,
+                owner: item.ownerEmail,
+                copied: result.copied,
+                skipped: result.skipped,
+                status: result.status,
+              },
+              'Сбор почты с внешнего ящика завершён',
+            );
+          }
+        } catch (err) {
+          this.#logger.warn(
+            errorInfo(err, { account: item.account.address, owner: item.ownerEmail }),
+            'Сбор почты с внешнего ящика не удался, остальные подключения продолжаем',
           );
         }
       }

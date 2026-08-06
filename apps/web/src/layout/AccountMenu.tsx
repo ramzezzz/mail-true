@@ -15,17 +15,21 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAccounts, useUnlinkAccount, useUnreadTotal } from '../api/accountsQueries';
-import type { LinkedAccount, UnreadEntry } from '../api/accountsTypes';
+import type { ExternalAccountSummary, LinkedAccount, UnreadEntry } from '../api/accountsTypes';
 import { useAiState } from '../api/aiQueries';
 import { useAccount } from '../api/queries';
 import { AI_SETTINGS_PATH, aiNeedsConsent, aiVisible } from '../ai/aiVisibility';
 import { useSession } from '../app/session';
 import { useUiStore } from '../app/store';
 import { Dropdown, MenuItem, MenuSeparator, Spinner, useDropdownClose } from '../components';
+import { cx } from '../lib/cx';
 import { actionErrorText } from '../lib/errorText';
 import { IconExit, IconPlus, IconSparkles, IconTrash } from '../mail/icons';
 import { AddMailboxDialog } from './AddMailboxDialog';
 import styles from './AccountMenu.module.css';
+
+/** Раздел настроек, где чужим ящиком можно управлять. */
+const COLLECTOR_SETTINGS_PATH = '/settings/collector';
 
 /** Буквы на аватаре: первые буквы первых двух слов имени. */
 export function initials(name: string): string {
@@ -108,6 +112,65 @@ function MailboxRow({ item, entry, busy, onSwitch, onAskUnlink }: MailboxRowProp
   );
 }
 
+/**
+ * Что показать в строке подключённого чужого ящика.
+ *
+ * Отказ сборщика обязан быть виден здесь, а не только в настройках:
+ * подключение, которое молча перестало забирать почту, — худший исход
+ * из возможных. Человек видит «!» и причину, а не пустую строку.
+ */
+export function externalHint(item: ExternalAccountSummary): { text: string; failed: boolean } {
+  if (!item.enabled) return { text: 'сбор выключен', failed: false };
+  if (item.state.status === 'error') {
+    return { text: item.state.error ?? 'сбор не удался', failed: true };
+  }
+  if (item.state.status === 'running') return { text: 'забираем письма…', failed: false };
+  if (item.state.status === 'never') return { text: 'ещё не забирали', failed: false };
+  if (item.state.status === 'partial') {
+    return { text: item.state.error ?? 'забрали не всё', failed: true };
+  }
+  return { text: 'письма приходят сюда', failed: false };
+}
+
+/**
+ * Строка подключённого чужого ящика.
+ *
+ * Переключиться на него нельзя, и кнопкой она намеренно не притворяется:
+ * письма сборщика лежат в ЭТОМ же ящике, отдельной сессии у чужого адреса
+ * нет. Нажатие ведёт в настройки подключения — единственное место, где с
+ * ним можно что-то сделать.
+ */
+function ExternalRow({ item, onOpen }: { item: ExternalAccountSummary; onOpen(): void }) {
+  const close = useDropdownClose();
+  const hint = externalHint(item);
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      className={cx(styles.mailbox, styles.externalRow)}
+      onClick={() => {
+        onOpen();
+        close();
+      }}
+    >
+      <span className={styles.mailboxAvatar} aria-hidden="true">
+        {initials(item.label ?? item.address)}
+      </span>
+      <span className={styles.mailboxText}>
+        <span className={styles.mailboxEmail}>{item.address}</span>
+        <span className={cx(styles.mailboxHint, hint.failed && styles.mailboxHintError)}>
+          {hint.text}
+        </span>
+      </span>
+      {hint.failed && (
+        <span className={styles.mailboxWarn} title={hint.text}>
+          !
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function AccountMenu() {
   const { data: account } = useAccount();
   const { data: accounts } = useAccounts();
@@ -127,6 +190,7 @@ export function AccountMenu() {
 
   const currentEmail = accounts?.current ?? account?.email ?? session?.email ?? '…';
   const linked = accounts?.linked ?? [];
+  const external = accounts?.external ?? [];
 
   /** Непрочитанные конкретного ящика из общего ответа сервера. */
   const unreadOf = (email: string) =>
@@ -235,6 +299,22 @@ export function AccountMenu() {
               onAskUnlink={setConfirmUnlink}
             />
           ),
+        )}
+
+        {/* Чужие ящики — отдельной группой: переключаться на них нельзя,
+            их почта приходит сюда, и путать их со своими не надо */}
+        {external.length > 0 && (
+          <>
+            <MenuSeparator />
+            <div className={styles.groupTitle}>Почта с других ящиков</div>
+            {external.map((item) => (
+              <ExternalRow
+                key={item.id}
+                item={item}
+                onOpen={() => void navigate(COLLECTOR_SETTINGS_PATH)}
+              />
+            ))}
+          </>
         )}
 
         <MenuSeparator />

@@ -173,6 +173,62 @@
   white-space: nowrap;
 }
 
+/* Заголовок группы «Почта с других ящиков» — как разделы меню mail.ru:
+   мелкий, приглушённый, не кликается */
+.groupTitle {
+  padding: 6px 16px 2px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}
+
+/* Строка чужого ящика выше своей: под адресом идёт состояние сбора.
+   Высота задана снизу, а не жёстко: длинная причина отказа переносится
+   многоточием, но короткая не должна оставлять пустоту */
+.externalRow {
+  /* Строка — прямой ребёнок меню, а не гибкой строки со значком отвязки,
+     поэтому ширину задаём явно: иначе кнопка растянулась бы по длине
+     причины отказа и вылезла за края меню */
+  width: 100%;
+  height: auto;
+  min-height: 48px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+/* `width: 0` вместе с `flex: 1 1 auto` — единственный способ заставить
+   гибкий элемент сжиматься до многоточия: `min-width: 0` в колонке
+   не мешает содержимому раздвинуть саму колонку */
+.mailboxText {
+  flex: 1 1 auto;
+  width: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+}
+
+.mailboxText .mailboxEmail {
+  flex: none;
+  max-width: 100%;
+}
+
+.mailboxHint {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 14px;
+}
+
+.mailboxHintError {
+  color: var(--mt-color-text-negative, #ed330a);
+}
+
 .mailboxUnread {
   flex: none;
   min-width: 20px;

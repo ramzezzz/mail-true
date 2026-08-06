@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
 import { useAccount, useSaveDraft, useSendMessage, useUndoSend } from '../api/queries';
+import { useSendAsExternal, useSenders, type SenderOption } from '../api/accountsQueries';
 import { useUiStore, type ComposeDraft, type ComposeWindowState } from '../app/store';
 import { Button, Dropdown, IconButton, MenuItem, Tooltip, useDropdownClose } from '../components';
 import { RecipientField } from '../contacts/RecipientField';
@@ -21,6 +22,7 @@ import {
   IconAlignLeft,
   IconAlignRight,
   IconAttach,
+  IconChevronDown,
   IconClearFormat,
   IconClose,
   IconEmoji,
@@ -210,6 +212,14 @@ function EmojiGrid({ onPick }: { onPick: (symbol: string) => void }) {
   );
 }
 
+/** Как назвать отправителя в списке и в поле «От кого». */
+export function senderLabel(sender: SenderOption, displayName: string | null): string {
+  if (sender.externalId === null) {
+    return displayName ? `${displayName} <${sender.address}>` : sender.address;
+  }
+  return sender.label ? `${sender.label} <${sender.address}>` : sender.address;
+}
+
 export function ComposeWindow({
   win,
   offset,
@@ -217,6 +227,8 @@ export function ComposeWindow({
   undoIndex = 0,
 }: ComposeWindowProps) {
   const { data: account } = useAccount();
+  const senders = useSenders();
+  const sendAsExternal = useSendAsExternal();
   // Подписи живут в общих настройках ящика. Раньше сюда подставлялось
   // `account.signature`, а его /api/account отдаёт пустой строкой — в письмо
   // уезжал пустой блок, и выбрать одну из заведённых подписей было негде.
@@ -243,6 +255,18 @@ export function ComposeWindow({
   );
 
   const { to, cc, bcc, subject, showCc, showBcc, attachments, attachedMessages, savedAt } = draft;
+
+  /**
+   * Выбранный отправитель. Подключение могли удалить, пока окно висело
+   * свёрнутым, — тогда молча возвращаемся к своему ящику: отправить
+   * с несуществующего адреса всё равно нечем.
+   */
+  const currentSender =
+    senders.find((s) => s.externalId === draft.fromExternalId) ?? senders[0] ?? null;
+  const externalSender = currentSender?.externalId === null ? null : currentSender;
+  const fromLabel = currentSender
+    ? senderLabel(currentSender, account?.displayName ?? null)
+    : (account?.email ?? '…');
 
   const [maximized, setMaximized] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -403,10 +427,54 @@ export function ComposeWindow({
     return payload;
   };
 
+  /**
+   * Отправка с подключённого чужого адреса — через его собственный SMTP.
+   *
+   * Отдельная ветка, а не флаг в общем запросе: у чужого сервера нет ни
+   * нашей очереди (отмена, отложенная отправка), ни наших «Отправленных»
+   * — копию туда кладёт сам сервер, в чужой ящик. Смешивать эти два пути
+   * значило бы обещать в окне возможности, которых на этом пути нет.
+   */
+  const sendExternal = (externalId: number) => {
+    const payload = buildPayload();
+    setError(null);
+    rememberBody();
+    sendAsExternal.mutate(
+      {
+        id: externalId,
+        request: {
+          to: payload.to,
+          cc: payload.cc,
+          bcc: payload.bcc,
+          subject: payload.subject,
+          bodyHtml: currentBodyHtml(),
+          attachmentIds: payload.attachmentIds,
+          // Имя берём от ПОДКЛЮЧЕНИЯ, а не своё: письмо с чужого адреса,
+          // подписанное именем владельца этого интерфейса, выглядит как
+          // подделка — «Иван Петров <buhgalteria@example.com>».
+          fromName: externalSender?.label ?? null,
+          ...(win.init.inReplyTo ? { inReplyTo: win.init.inReplyTo } : {}),
+          ...(win.init.references ? { references: win.init.references } : {}),
+        },
+      },
+      {
+        onSuccess: (result) => {
+          showNotice(`Письмо отправлено с адреса ${result.from}`);
+          closeCompose(win.id);
+        },
+        onError: (err) => setError(actionErrorText('Не удалось отправить письмо', err)),
+      },
+    );
+  };
+
   const send = () => {
     const payload = buildPayload();
     if (payload.to.length === 0) {
       setError('Укажите хотя бы одного получателя');
+      return;
+    }
+    if (externalSender) {
+      sendExternal(externalSender.externalId as number);
       return;
     }
     // Отложенная отправка уходит тем же запросом: сервер сам решает,
@@ -720,13 +788,50 @@ export function ComposeWindow({
           </div>
         )}
 
-        {/* От кого */}
+        {/* От кого. Список появляется, только когда есть из чего выбирать:
+            один адрес в выпадающем списке — лишний повод для нажатия */}
         <div className={styles.fieldRow}>
           <span className={styles.fieldLabel}>От кого</span>
-          <span className={styles.fieldStatic}>
-            {account ? `${account.displayName} <${account.email}>` : '…'}
-          </span>
+          {senders.length > 1 ? (
+            <Dropdown
+              align="left"
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  className={styles.fromButton}
+                  onClick={toggle}
+                  aria-label={`Отправить с адреса ${fromLabel}`}
+                >
+                  <span className={styles.fromText}>{fromLabel}</span>
+                  <IconChevronDown size={16} />
+                </button>
+              )}
+            >
+              {senders.map((sender) => (
+                <MenuItem
+                  key={sender.externalId ?? 'own'}
+                  onClick={() => patch({ fromExternalId: sender.externalId })}
+                >
+                  {senderLabel(sender, account?.displayName ?? null)}
+                </MenuItem>
+              ))}
+            </Dropdown>
+          ) : (
+            <span className={styles.fieldStatic}>
+              {account ? `${account.displayName} <${account.email}>` : '…'}
+            </span>
+          )}
         </div>
+
+        {/* Отправка с чужого адреса идёт через ЕГО сервер, и наши
+            «отменить» и «отправить позже» к ней неприменимы. Сказать об
+            этом надо до отправки, а не отказом после */}
+        {externalSender && (
+          <div className={styles.fromNotice}>
+            Письмо уйдёт через сервер {externalSender.address}: отмена отправки и отложенная
+            отправка для него недоступны, черновик тоже не сохраняется.
+          </div>
+        )}
 
         {/* Тема */}
         <div className={styles.fieldRow}>

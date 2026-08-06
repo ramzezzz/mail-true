@@ -9,6 +9,7 @@
  *   DELETE /api/accounts/link/:email   → {linked: […]}
  *   POST   /api/accounts/switch        ← {email} → новая сессия в cookie
  *   GET    /api/accounts/unread        → общий счётчик по всем ящикам
+ *   POST   /api/accounts/external/:id/send ← письмо от имени чужого адреса
  *
  * Отдельный клиент, а не часть `MailApi`: это работа с ящиками целиком,
  * а не с почтой внутри одного ящика.
@@ -17,6 +18,8 @@
 import { apiFetch } from './http';
 import type {
   AccountsOverview,
+  ExternalSendRequest,
+  ExternalSendResponse,
   LinkedListResponse,
   SwitchResponse,
   UnreadReport,
@@ -37,6 +40,16 @@ export interface AccountsApi {
   switchAccount(email: string): Promise<SwitchResponse>;
   /** Непрочитанные по всем ящикам разом. */
   getUnread(): Promise<UnreadReport>;
+  /**
+   * Отправить письмо от имени подключённого чужого адреса.
+   *
+   * Уходит через ЧУЖОЙ SMTP, а не наш: письмо с обратным адресом чужого
+   * домена, отправленное нашим сервером, у получателя почти наверняка
+   * попадёт в спам (SPF/DKIM подписаны не нами). Поэтому и путь другой,
+   * и возможностей меньше: ни отмены отправки, ни отложенной — они живут
+   * в очереди нашего сервера, а тут письмо уходит сразу.
+   */
+  sendAsExternal(id: number, request: ExternalSendRequest): Promise<ExternalSendResponse>;
 }
 
 export const httpAccountsApi: AccountsApi = {
@@ -57,4 +70,10 @@ export const httpAccountsApi: AccountsApi = {
     apiFetch('/api/accounts/switch', { method: 'POST', body: JSON.stringify({ email }) }),
 
   getUnread: () => apiFetch('/api/accounts/unread'),
+
+  sendAsExternal: (id, request) =>
+    apiFetch(`/api/accounts/external/${String(id)}/send`, {
+      method: 'POST',
+      body: JSON.stringify(request),
+    }),
 };

@@ -313,15 +313,25 @@ export class AccountsDb {
    * Помечает начало сбора. Возвращает false, если сбор уже идёт:
    * два одновременных сбора одного ящика — верный способ получить дубли
    * и заблокировать учётную запись на чужом сервере.
+   *
+   * «Уже идёт» проверяется по времени, а не только по пометке. Пометка
+   * могла остаться от процесса, которого больше нет (убит на середине
+   * сбора, либо это вообще другой экземпляр сервера) — и тогда без срока
+   * давности подключение не собиралось бы уже никогда: `resetRunning`
+   * приводит записи в порядок только при старте, а `listDueCollectors`
+   * записи с пометкой не выбирает вовсе.
    */
-  async markCollectorStart(id: number): Promise<boolean> {
+  async markCollectorStart(id: number, staleMinutes = 30): Promise<boolean> {
     const rows = await this.query<{ id: string }>(
       `UPDATE external_accounts
           SET last_status = 'running', last_run_at = now(), last_error = NULL,
               runs = runs + 1, updated_at = now()
-        WHERE id = $1 AND last_status <> 'running'
+        WHERE id = $1
+          AND (last_status <> 'running'
+               OR last_run_at IS NULL
+               OR last_run_at < now() - make_interval(mins => $2::int))
        RETURNING id`,
-      [id],
+      [id, staleMinutes],
     );
     return rows.length > 0;
   }
@@ -374,17 +384,25 @@ export class AccountsDb {
     return rows.length;
   }
 
-  /** Подключения, которым пора забирать почту. */
-  async listDueCollectors(limit: number): Promise<ExternalAccountSecret[]> {
+  /**
+   * Подключения, которым пора забирать почту.
+   *
+   * Брошенная пометка «идёт сбор» (старше `staleMinutes`) не должна
+   * исключать подключение навсегда — иначе один убитый на середине сбора
+   * процесс останавливает сбор с этого ящика до перезапуска сервера.
+   */
+  async listDueCollectors(limit: number, staleMinutes = 30): Promise<ExternalAccountSecret[]> {
     const rows = await this.query<ExternalRow>(
       `SELECT ${EXTERNAL_COLUMNS} FROM external_accounts
         WHERE enabled AND mode = 'collector' AND interval_minutes > 0
-          AND last_status <> 'running'
+          AND (last_status <> 'running'
+               OR last_run_at IS NULL
+               OR last_run_at < now() - make_interval(mins => $2::int))
           AND (last_run_at IS NULL
                OR last_run_at < now() - make_interval(mins => interval_minutes))
         ORDER BY last_run_at NULLS FIRST
         LIMIT $1`,
-      [limit],
+      [limit, staleMinutes],
     );
     return rows.map((row) => ({
       account: toExternalAccount(row),
