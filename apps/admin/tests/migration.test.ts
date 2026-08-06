@@ -220,7 +220,7 @@ describe('готовность раздела', () => {
     expect(problems).toHaveLength(3);
     expect(problems.join(' ')).toContain('DOVECOT_MASTER_USER');
     expect(problems.join(' ')).toContain('SESSION_SECRET');
-    expect(problems.join(' ')).toContain('0011_migration_jobs.sql');
+    expect(problems.join(' ')).toContain('0013_migration_jobs.sql');
   });
 
   it('когда всё настроено — препятствий нет', () => {

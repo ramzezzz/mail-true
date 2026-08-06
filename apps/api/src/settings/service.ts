@@ -168,4 +168,4 @@ export const MIGRATION_HINT =
  */
 export const APPEARANCE_MIGRATION_HINT =
   'Оформление не запоминается: в таблице настроек нет колонок theme/wallpaper. ' +
-  'Примените infra/postgres/migrations/0009_appearance.sql к работающей базе.';
+  'Примените infra/postgres/migrations/0010_appearance.sql к работающей базе.';

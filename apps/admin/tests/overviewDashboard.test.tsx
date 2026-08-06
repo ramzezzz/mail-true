@@ -421,13 +421,13 @@ describe('недоступное называется недоступным', (
   it('несделанная миграция даёт объяснение вместо пустого графика', async () => {
     historyBody = {
       available: false,
-      note: 'История показателей недоступна: не применена миграция 0010_metrics.sql.',
+      note: 'История показателей недоступна: не применена миграция 0011_metrics.sql.',
       hours: 24,
       stepSeconds: 60,
       points: [],
     };
     await open();
-    expect(text()).toContain('не применена миграция 0010_metrics.sql');
+    expect(text()).toContain('не применена миграция 0011_metrics.sql');
   });
 
   it('нерабочий сборщик не превращается в нули', async () => {

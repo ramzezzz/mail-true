@@ -188,7 +188,7 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
       );
     }
     if (!(await ctx.db.migrationSchemaReady())) {
-      problems.push('не применена миграция infra/postgres/migrations/0011_migration_jobs.sql');
+      problems.push('не применена миграция infra/postgres/migrations/0013_migration_jobs.sql');
     }
     if (problems.length > 0) {
       throw new AdminUnavailableError(`Перенос почты недоступен: ${problems.join('; ')}.`);

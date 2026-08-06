@@ -294,7 +294,7 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
       return {
         available: false,
         note:
-          'История показателей недоступна: не применена миграция 0010_metrics.sql. ' +
+          'История показателей недоступна: не применена миграция 0011_metrics.sql. ' +
           'Состояние «прямо сейчас» показывается и без неё, графика за прошедшие часы — нет',
         hours,
         stepSeconds: step,

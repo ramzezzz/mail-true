@@ -271,7 +271,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.error(
           'Таблицы снимков показателей нет. Примените ' +
-            'infra/postgres/migrations/0010_metrics.sql — до этого дашборд покажет ' +
+            'infra/postgres/migrations/0011_metrics.sql — до этого дашборд покажет ' +
             'состояние «прямо сейчас», но без графиков за прошедшие часы.',
         );
         // Один проход всё же делаем: он наполняет «прямо сейчас».
@@ -297,7 +297,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.warn(
           'Таблиц переноса почты нет. Примените ' +
-            'infra/postgres/migrations/0011_migration_jobs.sql — до этого раздел ' +
+            'infra/postgres/migrations/0013_migration_jobs.sql — до этого раздел ' +
             '«Перенос почты» будет отвечать 503 с объяснением.',
         );
         return;
