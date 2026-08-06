@@ -395,6 +395,14 @@ for tbl in sender_logo_cache migrate_messages migrate_cursors; do
         bash -c "grep -qi 'CREATE TABLE IF NOT EXISTS $tbl' '$REPO_DIR/infra/postgres/migrations/'*.sql"
 done
 
+# --- Команды package.json должны быть исполнимы ------------------------
+# `npm run lint` стоял в package.json с самого начала, а самого ESLint не
+# было ни в корне, ни в одном пакете: команда падала, её перестали
+# запускать, и разбор кода тихо не делался месяцами. Проверка на бумаге
+# хуже её отсутствия — отсутствие хотя бы заметно.
+t_ok "у команды lint есть и настройка, и сам инструмент"     bash -c "! grep -q '\"lint\"' '$REPO_DIR/package.json' || { test -f '$REPO_DIR/eslint.config.js' && grep -q '\"eslint\"' '$REPO_DIR/package.json'; }"
+t_ok "у команды format есть инструмент"     bash -c "! grep -q '\"format\"' '$REPO_DIR/package.json' || grep -q '\"prettier\"' '$REPO_DIR/package.json'"
+
 # --- Подсеть стека и адреса внутри неё --------------------------------
 # Подсеть меняют, когда 172.28.0.0/16 занята на машине чем-то ещё. Но
 # фиксированных адресов в ней два (свой резольвер и Dovecot, которому Postfix
