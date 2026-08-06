@@ -1,0 +1,184 @@
+/* Настройки → «Шаблоны писем». Отступы и типографика — общие с
+   остальными разделами настроек (settings/ui.module.css). */
+
+.topRow {
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Строка шаблона: стрелки порядка · содержимое · правка и удаление. */
+.item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+}
+
+.order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.name {
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: 500;
+  line-height: 20px;
+}
+
+@media (hover: hover) {
+  .body:hover .name {
+    text-decoration: underline;
+  }
+}
+
+.subject,
+.preview,
+.files {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  /* Одна строка на каждое: список из пятнадцати шаблонов должен
+     прочитываться целиком, а не разворачиваться на два экрана. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.actions {
+  display: flex;
+  gap: 2px;
+}
+
+/* --- Окно правки ------------------------------------------------------ */
+
+.dialog {
+  width: 560px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.editorLabel {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.editorBar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  background: var(--mt-color-background-secondary-alpha);
+}
+
+.editorButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .editorButton:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
+}
+
+.editor {
+  min-height: 140px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 0 0 8px 8px;
+  background: var(--mt-color-background-content, #fff);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  outline: none;
+}
+
+.editor:focus {
+  border-color: var(--mt-color-icon-accent, #0077ff);
+}
+
+.placeholders {
+  margin: 8px 0 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 18px;
+}
+
+.dialogFiles {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.dialogFilesTitle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.dialogFilesList {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 18px;
+}
+
+.deleteNote {
+  margin: 0;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}

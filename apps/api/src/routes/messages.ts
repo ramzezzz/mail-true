@@ -2,20 +2,12 @@
  * Маршруты работы с письмами: список, чтение, части/вложения,
  * массовые флаги, перемещение между папками, откладывание до срока.
  */
-import { lookup } from 'node:dns/promises';
 import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
-import nodemailer from 'nodemailer';
 import { z } from 'zod';
 import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import type { Folder, MessageListPage } from '@mail-true/shared';
-import {
-  ApiError,
-  BadRequestError,
-  NotFoundError,
-  UnauthorizedError,
-  UpstreamUnavailableError,
-} from '../errors.js';
+import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import {
   existingUids,
   groupIdsByFolder,
@@ -36,12 +28,13 @@ import {
 import { SnoozeService } from '../mail/snooze-service.js';
 import { LabelsDb } from '../mail/labels-db.js';
 import { labelRoutes, LABELS_MIGRATION_HINT } from '../mail/labels-routes.js';
+import { SavedSearchesDb } from '../mail/saved-searches-db.js';
 import {
-  isPrivateAddress,
-  isSafeUnsubscribeUrl,
-  parseUnsubscribe,
-  type MailtoUnsubscribe,
-} from '../mail/unsubscribe.js';
+  savedSearchRoutes,
+  SAVED_SEARCHES_MIGRATION_HINT,
+} from '../mail/saved-searches-routes.js';
+import { mailingsRoutes } from '../mail/mailings-routes.js';
+import { performUnsubscribe, type UnsubscribeSmtp } from '../mail/unsubscribe-request.js';
 import type { MailSession } from '../types.js';
 
 /* Наружу — ради проверок: разбор строки запроса здесь уже один раз соврал
@@ -136,86 +129,6 @@ function requireMailSession(session: MailSession | null): MailSession {
   return session;
 }
 
-/** Сколько ждём ответа от адреса отписки. */
-const UNSUBSCRIBE_TIMEOUT_MS = 8000;
-
-/**
- * Шлёт POST по адресу отписки (RFC 8058).
- *
- * Адрес пришёл из письма, то есть от кого угодно, а сервер стоит внутри
- * стека рядом с Dovecot, Postgres и Redis. Поэтому перед запросом адрес
- * проверяется дважды: по виду (только https, без учётных данных и
- * нестандартных портов) и по тому, куда разрешается имя, — во внутреннюю
- * сеть не ходим. Перенаправления не выполняются: они увели бы куда угодно.
- */
-async function requestOneClickUnsubscribe(
-  url: string,
-  log: { warn: (obj: unknown, msg: string) => void }
-): Promise<void> {
-  if (!isSafeUnsubscribeUrl(url)) {
-    throw new BadRequestError('Адрес отписки выглядит небезопасно');
-  }
-  const hostname = new URL(url).hostname;
-  let addresses: Array<{ address: string }> = [];
-  try {
-    addresses = await lookup(hostname, { all: true });
-  } catch {
-    throw new UpstreamUnavailableError('Не удалось найти адрес отписки');
-  }
-  if (addresses.length === 0 || addresses.some((a) => isPrivateAddress(a.address))) {
-    throw new BadRequestError('Адрес отписки ведёт во внутреннюю сеть');
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UNSUBSCRIBE_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: 'List-Unsubscribe=One-Click',
-      redirect: 'manual',
-      signal: controller.signal,
-    });
-    // 3xx тоже считается принятым: многие рассылки отвечают перенаправлением
-    if (response.status >= 400) {
-      log.warn({ status: response.status, url }, 'Адрес отписки ответил ошибкой');
-      throw new UpstreamUnavailableError('Служба отписки ответила ошибкой');
-    }
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    log.warn(errorInfo(err, { url }), 'Не удалось выполнить отписку');
-    throw new UpstreamUnavailableError('Не удалось связаться со службой отписки');
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/** Отправляет письмо отписки на адрес из `mailto:`. */
-async function sendUnsubscribeMail(
-  app: FastifyInstance,
-  session: MailSession,
-  mailto: MailtoUnsubscribe
-): Promise<void> {
-  const { config } = app.deps;
-  const transport = nodemailer.createTransport({
-    host: config.SMTP_HOST,
-    port: config.SMTP_PORT,
-    secure: config.SMTP_SECURE,
-    auth: { user: session.email, pass: session.password },
-    tls: { rejectUnauthorized: config.TLS_REJECT_UNAUTHORIZED },
-  });
-  try {
-    await transport.sendMail({
-      from: session.email,
-      to: mailto.address,
-      subject: mailto.subject ?? 'unsubscribe',
-      text: mailto.body ?? 'unsubscribe',
-    });
-  } finally {
-    transport.close();
-  }
-}
-
 /**
  * Разрешает все папки списка ДО первого изменения.
  * Если хоть одной папки нет — бросает 404, и ящик остаётся нетронутым.
@@ -233,6 +146,23 @@ async function resolveTargets(
 
 export async function messageRoutes(app: FastifyInstance): Promise<void> {
   const { pool, config, logger } = app.deps;
+
+  /*
+   * Настройки исходящей почты для письма отписки. Отписка теперь бывает и
+   * поштучной, и пачкой из разбора рассылок, а способ послать письмо у них
+   * обязан быть один и тот же — отсюда общая сборка.
+   *
+   * Именно функция, а не готовый объект: сборка маршрутов не должна
+   * трогать настройки вовсе. Половина проверок поднимает этот набор
+   * маршрутов с урезанными зависимостями (им нужен только IMAP), и
+   * чтение SMTP на этапе сборки роняло бы их все разом — проверено.
+   */
+  const unsubscribeSmtp = (): UnsubscribeSmtp => ({
+    host: config.SMTP_HOST,
+    port: config.SMTP_PORT,
+    secure: config.SMTP_SECURE,
+    rejectUnauthorized: config.TLS_REJECT_UNAUTHORIZED,
+  });
 
   // Список писем в папке
   app.get('/messages', { preHandler: app.requireSession }, async (request) => {
@@ -409,23 +339,17 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
       }
     });
 
-    const info = parseUnsubscribe(headers);
-    if (!info.url && !info.mailto) {
-      throw new NotFoundError('В письме нет адреса отписки');
-    }
-
-    if (info.oneClick && info.url) {
-      await requestOneClickUnsubscribe(info.url, request.log);
-      return { ok: true, method: 'one-click' as const, url: info.url };
-    }
-
-    if (info.mailto) {
-      await sendUnsubscribeMail(app, session, info.mailto);
-      return { ok: true, method: 'mailto' as const, address: info.mailto.address };
-    }
-
-    // Остаётся только открыть страницу отписки — это делает интерфейс
-    return { ok: false, method: 'link' as const, url: info.url };
+    const outcome = await performUnsubscribe({
+      headers,
+      session,
+      smtp: unsubscribeSmtp(),
+      log: request.log,
+    });
+    // Здесь «отписаться нечем» — это 404: человек нажал на кнопку в
+    // конкретном письме и обязан узнать, что в нём адреса отписки нет.
+    // В разборе рассылок тот же случай означает другое (см. mailings-routes).
+    if (!outcome) throw new NotFoundError('В письме нет адреса отписки');
+    return outcome;
   });
 
   // Массовая простановка/снятие флагов
@@ -625,10 +549,70 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
 
   await labelRoutes(app, labelsDeps);
 
+  /* ------------------------------------------------------------------ */
+  /* Сохранённые поисковые запросы                                       */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Подключаются здесь по той же причине, что метки и отложенные письма:
+   * своих переменных окружения не заводят, база берётся оттуда же, а проба
+   * схемы асинхронная и не задерживает сборку маршрутов. До ответа
+   * возможность выключена, и интерфейс её честно не показывает — ни кнопки
+   * «Сохранить запрос», ни группы в левой колонке.
+   */
+  const savedSearchesDeps: { store: SavedSearchesDb | null; unavailableReason: string } = {
+    store: null,
+    unavailableReason:
+      'Сохранённые запросы недоступны: не настроена база данных (DATABASE_URL). ' +
+      'Поиск при этом работает как обычно.',
+  };
+  let savedSearchesDb: SavedSearchesDb | null = null;
+  if (accountsConfig.databaseUrl) {
+    savedSearchesDb = new SavedSearchesDb({
+      connectionString: accountsConfig.databaseUrl,
+      logger,
+    });
+    const db = savedSearchesDb;
+    db.schemaReady()
+      .then((ready) => {
+        if (!ready) {
+          savedSearchesDeps.unavailableReason = SAVED_SEARCHES_MIGRATION_HINT;
+          app.log.error(SAVED_SEARCHES_MIGRATION_HINT);
+          return;
+        }
+        savedSearchesDeps.store = db;
+      })
+      .catch((err: unknown) => {
+        savedSearchesDeps.unavailableReason = 'Не удалось проверить схему сохранённых запросов';
+        app.log.error(errorInfo(err), 'Не удалось проверить схему сохранённых запросов');
+      });
+  } else {
+    app.log.warn(savedSearchesDeps.unavailableReason);
+  }
+
+  await savedSearchRoutes(app, savedSearchesDeps);
+
+  /* ------------------------------------------------------------------ */
+  /* Разбор рассылок и массовая уборка                                   */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Базы у разбора нет, и это не упущение: он целиком считается по
+   * содержимому ящика, а снимок осмотра живёт в памяти процесса минуты.
+   * Поэтому — в отличие от меток, отложенных писем и сохранённых
+   * запросов — у него нет ни миграции, ни состояния «возможности нет»:
+   * он работает везде, где работает сама почта.
+   *
+   * Настройки исходящей почты нужны ровно для одного — письма отписки на
+   * `mailto:`; те же самые, что у поштучной отписки выше.
+   */
+  await mailingsRoutes(app, { smtp: unsubscribeSmtp });
+
   app.addHook('onClose', async () => {
     snooze.stop();
     if (snoozeDb) await snoozeDb.shutdown().catch(() => undefined);
     if (labelsDb) await labelsDb.shutdown().catch(() => undefined);
+    if (savedSearchesDb) await savedSearchesDb.shutdown().catch(() => undefined);
   });
 
   /**

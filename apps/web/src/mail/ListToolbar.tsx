@@ -1,6 +1,7 @@
 /**
  * Панель над списком писем. Два состояния:
- *   обычное — «Выделить все», «Отметить все прочитанными», справа «Фильтр»;
+ *   обычное — «Выделить все», «Отметить все прочитанными», «Разобрать
+ *     ящик», справа «Фильтр»;
  *   режим выделения — × · счётчик · Выделить все · Удалить · В архив ·
  *   В папку · Отписаться · ⋯ (меню с горячими клавишами).
  */
@@ -73,7 +74,24 @@ export interface ListToolbarProps {
   onDelete(): void;
   onArchive(): void;
   onMoveTo(folderId: string): void;
+  /**
+   * Отписаться от рассылок выделенных писем.
+   *
+   * Ведёт в разбор рассылок, потому что отписка — это действие над
+   * ОТПРАВИТЕЛЕМ, а не над письмами: отписавшись «по выделенным», человек
+   * всё равно остаётся с накопившимися письмами и с теми же рассылками,
+   * которые в выделение не попали. Раньше здесь стояла заглушка,
+   * отправлявшая читать письмо.
+   */
   onUnsubscribe(): void;
+  /**
+   * Разобрать ящик: кто пишет и что занимает место.
+   *
+   * Проп необязательный, и кнопки без него нет вовсе — общее правило
+   * продукта. Разбор работает везде, где работает почта, кроме режима
+   * заглушек: там ящика нет, и осматривать нечего.
+   */
+  onReview?: (() => void) | undefined;
   onMarkUnread(): void;
   onToggleFlag(): void;
   onSpam(): void;
@@ -148,6 +166,16 @@ export function ListToolbar(props: ListToolbarProps) {
         >
           Отметить все прочитанными
         </Button>
+        {/*
+          «Разобрать ящик» стоит здесь, а не в настройках, намеренно:
+          желание разобраться появляется при взгляде на список, а не в
+          параметрах. Так же устроен «Sweep» в Outlook.
+        */}
+        {props.onReview && (
+          <Button mode="tertiary" before={<IconUnsubscribe />} onClick={props.onReview}>
+            Разобрать ящик
+          </Button>
+        )}
 
         <div className={styles.spacer} />
 
@@ -253,7 +281,7 @@ export function ListToolbar(props: ListToolbarProps) {
             folderTitle и забыли — в меню светились INBOX, Sent, Drafts */}
         {props.folders.map((f) => (
           <MenuItem key={f.id} onClick={() => props.onMoveTo(f.id)}>
-            {f.depth > 0 ? `  ${folderTitle(f)}` : folderTitle(f)}
+            {f.depth > 0 ? `\u00A0\u00A0${folderTitle(f)}` : folderTitle(f)}
           </MenuItem>
         ))}
       </Dropdown>

@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { useAiState } from '../../api/aiQueries';
 import { AI_SETTINGS_PATH, aiVisible } from '../../ai/aiVisibility';
 import { IconChevronRight } from '../../mail/icons';
+import { useAccessLog, useExports, useRecovery } from '../../settings/ownerQueries';
 import { SettingsTitle } from '../../settings/ui';
 import styles from './SettingsHomePage.module.css';
 
@@ -49,18 +50,53 @@ const CARDS: Card[] = [
   },
 ];
 
+/**
+ * Карточки трёх разделов владельца ящика.
+ *
+ * Показываются по тому же правилу, что и пункты меню: пока сервер не
+ * сказал `available`, карточки нет. Ведущая в никуда плитка на главной
+ * хуже отсутствующей — на неё нажимают чаще, чем на пункт меню.
+ */
+const RECOVERY_CARD: Card = {
+  to: '/settings/recovery',
+  title: 'Восстановление писем',
+  text: 'Вернуть письма после очистки корзины и решить, сколько их хранить',
+};
+
+const ACCESS_CARD: Card = {
+  to: '/settings/access-log',
+  title: 'Вход и действия',
+  text: 'Кто и откуда заходил в ящик — через браузер, почтовую программу и при отправке',
+};
+
+const EXPORT_CARD: Card = {
+  to: '/settings/export',
+  title: 'Выгрузка ящика',
+  text: 'Забрать всю переписку одним архивом: папки каталогами, письма файлами .eml',
+};
+
 export function SettingsHomePage() {
   const { data: aiState } = useAiState();
+  const access = useAccessLog();
+  const exports = useExports();
+  const recovery = useRecovery();
+
+  const owner = [
+    ...(recovery.available ? [RECOVERY_CARD] : []),
+    ...(access.available ? [ACCESS_CARD] : []),
+    ...(exports.available ? [EXPORT_CARD] : []),
+  ];
+  const withOwner = [...CARDS, ...owner];
   const cards = aiVisible(aiState)
     ? [
-        ...CARDS,
+        ...withOwner,
         {
           to: AI_SETTINGS_PATH,
           title: 'Помощник на основе ИИ',
           text: 'Согласие, набор возможностей и расход средств',
         },
       ]
-    : CARDS;
+    : withOwner;
 
   return (
     <>

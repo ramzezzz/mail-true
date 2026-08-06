@@ -34,8 +34,19 @@ import {
   IconListNumbered,
   IconMailRead,
   IconRedo,
+  IconTemplate,
   IconUndo,
 } from '../mail/icons';
+import {
+  firstRecipient,
+  prepareTemplateBody,
+  prepareTemplateSubject,
+  unresolvedPlaceholders,
+  templatesApi,
+  type MailTemplate,
+  type SubstitutionContext,
+} from '../mail/templatesApi';
+import { useCreateTemplate, useTemplatesState } from '../mail/useTemplates';
 import { useGeneralSettings } from '../api/settingsQueries';
 import {
   DEFAULT_GENERAL_SETTINGS,
@@ -44,6 +55,7 @@ import {
 } from '../settings/generalSettings';
 import { ComposeAiPanel } from './ComposeAiPanel';
 import { MailAttachmentPicker } from './MailAttachmentPicker';
+import { SaveTemplateDialog, TemplateMenu } from './TemplateMenu';
 import { failureSummary } from './SendFailureBanner';
 import { UndoSendBar } from './UndoSendBar';
 import styles from './ComposeWindow.module.css';
@@ -273,6 +285,24 @@ export function ComposeWindow({
   /** Открыт ли выбор вложения из уже пришедших писем («Из Почты»). */
   const [pickerOpen, setPickerOpen] = useState(false);
 
+  /* --- Шаблоны писем -------------------------------------------------
+   * Кнопки нет вовсе, пока сервер не сказал, что возможность у него есть
+   * (нет базы или не применена миграция). Общее правило продукта: кнопка
+   * появляется вместе с поведением — так же устроены метки и «Отложить». */
+  const templates = useTemplatesState();
+  const createTemplate = useCreateTemplate();
+  /** Открыто ли окно «Сохранить как шаблон». */
+  const [saveTemplateOpen, setSaveTemplateOpen] = useState(false);
+  /**
+   * Про незаполненные подстановки уже предупредили.
+   *
+   * Один раз, а не каждый: «Здравствуйте, {{имя}}!» в отправленном письме —
+   * это стыд, а вечный запрет отправки — это тупик. Человек, который
+   * написал `{{номер договора}}` намеренно, жмёт «Отправить» второй раз и
+   * уходит работать.
+   */
+  const [placeholdersWarned, setPlaceholdersWarned] = useState(false);
+
   const editorRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -407,6 +437,107 @@ export function ComposeWindow({
     exec('insertHTML', asHtml(text));
   };
 
+  /* --- Шаблоны --------------------------------------------------------
+   *
+   * Вставка идёт ТЕМ ЖЕ путём, что и смайлик с текстом помощника, —
+   * `document.execCommand('insertHTML')` в позицию курсора. Это и есть
+   * ответ на главный риск возможности (docs/gaps.md: «испортить можно —
+   * затереть написанное вставкой»): курсор переживает нажатие по кнопке,
+   * потому что панель форматирования гасит `mousedown`, а меню шаблонов
+   * стоит внутри неё.
+   */
+
+  /** Что знаем о получателе и о себе — для подстановок вида `{{имя}}`. */
+  const substitutionContext = (): SubstitutionContext => {
+    const recipient = firstRecipient(to);
+    return {
+      recipientName: recipient.name,
+      recipientAddress: recipient.address,
+      ownName: account?.displayName || null,
+    };
+  };
+
+  const insertTemplate = (template: MailTemplate) => {
+    const ctx = substitutionContext();
+
+    /*
+     * Тема: пустую заполняем, набранную НЕ трогаем. Молчаливая замена
+     * набранной темы — это письмо, ушедшее под чужим заголовком, и
+     * заметить это можно только в «Отправленных».
+     */
+    const filledSubject = prepareTemplateSubject(template.subject, ctx);
+    const subjectKept = subject.trim() !== '' && filledSubject !== '' && filledSubject !== subject;
+    if (filledSubject !== '' && subject.trim() === '') patch({ subject: filledSubject });
+
+    const html = prepareTemplateBody(template.bodyHtml, ctx);
+    if (html !== '') {
+      exec('insertHTML', html);
+      rememberBody();
+    }
+
+    /*
+     * Вложения шаблона выкладываются во временное хранилище загрузок
+     * НОВЫМИ файлами и дальше ведут себя как обычные вложения письма:
+     * их можно убрать, и шаблон от этого не пострадает. Запрос уходит
+     * только когда вложения есть — см. apps/api/src/templates/routes.ts.
+     */
+    if (template.attachments.length > 0) {
+      templatesApi
+        .materializeAttachments(template.id)
+        .then((result) => {
+          patch((current) => ({ attachments: [...current.attachments, ...result.attachments] }));
+        })
+        .catch((err: unknown) => {
+          // Молчать нельзя: текст вставился, а прайса нет — и человек
+          // отправит письмо, будучи уверенным, что файл приложен.
+          setError(actionErrorText('Текст шаблона вставлен, а вложения — нет', err));
+        });
+    }
+
+    /*
+     * Что осталось незаполненным, говорим сразу: подставить нечего, когда
+     * получателя ещё нет или известен только его адрес. Сказать об этом
+     * при вставке дешевле, чем поймать перед отправкой.
+     */
+    const leftovers = unresolvedPlaceholders(html);
+    const notes: string[] = [];
+    if (subjectKept) notes.push('тема письма оставлена своя');
+    if (leftovers.length > 0) notes.push(`заполните вручную: ${leftovers.join(', ')}`);
+    if (notes.length > 0) showNotice(`Шаблон «${template.name}» вставлен — ${notes.join('; ')}`);
+  };
+
+  /**
+   * Тело письма БЕЗ блока подписи — именно оно и есть шаблон.
+   *
+   * Подпись в шаблон брать нельзя, и это не вкусовщина. Окно написания
+   * заводит свой блок подписи в каждом новом письме и наполняет его
+   * выбранной подписью. Сохрани мы подпись внутрь шаблона — вставка
+   * положила бы её ВТОРОЙ раз, под уже подставленную, и человек вычищал
+   * бы её руками в каждом письме. Проверено на своей же подписи.
+   */
+  const bodyWithoutSignature = (): string => {
+    const editor = editorRef.current;
+    if (!editor) return draft.bodyHtml;
+    const copy = editor.cloneNode(true) as HTMLElement;
+    for (const block of copy.querySelectorAll(`[${SIGNATURE_MARK}]`)) block.remove();
+    return copy.innerHTML;
+  };
+
+  /** «Сохранить как шаблон»: тема и текст письма, по желанию — вложения. */
+  const saveAsTemplate = (name: string, withAttachments: boolean) => {
+    createTemplate.mutate(
+      {
+        name,
+        subject,
+        bodyHtml: bodyWithoutSignature(),
+        // Получатели в шаблон НЕ попадают намеренно: шаблон вставляют в
+        // разные письма, и запомненный адрес однажды ушёл бы не тому.
+        attachmentIds: withAttachments ? attachments.map((a) => a.id) : [],
+      },
+      { onSuccess: () => setSaveTemplateOpen(false) },
+    );
+  };
+
   const buildPayload = () => {
     const payload: Parameters<typeof sendMessage.mutate>[0] = {
       to: parseAddresses(to),
@@ -472,6 +603,28 @@ export function ComposeWindow({
     if (payload.to.length === 0) {
       setError('Укажите хотя бы одного получателя');
       return;
+    }
+    /*
+     * Незаполненная подстановка из шаблона.
+     *
+     * Останавливаем ОДИН раз и называем, что именно осталось. Письмо
+     * «Здравствуйте, {{имя}}!» — это ровно та ошибка, ради которой
+     * Superhuman не даёт отправить письмо с незаполненным заполнителем;
+     * а вечный запрет был бы хуже неё, потому что фигурные скобки в тексте
+     * человек может написать и намеренно. Второе нажатие отправляет.
+     */
+    if (!placeholdersWarned) {
+      const leftovers = unresolvedPlaceholders(
+        `${payload.subject} ${currentBodyHtml()}`,
+      );
+      if (leftovers.length > 0) {
+        setPlaceholdersWarned(true);
+        setError(
+          `В письме остались незаполненные подстановки: ${leftovers.join(', ')}. ` +
+            'Заполните их или нажмите «Отправить» ещё раз.',
+        );
+        return;
+      }
     }
     if (externalSender) {
       sendExternal(externalSender.externalId as number);
@@ -550,7 +703,7 @@ export function ComposeWindow({
     // Смотрим на видимый текст, а не на разметку: у пустого редактора
     // innerHTML не пустой — браузер держит там <br> или неразрывный пробел,
     // и по разметке любое только что открытое окно считалось бы непустым.
-    (editorRef.current?.textContent ?? '').replace(/ /g, ' ').trim() !== '';
+    (editorRef.current?.textContent ?? '').replace(/\u00A0/g, ' ').trim() !== '';
 
   /**
    * Закрытие крестиком.
@@ -1056,6 +1209,44 @@ export function ComposeWindow({
           <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
             <IconClearFormat size={20} />
           </button>
+
+          {/*
+            «Шаблоны» — у ПРАВОГО края панели форматирования: место
+            размечено по mail.ru (docs/features-mailru.md, «Справа: Вставить
+            подпись, Шаблоны»). Кнопки нет вовсе, пока сервер не сказал,
+            что возможность у него есть.
+
+            Меню стоит ВНУТРИ панели не ради вида: панель гасит `mousedown`,
+            и только благодаря этому выделение в редакторе переживает
+            нажатие — то есть шаблон вставляется в позицию курсора, а не
+            в начало письма.
+          */}
+          {templates.available && (
+            <>
+              <span className={styles.fmtSpacer} />
+              <Dropdown
+                align="right"
+                menuClassName={styles.templatesMenu}
+                trigger={({ toggle }) => (
+                  <button
+                    type="button"
+                    className={cx(styles.fmtButton, styles.fmtButtonWide)}
+                    title="Шаблоны писем"
+                    onClick={toggle}
+                  >
+                    <IconTemplate size={20} />
+                    <span className={styles.fmtButtonLabel}>Шаблоны</span>
+                  </button>
+                )}
+              >
+                <TemplateMenu
+                  items={templates.items}
+                  onPick={insertTemplate}
+                  onSaveCurrent={() => setSaveTemplateOpen(true)}
+                />
+              </Dropdown>
+            </>
+          )}
         </div>
 
         {/* Помощь с ответом. Панели нет вовсе, если помощник выключен */}
@@ -1174,6 +1365,21 @@ export function ComposeWindow({
           </Dropdown>
         </div>
       </section>
+
+      {/* «Сохранить как шаблон». Окно стоит РЯДОМ с окном написания, а не
+          внутри, по той же причине, что и выбор вложения ниже: иначе
+          Escape в нём всплывал бы до обработчика окна и заодно сохранял
+          письмо в черновики и закрывал его. */}
+      {saveTemplateOpen && (
+        <SaveTemplateDialog
+          subject={subject}
+          attachmentCount={attachments.length}
+          busy={createTemplate.isPending}
+          error={createTemplate.isError ? createTemplate.error.message : null}
+          onClose={() => setSaveTemplateOpen(false)}
+          onSubmit={saveAsTemplate}
+        />
+      )}
 
       {/* Выбор вложения из уже пришедших писем. Окно стоит РЯДОМ с окном
           написания, а не внутри: иначе Escape в нём всплывал бы до

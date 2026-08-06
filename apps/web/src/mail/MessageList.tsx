@@ -409,7 +409,7 @@ function Row({
           onOpen(message);
           return;
         }
-        navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`);
+        void navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`);
       }}
       onContextMenu={(e) => {
         if (!onContextMenu) return;

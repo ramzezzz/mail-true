@@ -273,7 +273,15 @@ export function MessagePage() {
 
   const ai = useMessageAi({ messageId: message?.id, threadIds });
 
-  const goBack = () => navigate(`/${folderId}/`);
+  /*
+   * Обещание навигации наружу не отдаётся: goBack передаётся и в жест
+   * «назад», и в onClick — а там ждут обычную функцию, и отказ обещания
+   * никто бы не поймал. Сам отказ означает отменённый переход, чинить
+   * его нечем и показывать человеку нечего.
+   */
+  const goBack = () => {
+    void navigate(`/${folderId}/`);
+  };
 
   /**
    * Назад к списку пальцем от левого края. Кнопка «К списку» стоит в левом
@@ -290,7 +298,7 @@ export function MessagePage() {
    */
   const goAfterRemoved = () => {
     if (preferences.afterDelete === 'next-message' && nextId) {
-      navigate(`/${folderId}/${encodeURIComponent(nextId)}`);
+      void navigate(`/${folderId}/${encodeURIComponent(nextId)}`);
       return;
     }
     goBack();
@@ -382,7 +390,7 @@ export function MessagePage() {
         case 'toggle-unread':
           e.preventDefault();
           setFlags.mutate({ ids: [message.id], set: { seen: false } });
-          navigate(`/${folderId}/`);
+          void navigate(`/${folderId}/`);
           return;
         case 'toggle-flag':
           e.preventDefault();
@@ -408,7 +416,7 @@ export function MessagePage() {
           return;
         case 'close':
           e.preventDefault();
-          navigate(`/${folderId}/`);
+          void navigate(`/${folderId}/`);
           return;
         default:
           return;
@@ -659,7 +667,7 @@ export function MessagePage() {
           <IconButton
             label="Предыдущее письмо"
             disabled={!prevId}
-            onClick={() => prevId && navigate(`/${folderId}/${encodeURIComponent(prevId)}`)}
+            onClick={() => { if (prevId) void navigate(`/${folderId}/${encodeURIComponent(prevId)}`); }}
           >
             <IconArrowLeft size={20} />
           </IconButton>
@@ -668,7 +676,7 @@ export function MessagePage() {
           <IconButton
             label="Следующее письмо"
             disabled={!nextId}
-            onClick={() => nextId && navigate(`/${folderId}/${encodeURIComponent(nextId)}`)}
+            onClick={() => { if (nextId) void navigate(`/${folderId}/${encodeURIComponent(nextId)}`); }}
           >
             <IconArrowRight size={20} />
           </IconButton>

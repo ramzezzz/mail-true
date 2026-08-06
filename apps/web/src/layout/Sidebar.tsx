@@ -15,6 +15,7 @@ import { Spinner } from '../components';
 import { cx } from '../lib/cx';
 import { getDragMessages, isMessageDrag } from '../lib/dragMessages';
 import { IconCompose, IconFolderRole } from '../mail/icons';
+import { SavedSearches } from '../search/SavedSearches';
 import styles from './Sidebar.module.css';
 import { folderTitle } from '../lib/folderNames';
 
@@ -116,6 +117,16 @@ export function Sidebar() {
           </svg>
           <span className={styles.itemName}>Новая папка</span>
         </button>
+
+        {/*
+          Сохранённые запросы стоят СРАЗУ ПОД папками — там их и ищут, — но
+          папками не притворяются: свой заголовок группы, значок лупы и
+          строка запроса под именем. Перетащить на них письмо нельзя, и
+          обработчиков переноса здесь нет вовсе: «папка», в которую письмо
+          не переезжает, обманывает ровно один раз и надолго.
+          Группы нет, пока сервер не сказал, что возможность есть.
+        */}
+        <SavedSearches />
       </nav>
     </aside>
   );

@@ -1,0 +1,132 @@
+/* Меню «Шаблоны» в панели написания письма. */
+
+.menu {
+  /*
+   * Ширина задана, а не выведена из содержимого: названия шаблонов у
+   * человека разной длины, и меню, скачущее от 200 до 500 пикселей при
+   * каждом заведении шаблона, читается как поломка.
+   */
+  width: 320px;
+  max-width: calc(100vw - 32px);
+}
+
+.list {
+  /*
+   * Больше десятка шаблонов — обычное дело у того, кто отвечает типовым
+   * текстом. Список прокручивается ВНУТРИ меню, иначе меню уезжало бы за
+   * нижний край окна написания и последние шаблоны были бы недоступны.
+   */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  width: 100%;
+  border: none;
+  margin: 0;
+  padding: 8px 16px;
+  background: transparent;
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
+}
+
+.item:active {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.itemName {
+  font-size: var(--mt-font-subhead-size, 14px);
+  font-weight: 500;
+  line-height: 20px;
+  /* Название целиком не влезает — обрезаем его, а не ломаем строку:
+     выжимка под ним и так объясняет, что в шаблоне. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Скрепка со счётчиком: у шаблона с вложениями поведение другое, и знать
+   об этом надо ДО вставки, а не после отправки письма с лишним файлом. */
+.itemFiles {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 20px;
+}
+
+.itemPreview {
+  grid-column: 1 / -1;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  margin: 0;
+  padding: 4px 16px 12px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 18px;
+}
+
+.manage {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .manage:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
+}
+
+/* --- Окно «Сохранить как шаблон» ------------------------------------- */
+
+.dialog {
+  width: 480px;
+}
+
+.dialogField {
+  margin-bottom: 12px;
+}
+
+.dialogNote {
+  margin: 0 0 12px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 18px;
+}
+
+.dialogCheck {
+  padding-top: 4px;
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.dialogCheckNote {
+  margin: 4px 0 0 32px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-footnote-size, 13px);
+  line-height: 18px;
+}

@@ -1,0 +1,418 @@
+/* Окно «Разбор ящика».
+
+   Ширина 780px: в строке разбора умещаются название рассылки, её числа и
+   четыре кнопки действий — иначе кнопки переносятся под строку и список
+   перестаёт читаться столбцом. Высота ограничена окном браузера, а
+   прокручивается ТЕЛО окна: заголовок с вкладками должен оставаться на
+   виду, пока человек листает сотню отправителей. */
+
+.modal {
+  width: min(780px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+}
+
+/* --- Вкладки ------------------------------------------------------ */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--mt-color-stroke-primary, rgba(0, 16, 61, 0.12));
+}
+
+.tabsSpacer {
+  flex: 1 1 auto;
+}
+
+.tab {
+  padding: 8px 12px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--mt-color-text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+/* Наведение — только там, где есть чем наводить: на касании :hover
+   «залипает», и коснувшаяся кнопка остаётся подсвеченной. Правило общее
+   для продукта и проверяется тестом. */
+@media (hover: hover) {
+  .tab:hover {
+    color: var(--mt-color-text-primary);
+  }
+}
+
+.tabActive {
+  border-bottom-color: var(--mt-color-stroke-accent, #005ff9);
+  color: var(--mt-color-text-primary);
+  font-weight: 500;
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--mt-color-stroke-accent, #005ff9);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+
+/* --- Общие мелочи ------------------------------------------------- */
+
+.note {
+  margin: 8px 0 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}
+
+.scanNote {
+  margin: 0 0 12px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}
+
+.error {
+  margin: 16px 0;
+  color: var(--mt-color-text-negative, #e64646);
+}
+
+.centered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--mt-color-text-secondary);
+}
+
+.filter {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.filterHint {
+  display: block;
+  padding-left: 24px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}
+
+/* --- Строка отправителя ------------------------------------------- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mt-color-background-secondary, rgba(0, 16, 61, 0.04));
+}
+
+.rowMain {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.rowTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Пилюля «рассылка»: тот же приём, что у пилюли метки в строке письма —
+   слово, а не значок, потому что значок здесь ничего не объясняет. */
+.badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 6px;
+  /* Заливка ПРОЗРАЧНАЯ (…-alpha), а не сплошная: сплошная равна цвету
+     текста-акцента, и слово «рассылка» становится синим по синему —
+     поймано на живом стенде. */
+  background: var(--mt-color-background-accent-themed-alpha, rgba(0, 119, 255, 0.2));
+  color: var(--mt-color-text-accent, #005ff9);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.rowAddress {
+  overflow: hidden;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+}
+
+.rowStats b {
+  color: var(--mt-color-text-primary);
+  font-weight: 500;
+}
+
+.rowActions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Выбор папки раскрывается ПОД строкой, а не выпадающим меню: окно и так
+   прокручивается, а второй прокручиваемый слой поверх первого мышью
+   промахивается. */
+.folderPicker {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.folderButton {
+  padding: 4px 10px;
+  border: 1px solid var(--mt-color-stroke-primary, rgba(0, 16, 61, 0.12));
+  border-radius: 8px;
+  background: var(--mt-color-background-content, #fff);
+  color: var(--mt-color-text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--mt-font-caption-size, 13px);
+}
+
+@media (hover: hover) {
+  .folderButton:hover {
+    background: var(--mt-color-background-secondary, rgba(0, 16, 61, 0.04));
+  }
+}
+
+.folderButton:focus-visible {
+  outline: 2px solid var(--mt-color-stroke-accent, #005ff9);
+  outline-offset: -1px;
+}
+
+/* --- Подтверждение ------------------------------------------------ */
+
+.confirm {
+  padding: 8px 0 0;
+}
+
+.confirmTitle {
+  margin: 0 0 12px;
+  font-size: var(--mt-font-title-3-size, 17px);
+  line-height: 24px;
+}
+
+/* Обычный абзац, а не flex: во flex-контейнере КАЖДЫЙ текстовый узел
+   становится отдельным элементом с зазором, и строка «12 писем, 55 КБ»
+   печаталась как «12 писем , 55 КБ» — с пробелом перед запятой.
+   Поймано на живом стенде. Крутилке для этого заведена своя строка. */
+.confirmCount {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.confirmPending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.confirmDetails {
+  margin: 0 0 16px;
+  padding-left: 20px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 20px;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+/* --- Свободное место ---------------------------------------------- */
+
+.quota {
+  margin-bottom: 16px;
+}
+
+.quotaHead {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.quotaPercent {
+  color: var(--mt-color-text-secondary);
+}
+
+.quotaTrack {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--mt-color-background-secondary, rgba(0, 16, 61, 0.08));
+}
+
+.quotaFill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--mt-color-background-accent, #005ff9);
+}
+
+/* Заполненный под завязку ящик — это уже не сведения, а предупреждение */
+.quotaFillFull {
+  background: var(--mt-color-background-negative, #e64646);
+}
+
+.quotaSource {
+  margin: 4px 0 0;
+  color: var(--mt-color-text-secondary);
+  font-size: 12px;
+}
+
+.section {
+  padding-top: 16px;
+  border-top: 1px solid var(--mt-color-stroke-primary, rgba(0, 16, 61, 0.12));
+  margin-top: 16px;
+}
+
+.sectionTitle {
+  margin: 0 0 10px;
+  font-size: var(--mt-font-title-3-size, 17px);
+  line-height: 24px;
+}
+
+.folderStats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folderStats li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.folderStatValue {
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+}
+
+.sweepForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.select {
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid var(--mt-color-stroke-primary, rgba(0, 16, 61, 0.12));
+  border-radius: 8px;
+  background: var(--mt-color-background-content, #fff);
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.heavyList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.heavyRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+@media (hover: hover) {
+  .heavyRow:hover {
+    background: var(--mt-color-background-secondary, rgba(0, 16, 61, 0.04));
+  }
+}
+
+.heavyMain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.heavySubject {
+  overflow: hidden;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heavyMeta {
+  overflow: hidden;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heavySize {
+  flex: 0 0 auto;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-caption-size, 13px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* Узкий экран: кнопки строки уходят под текст, но остаются в один ряд —
+   в столбик они превращают список в простыню. */
+@media (max-width: 640px) {
+  .modal {
+    width: calc(100vw - 16px);
+  }
+
+  .rowActions {
+    flex: 1 1 100%;
+  }
+}

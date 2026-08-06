@@ -22,7 +22,10 @@ import { SessionProvider, useSession } from './session';
 import { AppLayout } from '../layout/AppLayout';
 import { Spinner } from '../components';
 import { AiSettingsPage } from '../pages/AiSettingsPage';
+import { AccessLogPage } from '../pages/settings/AccessLogPage';
 import { AppearancePage } from '../pages/settings/AppearancePage';
+import { ExportPage } from '../pages/settings/ExportPage';
+import { RecoveryPage } from '../pages/settings/RecoveryPage';
 import { ComposePage } from '../pages/ComposePage';
 import { FolderPage } from '../pages/FolderPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -35,6 +38,7 @@ import { GeneralSettingsPage } from '../pages/settings/GeneralSettingsPage';
 import { LabelsPage } from '../pages/settings/LabelsPage';
 import { NotificationsPage } from '../pages/settings/NotificationsPage';
 import { SettingsHomePage } from '../pages/settings/SettingsHomePage';
+import { TemplatesPage } from '../pages/settings/TemplatesPage';
 import { SettingsLayout } from '../settings/SettingsLayout';
 
 export const LOGIN_PATH = '/login';
@@ -90,7 +94,11 @@ export const router = createBrowserRouter([
           { path: 'filters', element: <FiltersPage /> },
           { path: 'folders', element: <FoldersPage /> },
           { path: 'labels', element: <LabelsPage /> },
+          { path: 'templates', element: <TemplatesPage /> },
+          { path: 'recovery', element: <RecoveryPage /> },
           { path: 'collector', element: <CollectorPage /> },
+          { path: 'access-log', element: <AccessLogPage /> },
+          { path: 'export', element: <ExportPage /> },
           { path: 'ai', element: <AiSettingsPage /> },
         ],
       },

@@ -50,6 +50,8 @@ import {
   IconTrash,
 } from '../mail/icons';
 import { ListToolbar } from '../mail/ListToolbar';
+import { MailboxReview, type ReviewTab } from '../mail/MailboxReview';
+import { useMailboxReviewAvailable } from '../mail/useMailings';
 import { MessageList } from '../mail/MessageList';
 import { chunkIds, expandThreadIds, isRowFlagged, rowLabelKeys } from '../mail/threadList';
 import { SnoozeMenu } from '../mail/SnoozeMenu';
@@ -267,7 +269,7 @@ export function FolderPage() {
           return;
         }
       }
-      navigate(`/${folderId}/${encodeURIComponent(id)}`);
+      void navigate(`/${folderId}/${encodeURIComponent(id)}`);
     },
     [navigate, folderId, draftsFolder, messages, openDraft],
   );
@@ -534,6 +536,17 @@ export function FolderPage() {
     }
     return map;
   }, [snoozedFolder, snoozeState.items]);
+  /* --- Разбор ящика ---------------------------------------------------
+   *
+   * Окно поверх списка, а не отдельная страница: разбор — это ответ на
+   * вопрос «что за мусор у меня в списке», и уводить за ним из списка
+   * значит терять место, где вопрос возник. Осмотр ящика начинается
+   * только с открытием окна (см. useMailings): он дорог, и платить за
+   * него при каждом открытии почты нельзя.
+   */
+  const reviewAvailable = useMailboxReviewAvailable();
+  const [reviewTab, setReviewTab] = useState<ReviewTab | null>(null);
+
   /** Список загружен и в нём нет ни одного письма. */
   const emptyFolder = !page.isPending && !page.isError && messages.length === 0;
 
@@ -562,11 +575,20 @@ export function FolderPage() {
         onDelete={() => moveTo(targetIds(), 'trash')}
         onArchive={() => moveTo(targetIds(), 'archive')}
         onMoveTo={(target) => moveTo(targetIds(), target)}
-        // Отписка живёт в письме: адрес отписки берётся из его заголовков.
-        // Молчаливой заглушки здесь быть не должно — говорим, куда идти.
+        /*
+          «Отписаться» над выделением ведёт в разбор рассылок. Отписка —
+          это действие над ОТПРАВИТЕЛЕМ, а не над выбранными письмами: в
+          разборе видно, сколько у него писем всего, и отписка идёт по
+          самому свежему из них (у старого адрес отписки часто протух).
+          Раньше здесь стояло указание «отписаться можно в самом письме» —
+          то есть отправка человека делать это тридцать раз подряд.
+        */
         onUnsubscribe={() =>
-          showNotice('Отписаться можно в самом письме — там есть адрес отписки')
+          reviewAvailable
+            ? setReviewTab('mailings')
+            : showNotice('Отписаться можно в самом письме — там есть адрес отписки')
         }
+        onReview={reviewAvailable ? () => setReviewTab('mailings') : undefined}
         onMarkUnread={() => applyFlags(targetIds(), { seen: false })}
         onToggleFlag={() => toggleFlagOn(targetIds())}
         onSpam={() => moveTo(targetIds(), 'spam')}
@@ -697,6 +719,14 @@ export function FolderPage() {
             setFocusedId(message.id);
             setContextMenu({ message, x, y, view: 'main' });
           }}
+        />
+      )}
+
+      {reviewTab && (
+        <MailboxReview
+          initialTab={reviewTab}
+          folders={folders ?? []}
+          onClose={() => setReviewTab(null)}
         />
       )}
 

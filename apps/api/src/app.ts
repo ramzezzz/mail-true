@@ -32,6 +32,7 @@ import { aiRoutes } from './ai/index.js';
 import { settingsRoutes } from './settings/index.js';
 import { accountsRoutes } from './accounts/index.js';
 import { contactsRoutes } from './contacts/index.js';
+import { templatesRoutes } from './templates/index.js';
 import { senderLogosRoutes } from './logos/index.js';
 import { pushNotificationRoutes } from './push/index.js';
 
@@ -274,6 +275,15 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
    * сборщик спрашивает об этом готовый сервис настроек из декорации.
    */
   await contactsRoutes(app);
+
+  /*
+   * Шаблоны писем (см. src/templates/). Ни от кого не зависят и ни от кого
+   * не зависимы: своя таблица, свои маршруты, и в отправку они не
+   * вмешиваются вовсе — вложение шаблона уходит в письмо через то же
+   * временное хранилище загрузок, что и любой прикреплённый файл.
+   * Поэтому место в этом списке у них произвольное.
+   */
+  await templatesRoutes(app);
 
   // Логотипы доменов отправителей (см. src/logos/). Регистрируются ПОСЛЕ
   // настроек: маршрут спрашивает у них, разрешил ли человек эту возможность,

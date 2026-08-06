@@ -16,6 +16,8 @@ import { AI_SETTINGS_PATH, aiVisible } from '../ai/aiVisibility';
 import { cx } from '../lib/cx';
 import { IconArrowLeft } from '../mail/icons';
 import { useLabelsState } from '../mail/useLabels';
+import { useTemplatesState } from '../mail/useTemplates';
+import { useAccessLog, useExports, useRecovery } from './ownerQueries';
 import styles from './SettingsLayout.module.css';
 
 export interface NavItem {
@@ -46,6 +48,29 @@ const LABELS_ITEM: NavItem = { to: '/settings/labels', title: 'Метки' };
 const LABELS_AFTER = '/settings/folders';
 
 /**
+ * Шаблоны стоят сразу за «Общими» — там же, где живут подписи, с которыми
+ * у них одна работа: заготовленный кусок письма. Пункт условный по тому же
+ * правилу, что и метки: нет хранилища на сервере — нет и раздела.
+ */
+const TEMPLATES_ITEM: NavItem = { to: '/settings/templates', title: 'Шаблоны писем' };
+const TEMPLATES_AFTER = '/settings/general';
+
+/**
+ * «Восстановление писем» стоит сразу за папками: очищают корзину именно
+ * там, и возвращать очищенное человек идёт туда же, где очищал.
+ */
+const RECOVERY_ITEM: NavItem = { to: '/settings/recovery', title: 'Восстановление писем' };
+const RECOVERY_AFTER = '/settings/folders';
+
+/**
+ * «Вход и действия» и «Выгрузка ящика» стоят последними и вместе: оба про
+ * ящик целиком, а не про то, как он выглядит и как раскладывает почту.
+ * У mail.ru «Лог действий» лежит там же — в самом низу списка.
+ */
+const ACCESS_ITEM: NavItem = { to: '/settings/access-log', title: 'Вход и действия' };
+const EXPORT_ITEM: NavItem = { to: '/settings/export', title: 'Выгрузка ящика' };
+
+/**
  * Адрес без хвостовых косых: `/settings/` и `/settings` — одно и то же место.
  *
  * Именно на этом ломалась подсветка «Главной»: в меню стоит `/settings`, а
@@ -70,6 +95,10 @@ export function SettingsLayout() {
   const { pathname } = useLocation();
   const { data: aiState } = useAiState();
   const labels = useLabelsState();
+  const templates = useTemplatesState();
+  const access = useAccessLog();
+  const exports = useExports();
+  const recovery = useRecovery();
 
   /*
    * Разделы, которых может не быть.
@@ -85,9 +114,29 @@ export function SettingsLayout() {
   const withLabels = labels.available
     ? NAV.flatMap((item) => (item.to === LABELS_AFTER ? [item, LABELS_ITEM] : [item]))
     : NAV;
-  const nav = aiVisible(aiState)
-    ? [...withLabels, { to: AI_SETTINGS_PATH, title: 'Помощник на основе ИИ' }]
+  const withTemplates = templates.available
+    ? withLabels.flatMap((item) => (item.to === TEMPLATES_AFTER ? [item, TEMPLATES_ITEM] : [item]))
     : withLabels;
+  /*
+   * Три раздела владельца ящика — по тому же правилу, что метки и шаблоны:
+   * пока сервер не сказал `available`, пункта в меню нет. Ему есть чего не
+   * сказать: у каждого своя миграция, а выгрузке нужен ещё и служебный
+   * доступ к почтовому хранилищу. Пункт, ведущий на страницу «раздел
+   * недоступен», — это кнопка без поведения.
+   */
+  const withRecovery = recovery.available
+    ? withTemplates.flatMap((item) =>
+        item.to === RECOVERY_AFTER ? [item, RECOVERY_ITEM] : [item],
+      )
+    : withTemplates;
+  const withOwner = [
+    ...withRecovery,
+    ...(access.available ? [ACCESS_ITEM] : []),
+    ...(exports.available ? [EXPORT_ITEM] : []),
+  ];
+  const nav = aiVisible(aiState)
+    ? [...withOwner, { to: AI_SETTINGS_PATH, title: 'Помощник на основе ИИ' }]
+    : withOwner;
 
   return (
     <div className={styles.root}>
