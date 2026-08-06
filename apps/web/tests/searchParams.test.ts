@@ -28,7 +28,7 @@ describe('parseSearchParams', () => {
       query: '',
       scope: { kind: 'all' },
       includeJunk: false,
-      facets: { flags: [], folderId: null, period: null },
+      facets: { flags: [], folderId: null, period: null, label: null },
     });
   });
 
@@ -61,7 +61,7 @@ describe('buildSearchUrl', () => {
         query: '',
         scope: { kind: 'all' },
         includeJunk: false,
-        facets: { flags: [], folderId: null, period: null },
+        facets: { flags: [], folderId: null, period: null, label: null },
       }),
     ).toBe(SEARCH_PATH);
   });

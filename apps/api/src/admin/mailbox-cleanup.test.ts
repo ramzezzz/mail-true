@@ -129,6 +129,80 @@ void test('уборщик находит осиротевшие каталоги
   assert.ok((await stat(living)).isDirectory());
 });
 
+/**
+ * Уборщик ходит раз в минуту, а осиротевший каталог живёт неделями.
+ * Пока состав не меняется, повторять предупреждение нельзя: иначе одна
+ * забытая папка даёт ~1440 записей в сутки, и настоящие предупреждения
+ * в журнале тонут. Проверяем именно частоту, а не сам факт находки.
+ */
+void test('про осиротевшие каталоги уборщик сообщает один раз, а не на каждом проходе', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-orph-'));
+  await seed(root, 'orphan@x.local');
+
+  const warnings: string[] = [];
+  const noisy = pino(
+    { level: 'warn' },
+    {
+      write(line: string) {
+        warnings.push(line);
+      },
+    },
+  );
+
+  let known: string[] = ['alive@x.local'];
+  const db = {
+    listDeletionsToPurge: async () => [],
+    updateMailboxDeletion: async () => undefined,
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    listAllMailboxEmails: async () => known,
+  };
+  // Часы под управлением теста: иначе суточное напоминание не проверить.
+  let clock = 1_000_000;
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger: noisy,
+    mailRoot: root,
+    intervalSeconds: 0,
+    now: () => clock,
+  });
+
+  const first = await janitor.runOnce();
+  assert.equal(first.orphanMaildirs, 1);
+  assert.equal(first.orphanReported, true, 'о новой находке сообщить обязаны');
+
+  // Десять проходов подряд, состав тот же — в журнале не должно прибавиться.
+  for (let i = 0; i < 10; i += 1) {
+    clock += 60_000;
+    const again = await janitor.runOnce();
+    assert.equal(again.orphanMaildirs, 1, 'каталог по-прежнему находится');
+    assert.equal(again.orphanReported, false, 'повторять то же самое нельзя');
+  }
+  assert.equal(warnings.length, 1, `ожидалась одна запись, получено ${warnings.length}`);
+
+  // Появился НОВЫЙ каталог — это новость, о ней сообщаем сразу.
+  await seed(root, 'orphan2@x.local');
+  clock += 60_000;
+  const changed = await janitor.runOnce();
+  assert.equal(changed.orphanReported, true, 'о новом каталоге сообщаем немедленно');
+  assert.equal(warnings.length, 2);
+
+  // Прошли сутки, состав тот же — одно напоминание, чтобы не забылось.
+  clock += 24 * 60 * 60 * 1000;
+  const reminder = await janitor.runOnce();
+  assert.equal(reminder.orphanReported, true, 'суточное напоминание должно быть');
+  assert.equal(warnings.length, 3);
+  assert.match(warnings[2] ?? '', /"reason":"reminder"/);
+
+  // Каталоги убрали руками — уборщик молчит и забывает сказанное.
+  known = ['alive@x.local', 'orphan@x.local', 'orphan2@x.local'];
+  clock += 60_000;
+  const clean = await janitor.runOnce();
+  assert.equal(clean.orphanMaildirs, 0);
+  assert.equal(clean.orphanReported, false);
+  assert.equal(warnings.length, 3);
+});
+
 void test('карантин не попадает в список осиротевших каталогов', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'mt-orph-'));
   await seed(root, 'gone@x.local');

@@ -34,6 +34,9 @@ const NAV: NavItem[] = [
   { to: '/settings/appearance', title: 'Оформление' },
   { to: '/settings/filters', title: 'Фильтры' },
   { to: '/settings/folders', title: 'Папки' },
+  // Метки стоят рядом с папками намеренно: это второй способ разложить
+  // почту, и человек ищет их там же, где искал бы папку.
+  { to: '/settings/labels', title: 'Метки' },
   { to: '/settings/collector', title: 'Почта с других ящиков' },
 ];
 

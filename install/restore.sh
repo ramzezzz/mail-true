@@ -128,10 +128,13 @@ if want db && [ -f "$WORK/database.sql" ]; then
         [ -f "$mig" ] || continue
         mig_name="$(basename "$mig")"
         if dc exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q \
-                < "$mig" >/dev/null 2>&1; then
+                < "$mig" >/dev/null 2>"$WORK/mig.err"; then
             info "миграция $mig_name применена"
         else
             fail "миграция $mig_name не применилась"
+            # Причина уходила в /dev/null, и человеку оставалось повторять
+            # команду вручную только ради того, чтобы прочитать одну строку.
+            sed -n '1,5p' "$WORK/mig.err" | sed 's/^/           /'
             hint "  docker compose -f infra/docker-compose.yml exec -T postgres \\"
             hint "    psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $POSTGRES_DB < infra/postgres/migrations/$mig_name"
             MIG_FAILED=1

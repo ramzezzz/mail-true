@@ -148,6 +148,20 @@ export const FLOW_SERIES: readonly ChartSeries[] = [
   { id: 'held', title: 'Задержано вручную', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },
 ];
 
+/**
+ * Ряд «пиковых часов» — свой, а не заимствованный у потока.
+ *
+ * Раньше этот график брал ряд `sent` из FLOW_SERIES, и подсказка при
+ * наведении честно печатала его название: «Доставлено: 38». А считает
+ * запрос ВСЕ состояния — доставленные, отложенные, отбитые и отклонённые
+ * на приёме. То есть график называл одним словом совсем другое число, и
+ * администратор, сверяя пик с кольцом «Доли состояний», не сходился бы в
+ * цифрах и искал бы поломку там, где её нет.
+ */
+export const HOURLY_SERIES: readonly ChartSeries[] = [
+  { id: 'hourlyTotal', title: 'Всего писем', hue: 'blue', dash: '', pattern: 'solid' },
+];
+
 /** Ряды графика ресурсов. */
 export const RESOURCE_SERIES: readonly ChartSeries[] = [
   { id: 'cpuNode', title: 'Процессор узла', hue: 'blue', dash: '', pattern: 'solid' },
@@ -176,6 +190,7 @@ export const DISK_SERIES: readonly ChartSeries[] = [
 /** Все ряды всех графиков — для проверок и подстановки цветов. */
 export const ALL_SERIES: readonly ChartSeries[] = [
   ...FLOW_SERIES,
+  ...HOURLY_SERIES,
   ...RESOURCE_SERIES,
   ...QUEUE_SERIES,
   ...DISK_SERIES,

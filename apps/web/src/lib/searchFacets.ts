@@ -13,6 +13,7 @@
  */
 
 import type { Folder, MessageSummary } from '@mail-true/shared';
+import { userLabelKeys } from './categories';
 import { folderTitle } from './folderNames';
 
 /** Признаки письма — те же, что в меню «Фильтр» над списком. */
@@ -39,6 +40,15 @@ export interface SearchAggregates {
   folders: FacetCount[];
   /** Периоды: «За этот месяц», помесячно за текущий год, затем по годам. */
   periods: FacetCount[];
+  /**
+   * Свои метки, встреченные среди совпадений: `id` — ключевое слово письма
+   * (`mt-oplatit`), `label` — то же ключевое слово. НАЗВАНИЕ И ЦВЕТ здесь
+   * не подставляются намеренно: они живут в справочнике меток, который
+   * знает только интерфейс поиска (search/SearchFacets.tsx). Тянуть
+   * справочник сюда значило бы, что чистая функция подсчёта зависит от
+   * состояния запроса к серверу.
+   */
+  labels: FacetCount[];
 }
 
 const MONTHS_NOMINATIVE = [
@@ -110,9 +120,21 @@ export interface SearchFacetSelection {
   folderId: string | null;
   /** Ключ выбранного периода (`month:2026-07`) или null — за всё время. */
   period: string | null;
+  /**
+   * Ключевое слово выбранной метки (`mt-oplatit`) или null — метка не
+   * выбрана. Поле обязательное, а не необязательное: отбор по метке
+   * должен быть либо учтён везде, где учитываются фасеты, либо нигде —
+   * с `label?` забытое место молча показывало бы всё подряд.
+   */
+  label: string | null;
 }
 
-export const EMPTY_SELECTION: SearchFacetSelection = { flags: [], folderId: null, period: null };
+export const EMPTY_SELECTION: SearchFacetSelection = {
+  flags: [],
+  folderId: null,
+  period: null,
+  label: null,
+};
 
 /** Отбор писем по выбранным фасетам. */
 export function applyFacets(
@@ -124,8 +146,21 @@ export function applyFacets(
     if (!selection.flags.every((f) => matchesFlagFacet(m, f))) return false;
     if (selection.folderId !== null && m.folderId !== selection.folderId) return false;
     if (selection.period !== null && periodBucket(m.date, now).id !== selection.period) return false;
+    if (selection.label !== null && !hasLabel(m, selection.label)) return false;
     return true;
   });
+}
+
+/**
+ * Стоит ли на письме эта метка.
+ *
+ * Сравнение без учёта регистра: ключевые слова у Dovecot нечувствительны
+ * к регистру, и письмо, помеченное в другой почтовой программе словом
+ * `MT-OPLATIT`, — то же самое помеченное письмо.
+ */
+function hasLabel(message: MessageSummary, key: string): boolean {
+  const wanted = key.toLowerCase();
+  return message.labels.some((l) => l.toLowerCase() === wanted);
 }
 
 /**
@@ -145,8 +180,17 @@ export function computeAggregates(
   const flags: Record<SearchFlagFacet, number> = { unread: 0, flagged: 0, attachments: 0 };
   const byFolder = new Map<string, number>();
   const byPeriod = new Map<string, { label: string; count: number }>();
+  const byLabel = new Map<string, number>();
 
   for (const message of messages) {
+    // Считаются только СВОИ метки: чипы категорий, признак надёжного
+    // отправителя и пометка возврата из «Отложенных» приезжают тем же
+    // полем, и без отсева в колонке фильтров появились бы «finance»
+    // и «$Snoozed» — слова, которых человек не заводил и снять не может.
+    for (const key of userLabelKeys(message.labels)) {
+      byLabel.set(key, (byLabel.get(key) ?? 0) + 1);
+    }
+
     if (matchesFlagFacet(message, 'unread')) flags.unread += 1;
     if (matchesFlagFacet(message, 'flagged')) flags.flagged += 1;
     if (matchesFlagFacet(message, 'attachments')) flags.attachments += 1;
@@ -175,5 +219,11 @@ export function computeAggregates(
     .map(([id, { label, count }]) => ({ id, label, count }))
     .sort((a, b) => comparePeriods(a.id, b.id));
 
-  return { total: messages.length, flags, folders: folderCounts, periods };
+  // Метки — по убыванию числа совпадений: чаще всего человек ищет ту,
+  // которой пометил больше всего.
+  const labels: FacetCount[] = [...byLabel.entries()]
+    .map(([id, count]) => ({ id, label: id, count }))
+    .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id));
+
+  return { total: messages.length, flags, folders: folderCounts, periods, labels };
 }

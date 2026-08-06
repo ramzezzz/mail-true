@@ -8,7 +8,7 @@
  */
 
 import type { Folder } from '@mail-true/shared';
-import type { SearchFacetSelection, SearchFlagFacet } from '../lib/searchFacets';
+import { EMPTY_SELECTION, type SearchFacetSelection, type SearchFlagFacet } from '../lib/searchFacets';
 
 export const SEARCH_PATH = '/search/';
 
@@ -48,6 +48,7 @@ export function parseSearchParams(params: URLSearchParams): SearchState {
       flags,
       folderId: params.get('folder'),
       period: params.get('period'),
+      label: params.get('label'),
     },
   };
 }
@@ -66,6 +67,10 @@ export function buildSearchParams(state: SearchState): URLSearchParams {
   }
   if (state.facets.folderId) params.set('folder', state.facets.folderId);
   if (state.facets.period) params.set('period', state.facets.period);
+  // В адрес попадает КЛЮЧ метки, а не её название: название человек меняет
+  // когда захочет, и ссылка «письма с меткой Оплатить», отправленная себе
+  // же на завтра, после переименования указывала бы в пустоту.
+  if (state.facets.label) params.set('label', state.facets.label);
   return params;
 }
 
@@ -81,7 +86,24 @@ export function searchUrlFor(query: string): string {
     query,
     scope: { kind: 'all' },
     includeJunk: false,
-    facets: { flags: [], folderId: null, period: null },
+    facets: EMPTY_SELECTION,
+  });
+}
+
+/**
+ * Ссылка «показать всё с этой меткой».
+ *
+ * Запрос пустым быть не может — поиск без запроса ничего не ищет
+ * (см. useSearch), — поэтому меткой отбирают уже найденное. Отдельная
+ * функция нужна затем, чтобы пункт «Отобрать по метке» из любого меню
+ * собирал адрес одинаково.
+ */
+export function searchUrlForLabel(query: string, labelKey: string): string {
+  return buildSearchUrl({
+    query,
+    scope: { kind: 'all' },
+    includeJunk: false,
+    facets: { ...EMPTY_SELECTION, label: labelKey },
   });
 }
 
@@ -120,4 +142,17 @@ export function toggleFolderFacet(state: SearchState, folderId: string): SearchS
 export function togglePeriodFacet(state: SearchState, period: string): SearchState {
   const next = state.facets.period === period ? null : period;
   return { ...state, facets: { ...state.facets, period: next } };
+}
+
+/**
+ * Выбрать метку; повторное нажатие снимает отбор.
+ *
+ * Метка выбирается одна, как папка и период, а не набором, как признаки
+ * письма. Причина в том, что «и оплатить, и спросить у юриста» — это
+ * пересечение, которое человек почти никогда не имеет в виду: метки он
+ * вешает как раз затем, чтобы разделить эти два дела.
+ */
+export function toggleLabelFacet(state: SearchState, labelKey: string): SearchState {
+  const next = state.facets.label === labelKey ? null : labelKey;
+  return { ...state, facets: { ...state.facets, label: next } };
 }

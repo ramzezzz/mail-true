@@ -1,0 +1,107 @@
+/* Справочник своих меток. Метрика таблицы — как у «Папок». */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.headCell {
+  padding: 0 12px 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  font-weight: 400;
+  line-height: 16px;
+  text-align: left;
+}
+
+.row {
+  border-top: 1px solid var(--mt-color-separator-primary);
+}
+
+.nameCell {
+  padding: 10px 12px;
+}
+
+.keyCell {
+  padding: 10px 12px;
+  color: var(--mt-color-text-tertiary);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: var(--mt-font-caption1-size, 12px);
+  white-space: nowrap;
+}
+
+.actionsCell {
+  width: 96px;
+  padding: 6px 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.topRow {
+  margin-bottom: 12px;
+}
+
+.dialog {
+  width: 420px;
+  max-width: 100%;
+}
+
+/* Выбор цвета: кружки с обводкой у выбранного. */
+.colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.color {
+  width: 28px;
+  height: 28px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.colorInner {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--mt-label-color);
+}
+
+.colorActive {
+  border-color: var(--mt-color-text-primary);
+}
+
+.preview {
+  margin-top: 14px;
+}
+
+.field {
+  margin-bottom: 4px;
+}
+
+/* Вопрос при удалении: два разных исхода, оба названы словами. */
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  cursor: pointer;
+}
+
+.choiceText {
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.choiceNote {
+  display: block;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+}

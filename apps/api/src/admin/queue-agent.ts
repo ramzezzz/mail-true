@@ -19,6 +19,7 @@
 import type { Logger } from 'pino';
 import { ApiError } from '../errors.js';
 import { errorInfo } from '../log.js';
+import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
 
 /** Адресат письма в очереди и последняя причина отсрочки для него. */
 export interface QueueRecipient {
@@ -77,6 +78,13 @@ export class QueueAgent {
   private readonly cacheMs: number;
   private readonly timeoutMs: number;
   private cache: { snapshot: QueueSnapshot; at: number } | null = null;
+  /**
+   * Сторож повторов. Сюда ходят и сборщик показателей (раз в минуту), и
+   * раздел «Почтовый поток», который автообновляется у каждой открытой
+   * вкладки. Не поднявшийся посредник — состояние на часы, и без сторожа
+   * оно писало бы в журнал строку на каждый опрос (см. repeat-log.ts).
+   */
+  private readonly failures = new RepeatGuard();
   /** Идущий прямо сейчас запрос: параллельные читатели ждут его, а не плодят свои. */
   private inflight: Promise<QueueSnapshot> | null = null;
 
@@ -108,7 +116,7 @@ export class QueueAgent {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (err) {
-      this.opts.logger.warn(errorInfo(err, { path }), 'Посредник очереди не отвечает');
+      warnOnce(this.failures, this.opts.logger, err, 'Посредник очереди не отвечает', { path });
       throw new QueueUnavailableError(
         'Посредник к очереди Postfix не отвечает. Проверьте, что контейнер postfix ' +
           'запущен и в нём поднялся queue-agent.pl (docker compose logs postfix).',

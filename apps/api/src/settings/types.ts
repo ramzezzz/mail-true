@@ -75,6 +75,16 @@ export interface MailSettings {
    * значения перечислены в UNDO_SEND_CHOICES.
    */
   undoSendSeconds: number;
+  /**
+   * Показывать список разговорами, а не письмами: ответ на письмо занимает
+   * ту же строку, что и само письмо, а не заводит вторую с той же темой.
+   *
+   * По умолчанию ВКЛЮЧЕНО — так же, как у mail.ru, который мы повторяем.
+   * Настройка относится к списку целиком, но действует не везде: в
+   * черновиках, корзине, спаме и отложенных сервер её не применяет,
+   * и почему — объяснено в mail/threads.ts (threadingAllowed).
+   */
+  threadedList: boolean;
   autoReply: AutoReplySettings;
   updatedAt: string | null;
 }
@@ -96,6 +106,7 @@ export interface MailSettingsPatch {
   collectContacts?: boolean | undefined;
   senderLogos?: boolean | undefined;
   undoSendSeconds?: number | undefined;
+  threadedList?: boolean | undefined;
   autoReply?: AutoReplyPatch | undefined;
 }
 
@@ -211,6 +222,9 @@ export function defaultMailSettings(email: string): MailSettings {
     senderLogos: false,
     // Включена намеренно: см. DEFAULT_UNDO_SEND_SECONDS в mail/deferred-send.ts
     undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
+    // Включена намеренно: у mail.ru группировка по переписке — поведение
+    // по умолчанию, и в этом заметная часть привычности интерфейса.
+    threadedList: true,
     autoReply: {
       enabled: false,
       subject: null,

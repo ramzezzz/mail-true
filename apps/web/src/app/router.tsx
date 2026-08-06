@@ -32,6 +32,7 @@ import { CollectorPage } from '../pages/settings/CollectorPage';
 import { FiltersPage } from '../pages/settings/FiltersPage';
 import { FoldersPage } from '../pages/settings/FoldersPage';
 import { GeneralSettingsPage } from '../pages/settings/GeneralSettingsPage';
+import { LabelsPage } from '../pages/settings/LabelsPage';
 import { NotificationsPage } from '../pages/settings/NotificationsPage';
 import { SettingsHomePage } from '../pages/settings/SettingsHomePage';
 import { SettingsLayout } from '../settings/SettingsLayout';
@@ -88,6 +89,7 @@ export const router = createBrowserRouter([
           { path: 'appearance', element: <AppearancePage /> },
           { path: 'filters', element: <FiltersPage /> },
           { path: 'folders', element: <FoldersPage /> },
+          { path: 'labels', element: <LabelsPage /> },
           { path: 'collector', element: <CollectorPage /> },
           { path: 'ai', element: <AiSettingsPage /> },
         ],

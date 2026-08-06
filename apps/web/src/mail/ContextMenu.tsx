@@ -15,6 +15,9 @@ import {
   type ReactNode,
 } from 'react';
 import { cx } from '../lib/cx';
+import { LabelMenu, type LabelTarget } from './LabelMenu';
+import { IconLabel } from './icons';
+import { useLabelsState } from './useLabels';
 import styles from './ContextMenu.module.css';
 
 const CloseContext = createContext<() => void>(() => {});
@@ -108,4 +111,35 @@ export function ContextMenuItem({
 
 export function ContextMenuSeparator() {
   return <div className={styles.separator} role="separator" />;
+}
+
+/**
+ * Пункт «Метки» со списком, раскрывающимся ПРЯМО В МЕНЮ.
+ *
+ * Раскрытие на месте, а не переход в отдельный вид меню (как у «В папку» и
+ * «Отложить»), потому что метки ставят пачками: «оплатить» и «спросить у
+ * юриста» на одно письмо. Переход туда-обратно за каждой меткой означал бы
+ * два лишних нажатия на каждую.
+ *
+ * Пункта нет вовсе, пока сервер не сказал, что справочник меток доступен, —
+ * общее правило продукта: кнопка появляется вместе с поведением.
+ */
+export function ContextMenuLabels({ messages }: { messages: readonly LabelTarget[] }) {
+  const { available } = useLabelsState();
+  const [open, setOpen] = useState(false);
+  if (!available) return null;
+  return (
+    <>
+      <ContextMenuItem
+        before={<IconLabel />}
+        keepOpen
+        aria-expanded={open}
+        hint={open ? '▴' : '▾'}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Метки
+      </ContextMenuItem>
+      {open && <LabelMenu messages={messages} />}
+    </>
+  );
 }

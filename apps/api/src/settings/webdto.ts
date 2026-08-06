@@ -72,6 +72,13 @@ export interface WebGeneralSettings {
    * знает, не должна молча возвращать человеку отправку без отмены.
    */
   undoSendSeconds?: number;
+  /**
+   * Группировать письма в переписки. Необязательное по той же причине, что
+   * и два поля выше: этот контракт правит и админка, а форма, которая о
+   * поле не знает, не должна молча разворачивать человеку список обратно
+   * в письма.
+   */
+  groupByThread?: boolean;
 }
 
 /** Внутренние настройки + подписи -> DTO интерфейса. */
@@ -103,6 +110,7 @@ export function toWebGeneral(
     autoCollectContacts: settings.collectContacts,
     showSenderLogos: settings.senderLogos,
     undoSendSeconds: settings.undoSendSeconds,
+    groupByThread: settings.threadedList,
   };
 }
 
@@ -119,6 +127,7 @@ export function fromWebGeneral(dto: WebGeneralSettings): MailSettingsPatch {
     // (админка, старый интерфейс). Настройку человека это трогать не должно.
     ...(dto.showSenderLogos === undefined ? {} : { senderLogos: dto.showSenderLogos }),
     ...(dto.undoSendSeconds === undefined ? {} : { undoSendSeconds: dto.undoSendSeconds }),
+    ...(dto.groupByThread === undefined ? {} : { threadedList: dto.groupByThread }),
     autoReply: {
       enabled: dto.autoReply.enabled,
       text: dto.autoReply.text,

@@ -103,10 +103,32 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  /** Письмо очереди целиком: конверт, заголовки, начало тела. */
-  app.get('/queue/:id/message', { preHandler: requireAdmin(app, 'overview.read') }, async (request) => {
+  /**
+   * Письмо очереди целиком: конверт, заголовки, начало тела.
+   *
+   * ЭТО ЧУЖАЯ ПЕРЕПИСКА, а не сводка о ней, и обходятся с ней здесь так же,
+   * как с чужим ящиком и чужими фильтрами.
+   *
+   * Право — audit.read, то же, что у раздела «Журналы почты». Там оно взято
+   * потому, что в журнале видны адреса переписки; в письме очереди видны и
+   * адреса, и тема, и начало текста, так что меньшего права быть не может.
+   * Раньше стоял overview.read — то есть прочитать текст письма было ЛЕГЧЕ,
+   * чем строку журнала с одним только адресом.
+   *
+   * И запись в аудит, которой не было вовсе. Вход администратора в чужой
+   * ящик (mailbox.impersonate) и даже просмотр чужих фильтров
+   * (usersettings.view) в журнале отмечаются; чтение письма из очереди
+   * не отмечалось ничем, хотя по существу это то же самое.
+   */
+  app.get('/queue/:id/message', { preHandler: requireAdmin(app, 'mailbox.impersonate') }, async (request) => {
     const { id } = idSchema.parse(request.params);
     const result = await agent.message(id);
+    await audit(ctx, request, {
+      action: 'queue.view',
+      targetType: 'settings',
+      targetLabel: `Очередь: ${id}`,
+      after: { queueId: id, action: 'view' },
+    });
     return { queueId: id, text: result.text, truncated: result.truncated };
   });
 

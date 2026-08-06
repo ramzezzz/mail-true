@@ -149,6 +149,7 @@ describe('computeAggregates', () => {
       flags: { unread: 0, flagged: 0, attachments: 0 },
       folders: [],
       periods: [],
+      labels: [],
     });
   });
 });
@@ -161,13 +162,15 @@ describe('applyFacets', () => {
   ];
 
   it('без выбранных фасетов возвращает всё', () => {
-    expect(applyFacets(messages, { flags: [], folderId: null, period: null }, NOW)).toHaveLength(3);
+    expect(
+      applyFacets(messages, { flags: [], folderId: null, period: null, label: null }, NOW),
+    ).toHaveLength(3);
   });
 
   it('несколько признаков объединяются по И', () => {
     const result = applyFacets(
       messages,
-      { flags: ['unread', 'attachments'], folderId: null, period: null },
+      { flags: ['unread', 'attachments'], folderId: null, period: null, label: null },
       NOW,
     );
     expect(result.map((m) => m.id)).toEqual(['1']);
@@ -176,7 +179,7 @@ describe('applyFacets', () => {
   it('папка и период сужают выборку вместе', () => {
     const result = applyFacets(
       messages,
-      { flags: [], folderId: 'inbox', period: 'month:2026-07' },
+      { flags: [], folderId: 'inbox', period: 'month:2026-07', label: null },
       NOW,
     );
     expect(result.map((m) => m.id)).toEqual(['2']);

@@ -30,7 +30,6 @@
  * историю всех остальных показателей — ровно тогда, когда она нужнее всего.
  */
 import type { Logger } from 'pino';
-import { errorInfo } from '../log.js';
 import type { AdminDb } from './db.js';
 import {
   directorySize,
@@ -42,6 +41,7 @@ import {
 import { HostMetricsReader, type HostSnapshot } from './metrics-host.js';
 import { MetricsStore, type MetricSampleInput } from './metrics-store.js';
 import type { QueueAgent } from './queue-agent.js';
+import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
 
 /** Разрез занятого места: одна строка — одна статья расхода. */
 export interface DiskSlice {
@@ -60,6 +60,15 @@ export interface QueueSnapshotBrief {
   oldestSeconds: number | null;
   /** Крупнейшие адресаты отсрочек: домен и сколько писем ему не уходит. */
   topDeferredDomains: Array<{ domain: string; count: number }>;
+  /**
+   * Очередь длиннее предела разбора — показанные числа НЕПОЛНЫ.
+   *
+   * Признак вынесен отдельным полем, а не только текстом в note: раздел
+   * «Почтовый поток» о неполноте предупреждал, а дашборд показывал ровно
+   * 20 000 как факт — то есть в самый заторный момент два раздела панели
+   * говорили администратору разное об одной и той же очереди.
+   */
+  truncated: boolean;
   note: string;
 }
 
@@ -103,6 +112,14 @@ export class MetricsCollector {
   #last: ResourceSnapshot | null = null;
   /** Каждый сотый проход чистим историю: чаще незачем, реже опасно. */
   #ticks = 0;
+  /**
+   * Сторожа повторов: проход раз в минуту, а недоступная база лежит
+   * часами. Без них одна поломка = 1440 одинаковых строк в сутки
+   * (см. repeat-log.ts). Сторожа два, потому что причины разные и
+   * глушить их надо порознь.
+   */
+  readonly #passFailures = new RepeatGuard();
+  readonly #persistFailures = new RepeatGuard();
 
   constructor(opts: MetricsCollectorOptions) {
     this.#opts = opts;
@@ -123,7 +140,7 @@ export class MetricsCollector {
     void this.runOnce().catch(() => undefined);
     this.#timer = setInterval(() => {
       void this.runOnce().catch((err: unknown) => {
-        this.#opts.logger.warn(errorInfo(err), 'Проход сборщика показателей не удался');
+        warnOnce(this.#passFailures, this.#opts.logger, err, 'Проход сборщика показателей не удался');
       });
     }, seconds * 1000);
     this.#timer.unref?.();
@@ -144,11 +161,26 @@ export class MetricsCollector {
     try {
       const snapshot = await this.collect();
       this.#last = snapshot;
-      await this.persist(snapshot).catch((err: unknown) => {
-        // Недоступная база не должна лишать дашборд текущего состояния:
-        // историю потеряем, «прямо сейчас» покажем.
-        this.#opts.logger.warn(errorInfo(err), 'Снимок показателей не записан в базу');
-      });
+      await this.persist(snapshot)
+        .then(() => {
+          // О возврате записи сообщаем один раз: без этого по журналу
+          // не понять, когда именно история снова стала полной.
+          noteRecovered(
+            this.#persistFailures,
+            this.#opts.logger,
+            'Снимки показателей снова пишутся в базу',
+          );
+        })
+        .catch((err: unknown) => {
+          // Недоступная база не должна лишать дашборд текущего состояния:
+          // историю потеряем, «прямо сейчас» покажем.
+          warnOnce(
+            this.#persistFailures,
+            this.#opts.logger,
+            err,
+            'Снимок показателей не записан в базу',
+          );
+        });
       this.#ticks += 1;
       if (this.#ticks % 100 === 1) {
         await this.#store
@@ -275,6 +307,7 @@ export class MetricsCollector {
         deferred: null,
         oldestSeconds: null,
         topDeferredDomains: [],
+        truncated: false,
         note:
           'Очередь недоступна: не настроен посредник к Postfix (QUEUE_AGENT_TOKEN). ' +
           'Сокет Docker вместо него мы не подключаем — это права root на всей машине',
@@ -291,8 +324,20 @@ export class MetricsCollector {
         if (Number.isFinite(age) && (oldest === null || age > oldest)) oldest = age;
         if (message.queueName === 'deferred') {
           deferred += 1;
+          /*
+           * Считаем ПИСЬМА, а не адресатов. Раньше письмо, адресованное трём
+           * сотрудникам одного домена, добавляло домену три — и сумма
+           * столбца «Писем» на дашборде превышала плитку «отложено» ровно на
+           * число лишних адресатов. Администратор видел «на example.com не
+           * уходит 300 писем» при 100 письмах в очереди и искал недостающие.
+           * Домены внутри одного письма при этом разные считаются каждый:
+           * письмо действительно не уходит к обоим.
+           */
+          const domains = new Set<string>();
           for (const recipient of message.recipients) {
-            const domain = recipient.address.split('@')[1]?.toLowerCase() ?? '(без домена)';
+            domains.add(recipient.address.split('@')[1]?.toLowerCase() ?? '(без домена)');
+          }
+          for (const domain of domains) {
             byDomain.set(domain, (byDomain.get(domain) ?? 0) + 1);
           }
         }
@@ -307,6 +352,7 @@ export class MetricsCollector {
         deferred,
         oldestSeconds: oldest,
         topDeferredDomains,
+        truncated: snapshot.truncated,
         note: snapshot.truncated
           ? 'Очередь длиннее предела разбора: показанное неполно'
           : 'Посредник в контейнере postfix (postqueue -j)',
@@ -318,6 +364,7 @@ export class MetricsCollector {
         deferred: null,
         oldestSeconds: null,
         topDeferredDomains: [],
+        truncated: false,
         note: `Очередь не опрошена: ${err instanceof Error ? err.message : String(err)}`,
       };
     }

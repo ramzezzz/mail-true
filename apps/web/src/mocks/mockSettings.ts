@@ -35,6 +35,8 @@ let general: GeneralSettings = {
   showSenderLogos: false,
   // Как и на сервере: отмена отправки включена, пять секунд
   undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
+  // Как и на сервере: список группируется по перепискам
+  groupByThread: true,
 };
 
 let signatureSeq = 30;

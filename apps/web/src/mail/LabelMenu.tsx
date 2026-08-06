@@ -1,0 +1,99 @@
+/**
+ * Подменю «Метки»: поставить и снять метку на одном письме или сразу
+ * на нескольких выделенных.
+ *
+ * Отдельный кусок разметки, а не пункт в каждом меню, ровно потому, что
+ * мест три: контекстное меню строки списка, меню «⋯» над открытым письмом
+ * и панель над списком в режиме выделения. Три копии одного списка меток
+ * разошлись бы на первой же правке.
+ *
+ * Меню НЕ закрывается после нажатия: человек, вешающий на письмо «оплатить»
+ * и «спросить у юриста», не должен открывать меню дважды.
+ */
+
+import { useNavigate } from 'react-router-dom';
+import { cx } from '../lib/cx';
+import { LabelPill } from './LabelPill';
+import { labelPresence, nextLabelAction, type MailLabel } from './labelsApi';
+import { useApplyLabels, useLabelsState } from './useLabels';
+import styles from './LabelMenu.module.css';
+
+/** Что нужно знать о письме, чтобы показать состояние метки. */
+export interface LabelTarget {
+  id: string;
+  labels: readonly string[];
+}
+
+export interface LabelMenuProps {
+  /** Письма, к которым относится действие: одно или всё выделение. */
+  messages: readonly LabelTarget[];
+  /** Позвать после изменения — например, чтобы закрыть родительское меню. */
+  onApplied?: (() => void) | undefined;
+}
+
+export const LABELS_SETTINGS_PATH = '/settings/labels';
+
+export function LabelMenu({ messages, onApplied }: LabelMenuProps) {
+  const navigate = useNavigate();
+  const { items } = useLabelsState();
+  const apply = useApplyLabels();
+  const ids = messages.map((m) => m.id);
+
+  const toggle = (label: MailLabel): void => {
+    const action = nextLabelAction(labelPresence(messages, label.key));
+    apply.mutate(action === 'add' ? { ids, add: [label.key] } : { ids, remove: [label.key] });
+    onApplied?.();
+  };
+
+  return (
+    <div className={styles.menu}>
+      <div className={styles.title}>
+        {messages.length > 1 ? `Метки для ${String(messages.length)} писем` : 'Метки'}
+      </div>
+
+      {items.length === 0 && (
+        <div className={styles.empty}>
+          Меток пока нет. Их заводят в настройках — там же выбирают цвет и название.
+        </div>
+      )}
+
+      {items.map((label) => {
+        const presence = labelPresence(messages, label.key);
+        return (
+          <button
+            key={label.key}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={presence === 'all' ? 'true' : presence === 'some' ? 'mixed' : 'false'}
+            className={styles.item}
+            onClick={() => toggle(label)}
+          >
+            {/*
+              Галочка — «стоит у всех», черта — «стоит у части выделения».
+              Разные ЗНАКИ, а не разные оттенки: состояние обязано читаться
+              и без различения цветов, как и сама метка.
+            */}
+            <span
+              className={cx(styles.mark, presence !== 'none' && styles.markOn)}
+              aria-hidden="true"
+            >
+              {presence === 'all' ? '✓' : presence === 'some' ? '–' : ''}
+            </span>
+            <LabelPill label={label} />
+          </button>
+        );
+      })}
+
+      <div className={styles.footer}>
+        <button
+          type="button"
+          role="menuitem"
+          className={styles.item}
+          onClick={() => void navigate(LABELS_SETTINGS_PATH)}
+        >
+          Настроить метки…
+        </button>
+      </div>
+    </div>
+  );
+}

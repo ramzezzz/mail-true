@@ -49,6 +49,7 @@ import { timeLabel } from '../lib/chart';
 import {
   DISK_SERIES,
   FLOW_SERIES,
+  HOURLY_SERIES,
   hueVar,
   QUEUE_SERIES,
   RESOURCE_SERIES,
@@ -350,7 +351,12 @@ function ResourcesSection({ hours, poll }: { hours: number; poll: number | false
                     values: points.map((p) => p.diskUsedPercent),
                   },
                 ]}
-                emptyText="Снимков за этот период ещё нет. История начинается с момента запуска сервера приложения с применённой миграцией 0010."
+                /*
+                  Имя миграции — ровно то, что лежит на диске. Раньше здесь
+                  стояло «0010», а файл называется 0011_metrics.sql: человек
+                  шёл искать в install/ файл, которого нет.
+                */
+                emptyText="Снимков за этот период ещё нет. История начинается с момента запуска сервера приложения с применённой миграцией 0011_metrics.sql."
               />
               <p className={styles.source}>{history.data?.note}</p>
             </>
@@ -540,6 +546,19 @@ function QueueCard({
   if (!queue.available) return <Notice tone="error">{queue.note}</Notice>;
   return (
     <>
+      {/*
+        Про неполноту говорим ЗДЕСЬ, а не только в «Почтовом потоке».
+        Раньше при заторе дашборд показывал предел разбора (20 000) как
+        точное число писем в очереди, а поток на том же стенде честно
+        предупреждал, что показана часть, — два раздела панели расходились
+        в показаниях ровно в тот момент, когда очередь и надо разбирать.
+      */}
+      {queue.truncated && (
+        <Notice tone="info">
+          Очередь длиннее предела разбора: числа ниже — по разобранной части, писем в
+          действительности больше.
+        </Notice>
+      )}
       <Tiles>
         <Tile value={queue.total ?? '—'} label="писем в очереди" />
         <Tile value={queue.deferred ?? '—'} label="отложено" />
@@ -614,6 +633,12 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
           : ''}
       </p>
       {mail.error && <ErrorNotice error={mail.error} />}
+      {/*
+        Раздел без своей миграции больше не падает «внутренней ошибкой» —
+        сервер объясняет, чего не хватает, и это надо показать. Пустые
+        графики ниже при этом честны: данных действительно нет.
+      */}
+      {data && !data.available && <Notice tone="info">{data.note}</Notice>}
 
       <div className={styles.gridWide}>
         <Panel title="Что происходило с письмами">
@@ -667,7 +692,10 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
               labels={data.hourly.map((h) => String(h.hour).padStart(2, '0'))}
               series={[
                 {
-                  series: seriesOf(FLOW_SERIES, 'sent'),
+                  // Ряд СВОЙ, а не 'sent' из потока: здесь считаются письма
+                  // всех состояний, и подпись «Доставлено» в подсказке
+                  // называла бы это число чужим именем.
+                  series: seriesOf(HOURLY_SERIES, 'hourlyTotal'),
                   values: data.hourly.map((h) => h.count),
                 },
               ]}

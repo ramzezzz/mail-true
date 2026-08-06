@@ -28,9 +28,9 @@
  */
 import { join } from 'node:path';
 import type { Logger } from 'pino';
-import { errorInfo } from '../log.js';
 import type { AdminDb } from './db.js';
 import { FlowStore } from './flow-store.js';
+import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
 import { LOG_FILE_NAMES, describeLogFile, readNewLines } from './log-files.js';
 import {
   QueueMetaCache,
@@ -66,6 +66,12 @@ export class FlowCollector {
   private readonly chunkBytes: number;
   private readonly store: FlowStore;
   private lastPruneAt = 0;
+  /**
+   * Заход идёт раз в 5 секунд. Недоступный журнал или упавшая база живут
+   * куда дольше, поэтому без сторожа одна неустранённая причина давала бы
+   * 17 280 одинаковых строк в сутки (см. repeat-log.ts).
+   */
+  private readonly failures = new RepeatGuard();
 
   constructor(private readonly opts: FlowCollectorOptions) {
     this.chunkBytes = opts.chunkBytes ?? 2 * 1024 * 1024;
@@ -108,8 +114,13 @@ export class FlowCollector {
     try {
       await this.collect();
       await this.maybePrune();
+      noteRecovered(
+        this.failures,
+        this.opts.logger,
+        'Сборщик истории доставки снова работает',
+      );
     } catch (err) {
-      this.opts.logger.warn(errorInfo(err), 'Сборщик истории доставки: заход не удался');
+      warnOnce(this.failures, this.opts.logger, err, 'Сборщик истории доставки: заход не удался');
     } finally {
       this.running = false;
     }

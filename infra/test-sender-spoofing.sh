@@ -46,7 +46,7 @@ bash "$HERE/scripts/create-mailbox.sh" "$USER_B" "$PASS_B" >/dev/null 2>&1
 # Первая версия проверки этого не знала, вставка падала, и проверка алиасов
 # показывала «дефект», которого нет. Ошибку скрыло перенаправление вывода —
 # поэтому здесь оно снято.
-DOMAIN_ID="$(sql "SELECT id FROM virtual_domains WHERE name='mail.local' LIMIT 1;" | tr -d '' | head -1)"
+DOMAIN_ID="$(sql "SELECT id FROM virtual_domains WHERE name='mail.local' LIMIT 1;" | tr -d '\r' | head -1)"
 if [ -z "$DOMAIN_ID" ]; then
     fail "не найден домен mail.local — алиасы проверить не на чем"
 else

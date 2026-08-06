@@ -70,6 +70,14 @@ interface SettingsRow extends QueryResultRow {
    * почта обязана вести себя ровно как до появления возможности.
    */
   undo_send_seconds?: number | null;
+  /**
+   * Добавлена миграцией 0019 и тоже необязательная. Отсутствие колонки
+   * (миграцию не применили) означает ВКЛЮЧЕНО — то же, что и в самой
+   * миграции: список должен выглядеть одинаково до и после её применения,
+   * иначе одно только обновление базы молча переставляло бы человеку
+   * привычный вид почты.
+   */
+  threaded_list?: boolean | null;
   autoreply_enabled: boolean;
   autoreply_subject: string | null;
   autoreply_text: string;
@@ -185,6 +193,9 @@ function toSettings(row: SettingsRow): MailSettings {
     // `?? 0` — поведение до миграции 0016: письмо уходит сразу. Само же
     // умолчание возможности (пять секунд) проставляет колонке миграция.
     undoSendSeconds: normalizeUndoSeconds(row.undo_send_seconds ?? 0),
+    // `?? true` — и умолчание, и поведение до миграции 0019: список
+    // группируется, как у mail.ru.
+    threadedList: row.threaded_list ?? true,
     autoReply: {
       enabled: row.autoreply_enabled,
       subject: row.autoreply_subject,
@@ -326,6 +337,7 @@ export class SettingsDb {
       // что интерфейс умеет показать обратно
       put('undo_send_seconds', normalizeUndoSeconds(patch.undoSendSeconds));
     }
+    if (patch.threadedList !== undefined) put('threaded_list', patch.threadedList);
     if (patch.autoReply) {
       const ar = patch.autoReply;
       if (ar.enabled !== undefined) put('autoreply_enabled', ar.enabled);

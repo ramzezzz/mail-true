@@ -26,7 +26,18 @@ import {
 } from '../api/queries';
 import { MESSAGES_PAGE_SIZE } from '../api/client';
 import { useUiStore } from '../app/store';
-import { Button, Dropdown, IconButton, MenuItem, Spinner, Tooltip } from '../components';
+import {
+  Button,
+  Dropdown,
+  IconButton,
+  MenuItem,
+  MenuSeparator,
+  Spinner,
+  Tooltip,
+} from '../components';
+import { LabelMenu } from '../mail/LabelMenu';
+import { LabelPills } from '../mail/LabelPill';
+import { useApplyLabels, useLabelsState } from '../mail/useLabels';
 import { isReliable, messageCategory } from '../lib/categories';
 import { forwardInit, quoteHtml, replyInit } from '../lib/composeFromMessage';
 import { errorText, isNotFoundError } from '../lib/errorText';
@@ -145,6 +156,11 @@ export function MessagePage() {
   const { data: folders } = useFolders();
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
+  /* Свои метки: справочник (имена и цвета) и простановка. Оба хука стоят
+     здесь, до первого раннего выхода, — иначе порядок хуков менялся бы
+     между «письмо загружается» и «письмо показано». */
+  const { available: labelsAvailable, items: labelDictionary } = useLabelsState();
+  const applyLabels = useApplyLabels();
   const openCompose = useUiStore((s) => s.openCompose);
   const setVisitedMessage = useUiStore((s) => s.setVisitedMessage);
   const readReceipt = useSendReadReceipt(id);
@@ -577,6 +593,19 @@ export function MessagePage() {
           <MenuItem before={<IconSpam />} hint="Shift+J" onClick={() => moveTo('spam')}>
             Спам
           </MenuItem>
+          {/*
+            Метки прямо в меню «⋯», а не отдельным видом меню: список
+            короткий, а метки вешают по нескольку сразу — переход
+            туда-обратно за каждой стоил бы двух лишних нажатий.
+            Меню не закрывается по нажатию на метку намеренно.
+          */}
+          {labelsAvailable && (
+            <>
+              <MenuSeparator />
+              <LabelMenu messages={[{ id: message.id, labels: message.labels }]} />
+              <MenuSeparator />
+            </>
+          )}
           <MenuItem before={<IconPrint />} hint="Ctrl+P" onClick={() => window.print()}>
             Распечатать
           </MenuItem>
@@ -788,6 +817,18 @@ export function MessagePage() {
               {category.name}
             </span>
           )}
+          {/*
+            Свои метки письма — цветными пилюлями С НАЗВАНИЕМ, рядом с
+            темой. Крестик на пилюле снимает метку прямо отсюда: снять
+            метку — самое частое действие с ней («оплатил»), и уводить
+            за этим в меню значило бы прятать его на два нажатия.
+          */}
+          <LabelPills
+            keywords={message.labels}
+            dictionary={labelDictionary}
+            large
+            onRemove={(key) => applyLabels.mutate({ ids: [message.id], remove: [key] })}
+          />
         </div>
 
         {/* Блок отправителя */}

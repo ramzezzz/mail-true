@@ -14,11 +14,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cx } from '../lib/cx';
 import { FLAG_FACET_TITLES, type SearchFlagFacet } from '../lib/searchFacets';
 import { IconAttach, IconFlag, IconFolder, IconMailUnread } from '../mail/icons';
+import { LabelPill } from '../mail/LabelPill';
+import { useLabelsState } from '../mail/useLabels';
 import {
   buildSearchUrl,
   parseSearchParams,
   toggleFlagFacet,
   toggleFolderFacet,
+  toggleLabelFacet,
   togglePeriodFacet,
 } from './searchParams';
 import { useSearchContext } from './SearchContext';
@@ -37,6 +40,17 @@ export function SearchFacets() {
   const navigate = useNavigate();
   const { aggregates, loading } = useSearchContext();
   const state = parseSearchParams(params);
+  /*
+   * Справочник меток. Без него отбор по метке не показывается вовсе:
+   * агрегаты знают только ключевое слово (`mt-oplatit`), а строка фильтра
+   * с таким текстом ничего человеку не говорит. Пока справочник не приехал
+   * (или возможность выключена), группы «Метки» в колонке просто нет.
+   */
+  const { available: labelsAvailable, items: labelDictionary } = useLabelsState();
+  const labelFacets = (aggregates?.labels ?? []).flatMap((facet) => {
+    const known = labelDictionary.find((l) => l.key.toLowerCase() === facet.id.toLowerCase());
+    return known ? [{ ...facet, label: known }] : [];
+  });
 
   const go = (next: ReturnType<typeof parseSearchParams>) => {
     void navigate(buildSearchUrl(next));
@@ -69,6 +83,36 @@ export function SearchFacets() {
           );
         })}
       </div>
+
+      {/* Свои метки. Группы нет, если меток нет среди совпадений: пустой
+          заголовок в колонке фильтров занимает место и ничего не значит. */}
+      {labelsAvailable && labelFacets.length > 0 && (
+        <>
+          <div className={styles.groupTitle}>Метки</div>
+          <div className={styles.group}>
+            {labelFacets.map((facet) => {
+              const active = state.facets.label === facet.id;
+              return (
+                <button
+                  key={facet.id}
+                  type="button"
+                  className={cx(styles.item, active && styles.active)}
+                  aria-pressed={active}
+                  onClick={() => go(toggleLabelFacet(state, facet.id))}
+                >
+                  {/* Пилюля целиком, а не кружок: название рядом с цветом
+                      обязательно и здесь — иначе строка фильтра ничем не
+                      отличается от соседней для того, кто цвет не видит. */}
+                  <span className={styles.itemName}>
+                    <LabelPill label={facet.label} />
+                  </span>
+                  <span className={styles.counter}>{facet.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* Папки со счётчиками совпадений */}
       <div className={styles.groupTitle}>Все папки</div>

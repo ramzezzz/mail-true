@@ -9,7 +9,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { registerErrorHandling } from '../http-errors.js';
 import type { AppDeps } from '../types.js';
-import { messageRoutes } from './messages.js';
+import { listQuerySchema, messageRoutes } from './messages.js';
 
 interface FolderSpec {
   path: string;
@@ -521,4 +521,33 @@ test('без базы «Отложить» недоступно, и интерф
   } finally {
     await app.close();
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Разбор строки запроса списка                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `threaded=false` означает «не группировать» — и это пришлось написать
+ * отдельной проверкой, потому что раньше означало обратное.
+ *
+ * В схеме стояло `z.coerce.boolean()`, то есть `Boolean(значение)`. Из
+ * строки запроса приходит СТРОКА, а непустая строка «false» — истина.
+ * Пока признак принимался и молча терялся, ошибка ничего не портила; как
+ * только группировка заработала, выключить её стало нельзя. Найдено на
+ * живом стенде: список без группировки отдавал 480 строк вместо 483 писем.
+ */
+test('threaded: истина — только «1» и «true», всё прочее — ложь', () => {
+  const parse = (threaded?: string): boolean =>
+    listQuerySchema.parse(threaded === undefined ? {} : { threaded }).threaded;
+
+  assert.equal(parse('1'), true);
+  assert.equal(parse('true'), true);
+  // Обратный ход — то, ради чего проверка и написана
+  assert.equal(parse('0'), false);
+  assert.equal(parse('false'), false);
+  assert.equal(parse(''), false);
+  assert.equal(parse('нет'), false);
+  // Признака нет вовсе — группировки нет: старый клиент ведёт себя как раньше
+  assert.equal(parse(), false);
 });

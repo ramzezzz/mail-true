@@ -48,6 +48,14 @@ import { usePhone } from '../lib/useMediaQuery';
 import { IconArchive, IconAttach, IconClock, IconFlagFilled, IconShield, IconTrash } from './icons';
 import styles from './MessageList.module.css';
 import { SenderAvatar } from './SenderAvatar';
+import {
+  correspondentLabel,
+  displayName,
+  isRowFlagged,
+  isRowUnread,
+  rowHasAttachments,
+  rowThreadCount,
+} from './threadList';
 
 export type ListRow =
   | { type: 'header'; label: string }
@@ -67,6 +75,21 @@ export const RETURNED_GROUP_LABEL = 'Вернулись к вам';
  *
  * Группа исчезает сама: пометку возврата снимает сервер, как только письмо
  * прочитано (apps/api/src/routes/messages.ts).
+ */
+/*
+ * Строка списка — это ПЕРЕПИСКА, когда сервер прислал её сводку
+ * (`message.thread`), и одно письмо, когда не прислал. Разницы в раскладке
+ * между ними нет: в строке всё равно показывается последнее письмо
+ * разговора — его тема, его дата, его начало, — а от переписки берутся
+ * счётчик, участники и признаки «есть непрочитанное», «есть флажок»,
+ * «есть вложение».
+ *
+ * Отсюда важное для виртуализации следствие: высота строки от группировки
+ * НЕ зависит и остаётся той же (см. ROW_HEIGHT ниже). Так же устроен и
+ * mail.ru — строка с пилюлей «3» ровно такой же высоты, как без неё.
+ * Держать это правилом дешевле, чем измерять каждую строку: как только
+ * высоты разойдутся, `estimateSize` начнёт врать, и список поедет —
+ * причём тем сильнее, чем дальше пролистали.
  */
 export function flattenRows(messages: readonly MessageSummary[], now?: Date): ListRow[] {
   const rows: ListRow[] = [];
@@ -95,6 +118,13 @@ const HEADER_HEIGHT = 40;
  *   телефон      — 84px: 20 (отправитель) + 20 (тема) + 18 (превью)
  *                  + 20 полей и зазоров.
  * Компактный режим («pony mode») ужимает и то и другое.
+ *
+ * Строка ПЕРЕПИСКИ той же высоты, и это не совпадение, а требование к
+ * вёрстке. Всё, что добавляет группировка, — пилюля со счётчиком (24px
+ * внутри 48px) и список участников в колонке отправителя, которая и без
+ * того обрезается многоточием в одну строку. Ни то, ни другое строку не
+ * растит, поэтому число здесь остаётся одно на оба вида строк.
+ * Проверено измерением: tests/threadList.test.tsx.
  */
 export const ROW_HEIGHT = {
   desktop: { normal: 48, compact: 40 },
@@ -176,12 +206,14 @@ export interface MessageListProps {
   snoozeLabels?: ReadonlyMap<string, string> | undefined;
 }
 
+/**
+ * Имя для КРУЖКА строки. Кружок один, а участников переписки может быть
+ * несколько, поэтому он остаётся кружком последнего письма — того самого,
+ * которое строка и показывает. В колонке отправителя рядом при этом стоят
+ * все участники (correspondentLabel).
+ */
 function senderName(m: MessageSummary): string {
-  // Именно проверка на непустоту, а не `??`: у писем без отображаемого имени
-  // в заголовке приходит пустая строка, и оператор `??` её пропускал —
-  // в списке колонка отправителя оставалась пустой.
-  const name = m.from.name?.trim();
-  return name ? name : m.from.address;
+  return displayName(m.from);
 }
 
 /* Цвет кружка и буква в нём переехали в SenderAvatar: тот же кружок теперь
@@ -228,7 +260,9 @@ function Row({
   const toggleSelected = useUiStore((s) => s.toggleSelected);
   const selectedIds = useUiStore((s) => s.selectedIds);
   const navigate = useNavigate();
-  const unread = !message.flags.seen;
+  // Непрочитанность, флажок и скрепка берутся по ВСЕЙ переписке, а не по
+  // последнему письму: строка представляет разговор целиком (см. threadList).
+  const unread = isRowUnread(message);
   const category = messageCategory(message.labels);
   const reliable = isReliable(message.labels);
 
@@ -390,18 +424,25 @@ function Row({
             toggleSelected(message.id);
           }}
         >
-          <Checkbox checked={selection.selected} readOnly aria-label="Выбрать письмо" />
+          {/* Строка-переписка выделяется целиком, и говорить об этом надо
+              вслух: незрячий человек иначе не отличит выбор одного письма
+              от выбора разговора из шести. */}
+          <Checkbox
+            checked={selection.selected}
+            readOnly
+            aria-label={threadCount > 1 ? 'Выбрать переписку' : 'Выбрать письмо'}
+          />
         </span>
       </span>
 
-      {/* Отправитель, 22% */}
+      {/* Отправитель, 22%. У переписки здесь её участники: «Иван, Пётр» */}
       <span className={styles.correspondent}>
-        <span className={styles.correspondentName}>{senderName(message)}</span>
+        <span className={styles.correspondentName}>{correspondentLabel(message)}</span>
       </span>
 
       {/* Флажок «важное», 24px — красная закладка-лента */}
       <span className={styles.flagCell}>
-        {message.flags.flagged && (
+        {isRowFlagged(message) && (
           <span className={styles.flagIcon} title="Важное">
             <IconFlagFilled />
           </span>
@@ -447,7 +488,7 @@ function Row({
             title={category.name}
           />
         )}
-        {message.hasAttachments && (
+        {rowHasAttachments(message) && (
           <span className={styles.attachIcon} title="С вложением">
             <IconAttach />
           </span>
@@ -518,7 +559,14 @@ export function MessageList({
   const rows = useMemo(() => flattenRows(messages), [messages]);
   const leavingSet = useMemo(() => new Set(leavingIds ?? []), [leavingIds]);
 
-  /** Счётчик писем в цепочке в пределах загруженного списка. */
+  /**
+   * Запасной счётчик писем в цепочке — по загруженному списку.
+   *
+   * Нужен только там, где сервер сводку переписки не прислал: список без
+   * группировки и папки, где она не применяется. Как только сводка есть,
+   * счётчик берётся из неё (rowThreadCount): она знает про всю папку,
+   * а этот — только про загруженные страницы.
+   */
   const threadCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const m of messages) counts.set(m.threadId, (counts.get(m.threadId) ?? 0) + 1);
@@ -751,7 +799,10 @@ export function MessageList({
                     leaving={leavingSet.has(row.message.id)}
                     tabbable={row.message.id === tabbableId}
                     rowRef={row.message.id === focusedId ? focusedRowRef : undefined}
-                    threadCount={threadCounts.get(row.message.threadId) ?? 1}
+                    threadCount={rowThreadCount(
+                      row.message,
+                      threadCounts.get(row.message.threadId) ?? 1,
+                    )}
                     snoozeLabel={snoozeLabels?.get(row.message.id)}
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}

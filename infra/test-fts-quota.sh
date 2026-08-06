@@ -18,7 +18,7 @@ set -uo pipefail
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml")
-set -a; . "$INFRA_DIR/.env"; set +a
+set -a; . <(tr -d '\r' < "$INFRA_DIR/.env"); set +a
 
 # docker exec с аргументами-путями: под Git Bash MSYS иначе ломает /tmp/... в C:\...
 dex() { MSYS_NO_PATHCONV=1 docker exec "$@"; }

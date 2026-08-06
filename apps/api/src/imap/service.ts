@@ -7,13 +7,27 @@ import type {
   MessageStructureObject,
   SearchObject,
 } from 'imapflow';
-import type { Folder, MessageFilter, MessageListPage, MessageSummary } from '@mail-true/shared';
+import type {
+  Folder,
+  MailAddress,
+  MessageFilter,
+  MessageListPage,
+  MessageSummary,
+  ThreadSummary,
+} from '@mail-true/shared';
 import { NotFoundError, BadRequestError, UpstreamUnavailableError } from '../errors.js';
 import { mapFolders, findFolderById, type RawFolderInfo } from '../mail/folders.js';
-import { buildSummary } from '../mail/summary.js';
+import { buildSummary, mapAddress } from '../mail/summary.js';
 import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText, makeSnippet } from '../mail/text.js';
 import { parseSearch } from '../mail/search-query.js';
+import {
+  THREAD_ALGORITHM,
+  THREAD_CAPABILITY,
+  buildThreadRows,
+  parseThreadGroups,
+  threadingAllowed,
+} from '../mail/threads.js';
 
 /** Загружает список папок с счётчиками. */
 export async function listFolders(client: ImapFlow): Promise<Folder[]> {
@@ -301,6 +315,115 @@ export async function fetchSnippet(client: ImapFlow, msg: FetchMessageObject): P
   }
 }
 
+/**
+ * То немногое, что нужно от соединения для команды THREAD.
+ *
+ * Своего метода для THREAD у imapflow нет (в lib/commands/ его просто не
+ * существует), но есть `exec` — отправка произвольной команды с разбором
+ * нетегированных ответов. В объявлениях типов библиотеки `exec` не описан,
+ * поэтому здесь описано ровно то, чем мы пользуемся: узкий интерфейс вместо
+ * `any` по всему файлу.
+ */
+interface ThreadCapableClient {
+  capabilities: Map<string, boolean | number>;
+  exec(
+    command: string,
+    attributes: Array<{ type: string; value: string }>,
+    options: {
+      untagged: Record<string, (untagged: { attributes?: unknown }) => Promise<void>>;
+    },
+  ): Promise<{ next(): void }>;
+}
+
+/**
+ * Просит почтовый сервер собрать переписки во всей открытой папке.
+ *
+ * `null` — сервер не умеет THREAD=REFS. Это не ошибка и не повод отказать
+ * в списке: письма никуда не делись, просто они не сгруппированы. Дефект
+ * «список не открывается» был бы хуже дефекта «список не сгруппирован» на
+ * порядок, а разница видна человеку сразу и без сообщений.
+ *
+ * А вот ОТКАЗ самой команды наружу выпускается: это неисправность сервера
+ * (обычно испорченный индекс), и молча показывать вместо переписок плоский
+ * список значило бы прятать поломку — ровно та ошибка, которую здесь уже
+ * один раз допустили с поиском (см. searchUids).
+ *
+ * Почему `ALL`, а не наши условия поиска: ответ THREAD по всей папке
+ * Dovecot считает по индексу и отдаёт быстро (замер: 478 писем — 9 мс),
+ * а пересечение с найденным делается на нашей стороне за один проход
+ * (buildThreadRows). Две команды с раздельно составленными условиями рано
+ * или поздно разошлись бы между собой — и разошлись бы молча.
+ */
+export async function fetchThreadGroups(client: ImapFlow): Promise<number[][] | null> {
+  const capable = client as unknown as ThreadCapableClient;
+  if (!capable.capabilities?.has(THREAD_CAPABILITY)) return null;
+
+  const groups: number[][] = [];
+  try {
+    const response = await capable.exec(
+      'UID THREAD',
+      [
+        { type: 'ATOM', value: THREAD_ALGORITHM },
+        // Кодировка запроса. У нас условие `ALL`, строк в нём нет, но
+        // аргумент по RFC 5256 обязателен.
+        { type: 'ATOM', value: 'UTF-8' },
+        { type: 'ATOM', value: 'ALL' },
+      ],
+      {
+        untagged: {
+          THREAD: async (untagged) => {
+            for (const group of parseThreadGroups(untagged.attributes)) groups.push(group);
+          },
+        },
+      },
+    );
+    // Разбор ответа держит поток: пока не отпустили, сервер не читается
+    // дальше. Ровно так же поступают собственные команды imapflow.
+    response.next();
+  } catch {
+    throw new UpstreamUnavailableError(
+      'Почтовый сервер не смог собрать переписки. Повторите попытку позже.',
+    );
+  }
+  return groups;
+}
+
+/** Собирает сводку переписки по её письмам (старые первыми). */
+export function summarizeThread(
+  folderId: string,
+  messages: readonly FetchMessageObject[],
+): ThreadSummary {
+  const participants: MailAddress[] = [];
+  const seenAddresses = new Set<string>();
+  let unreadCount = 0;
+  let flagged = false;
+  let hasAttachments = false;
+
+  for (const msg of messages) {
+    if (!msg.flags?.has('\\Seen')) unreadCount += 1;
+    if (msg.flags?.has('\\Flagged')) flagged = true;
+    if (hasRealAttachments(msg.bodyStructure)) hasAttachments = true;
+
+    const from = mapAddress(msg.envelope?.from?.[0]);
+    // Один и тот же человек в переписке пишет много раз — в колонке
+    // отправителя он должен стоять один раз и на своём месте по времени.
+    const key = from.address.toLowerCase();
+    if (from.address && !seenAddresses.has(key)) {
+      seenAddresses.add(key);
+      participants.push(from);
+    }
+  }
+
+  return {
+    messageIds: messages.map((msg) => `${folderId}:${String(msg.uid)}`),
+    count: messages.length,
+    unreadCount,
+    flagged,
+    hasAttachments,
+    participants,
+  };
+}
+
 export interface ListMessagesArgs {
   folder: Folder;
   offset: number;
@@ -309,6 +432,63 @@ export interface ListMessagesArgs {
   search?: string | undefined;
   /** Загружать ли сниппеты (дороже на порядок). */
   withSnippets?: boolean;
+  /**
+   * Группировать письма в переписки: строка списка — одна на разговор.
+   *
+   * Просьба, а не приказ: в папках, где переписка мешает искать письмо
+   * (черновики, корзина, спам, отложенные), сервер её не применит —
+   * см. threadingAllowed. Решение принимается здесь намеренно, чтобы
+   * недостижимого черновика нельзя было получить ни от какого клиента.
+   */
+  threaded?: boolean;
+}
+
+/**
+ * Поля письма, которых хватает на строку списка.
+ *
+ * Один набор на оба пути — плоский список и список переписок: строка
+ * переписки собирается из тех же данных, что и строка письма, и разойтись
+ * этим двум наборам нельзя (иначе, например, скрепка у переписки считалась
+ * бы иначе, чем у отдельного письма).
+ */
+const LIST_FETCH_FIELDS = {
+  uid: true,
+  envelope: true,
+  flags: true,
+  bodyStructure: true,
+  size: true,
+  internalDate: true,
+  // Сырой заголовок темы — чтобы восстановить её, если отправитель
+  // прислал восьмибитные байты без кодирования по RFC 2047 (старые
+  // почтовые программы так делают до сих пор). Стоит несколько
+  // десятков байт на письмо; см. mail/header-charset.ts.
+  // Authentication-Results — результат проверки подлинности
+  // отправителя, вписанный НАШИМ сервером при приёме. Нужен, чтобы
+  // решить, можно ли показать в кружке логотип домена: логотип
+  // читается как знак подлинности, и рядом с непроверенным письмом
+  // он опаснее, чем его отсутствие (см. mail/sender-auth.ts).
+  // Стоит ещё сотню байт на письмо и ни одного лишнего оборота
+  // к серверу: заголовок едет тем же ответом, что и тема.
+  headers: ['subject', 'authentication-results'],
+};
+
+/**
+ * Забирает письма страницы по номерам.
+ *
+ * Номера разбиваются на несколько команд (chunkUidSets): страница переписок
+ * — это не двадцать пять номеров, а все письма двадцати пяти разговоров,
+ * и одной строкой они могут не поместиться в предел длины команды IMAP.
+ */
+async function fetchListMessages(
+  client: ImapFlow,
+  uids: readonly number[],
+): Promise<Map<number, FetchMessageObject>> {
+  const byUid = new Map<number, FetchMessageObject>();
+  for (const range of chunkUidSets([...uids])) {
+    const fetched = await client.fetchAll(range, LIST_FETCH_FIELDS, { uid: true });
+    for (const msg of fetched) byUid.set(msg.uid, msg);
+  }
+  return byUid;
 }
 
 /** Постраничный список писем в папке (новые первыми). */
@@ -346,30 +526,57 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
       uids = uids.filter((uid) => kept.has(uid));
     }
 
+    /*
+     * Группировка спрашивается у почтового сервера ОДИН раз на запрос
+     * списка и только когда её и просили, и разрешает папка. Пустой ответ
+     * (`null`) означает «сервер не умеет» — дальше идёт обычный плоский
+     * путь, тот же самый, что и раньше.
+     */
+    const groups =
+      args.threaded === true && threadingAllowed(folder.role)
+        ? await fetchThreadGroups(client)
+        : null;
+
+    if (groups) {
+      const rows = buildThreadRows(groups, uids);
+      const pageRows = rows.slice(offset, offset + limit);
+      const fetched = await fetchListMessages(client, pageRows.flat());
+      const items: MessageSummary[] = [];
+
+      for (const row of pageRows) {
+        const messages = row
+          .map((uid) => fetched.get(uid))
+          .filter((msg): msg is FetchMessageObject => msg !== undefined);
+        // Письмо могли удалить между поиском и выборкой. Строка без единого
+        // письма — это не пустая строка, это отсутствие строки.
+        const latest = messages[messages.length - 1];
+        if (!latest) continue;
+        // Сниппет — только у письма, которое видно в строке. Остальные
+        // письма переписки в строке не показаны, и качать их начало
+        // означало бы платить за то, чего никто не увидит.
+        const snippet = withSnippets ? await fetchSnippet(client, latest) : '';
+        items.push({
+          ...buildSummary({
+            folderId: folder.id,
+            msg: latest,
+            snippet,
+            rawHeaders: latest.headers,
+          }),
+          thread: summarizeThread(folder.id, messages),
+        });
+      }
+
+      // `total` — число ПЕРЕПИСОК, а не писем: это то, сколько строк
+      // покажет список. Иначе подгрузка следующих страниц считала бы
+      // остаток по чужой единице измерения и не остановилась бы вовремя.
+      return { items, total: rows.length, offset, limit };
+    }
+
     const pageUids = uids.slice(offset, offset + limit);
     const items: MessageSummary[] = [];
 
     if (pageUids.length > 0) {
-      const fetched = await client.fetchAll(pageUids, {
-        uid: true,
-        envelope: true,
-        flags: true,
-        bodyStructure: true,
-        size: true,
-        internalDate: true,
-        // Сырой заголовок темы — чтобы восстановить её, если отправитель
-        // прислал восьмибитные байты без кодирования по RFC 2047 (старые
-        // почтовые программы так делают до сих пор). Стоит несколько
-        // десятков байт на письмо; см. mail/header-charset.ts.
-        // Authentication-Results — результат проверки подлинности
-        // отправителя, вписанный НАШИМ сервером при приёме. Нужен, чтобы
-        // решить, можно ли показать в кружке логотип домена: логотип
-        // читается как знак подлинности, и рядом с непроверенным письмом
-        // он опаснее, чем его отсутствие (см. mail/sender-auth.ts).
-        // Стоит ещё сотню байт на письмо и ни одного лишнего оборота
-        // к серверу: заголовок едет тем же ответом, что и тема.
-        headers: ['subject', 'authentication-results'],
-      }, { uid: true });
+      const fetched = [...(await fetchListMessages(client, pageUids)).values()];
       fetched.sort((a, b) => b.uid - a.uid);
       for (const msg of fetched) {
         const snippet = withSnippets ? await fetchSnippet(client, msg) : '';

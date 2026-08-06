@@ -16,7 +16,7 @@
  * открытием дашборда.
  *
  * Поэтому всё считается ГРУППИРОВКОЙ на стороне базы, а окно времени
- * сужается индексом. Под эти запросы в миграции 0010 заведён покрывающий
+ * сужается индексом. Под эти запросы в миграции 0011_metrics.sql заведён покрывающий
  * индекс idx_mail_flow_agg: агрегат считается по индексу, не заглядывая
  * в таблицу вовсе. Замерено на 300 000 строк, окно шесть часов (75 000
  * строк): 17–19 мс с ним против 34–48 мс без него, Heap Fetches: 0.
@@ -184,10 +184,34 @@ const SPAM_REASON_SQL = `reason ~* '(spam|rspamd|gtube|blocked using|dnsbl|spamh
 export class MetricsStore {
   constructor(private readonly db: AdminDb) {}
 
-  /** Применена ли миграция 0010 (без неё истории показателей нет). */
+  /**
+   * Применена ли миграция 0011_metrics.sql (без неё истории показателей нет).
+   *
+   * Номер здесь и в тексте для человека (routes/overview.ts) обязан быть
+   * ОДИН. Раньше здесь стояло «0010», в панели — «миграция 0010», а файл
+   * называется 0011_metrics.sql: администратор получал имя файла, которого
+   * нет, и искал его в install/.
+   */
   async schemaReady(): Promise<boolean> {
     const row = await this.db.one<{ ok: boolean }>(
       `SELECT to_regclass('public.server_metric_samples') IS NOT NULL AS ok`,
+    );
+    return row?.ok === true;
+  }
+
+  /**
+   * Применена ли миграция 0007_mail_flow.sql — та, где живёт разобранный
+   * почтовый журнал.
+   *
+   * Проверка отдельная от schemaReady: таблицы приезжают РАЗНЫМИ миграциями,
+   * и раздел «Почтовый поток» дашборда без 0007 падал сырой ошибкой SQL,
+   * то есть «Внутренняя ошибка сервера» на весь экран, — при том что
+   * соседний график ресурсов в такой же ситуации честно объясняет, чего
+   * не хватает.
+   */
+  async flowSchemaReady(): Promise<boolean> {
+    const row = await this.db.one<{ ok: boolean }>(
+      `SELECT to_regclass('public.mail_flow_events') IS NOT NULL AS ok`,
     );
     return row?.ok === true;
   }

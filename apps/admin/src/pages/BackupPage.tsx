@@ -268,6 +268,14 @@ export function BackupPage() {
                 .join('; ') || 'изменений не потребовалось'}
             </Notice>
             {result.note && <Notice tone="info">{result.note}</Notice>}
+            {result.brandingError && (
+              <Notice tone="error">
+                Всё перечисленное выше восстановлено, а оформление входа — нет:{' '}
+                {result.brandingError}. Логотип и подписи остались прежними; повторять
+                восстановление целиком ради них не нужно, задайте их в разделе «Оформление
+                входа».
+              </Notice>
+            )}
             {result.sieve.errors.length > 0 && (
               <Notice tone="error">
                 Правила восстановлены в базе, но файл правил не переписан у:{' '}

@@ -255,6 +255,9 @@ export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
           sections: sections.join(','),
           applied: outcome.applied as unknown as Record<string, unknown>,
           sieveErrors: sieveErrors.length,
+          // Отказ оформления попадает в журнал вместе с остальным: иначе
+          // из записи не понять, полным ли было восстановление.
+          brandingError: outcome.brandingError ?? '',
         },
       });
 
@@ -266,6 +269,12 @@ export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
           resynced: outcome.resyncSieve.length - sieveErrors.length,
           errors: sieveErrors,
         },
+        /**
+         * Оформление применяется последним и вне транзакции. Его отказ
+         * больше не роняет ответ: всё остальное уже записано, и человек
+         * должен увидеть ЧТО именно доехало, а не «внутреннюю ошибку».
+         */
+        brandingError: outcome.brandingError,
         /**
          * Пароли администраторов только что могли смениться — сессия
          * при этом остаётся действующей, и человек об этом должен узнать

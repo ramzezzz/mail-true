@@ -93,8 +93,17 @@ fi
 dc down --volumes --remove-orphans || warn "docker compose down завершился с ошибкой"
 ok "контейнеры и тома удалены"
 
-# Тома, которые могли остаться от прошлых запусков без переопределения
-for vol in vmail pgdata redisdata mailindex rspamd-data api-uploads clamav-db; do
+# Тома, которые могли остаться от прошлых запусков без переопределения.
+#
+# Список берём ИЗ docker-compose.yml, а не из перечня здесь. Перечень тут
+# уже отстал от стека: в нём не было ни очереди Postfix (postfix-spool), ни
+# логотипа страниц входа (api-branding), ни журналов (maillogs) — то есть
+# «полное удаление» оставляло на машине данные, о которых человеку сказали,
+# что их больше нет. Ровно на этом же расхождении списков однажды потеряли
+# очередь в резервной копии.
+COMPOSE_VOLUMES="$(sed -n '/^volumes:/,$p' "$COMPOSE_FILE" |
+                   sed -n 's/^  \([a-z0-9-]*\):[[:space:]]*$/\1/p')"
+for vol in $COMPOSE_VOLUMES; do
     if docker volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1; then
         if docker volume rm "${PROJECT}_${vol}" >/dev/null 2>&1; then
             ok "том ${PROJECT}_${vol} удалён"

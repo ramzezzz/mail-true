@@ -314,6 +314,36 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
   app.get('/overview/mail', { preHandler: requireAdmin(app, 'overview.read') }, async (req) => {
     const { from, to, hours } = windowOf((req.query as Record<string, unknown>).hours);
     const step = bucketSeconds(hours * 3600, 300);
+    /*
+     * Без таблицы разобранного журнала все восемь запросов ниже падают
+     * сырой ошибкой SQL, и человек получает «Внутренняя ошибка сервера» на
+     * весь раздел. Соседний график ресурсов в такой же ситуации объясняет,
+     * какой миграции не хватает, — здесь должно быть так же.
+     */
+    if (!(await store.flowSchemaReady())) {
+      return {
+        available: false,
+        note:
+          'Почтовый поток недоступен: не применена миграция 0007_mail_flow.sql. ' +
+          'Остальные разделы дашборда работают и без неё',
+        hours,
+        stepSeconds: step,
+        buckets: [],
+        totals: {},
+        byDirection: { in: 0, out: 0, unknown: 0 },
+        spamRejected: 0,
+        spamNote: '',
+        rejectReasons: [],
+        deferReasons: [],
+        sizes: { messages: 0, totalBytes: 0, avgBytes: null, medianBytes: null, maxBytes: null },
+        hourly: Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 })),
+        historyStartsAt: null,
+        historyEndsAt: null,
+        mailboxesTotal: 0,
+        mailboxesActive: 0,
+        activityNote: '',
+      };
+    }
     // Пять сводок разом: они читают один и тот же индекс по одному и тому
     // же окну, и последовательное выполнение просто складывало бы задержки.
     const [buckets, totals, rejectReasons, deferReasons, sizes, hourly, edges, activity] =
@@ -328,6 +358,10 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
         store.activityCounts(from, to),
       ]);
     return {
+      // Признак «раздел доступен» есть в ОБОИХ ответах: без него панели
+      // пришлось бы угадывать по составу полей, доехали данные или нет.
+      available: true,
+      note: '',
       hours,
       stepSeconds: step,
       buckets,

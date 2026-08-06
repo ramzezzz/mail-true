@@ -308,6 +308,18 @@ export interface RestoreOutcome {
   applied: Record<string, { created: number; updated: number }>;
   /** Ящики, чей файл правил нужно пересобрать (делает вызывающий). */
   resyncSieve: string[];
+  /**
+   * Почему не применилось оформление; null — применилось или его не просили.
+   *
+   * Отказ здесь НЕ бросается наружу, и это принципиально. Оформление
+   * применяется последним и вне транзакции, то есть к этому моменту пароли
+   * ящиков и учётные записи администраторов уже записаны. Брошенное
+   * исключение уводило маршрут мимо записи в журнал аудита — и
+   * восстановление, сменившее пароль администратора, не оставляло следа
+   * вообще. Логотип из копии не стоит потерянной записи аудита: о нём
+   * сообщаем текстом, ровно как о непересобранных правилах Sieve.
+   */
+  brandingError: string | null;
 }
 
 /**
@@ -498,12 +510,19 @@ export async function applyRestore(
   /* --- оформление --- */
   // Вне транзакции: это файлы в томе, а не строки в базе. Порядок такой,
   // чтобы битый логотип из копии не откатывал уже применённые настройки.
+  let brandingError: string | null = null;
   if (want.has('branding') && file.data.branding) {
-    await branding.importSnapshot(file.data.branding);
-    applied.branding = { created: 0, updated: 1 };
+    try {
+      await branding.importSnapshot(file.data.branding);
+      applied.branding = { created: 0, updated: 1 };
+    } catch (err) {
+      // См. пояснение у RestoreOutcome.brandingError: наружу не бросаем,
+      // иначе теряется запись аудита об уже перезаписанных паролях.
+      brandingError = err instanceof Error ? err.message : String(err);
+    }
   }
 
-  return { applied, resyncSieve };
+  return { applied, resyncSieve, brandingError };
 }
 
 /** Домен по имени; заводит, если его нет. Возвращает id. */

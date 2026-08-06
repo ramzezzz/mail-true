@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { api } from '../api/client';
+import type { Alias } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
@@ -29,6 +30,16 @@ export function AliasesPage() {
   const [offset, setOffset] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
+  /**
+   * Алиас, который собираются удалить.
+   *
+   * Подтверждение здесь появилось не для симметрии с ящиками. Значок
+   * корзины стоит вплотную к «Отключить», кнопки 26×26 с зазором 2 px, и
+   * промах пальцем удалял пересылку без единого вопроса и без отмены.
+   * Последствие тихое и потому злое: письма на прежний адрес начинают
+   * отбиваться, а заметят это через дни — по жалобе снаружи.
+   */
+  const [removing, setRemoving] = useState<Alias | null>(null);
 
   const aliases = useQuery({
     queryKey: ['aliases', search, offset],
@@ -42,13 +53,19 @@ export function AliasesPage() {
   const toggle = useMutation({
     mutationFn: ({ id, active }: { id: number; active: boolean }) =>
       api.setAliasActive(id, active),
-    onSuccess: invalidate,
+    // Об успехе сообщаем, как в списке ящиков: молчание после нажатия
+    // неотличимо от «кнопка не сработала», и человек жмёт ещё раз.
+    onSuccess: (_data, variables) => {
+      setFlash(variables.active ? 'Алиас включён' : 'Алиас отключён');
+      invalidate();
+    },
   });
 
   const remove = useMutation({
     mutationFn: (id: number) => api.deleteAlias(id),
     onSuccess: () => {
       setFlash('Алиас удалён');
+      setRemoving(null);
       invalidate();
     },
   });
@@ -120,7 +137,10 @@ export function AliasesPage() {
                           icon: <IconTrash />,
                           label: 'Удалить',
                           danger: true,
-                          onClick: () => remove.mutate(alias.id),
+                          onClick: () => {
+                            remove.reset();
+                            setRemoving(alias);
+                          },
                         },
                       ]}
                     />
@@ -136,6 +156,30 @@ export function AliasesPage() {
       </TableWrap>
 
       <Pager total={aliases.data?.total ?? 0} limit={LIMIT} offset={offset} onChange={setOffset} />
+
+      {removing && (
+        <Modal
+          title="Удалить алиас"
+          onClose={() => setRemoving(null)}
+          footer={
+            <>
+              <Button mode="secondary" onClick={() => setRemoving(null)}>
+                Отмена
+              </Button>
+              <Button disabled={remove.isPending} onClick={() => remove.mutate(removing.id)}>
+                {remove.isPending ? 'Удаляем…' : 'Удалить алиас'}
+              </Button>
+            </>
+          }
+        >
+          <ErrorNotice error={remove.error} />
+          <Notice tone="error">
+            Письма, приходящие на <span className="mt-mono">{removing.source}</span>, перестанут
+            попадать на <span className="mt-mono">{removing.destination}</span> и будут
+            отбиваться отправителям. Восстановить пересылку можно только заново создав алиас.
+          </Notice>
+        </Modal>
+      )}
 
       {addOpen && (
         <AddAliasModal

@@ -1,0 +1,136 @@
+/*
+ * Пилюля своей метки.
+ *
+ * ЦВЕТ ЗДЕСЬ НЕ ЕДИНСТВЕННЫЙ ПРИЗНАК, И ЭТО ГЛАВНОЕ В ЭТОМ ФАЙЛЕ. Рядом
+ * с цветом всегда стоит НАЗВАНИЕ метки: примерно каждый двенадцатый мужчина
+ * не различает красное и зелёное, и «оплатить» от «спросить у юриста» он
+ * по одному кружку не отличит никак. Точка без подписи здесь была бы не
+ * украшением, а потерей возможности.
+ *
+ * Цвет задаётся переменной --mt-label-color, а фон и рамка выводятся из неё
+ * через color-mix: так одно значение работает и на светлой теме, и на
+ * тёмной, и на зеленоватой подложке письма надёжного отправителя.
+ */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 180px;
+  height: 18px;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, var(--mt-label-color) 35%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--mt-label-color) 14%, transparent);
+  color: var(--mt-label-color);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+/* Кружок цвета: он помогает тем, кто цвета различает, и не мешает
+   остальным — название стоит рядом в любом случае. */
+.dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Пилюля-кнопка: снять метку прямо с письма. */
+.remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  margin-right: -3px;
+  border: none;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Подсветка только там, где мышь действительно есть: на касании :hover
+   «залипает» после нажатия и крестик остаётся подсвеченным. */
+@media (hover: hover) {
+  .remove:hover {
+    background: color-mix(in srgb, var(--mt-label-color) 25%, transparent);
+  }
+}
+
+/* Крупный вид — в открытом письме и в настройках. */
+.large {
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 11px;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
+.large .dot {
+  width: 8px;
+  height: 8px;
+}
+
+/*
+ * Палитра. Значения намеренно жёсткие, а не через токены бренда: токенов
+ * ровно столько, сколько цветов у продукта, а меток человек заводит
+ * сколько захочет, и цвета для них — самостоятельный набор.
+ */
+.red {
+  --mt-label-color: #e64646;
+}
+
+.orange {
+  --mt-label-color: #f07f1a;
+}
+
+.yellow {
+  --mt-label-color: #c9a400;
+}
+
+.green {
+  --mt-label-color: #2fa84f;
+}
+
+.teal {
+  --mt-label-color: #0f9b9b;
+}
+
+.blue {
+  --mt-label-color: #3f7de0;
+}
+
+.violet {
+  --mt-label-color: #8455d6;
+}
+
+.pink {
+  --mt-label-color: #d94b91;
+}
+
+.gray {
+  --mt-label-color: #7b7f88;
+}
+
+/* Ряд пилюль в строке списка и в письме. Отступ справа — потому что за
+   рядом почти всегда идёт тема письма, и без него пилюля липнет к тексту. */
+.row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 6px;
+  flex-wrap: wrap;
+}

@@ -16,6 +16,9 @@ import { folderTitle } from '../lib/folderNames';
 import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
 import { highlightSegments } from '../lib/searchQuery';
 import { IconAttach, IconFlag } from '../mail/icons';
+import { LabelPills } from '../mail/LabelPill';
+import type { MailLabel } from '../mail/labelsApi';
+import { useLabelDictionary } from '../mail/useLabels';
 import styles from './SearchResults.module.css';
 
 export interface SearchResultsProps {
@@ -50,6 +53,10 @@ function extensionOf(filename: string): string {
 export function SearchResults({ items, stems, folders }: SearchResultsProps) {
   const navigate = useNavigate();
   const groups = groupMessagesByPeriod(items);
+  // Справочник меток берётся ОДИН раз на весь список, а не в каждой строке:
+  // хук кэшируется, но сотня одинаковых подписок на один запрос — это сотня
+  // лишних перерисовок при каждом его обновлении.
+  const labels = useLabelDictionary();
 
   return (
     <div className={styles.list}>
@@ -62,6 +69,7 @@ export function SearchResults({ items, stems, folders }: SearchResultsProps) {
               message={message}
               stems={stems}
               folders={folders}
+              labels={labels}
               onOpen={() =>
                 void navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`)
               }
@@ -77,10 +85,12 @@ interface ResultRowProps {
   message: MessageSummary;
   stems: readonly string[];
   folders: readonly Folder[];
+  /** Справочник меток: без него у ключевого слова нет ни имени, ни цвета. */
+  labels: readonly MailLabel[];
   onOpen(): void;
 }
 
-function ResultRow({ message, stems, folders, onOpen }: ResultRowProps) {
+function ResultRow({ message, stems, folders, labels, onOpen }: ResultRowProps) {
   const folder = folders.find((f) => f.id === message.folderId);
   const unread = !message.flags.seen;
   const sender = message.from.name?.trim() || message.from.address;
@@ -110,6 +120,10 @@ function ResultRow({ message, stems, folders, onOpen }: ResultRowProps) {
 
         <span className={styles.title}>
           <span className={styles.subject}>
+            {/* Метки стоят ПЕРЕД темой, как и у mail.ru стоят признаки
+                письма: строку читают слева направо, и «оплатить» должно
+                попадаться на глаза раньше, чем тема. */}
+            <LabelPills keywords={message.labels} dictionary={labels} />
             <Highlighted text={message.subject || '(без темы)'} stems={stems} />
           </span>
           <span className={styles.snippet}>

@@ -91,6 +91,13 @@ export const generalSchema = z.object({
   undoSendSeconds: z
     .union([z.literal(0), z.literal(5), z.literal(10), z.literal(30)])
     .optional(),
+  /*
+   * Группировка писем в переписки. Без `.default()` — по той же причине,
+   * что у двух полей выше: этот же контракт правит админка, и с умолчанием
+   * каждое сохранение оттуда молча переставляло бы человеку вид списка.
+   * `undefined` означает «не трогать».
+   */
+  groupByThread: z.boolean().optional(),
 });
 
 const conditionSchema = z.object({

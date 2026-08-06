@@ -516,6 +516,19 @@ if [ -f "$ENV_FILE" ]; then
         warn "права на infra/.env — $PERM, а должно быть 600"
         hint "chmod 600 $ENV_FILE"
     fi
+    # Концы строк Windows в .env — поломка с самым обманчивым видом:
+    # docker compose «\r» отбрасывает, контейнеры работают, а скрипты
+    # обслуживания (установщик, копия, восстановление) получают значения
+    # с невидимым хвостом и упираются в «role "mailserver" does not exist»
+    # при полностью исправной базе. Сами скрипты теперь от этого защищены
+    # (load_env в install/lib/common.sh), но файл всё равно надо починить:
+    # его читает не только наш код.
+    if grep -q $'\r' "$ENV_FILE"; then
+        warn "в infra/.env концы строк Windows (CRLF) — это ломает скрипты обслуживания"
+        hint "починить: sed -i 's/\\r\$//' $ENV_FILE"
+    else
+        ok "концы строк в infra/.env обычные (LF)"
+    fi
     if grep -qE '^(POSTGRES_PASSWORD|REDIS_PASSWORD|RSPAMD_PASSWORD)=change-me' "$ENV_FILE"; then
         fail "в infra/.env остались пароли из примера (change-me-…)"
         hint "перезапустите установщик или поменяйте пароли вручную"
@@ -582,17 +595,45 @@ else
     ok "ящик администратора не открывается паролем-заглушкой"
 fi
 
-DISK_AVAIL="$(df -BG --output=avail "$REPO_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
-DISK_PCT="$(df --output=pcent "$REPO_DIR" 2>/dev/null | tail -1 | tr -dc '0-9')"
-if [ -n "${DISK_AVAIL:-}" ]; then
-    if [ "${DISK_PCT:-0}" -ge 90 ]; then
-        fail "диск занят на ${DISK_PCT}% (свободно ${DISK_AVAIL} ГБ)"
-        hint "когда место кончится, почта перестанет приниматься"
-    elif [ "${DISK_PCT:-0}" -ge 80 ]; then
-        warn "диск занят на ${DISK_PCT}% (свободно ${DISK_AVAIL} ГБ)"
+# --- Место на диске -------------------------------------------------
+# Проверять только раздел с репозиторием было мало и вводило в заблуждение.
+# Письма, база и очередь лежат НЕ там: они в томах docker, а его каталог
+# (обычно /var/lib/docker) на серверах сплошь и рядом — отдельный раздел,
+# причём меньший. Ровно этот раздел и кончается первым: том vmail растёт с
+# каждым письмом. Когда он заполняется, Postfix перестаёт принимать почту,
+# Postgres уходит в режим только чтения — а проверка показывала «свободно
+# 200 ГБ», честно измеряя совсем другой диск.
+check_disk() {   # check_disk <путь> <что это>
+    local path="$1" what="$2" avail pct
+    avail="$(df -BG --output=avail "$path" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    pct="$(df --output=pcent "$path" 2>/dev/null | tail -1 | tr -dc '0-9')"
+    [ -n "${avail:-}" ] || return 0
+    if [ "${pct:-0}" -ge 90 ]; then
+        fail "$what: занято ${pct}% (свободно ${avail} ГБ)"
+        hint "когда место кончится, почта перестанет приниматься, а база уйдёт в режим только чтения"
+    elif [ "${pct:-0}" -ge 80 ]; then
+        warn "$what: занято ${pct}% (свободно ${avail} ГБ)"
     else
-        ok "на диске свободно ${DISK_AVAIL} ГБ (занято ${DISK_PCT:-?}%)"
+        ok "$what: свободно ${avail} ГБ (занято ${pct:-?}%)"
     fi
+}
+
+check_disk "$REPO_DIR" "место на диске с репозиторием"
+
+DOCKER_ROOT="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null)"
+if [ -n "$DOCKER_ROOT" ] && [ -d "$DOCKER_ROOT" ]; then
+    # Один и тот же раздел проверяем один раз: два одинаковых пункта в отчёте
+    # выглядят как ошибка проверки, а не как забота.
+    FS_REPO="$(df --output=source "$REPO_DIR" 2>/dev/null | tail -1)"
+    FS_DOCKER="$(df --output=source "$DOCKER_ROOT" 2>/dev/null | tail -1)"
+    if [ "$FS_REPO" != "$FS_DOCKER" ]; then
+        check_disk "$DOCKER_ROOT" "место на диске с письмами и базой ($DOCKER_ROOT)"
+    else
+        info "письма и база лежат на том же разделе ($DOCKER_ROOT)"
+    fi
+else
+    warn "не удалось узнать, где docker держит тома — место под письма не проверено"
+    hint "docker info --format '{{.DockerRootDir}}'"
 fi
 
 if [ -d "$STATE_DIR" ] && [ -f "$STATE_DIR/last-backup" ]; then
@@ -607,6 +648,122 @@ if [ -d "$STATE_DIR" ] && [ -f "$STATE_DIR/last-backup" ]; then
 else
     warn "резервных копий ещё не делали"
     hint "sudo bash install/backup.sh — и проверьте восстановление на тестовой машине"
+fi
+
+# ==================================================================
+step "9. Схема базы соответствует версии продукта"
+# ==================================================================
+# Зачем отдельный пункт. Обновление продукта — это `git pull` и повторный
+# запуск install.sh, который прогоняет каталог миграций. Если хоть одна не
+# применилась (а причины бывают: место на диске, чужая блокировка, ручная
+# правка схемы), стек всё равно поднимется и почта пойдёт. Молча отвалится
+# только новое: отложенная отправка, отложенные письма, контакты, показатели.
+# Человек увидит это как «кнопка не работает», и никакая другая проверка
+# ему об этом не скажет.
+#
+# Список нужного берём из самих файлов миграций, а не из перечня в коде:
+# перечень в коде всегда отстаёт от каталога — на этом уже обжигались.
+
+WANT_TABLES="$(grep -hoiE 'CREATE TABLE IF NOT EXISTS +(public\.)?[a-z_0-9]+' \
+    "$INFRA_DIR"/postgres/migrations/*.sql 2>/dev/null |
+    awk '{ t = tolower($NF); sub(/^public\./, "", t); print t }' | sort -u)"
+
+# Колонки, добавленные ALTER TABLE ... ADD COLUMN IF NOT EXISTS. Часть
+# нового (логотипы отправителей, оформление, отложенная отправка) — это
+# именно колонки в существующих таблицах, отсутствие таблицы их не поймает.
+WANT_COLUMNS="$(awk '
+    tolower($0) ~ /alter[ \t]+table/ {
+        line = tolower($0); sub(/.*alter[ \t]+table[ \t]+/, "", line)
+        sub(/^public\./, "", line); sub(/[^a-z_0-9].*$/, "", line)
+        tbl = line
+    }
+    tolower($0) ~ /add[ \t]+column[ \t]+if[ \t]+not[ \t]+exists/ {
+        line = tolower($0); sub(/.*add[ \t]+column[ \t]+if[ \t]+not[ \t]+exists[ \t]+/, "", line)
+        sub(/[^a-z_0-9].*$/, "", line)
+        if (tbl != "" && line != "") print tbl "." line
+    }
+' "$INFRA_DIR"/postgres/migrations/*.sql 2>/dev/null | sort -u)"
+
+HAVE_TABLES="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
+    -c "SELECT table_name FROM information_schema.tables WHERE table_schema='public'" \
+    2>/dev/null | tr -d '\r' | sort -u)"
+HAVE_COLUMNS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
+    -c "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE table_schema='public'" \
+    2>/dev/null | tr -d '\r' | sort -u)"
+
+if [ -z "$HAVE_TABLES" ]; then
+    fail "не удалось прочитать схему базы — проверьте доступность postgres"
+else
+    MISSING_T="$(comm -23 <(printf '%s\n' "$WANT_TABLES") <(printf '%s\n' "$HAVE_TABLES") | tr '\n' ' ')"
+    MISSING_C="$(comm -23 <(printf '%s\n' "$WANT_COLUMNS") <(printf '%s\n' "$HAVE_COLUMNS") | tr '\n' ' ')"
+    N_WANT_T="$(printf '%s\n' "$WANT_TABLES" | grep -c .)"
+    N_WANT_C="$(printf '%s\n' "$WANT_COLUMNS" | grep -c .)"
+    if [ -z "${MISSING_T// /}" ] && [ -z "${MISSING_C// /}" ]; then
+        ok "все таблицы и колонки из миграций на месте ($N_WANT_T таблиц, $N_WANT_C добавленных колонок)"
+    else
+        [ -z "${MISSING_T// /}" ] || fail "в базе нет таблиц из миграций: $MISSING_T"
+        [ -z "${MISSING_C// /}" ] || fail "в базе нет колонок из миграций: $MISSING_C"
+        hint "миграции применились не полностью — прогнать заново:"
+        hint "  sudo bash install/install.sh   (повторный запуск безопасен)"
+        hint "разделы панели, которым нужно недостающее, будут отвечать ошибкой"
+    fi
+fi
+
+# --- Служебный пользователь Dovecot ---------------------------------
+# От него зависят две вещи, которые ломаются молча: вход администратора в
+# чужой ящик из панели и сборщик почты с внешних ящиков. Пароль появился
+# в продукте позже самой установки, и на серверах, обновлённых с ранних
+# версий, в infra/.env его просто нет: Dovecot тогда оставляет файл
+# служебных пользователей ПУСТЫМ (infra/dovecot/entrypoint.sh), а панель
+# отвечает «неверный пароль» на верный пароль администратора.
+if [ -z "${DOVECOT_MASTER_USER:-}" ] || [ -z "${DOVECOT_MASTER_PASSWORD:-}" ]; then
+    fail "служебный пользователь Dovecot не настроен — вход администратора в чужой ящик не работает"
+    hint "в infra/.env нет DOVECOT_MASTER_USER или DOVECOT_MASTER_PASSWORD."
+    hint "заполнит повторный запуск: sudo bash install/install.sh"
+else
+    # Проверяем настоящим входом: файл может существовать и быть пустым.
+    # Разделитель «*» — DOVECOT_MASTER_SEPARATOR по умолчанию.
+    # shellcheck disable=SC2016
+    if dc exec -T -e MU="$DOVECOT_MASTER_USER" -e MP="$DOVECOT_MASTER_PASSWORD" -e MB="$ADMIN_EMAIL" \
+            dovecot sh -c 'doveadm auth test "$MB*$MU" "$MP"' >/dev/null 2>&1; then
+        ok "служебный вход Dovecot работает (администратор может открыть чужой ящик)"
+    else
+        fail "служебный вход Dovecot не работает при заданном пароле"
+        hint "пароль в infra/.env разошёлся с тем, что внутри контейнера."
+        hint "перечитать: docker compose -f infra/docker-compose.yml up -d dovecot"
+    fi
+fi
+
+# --- Посредник к очереди Postfix ------------------------------------
+# Пустой QUEUE_AGENT_TOKEN — это не «настройка по умолчанию», а выключенный
+# раздел «Очередь» в панели: посредник не запускается вовсе. Установщик
+# долго не заполнял этот ключ, и на каждой установке с нуля раздел молча
+# отсутствовал, а узнать об этом было неоткуда.
+if [ -z "${QUEUE_AGENT_TOKEN:-}" ]; then
+    fail "QUEUE_AGENT_TOKEN не задан — раздел «Очередь» в панели недоступен"
+    hint "посредник к очереди Postfix не запускается без общего секрета."
+    hint "задать и перезапустить:"
+    hint "  printf 'QUEUE_AGENT_TOKEN=%s\\n' \"\$(openssl rand -hex 32)\" >> $ENV_FILE"
+    hint "  docker compose -f infra/docker-compose.yml up -d postfix api"
+else
+    # Секрет посредник ждёт в заголовке X-Agent-Token (infra/postfix/queue-agent.pl):
+    # без него любой путь отвечает 401, и wget вернёт пустоту.
+    #
+    # Секрет передаём переменной окружения контейнера, а не подстановкой в
+    # строку команды: так он не попадает в список процессов на машине и не
+    # зависит от кавычек. Спрашиваем ИЗ КОНТЕЙНЕРА api — важно проверить тот
+    # самый путь, которым ходит панель, а не доступность порта с хоста
+    # (наружу он и не публикуется).
+    # shellcheck disable=SC2016
+    QUEUE_HTTP="$(dc exec -T -e Q_TOKEN="$QUEUE_AGENT_TOKEN" -e Q_PORT="${QUEUE_AGENT_PORT:-11345}" api \
+        sh -c 'wget -qO- --header="X-Agent-Token: $Q_TOKEN" "http://postfix:$Q_PORT/healthz" 2>/dev/null' \
+        2>/dev/null | tr -d '\r')"
+    case "$QUEUE_HTTP" in
+        *ok*|*queue*) ok "посредник к очереди Postfix отвечает — раздел «Очередь» работает" ;;
+        '')  fail "посредник к очереди Postfix не отвечает — раздел «Очередь» покажет ошибку"
+             hint "смотрите: docker compose -f infra/docker-compose.yml logs postfix | grep queue-agent" ;;
+        *)   warn "посредник к очереди ответил неожиданно: $QUEUE_HTTP" ;;
+    esac
 fi
 
 # ==================================================================

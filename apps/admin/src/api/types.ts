@@ -876,6 +876,12 @@ export interface BackupRestoreResponse {
   applied: Record<string, { created: number; updated: number }>;
   plan: BackupRestorePlan;
   sieve: { resynced: number; errors: string[] };
+  /**
+   * Почему не применилось оформление; null — применилось или не просили.
+   * Отдельно от общей ошибки: всё остальное к этому моменту уже записано,
+   * и ответ обязан сказать, что именно доехало.
+   */
+  brandingError: string | null;
   note: string | null;
 }
 
@@ -916,6 +922,8 @@ export interface QueueBrief {
   deferred: number | null;
   oldestSeconds: number | null;
   topDeferredDomains: Array<{ domain: string; count: number }>;
+  /** Очередь длиннее предела разбора: показанные числа неполны. */
+  truncated: boolean;
   note: string;
 }
 
@@ -962,6 +970,9 @@ export interface OverviewHistory {
 }
 
 export interface OverviewMail {
+  /** false — не применена миграция разобранного журнала; в note причина. */
+  available: boolean;
+  note: string;
   hours: number;
   stepSeconds: number;
   buckets: Array<{ at: string; counts: Record<string, number> }>;

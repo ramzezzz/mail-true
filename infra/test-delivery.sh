@@ -12,7 +12,7 @@ set -uo pipefail
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml")
-set -a; . "$INFRA_DIR/.env"; set +a
+set -a; . <(tr -d '\r' < "$INFRA_DIR/.env"); set +a
 
 TEST_USER="test@${MAIL_DOMAIN}"
 TEST_PASS="${TEST_MAILBOX_PASSWORD:-test12345}"
@@ -126,12 +126,8 @@ echo "=== 7. Юникод в заголовках: обещание сервер
 # Получалась ложь с последствиями: сервер соглашался принять письмо, а на
 # доставке отбивал его НАВСЕГДА (5.6.7 «SMTPUTF8 is required, but was not
 # offered»). Проверяем обе стороны разом — согласованность, а не настройку.
-LMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "LHLO proba
-QUIT
-" | timeout 5 nc 172.28.0.54 24' 2>/dev/null || true)
-SMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "EHLO proba
-QUIT
-" | timeout 5 nc 127.0.0.1 25' 2>/dev/null || true)
+LMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "LHLO proba\r\nQUIT\r\n" | timeout 5 nc 172.28.0.54 24' 2>/dev/null || true)
+SMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "EHLO proba\r\nQUIT\r\n" | timeout 5 nc 127.0.0.1 25' 2>/dev/null || true)
 if echo "$LMTP_CAPS" | grep -qi SMTPUTF8; then
     # Dovecot научился — тогда и Postfix обязан анонсировать.
     echo "$SMTP_CAPS" | grep -qi SMTPUTF8         && ok "SMTPUTF8 умеют оба (можно убрать smtputf8_enable = no)"         || fail "Dovecot умеет SMTPUTF8, а Postfix его не анонсирует — возможности теряются"

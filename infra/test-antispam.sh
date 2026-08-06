@@ -23,7 +23,7 @@ set -uo pipefail
 # так Git Bash на Windows не переписывает пути вида /etc/... в аргументах.
 
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-set -a; . "$INFRA_DIR/.env"; set +a
+set -a; . <(tr -d '\r' < "$INFRA_DIR/.env"); set +a
 
 : "${RESOLVER_IP:=172.28.0.53}"
 TEST_USER="test@${MAIL_DOMAIN}"

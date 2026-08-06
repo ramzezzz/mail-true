@@ -13,8 +13,12 @@ SCHEME="${3:-SHA512-CRYPT}"
 INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml")
 
-# Переменные подключения к БД из .env
-set -a; . "$INFRA_DIR/.env"; set +a
+# Переменные подключения к БД из .env.
+# Возврат каретки вычищаем: .env, сохранённый с концами строк Windows, даёт
+# POSTGRES_USER с невидимым хвостом, и psql отвечает «role "mailserver" does
+# not exist» при полностью исправной базе. Так же поступает load_env
+# в install/lib/common.sh.
+set -a; . <(tr -d '\r' < "$INFRA_DIR/.env"); set +a
 
 DOMAIN="${EMAIL#*@}"
 [ "$DOMAIN" != "$EMAIL" ] || { echo "Ошибка: '$EMAIL' — не e-mail"; exit 1; }

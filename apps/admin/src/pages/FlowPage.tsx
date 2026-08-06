@@ -179,6 +179,15 @@ function QueueTab() {
   const [confirming, setConfirming] = useState<{ message: QueueMessage; action: 'flush' | 'delete' } | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
+  // Чтение письма из очереди приравнено к чтению журналов почты: и там и
+  // здесь видна чужая переписка. Сервер требует того же права.
+  /*
+   * Показать письмо целиком — это чужая переписка, а не сводка о ней.
+   * Право то же, что у входа в чужой ящик: audit.read есть у роли
+   * «Только чтение», которой положено видеть состояние сервера, но не
+   * содержание писем сотрудников.
+   */
+  const mayReadMessage = can(session?.permissions, 'mailbox.impersonate');
   const mayFlush = can(session?.permissions, 'users.write');
   const mayDelete = can(session?.permissions, 'users.delete');
 
@@ -324,9 +333,17 @@ function QueueTab() {
                 <td className={styles.reason}>{item.reason ?? '—'}</td>
                 <td>
                   <div className={styles.rowActions}>
-                    <Button mode="secondary" size="s" onClick={() => setViewing(item)}>
-                      Письмо
-                    </Button>
+                    {/*
+                      Право то же, что требует сервер: в письме очереди
+                      лежит чужая переписка целиком. Без проверки кнопка
+                      осталась бы у роли, которой сервер ответит отказом, —
+                      человек нажимал бы её и получал ошибку вместо письма.
+                    */}
+                    {mayReadMessage && (
+                      <Button mode="secondary" size="s" onClick={() => setViewing(item)}>
+                        Письмо
+                      </Button>
+                    )}
                     {mayFlush && (
                       <Button
                         mode="secondary"

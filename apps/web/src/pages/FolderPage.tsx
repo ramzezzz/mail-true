@@ -44,6 +44,7 @@ import {
 } from '../mail/icons';
 import { ListToolbar } from '../mail/ListToolbar';
 import { MessageList } from '../mail/MessageList';
+import { chunkIds, expandThreadIds, isRowFlagged } from '../mail/threadList';
 import { SnoozeMenu } from '../mail/SnoozeMenu';
 import { PRESET_TITLES, formatWakeAt, type SnoozePreset } from '../mail/snoozeApi';
 import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
@@ -63,9 +64,22 @@ export function FolderPage() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<MessageFilter>('all');
   const { data: folders } = useFolders();
+  const preferences = useGeneralPreferences();
+  /**
+   * Группировать ли письма в переписки.
+   *
+   * Спрашивается ровно одно — что выбрал человек. В каких папках
+   * группировка уместна, решает СЕРВЕР (threadingAllowed в API): иначе
+   * правило пришлось бы держать в двух местах, а расходиться такие пары
+   * начинают с первой же новой папки. В черновиках и корзине сервер
+   * ответит обычным плоским списком, о чём строка честно скажет
+   * отсутствием сводки переписки.
+   */
+  const threaded = preferences.groupByThread;
   // Письма подгружаются страницами: сервер отдаёт не больше сотни за раз,
   // а в папке их бывает вдвое больше — раньше остальные были недостижимы.
-  const page = useFolderMessages(folderId, filter);
+  // С группировкой страница — это сотня ПЕРЕПИСОК, а не писем.
+  const page = useFolderMessages(folderId, filter, threaded);
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
 
@@ -76,7 +90,6 @@ export function FolderPage() {
   const openCompose = useUiStore((s) => s.openCompose);
   const visitedMessage = useUiStore((s) => s.visitedMessage);
   const clearVisitedMessage = useUiStore((s) => s.clearVisitedMessage);
-  const preferences = useGeneralPreferences();
   const queryClient = useQueryClient();
 
   /**
@@ -115,36 +128,60 @@ export function FolderPage() {
     setLeavingIds([]);
   }, [messages, leavingIds]);
 
-  /** Письма, к которым применяется действие: выделенные, иначе — под курсором. */
+  /**
+   * Строки, к которым применяется действие: выделенные, иначе — под курсором.
+   *
+   * Именно СТРОКИ, а не письма: строка бывает целой перепиской. Разворачивает
+   * их в письма `expand` — через него обязано пройти каждое действие.
+   */
   const targetIds = useCallback((): string[] => {
     if (selectedIds.size > 0) return [...selectedIds];
     if (focusedId) return [focusedId];
     return [];
   }, [selectedIds, focusedId]);
 
+  /**
+   * Строки -> письма. Здесь и живёт обещание «действие над строкой
+   * действует на всю переписку»: без этого шага «удалить» уносило бы одно
+   * последнее письмо из шести, а строка в списке пропадала бы целиком —
+   * то есть человек видел бы удалённую переписку, у которой пять писем
+   * остались в папке.
+   */
+  const expand = useCallback(
+    (rowIds: string[]): string[] => expandThreadIds(rowIds, messages),
+    [messages],
+  );
+
   const applyFlags = useCallback(
-    (ids: string[], set: Parameters<typeof setFlags.mutate>[0]['set']) => {
+    (rowIds: string[], set: Parameters<typeof setFlags.mutate>[0]['set']) => {
+      const ids = expand(rowIds);
       if (ids.length === 0) return;
-      setFlags.mutate({ ids, set });
+      // Пачками не больше пятисот: столько принимает маршрут за раз.
+      // Сотня выделенных строк — это легко больше пятисот писем, и раньше
+      // такой запрос просто отвергался бы целиком.
+      for (const chunk of chunkIds(ids)) setFlags.mutate({ ids: chunk, set });
       clearSelection();
     },
-    [setFlags, clearSelection],
+    [expand, setFlags, clearSelection],
   );
 
   const moveTo = useCallback(
-    (ids: string[], targetFolderId: string) => {
+    (rowIds: string[], targetFolderId: string) => {
+      const ids = expand(rowIds);
       if (ids.length === 0) return;
       // Строки гаснут сразу: ждать ответа сервера, чтобы показать отклик,
       // нельзя — при неудаче метка снимается и письма возвращаются на место.
       setLeavingIds(ids);
-      moveMessages.mutate(
-        { ids, targetFolderId },
-        { onError: () => setLeavingIds([]) },
-      );
+      for (const chunk of chunkIds(ids)) {
+        moveMessages.mutate(
+          { ids: chunk, targetFolderId },
+          { onError: () => setLeavingIds([]) },
+        );
+      }
       clearSelection();
       setFocusedId(null);
     },
-    [moveMessages, clearSelection],
+    [expand, moveMessages, clearSelection],
   );
 
   /** Подгрузка следующей страницы — по прокрутке до конца списка. */
@@ -265,12 +302,19 @@ export function FolderPage() {
     clearSelection();
   }, [targetIds, messages, openCompose, showNotice, clearSelection]);
 
-  /** Пометить флажком: если все цели уже с флагом — снять. */
+  /**
+   * Пометить флажком: если все цели уже с флагом — снять.
+   *
+   * «С флагом» у переписки означает «хоть одно письмо с флагом»
+   * (isRowFlagged) — ровно то, что и нарисовано в строке. Иначе нажатие
+   * по строке с уже красной лентой ставило бы флаг ещё раз вместо того,
+   * чтобы его снять.
+   */
   const toggleFlagOn = useCallback(
-    (ids: string[]) => {
-      const targets = messages.filter((m) => ids.includes(m.id));
-      const allFlagged = targets.length > 0 && targets.every((m) => m.flags.flagged);
-      applyFlags(ids, { flagged: !allFlagged });
+    (rowIds: string[]) => {
+      const targets = messages.filter((m) => rowIds.includes(m.id));
+      const allFlagged = targets.length > 0 && targets.every(isRowFlagged);
+      applyFlags(rowIds, { flagged: !allFlagged });
     },
     [messages, applyFlags],
   );
@@ -378,31 +422,42 @@ export function FolderPage() {
   const snoozedFolder = (currentFolder?.role ?? folderId) === 'snoozed';
 
   const snoozeTo = useCallback(
-    (ids: string[], choice: { preset: SnoozePreset; until?: string }) => {
+    (rowIds: string[], choice: { preset: SnoozePreset; until?: string }) => {
+      // Откладывается вся переписка: половина разговора, уехавшая до
+      // понедельника, — это разорванный разговор в обеих папках.
+      const ids = expand(rowIds);
       if (ids.length === 0) return;
       // Строки гаснут сразу, как при переносе в другую папку: письмо и
       // правда уезжает — ждать ответа сервера, чтобы показать отклик,
       // значило бы на секунду делать вид, что нажатие не сработало.
       setLeavingIds(ids);
-      snoozeMessages.mutate(
-        { ids, preset: choice.preset, ...(choice.until ? { until: choice.until } : {}) },
-        { onError: () => setLeavingIds([]) },
-      );
+      for (const chunk of chunkIds(ids)) {
+        snoozeMessages.mutate(
+          { ids: chunk, preset: choice.preset, ...(choice.until ? { until: choice.until } : {}) },
+          { onError: () => setLeavingIds([]) },
+        );
+      }
       clearSelection();
       setFocusedId(null);
     },
-    [snoozeMessages, clearSelection],
+    [expand, snoozeMessages, clearSelection],
   );
 
   const returnNow = useCallback(
-    (ids: string[]) => {
+    (rowIds: string[]) => {
+      // В самих «Отложенных» группировки нет (там у каждого письма свой
+      // срок), поэтому разворачивать обычно нечего — но правило одно на все
+      // действия, и исключений в нём быть не должно.
+      const ids = expand(rowIds);
       if (ids.length === 0) return;
       setLeavingIds(ids);
-      unsnooze.mutate(ids, { onError: () => setLeavingIds([]) });
+      for (const chunk of chunkIds(ids)) {
+        unsnooze.mutate(chunk, { onError: () => setLeavingIds([]) });
+      }
       clearSelection();
       setFocusedId(null);
     },
-    [unsnooze, clearSelection],
+    [expand, unsnooze, clearSelection],
   );
 
   /**

@@ -34,6 +34,8 @@ import {
   SNOOZE_RETURNED_KEYWORD,
 } from '../mail/snooze-mailbox.js';
 import { SnoozeService } from '../mail/snooze-service.js';
+import { LabelsDb } from '../mail/labels-db.js';
+import { labelRoutes, LABELS_MIGRATION_HINT } from '../mail/labels-routes.js';
 import {
   isPrivateAddress,
   isSafeUnsubscribeUrl,
@@ -42,11 +44,28 @@ import {
 } from '../mail/unsubscribe.js';
 import type { MailSession } from '../types.js';
 
-const listQuerySchema = z.object({
+/* Наружу — ради проверок: разбор строки запроса здесь уже один раз соврал
+   (см. `threaded` ниже), и ловить это через поднятое приложение дороже. */
+export const listQuerySchema = z.object({
   folderId: z.string().min(1).default('inbox'),
   offset: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(25),
-  threaded: z.coerce.boolean().default(false),
+  /*
+   * Группировать письма в переписки.
+   *
+   * Было `z.coerce.boolean()`, и это врало ровно наоборот: `coerce.boolean`
+   * — это `Boolean(значение)`, а строка «false» из строки запроса —
+   * непустая, то есть ИСТИНА. Пока признак принимался и терялся, ошибка
+   * ничего не значила; как только он заработал, `threaded=false` начало
+   * означать «группировать». Проверено на живом стенде: список без
+   * группировки отдавал 480 строк вместо 483 писем.
+   *
+   * Поэтому строка разбирается явно: истина — только «1» и «true».
+   */
+  threaded: z
+    .union([z.boolean(), z.string()])
+    .default(false)
+    .transform((value) => value === true || value === '1' || value === 'true'),
   filter: z.enum(['all', 'unread', 'flagged', 'with-attachments']).default('all'),
   search: z.string().max(500).optional(),
   /** Быстрый режим без сниппетов */
@@ -218,6 +237,13 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         filter: q.filter,
         search: q.search,
         withSnippets: q.snippets === '1',
+        /*
+         * Группировка по переписке. Раньше признак принимался и молча
+         * терялся — список оставался плоским, и это было записано в
+         * известных ограничениях API. Теперь он доходит до сборки списка;
+         * применить его или нет, решает сама папка (threadingAllowed).
+         */
+        threaded: q.threaded,
       });
     });
     return page;
@@ -543,9 +569,54 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     app.log.warn(snooze.unavailableReason);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Свои метки                                                          */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Справочник меток подключается здесь по той же причине, что и служба
+   * отложенных писем: метки целиком принадлежат работе с письмами (они и
+   * лежат в письмах ключевыми словами IMAP), а своих переменных окружения
+   * не заводят — база берётся оттуда же, откуда её берут настройки и
+   * сборщик почты.
+   *
+   * Проба схемы асинхронная и НЕ задерживает сборку маршрутов: почта
+   * обязана подняться и с лежащей базой. До ответа возможность выключена,
+   * и интерфейс честно её не показывает — см. mail/labels-routes.ts.
+   */
+  const labelsDeps: { store: LabelsDb | null; unavailableReason: string } = {
+    store: null,
+    unavailableReason:
+      'Свои метки недоступны: не настроена база данных (DATABASE_URL). ' +
+      'Почта при этом работает как обычно.',
+  };
+  let labelsDb: LabelsDb | null = null;
+  if (accountsConfig.databaseUrl) {
+    labelsDb = new LabelsDb({ connectionString: accountsConfig.databaseUrl, logger });
+    const db = labelsDb;
+    db.schemaReady()
+      .then((ready) => {
+        if (!ready) {
+          labelsDeps.unavailableReason = LABELS_MIGRATION_HINT;
+          app.log.error(LABELS_MIGRATION_HINT);
+          return;
+        }
+        labelsDeps.store = db;
+      })
+      .catch((err: unknown) => {
+        labelsDeps.unavailableReason = 'Не удалось проверить схему меток';
+        app.log.error(errorInfo(err), 'Не удалось проверить схему меток');
+      });
+  } else {
+    app.log.warn(labelsDeps.unavailableReason);
+  }
+
+  await labelRoutes(app, labelsDeps);
+
   app.addHook('onClose', async () => {
     snooze.stop();
     if (snoozeDb) await snoozeDb.shutdown().catch(() => undefined);
+    if (labelsDb) await labelsDb.shutdown().catch(() => undefined);
   });
 
   /**

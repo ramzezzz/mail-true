@@ -17,6 +17,7 @@ import { useFolders } from '../api/queries';
 import { Dropdown, MenuItem } from '../components';
 import { cx } from '../lib/cx';
 import { folderTitle } from '../lib/folderNames';
+import { EMPTY_SELECTION } from '../lib/searchFacets';
 import {
   SEARCH_PATH,
   buildSearchUrl,
@@ -57,7 +58,10 @@ export function SearchBar() {
       buildSearchUrl({
         ...state,
         query,
-        facets: { flags: [], folderId: null, period: null },
+        // Отбор по метке сбрасывается вместе с остальными фасетами: он
+        // тоже относится к прошлому поиску (EMPTY_SELECTION собран в
+        // lib/searchFacets.ts, чтобы новый фасет не забыли ни здесь, ни там).
+        facets: EMPTY_SELECTION,
       }),
     );
   };
