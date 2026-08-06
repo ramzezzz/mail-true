@@ -3,11 +3,14 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  HOTKEY_HELP,
   HOTKEY_SCOPE_ATTR,
   HOTKEY_SCOPE_LIST,
   hotkeyFor,
   ignoreHotkeysFor,
+  globalHotkeyFor,
   isInteractiveTarget,
+  matchGlobalHotkey,
   matchHotkey,
 } from '../src/lib/hotkeys';
 
@@ -131,5 +134,88 @@ describe('hotkeyFor — разбор с оглядкой на фокус', () =>
     expect(hotkeyFor({ key: 'Escape' }, button())).toBe('close');
     // а в поле ввода Esc принадлежит полю
     expect(hotkeyFor({ key: 'Escape' }, input())).toBeNull();
+  });
+});
+
+describe('клавиши каркаса — C, /, ?', () => {
+  it('C — написать, / — поиск, Shift+/ — справка', () => {
+    expect(matchGlobalHotkey({ key: 'c' })).toBe('compose');
+    expect(matchGlobalHotkey({ key: '/' })).toBe('search');
+    expect(matchGlobalHotkey({ key: '?', shiftKey: true })).toBe('help');
+    // Без Shift в событии: так приходит нажатие из скрипта и с раскладок,
+    // где «?» набирается не Shift+Slash. Живая проверка поймала здесь
+    // открытие поиска вместо справки.
+    expect(matchGlobalHotkey({ key: '?' })).toBe('help');
+  });
+
+  it('работают в русской раскладке', () => {
+    // Slash в русской раскладке даёт точку, KeyC — букву «с».
+    expect(matchGlobalHotkey({ key: 'с', code: 'KeyC' })).toBe('compose');
+    expect(matchGlobalHotkey({ key: '.', code: 'Slash' })).toBe('search');
+    expect(matchGlobalHotkey({ key: ',', code: 'Slash', shiftKey: true })).toBe('help');
+  });
+
+  it('с Ctrl и Alt молчат: это чужие сочетания', () => {
+    expect(matchGlobalHotkey({ key: 'c', ctrlKey: true })).toBeNull();
+    expect(matchGlobalHotkey({ key: 'c', metaKey: true })).toBeNull();
+    expect(matchGlobalHotkey({ key: '/', altKey: true })).toBeNull();
+  });
+
+  it('не отбирают клавиши у клавиш страницы', () => {
+    // Пересечение означало бы, что порядок двух обработчиков решает исход.
+    for (const key of ['r', 'f', 'u', 'i', 'Delete', 'Enter', 'Escape', 'ArrowDown']) {
+      expect(matchGlobalHotkey({ key })).toBeNull();
+    }
+    expect(matchHotkey({ key: 'c' })).toBeNull();
+    expect(matchHotkey({ key: '/' })).toBeNull();
+  });
+
+  it('в поле ввода принадлежат полю', () => {
+    const input = document.createElement('input');
+    expect(globalHotkeyFor({ key: 'c' }, input)).toBeNull();
+    expect(globalHotkeyFor({ key: '/' }, input)).toBeNull();
+    expect(globalHotkeyFor({ key: 'c' }, document.body)).toBe('compose');
+  });
+});
+
+describe('справка по клавишам', () => {
+  // Справка врёт незаметно: её открывают редко, а расходится она на первой
+  // же новой клавише. Поэтому сверяем её с самим разбором.
+  it('каждая клавиша из справки действительно что-то делает', () => {
+    const named: Record<string, () => unknown> = {
+      C: () => matchGlobalHotkey({ key: 'c' }),
+      '/': () => matchGlobalHotkey({ key: '/' }),
+      '?': () => matchGlobalHotkey({ key: '?', shiftKey: true }),
+      Esc: () => matchHotkey({ key: 'Escape' }),
+      Enter: () => matchHotkey({ key: 'Enter' }),
+      R: () => matchHotkey({ key: 'r' }),
+      F: () => matchHotkey({ key: 'f' }),
+      U: () => matchHotkey({ key: 'u' }),
+      I: () => matchHotkey({ key: 'i' }),
+      Delete: () => matchHotkey({ key: 'Delete' }),
+      '↑': () => matchHotkey({ key: 'ArrowUp' }),
+      '↓': () => matchHotkey({ key: 'ArrowDown' }),
+    };
+    // Сочетания — отдельно от одиночных клавиш: «↑ ↓» в одной строке справки
+    // это две клавиши, а «Shift+J» — одна пара, и путать их нельзя.
+    const combos: Record<string, () => unknown> = {
+      'Shift+J': () => matchHotkey({ key: 'j', shiftKey: true }),
+      'Shift+L': () => matchHotkey({ key: 'l', shiftKey: true }),
+      'Ctrl+P': () => matchHotkey({ key: 'p', ctrlKey: true }),
+    };
+    for (const section of HOTKEY_HELP) {
+      for (const item of section.items) {
+        // Сочетание проверяем как сочетание, перечисление — поклавишно:
+        // ровно так их и показывает справка.
+        const asCombo = item.combo !== false && item.keys.length > 1;
+        const combo = item.keys.join('+');
+        const probes = asCombo ? [combos[combo]] : item.keys.map((k) => named[k]);
+        for (const [index, probe] of probes.entries()) {
+          const shown = asCombo ? combo : item.keys[index];
+          expect(probe, `в справке есть «${shown}», а в разборе — нет`).toBeDefined();
+          expect(probe?.(), `«${shown}» в справке ничего не делает`).not.toBeNull();
+        }
+      }
+    }
   });
 });

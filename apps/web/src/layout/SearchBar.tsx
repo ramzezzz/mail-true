@@ -26,6 +26,15 @@ import {
 } from '../search/searchParams';
 import styles from './SearchBar.module.css';
 
+/**
+ * Метка поля поиска для клавиши «/».
+ *
+ * Через разметку, а не через общее состояние: поле здесь два (обычный вид и
+ * поисковый), живут они по очереди, и заводить в хранилище ссылку на то из
+ * них, которое сейчас на экране, — лишний узел ради одного нажатия.
+ */
+export const SEARCH_INPUT_ATTR = 'data-search-input';
+
 export function SearchBar() {
   const location = useLocation();
   const [params] = useSearchParams();
@@ -83,6 +92,7 @@ export function SearchBar() {
             value={text}
             placeholder="Поиск по почте"
             aria-label="Поиск по почте"
+            {...{ [SEARCH_INPUT_ATTR]: '' }}
             onChange={(e) => setText(e.target.value)}
           />
         </label>
@@ -132,6 +142,7 @@ export function SearchBar() {
           type="text"
           value={text}
           aria-label="Поисковый запрос"
+          {...{ [SEARCH_INPUT_ATTR]: '' }}
           onChange={(e) => setText(e.target.value)}
         />
 

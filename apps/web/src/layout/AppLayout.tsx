@@ -20,11 +20,14 @@ import { IconCompose } from '../mail/icons';
 import { SearchFacets } from '../search/SearchFacets';
 import { SEARCH_PATH } from '../search/searchParams';
 import { SearchProvider } from '../search/SearchContext';
+import { globalHotkeyFor } from '../lib/hotkeys';
 import { BottomNav } from './BottomNav';
 import bottomStyles from './BottomNav.module.css';
 import { Footer } from './Footer';
 import { Header, NAV_DRAWER_ID } from './Header';
+import { HotkeysHelp } from './HotkeysHelp';
 import { Notice } from './Notice';
+import { SEARCH_INPUT_ATTR } from './SearchBar';
 import { Sidebar } from './Sidebar';
 import styles from './AppLayout.module.css';
 
@@ -39,12 +42,44 @@ export function AppLayout() {
    * с остальным приложением незачем.
    */
   const [navOpen, setNavOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Перешли в другую папку или в письмо — ящик закрывается сам: иначе он
   // остался бы поверх только что открытого списка.
   useEffect(() => {
     setNavOpen(false);
   }, [location.pathname]);
+
+  /*
+   * Клавиши, доступные на любой странице почты: C — написать, / — поиск,
+   * ? — справка. Обработчик отдельный от страничного (см. lib/hotkeys.ts):
+   * страницы отвечают за письма, каркас — за то, что есть всегда.
+   */
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const action = globalHotkeyFor(e, e.target);
+      if (!action) return;
+      // Отменяем действие браузера до всего остального: без этого «/»
+      // в Firefox открывает быстрый поиск по странице, а наш обработчик
+      // сработал бы поверх него.
+      e.preventDefault();
+      if (action === 'compose') {
+        openCompose();
+        return;
+      }
+      if (action === 'help') {
+        setHelpOpen(true);
+        return;
+      }
+      // Поле поиска стоит в шапке при любой ширине экрана — своего вида для
+      // телефона у него нет, поэтому запасного пути здесь не нужно.
+      const input = document.querySelector<HTMLInputElement>(`[${SEARCH_INPUT_ATTR}]`);
+      input?.focus();
+      input?.select();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [openCompose]);
 
   return (
     <SearchProvider>
@@ -95,6 +130,8 @@ export function AppLayout() {
           <IconCompose size={24} />
         </button>
 
+        {/* Справка по клавишам — по «?» */}
+        {helpOpen && <HotkeysHelp onClose={() => setHelpOpen(false)} />}
         {/* Окна написания письма — поверх любой страницы */}
         <ComposeWindows />
         {/* Сообщение об отказе — поверх всего */}
