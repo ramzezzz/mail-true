@@ -88,6 +88,10 @@ const OPERATOR_MATCH: Record<
  * ошибку компиляции в загадку.
  */
 export function quoteSieveString(value: string): string {
+  // Запрет на управляющие символы снят осознанно: именно от них строка и
+  // чистится — управляющий байт в правиле превращает отказ компилятора
+  // Sieve в загадку.
+  // eslint-disable-next-line no-control-regex
   const cleaned = value.replace(/[\u0000-\u0008\u000B-\u001F\u007F]/g, '');
   return `"${cleaned.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }

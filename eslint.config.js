@@ -131,6 +131,9 @@ export default tseslint.config(
       '@typescript-eslint/no-misused-promises': 'off',
       '@typescript-eslint/no-empty-function': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
+      // Подделки чужих клиентов часто держат ссылку на себя, чтобы вложенный
+      // объект мог записать вызов: в проверке это нормальный приём.
+      '@typescript-eslint/no-this-alias': 'off',
     },
   },
   {

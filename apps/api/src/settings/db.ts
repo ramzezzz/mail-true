@@ -154,7 +154,10 @@ export function parseConditions(raw: unknown): FilterCondition[] {
     out.push({
       field: field as FilterField,
       op: op as FilterOperator,
-      value: typeof value === 'string' ? value : String(value ?? ''),
+      // Только строка и число: значение условия приезжает из JSON в базе,
+      // и объект в String() дал бы условие «поле содержит [object Object]» —
+      // правило, которое не сработает никогда и объяснить это не сможет.
+      value: typeof value === 'string' || typeof value === 'number' ? String(value) : '',
     });
   }
   return out;
