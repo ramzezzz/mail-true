@@ -18,6 +18,13 @@
  *
  * Запрос перед отправкой прогоняется через `stemSearchQuery`: поиск Xapian
  * префиксный, и без обрезки окончаний «документами» не нашло бы «документ».
+ * Операторы обрезку переживают — обрезка о них знает (lib/searchQuery.ts).
+ *
+ * Оператор `папка:` применяется ЗДЕСЬ, а не на сервере, и это не разделение
+ * труда наугад: у IMAP папка — не условие поиска, а то, что открыто до
+ * поиска. Сервер её выбрать не может, потому что в запросе к нему папка
+ * уже названа параметром. Зато здесь папка ровно тем и выбирается — списком
+ * тех, кого опрашиваем.
  */
 
 import { useMemo } from 'react';
@@ -28,6 +35,7 @@ import { MESSAGES_PAGE_SIZE } from '../api/client';
 import { queryKeys } from '../api/queries';
 import { computeAggregates, type SearchAggregates } from '../lib/searchFacets';
 import { queryStems, stemSearchQuery } from '../lib/searchQuery';
+import { planSearch, type SearchPlan } from './searchOperators';
 import { searchTargets, type SearchState } from './searchParams';
 
 export interface SearchResult {
@@ -38,6 +46,8 @@ export interface SearchResult {
   stems: string[];
   /** Запрос в том виде, в котором он ушёл на сервер. */
   serverQuery: string;
+  /** Разобранный запрос: чипы над выдачей и папка из оператора `папка:`. */
+  plan: SearchPlan;
   isPending: boolean;
   isError: boolean;
   /** Есть ли что искать: пустая строка запроса поиском не считается. */
@@ -47,9 +57,29 @@ export interface SearchResult {
 export function useSearch(state: SearchState, folders: readonly Folder[]): SearchResult {
   const serverQuery = useMemo(() => stemSearchQuery(state.query.trim()), [state.query]);
   const stems = useMemo(() => queryStems(state.query.trim()), [state.query]);
+  const plan = useMemo(() => planSearch(state.query.trim(), folders), [state.query, folders]);
+  /*
+   * Пустой запрос — это не только пустая строка. `папка:Рассылки` без единого
+   * слова — законный запрос («покажи всё в этой папке»), а вот строка, от
+   * которой после разбора не осталось ни слов, ни условий, искать нечего.
+   */
   const isEmptyQuery = serverQuery.length === 0;
 
-  const targets = useMemo(() => searchTargets(folders, state), [folders, state]);
+  const targets = useMemo(() => {
+    const scoped = searchTargets(folders, state);
+    // Названа несуществующая папка — искать негде. Пустой список запросов
+    // честнее, чем поиск везде: «везде» — не то, о чём просили.
+    if (plan.unknownFolder !== null) return [];
+    if (!plan.folder) return scoped;
+    const wanted = plan.folder;
+    /*
+     * Оператор сильнее чипа области: человек написал папку словами уже
+     * после того, как выбрал область мышью, — значит, передумал. Спам и
+     * Корзина при этом доступны без кнопки «искать в спаме и корзине»:
+     * назвав папку по имени, он именно туда и просится.
+     */
+    return folders.filter((f) => f.id === wanted.id);
+  }, [folders, state, plan]);
 
   const results = useQueries({
     queries: targets.map((folder) => {
@@ -87,6 +117,7 @@ export function useSearch(state: SearchState, folders: readonly Folder[]): Searc
     aggregates,
     stems,
     serverQuery,
+    plan,
     isPending: !isEmptyQuery && results.some((r) => r.isPending),
     isError: results.some((r) => r.isError),
     isEmptyQuery,

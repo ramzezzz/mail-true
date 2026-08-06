@@ -17,7 +17,27 @@
  *   - основа не короче MIN_STEM (4) — иначе «счета» превратилось бы в «сч»
  *     и поиск начал бы находить всё подряд;
  *   - латиница, цифры и слова в кавычках не меняются вовсе.
+ *
+ * ОПЕРАТОРЫ ОБРЕЗКУ НЕ ПЕРЕЖИВАЮТ, если о них не знать, — и это не
+ * умозрительный риск, а найденный дефект. Слово-признак `непрочитанные`
+ * обрезалось до `непрочитанн`, сервер такого признака не узнавал, и запрос
+ * молча превращался в полнотекстовый поиск слова, которого нет ни в одном
+ * письме: человек получал ноль там, где ждал весь непрочитанный ящик.
+ * Название оператора `тема` обрезки не переживает тем более: `тем:договор`
+ * — это уже не оператор.
+ *
+ * Поэтому разбор идёт по той же грамматике, что и на сервере
+ * (packages/shared/src/search.ts):
+ *
+ *   слово-признак           — не трогаем вовсе;
+ *   имя оператора           — не трогаем вовсе;
+ *   значение оператора      — обрезаем только у `тема:`; адреса, имена
+ *                             файлов, даты и размеры обрезать нельзя;
+ *   фраза в кавычках        — точное совпадение, не трогаем;
+ *   всё остальное           — свободные слова, обрезаем как раньше.
  */
+
+import { isFlagWord, isOperatorName, operatorField } from '@mail-true/shared';
 
 /** Ниже этой длины основу не укорачиваем: слишком общий префикс. */
 const MIN_STEM = 4;
@@ -121,19 +141,74 @@ export function trimRussianEnding(word: string): string {
 /**
  * Разбирает строку запроса на части, сохраняя куски в кавычках целиком.
  * `счета "за июль" 2026` → ['счета', '"за июль"', '2026'].
+ *
+ * Кавычки после двоеточия держатся при своём операторе: `тема:"годовой
+ * отчёт"` — это ОДИН кусок, а не «тема:"годовой» и «отчёт"». Иначе значение
+ * оператора разваливалось бы на полпути, а обрезка окончаний работала бы
+ * с обломками. Незакрытая кавычка дочитывается до конца строки — человек
+ * ещё печатает, и отказывать ему на полпути не за что.
+ *
+ * Ёлочки понимаются наравне с прямыми кавычками — по той же причине, что и
+ * в грамматике (packages/shared/src/search.ts): фразу в поиск чаще вставляют
+ * из редактора, чем набирают, а редактор ставит именно ёлочки.
  */
 export function splitQueryParts(query: string): string[] {
-  const parts = query.match(/"[^"]*"|\S+/gu);
+  const parts = query.match(/[\p{L}\p{N}_]+:["«][^"»]*["»]?|["«][^"»]*["»]?|\S+/gu);
   return parts ?? [];
+}
+
+/** Кусок запроса, разобранный на имя оператора и значение. */
+interface QueryPart {
+  /** Имя оператора в том виде, как его написали. Пусто — свободные слова. */
+  name: string | null;
+  value: string;
+  /** Значение было взято в кавычки — значит, это точная фраза. */
+  quoted: boolean;
+}
+
+/**
+ * Раскладывает кусок на имя оператора и значение — по той же грамматике,
+ * что и сервер. Неизвестное слово перед двоеточием оператором не считается:
+ * «встреча 14:30» и «Договор № 452/26: правки» обязаны остаться собой.
+ */
+function readPart(part: string): QueryPart {
+  const unquote = (value: string): string => value.replace(/^["«]|["»]$/gu, '');
+  const colon = part.indexOf(':');
+  if (colon > 0) {
+    const name = part.slice(0, colon);
+    if (isOperatorName(name)) {
+      const rest = part.slice(colon + 1);
+      const quoted = /^["«]/u.test(rest);
+      return { name, value: quoted ? unquote(rest) : rest, quoted };
+    }
+  }
+  const quoted = /^["«]/u.test(part);
+  return { name: null, value: quoted ? unquote(part) : part, quoted };
+}
+
+/** Собирает кусок обратно в строку запроса. */
+function writePart(part: QueryPart, value: string): string {
+  const body = part.quoted ? `"${value}"` : value;
+  return part.name === null ? body : `${part.name}:${body}`;
 }
 
 /**
  * Запрос, который уходит на сервер: у каждого русского слова обрезано
- * окончание. Куски в кавычках — точная фраза, их не трогаем.
+ * окончание. Куски в кавычках — точная фраза, их не трогаем; операторы и
+ * слова-признаки не трогаем тоже (см. шапку файла).
  */
 export function stemSearchQuery(query: string): string {
   return splitQueryParts(query)
-    .map((part) => (part.startsWith('"') ? part : trimRussianEnding(part)))
+    .map((raw) => {
+      const part = readPart(raw);
+      if (part.quoted) return raw;
+      if (part.name === null) {
+        return isFlagWord(part.value) ? raw : trimRussianEnding(part.value);
+      }
+      // Обрезаем значение только там, где оно ищется как слово текста.
+      if (operatorField(part.name) !== 'subject') return raw;
+      return writePart(part, trimRussianEnding(part.value));
+    })
     .join(' ');
 }
 
@@ -143,15 +218,41 @@ export function normalizeForMatch(text: string): string {
 }
 
 /**
+ * Поля, значения которых подсвечиваются в выдаче.
+ *
+ * Даты, размеры и папка сюда не входят: подсвечивать «2026-01-01» в теме
+ * письма незачем — это условие отбора, а не искомое слово. А вот имя
+ * отправителя и слово из темы человек глазами ищет в строке списка, и
+ * подсветка там помогает.
+ */
+const HIGHLIGHTED_FIELDS = new Set(['from', 'to', 'cc', 'subject', 'filename']);
+
+/**
  * Основы слов запроса — по ним подсвечиваются совпадения в результатах.
  * Кавычки снимаются, пустые куски отбрасываются.
+ *
+ * Названия операторов в основы не попадают: подсвечивать слово «тема»
+ * в темах писем — ровно то, чего человек не просил.
  */
 export function queryStems(query: string): string[] {
-  const stems = splitQueryParts(query)
-    .map((part) => (part.startsWith('"') ? part.replace(/"/gu, '') : trimRussianEnding(part)))
-    .map((part) => normalizeForMatch(part).trim())
-    .filter((part) => part.length > 0);
-  return [...new Set(stems)];
+  const stems: string[] = [];
+  for (const raw of splitQueryParts(query)) {
+    const part = readPart(raw);
+    if (part.name !== null) {
+      const field = operatorField(part.name);
+      if (field === null || !HIGHLIGHTED_FIELDS.has(field)) continue;
+      stems.push(part.quoted ? part.value : trimRussianEnding(part.value));
+      continue;
+    }
+    // Слово-признак — это условие отбора, а не искомое слово
+    if (isFlagWord(part.value)) continue;
+    stems.push(part.quoted ? part.value : trimRussianEnding(part.value));
+  }
+  return [
+    ...new Set(
+      stems.map((s) => normalizeForMatch(s).trim()).filter((s) => s.length > 0),
+    ),
+  ];
 }
 
 export interface HighlightSegment {

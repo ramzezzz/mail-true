@@ -1,5 +1,9 @@
 /**
- * Операторы поиска.
+ * Язык поисковых запросов (packages/shared/src/search.ts).
+ *
+ * Проверки живут здесь, а не рядом с грамматикой, по прозаической причине:
+ * в общем пакете нет запускалки проверок, а грамматику надо гонять на каждой
+ * сборке API — именно API превращает её в условия IMAP SEARCH.
  *
  * Раньше вся поисковая строка целиком уходила в IMAP как поиск по тексту.
  * Поэтому `от:волкова` не находило ничего: сервер честно искал письмо, где
@@ -9,7 +13,14 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hasOperators, parseSearch } from './search-query.js';
+import {
+  describeSearch,
+  hasOperators,
+  isFlagWord,
+  isOperatorName,
+  parseSearch,
+  SEARCH_OPERATORS,
+} from '@mail-true/shared';
 
 test('оператор «от» вынимается из строки и не остаётся текстом', () => {
   const q = parseSearch('от:волкова');
@@ -22,6 +33,8 @@ test('латинские названия операторов работают 
   assert.equal(parseSearch('to:sales').to, 'sales');
   assert.equal(parseSearch('subject:contract').subject, 'contract');
   assert.equal(parseSearch('cc:boss').cc, 'boss');
+  assert.equal(parseSearch('filename:.pdf').filename, '.pdf');
+  assert.equal(parseSearch('folder:Newsletters').folder, 'Newsletters');
 });
 
 test('операторы и свободные слова уживаются в одной строке', () => {
@@ -36,6 +49,14 @@ test('кавычки держат несколько слов вместе', () 
   assert.equal(q.text, 'срочно');
 });
 
+test('незакрытая кавычка не отказ, а недопечатанная строка', () => {
+  // Человек ещё печатает. Отказывать на полпути — значит требовать
+  // дописать кавычку прежде, чем показать хоть что-нибудь.
+  const q = parseSearch('тема:"годовой отчёт');
+  assert.equal(q.subject, 'годовой отчёт');
+  assert.equal(q.text, null);
+});
+
 test('слова-признаки узнаются без двоеточия', () => {
   assert.equal(parseSearch('непрочитанные').seen, false);
   assert.equal(parseSearch('важные').flagged, true);
@@ -48,6 +69,22 @@ test('«есть:вложение» просит отбор по вложени�
   assert.equal(parseSearch('есть:вложение').hasAttachment, true);
   assert.equal(parseSearch('has:attachment').hasAttachment, true);
   assert.equal(parseSearch('есть:луна').hasAttachment, false, 'неизвестное значение — это просто слова');
+  assert.equal(parseSearch('есть:луна').text, 'есть:луна');
+});
+
+test('имя файла подразумевает вложение', () => {
+  // Иначе `файл:.pdf` вело бы себя как «письма, где где-то встречается .pdf».
+  const q = parseSearch('файл:.pdf');
+  assert.equal(q.filename, '.pdf');
+  assert.equal(q.hasAttachment, true);
+});
+
+test('«папка:» разбирается, но условием поиска не становится', () => {
+  // Применяет её вызывающий: у IMAP папка — это то, что открыто до поиска.
+  // Здесь важно другое: она не должна уйти в полнотекстовый поиск словами.
+  const q = parseSearch('папка:Рассылки скидки');
+  assert.equal(q.folder, 'Рассылки');
+  assert.equal(q.text, 'скидки');
 });
 
 test('даты разбираются в календарные границы', () => {
@@ -64,12 +101,50 @@ test('несуществующая дата не молчит, а остаётс
   assert.equal(q.text, 'после:2026-02-31');
 });
 
+test('срок «старше» и «новее» считается календарём', () => {
+  const now = new Date('2026-08-06T12:34:56.000Z');
+  assert.equal(parseSearch('старше:1г', now).before?.toISOString(), '2025-08-06T00:00:00.000Z');
+  assert.equal(parseSearch('новее:7д', now).since?.toISOString(), '2026-07-30T00:00:00.000Z');
+  assert.equal(parseSearch('новее:2нед', now).since?.toISOString(), '2026-07-23T00:00:00.000Z');
+  assert.equal(parseSearch('старше:3мес', now).before?.toISOString(), '2026-05-06T00:00:00.000Z');
+  assert.equal(parseSearch('older_than:2y', now).before?.toISOString(), '2024-08-06T00:00:00.000Z');
+});
+
+test('срок с непонятной единицей — это просто слова', () => {
+  const q = parseSearch('старше:1попугая');
+  assert.equal(q.before, null);
+  assert.equal(q.text, 'старше:1попугая');
+});
+
+test('размер письма понимает килобайты и мегабайты', () => {
+  assert.equal(parseSearch('больше:5м').larger, 5 * 1024 * 1024);
+  assert.equal(parseSearch('меньше:100к').smaller, 100 * 1024);
+  assert.equal(parseSearch('larger:1mb').larger, 1024 * 1024);
+  assert.equal(parseSearch('больше:2048').larger, 2048);
+  // Ноль и мусор размером не считаются
+  assert.equal(parseSearch('больше:0').larger, null);
+  assert.equal(parseSearch('больше:много').text, 'больше:много');
+});
+
 test('адрес с двоеточием не ломает разбор', () => {
   // Двоеточие встречается в обычном тексте не реже, чем в операторах:
   // время «14:30» в теме, «Re:» в начале. Объявлять такое ошибкой нельзя.
   const q = parseSearch('встреча 14:30');
   assert.equal(q.text, 'встреча 14:30');
   assert.equal(hasOperators(q), false);
+});
+
+test('запрос из разбора риска остаётся собой', () => {
+  // Ровно тот пример, которым описан риск в docs/gaps.md, п. 7.
+  const q = parseSearch('Договор № 452/26: правки');
+  assert.equal(hasOperators(q), false);
+  assert.equal(q.text, 'Договор № 452/26: правки');
+});
+
+test('неизвестный оператор — это просто слова', () => {
+  const q = parseSearch('приоритет:высокий смета');
+  assert.equal(hasOperators(q), false);
+  assert.equal(q.text, 'приоритет:высокий смета');
 });
 
 test('оператор без значения — это просто слово', () => {
@@ -91,4 +166,51 @@ test('пустой запрос ничего не просит', () => {
 test('регистр названия оператора не важен', () => {
   assert.equal(parseSearch('От:Волкова').from, 'Волкова');
   assert.equal(parseSearch('FROM:Ivanov').from, 'Ivanov');
+});
+
+test('чипы показывают, во что превратился запрос', () => {
+  const chips = describeSearch(parseSearch('от:волкова есть:вложение договор'));
+  assert.deepEqual(
+    chips.map((c) => `${c.title}: ${c.value}`),
+    ['Отправитель: волкова', 'Вложения: есть', 'Слова: договор'],
+  );
+});
+
+test('подсказка обещает только те операторы, которые разбираются', () => {
+  /*
+   * Подсказка, обещающая оператор, которого разборщик не знает, — это ложь
+   * интерфейса, и заметить её можно только руками. Здесь она заметна сама.
+   */
+  for (const item of SEARCH_OPERATORS) {
+    const colon = item.sample.indexOf(':');
+    if (colon < 0) {
+      // Слово-признак: должно разбираться без двоеточия
+      assert.equal(
+        isFlagWord(item.sample),
+        true,
+        `слово-признак «${item.sample}» из подсказки не разбирается`,
+      );
+      assert.equal(
+        hasOperators(parseSearch(item.sample)),
+        true,
+        `слово-признак «${item.sample}» из подсказки ничего не даёт`,
+      );
+      continue;
+    }
+    assert.equal(
+      isOperatorName(item.sample.slice(0, colon)),
+      true,
+      `оператор «${item.sample}» из подсказки не разбирается`,
+    );
+    assert.equal(
+      hasOperators(parseSearch(item.sample)),
+      true,
+      `пример «${item.sample}» из подсказки ничего не даёт`,
+    );
+    // Латинский синоним из подсказки тоже обязан работать
+    const latin = item.latin.replace(/:$/u, '');
+    if (item.latin.endsWith(':')) {
+      assert.equal(isOperatorName(latin), true, `синоним «${item.latin}» не разбирается`);
+    }
+  }
 });

@@ -24,6 +24,7 @@ import {
   toggleLabelFacet,
   togglePeriodFacet,
 } from './searchParams';
+import { SavedSearches } from './SavedSearches';
 import { useSearchContext } from './SearchContext';
 import styles from './SearchFacets.module.css';
 
@@ -161,6 +162,13 @@ export function SearchFacets() {
           );
         })}
       </div>
+
+      {/*
+        Сохранённые запросы видны и в режиме поиска: переключиться с одного
+        сохранённого запроса на другой — самая частая причина сюда смотреть,
+        а левая колонка здесь занята фильтрами и папок не показывает.
+      */}
+      <SavedSearches />
     </aside>
   );
 }

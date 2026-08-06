@@ -1,0 +1,81 @@
+/* Подсказка по операторам: и на пустой странице поиска, и по кнопке в панели. */
+
+.help {
+  margin: 0 20px 16px;
+  padding: 16px 20px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-content-secondary, rgba(0, 0, 0, 0.03));
+  max-width: 720px;
+}
+
+.title {
+  margin-bottom: 6px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-color-text-primary);
+}
+
+.lead,
+.footer {
+  margin: 0;
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+  color: var(--mt-color-text-secondary);
+}
+
+.footer {
+  margin-top: 10px;
+}
+
+.list {
+  display: grid;
+  /* Две колонки на широком экране, одна на узком: пятнадцать строк
+     в один столбец выглядят списком дел, а не подсказкой. */
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 2px 24px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 22px;
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+}
+
+.sample {
+  /* Одинаковая ширина колонки примеров: пояснения выстраиваются столбиком,
+     и список читается сверху вниз, а не рваной лесенкой. */
+  flex: none;
+  min-width: 148px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-family: var(--mt-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--mt-color-text-accent, #005ff9);
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  button.sample:hover {
+    text-decoration: underline;
+  }
+}
+
+.hint {
+  flex: 1 1 auto;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Латинский синоним — самым тихим тоном: он для тех, кто его ищет */
+.latin {
+  flex: none;
+  font-family: var(--mt-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  color: var(--mt-color-text-tertiary);
+}

@@ -1,0 +1,32 @@
+.card {
+  width: 480px;
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 16px;
+}
+
+.previewLabel {
+  font-size: var(--mt-font-caption-size, 13px);
+  color: var(--mt-color-text-secondary);
+}
+
+.previewValue {
+  padding: 8px 12px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-content-secondary, rgba(0, 0, 0, 0.03));
+  font-family: var(--mt-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+  /* Длинный запрос переносится, а не растягивает окно */
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 12px 0 0;
+  font-size: var(--mt-font-caption-size, 13px);
+  color: var(--mt-color-text-secondary);
+}

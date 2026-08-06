@@ -3,21 +3,26 @@
  *
  * Шапка переключается в поисковый режим (см. layout/Header.tsx), левая
  * колонка показывает фасетные фильтры (search/SearchFacets.tsx), а здесь —
- * панель «Искать в спаме и корзине», сообщение об обрезке окончаний и
- * сгруппированные по периодам результаты.
+ * панель «Искать в спаме и корзине», чипы «во что превратился запрос»,
+ * сообщение об обрезке окончаний и сгруппированные по периодам результаты.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import type { Folder } from '@mail-true/shared';
+import { parseSearch, type Folder, type SearchChip } from '@mail-true/shared';
 import { useFolders } from '../api/queries';
 import { Button } from '../components';
 import { applyFacets } from '../lib/searchFacets';
+import { splitQueryParts } from '../lib/searchQuery';
 import { IconSearch } from '../mail/icons';
 import { ListSkeleton } from '../mail/ListSkeleton';
 import { buildSearchUrl, parseSearchParams } from '../search/searchParams';
+import { SaveSearchDialog } from '../search/SaveSearchDialog';
+import { SearchChips } from '../search/SearchChips';
 import { useSearchContext } from '../search/SearchContext';
+import { SearchHelp } from '../search/SearchHelp';
 import { SearchResults } from '../search/SearchResults';
+import { useCreateSavedSearch, useSavedSearches } from '../search/useSavedSearches';
 import { useSearch } from '../search/useSearch';
 import styles from './SearchPage.module.css';
 
@@ -29,14 +34,62 @@ import styles from './SearchPage.module.css';
  */
 const NO_FOLDERS: readonly Folder[] = [];
 
+/**
+ * Убирает из строки запроса условие, которое человек снял чипом.
+ *
+ * Каждый кусок разбирается ТОЙ ЖЕ грамматикой и проверяется по тому же
+ * описанию, что рисует чипы. Своего разбора здесь нет намеренно: он
+ * разошёлся бы с грамматикой в первый же месяц, и чип «Отправитель»
+ * перестал бы убирать `от:` — при том что нарисован был бы исправно.
+ */
+export function dropSearchChip(query: string, field: SearchChip['field']): string {
+  return splitQueryParts(query)
+    .filter((token) => {
+      const chips = describeToken(token);
+      return !chips.includes(field);
+    })
+    .join(' ');
+}
+
+function describeToken(token: string): SearchChip['field'][] {
+  // Разбираем кусок сам по себе: что он даёт в одиночку, то он и добавил
+  // к общему запросу.
+  const parsed = parseSearch(token);
+  const fields: SearchChip['field'][] = [];
+  if (parsed.from) fields.push('from');
+  if (parsed.to) fields.push('to');
+  if (parsed.cc) fields.push('cc');
+  if (parsed.subject) fields.push('subject');
+  if (parsed.folder) fields.push('folder');
+  if (parsed.filename) fields.push('filename');
+  else if (parsed.hasAttachment) fields.push('hasAttachment');
+  if (parsed.seen !== null) fields.push('seen');
+  if (parsed.flagged !== null) fields.push('flagged');
+  if (parsed.since) fields.push('since');
+  if (parsed.before) fields.push('before');
+  if (parsed.larger !== null) fields.push('larger');
+  if (parsed.smaller !== null) fields.push('smaller');
+  if (parsed.text) fields.push('text');
+  return fields;
+}
+
 export function SearchPage() {
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const state = parseSearchParams(params);
   const { data: folders } = useFolders();
   const { setAggregates, setLoading } = useSearchContext();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
 
   const search = useSearch(state, folders ?? NO_FOLDERS);
+  /*
+   * Кнопка «Сохранить запрос» появляется вместе с поведением: пока сервер
+   * не сказал, что запросы есть куда сохранять, кнопки нет вовсе — а не
+   * есть, но с отказом при нажатии.
+   */
+  const savedSearches = useSavedSearches();
+  const createSaved = useCreateSavedSearch();
 
   // Счётчики уходят в левую колонку — она рисуется каркасом, не страницей
   useEffect(() => {
@@ -53,6 +106,10 @@ export function SearchPage() {
     [setAggregates, setLoading],
   );
 
+  const goQuery = (query: string) => {
+    void navigate(buildSearchUrl({ ...state, query }));
+  };
+
   const visible = applyFacets(search.items, state.facets);
 
   if (search.isEmptyQuery) {
@@ -62,6 +119,9 @@ export function SearchPage() {
           <IconSearch size={32} />
           <p className={styles.placeholderText}>Введите запрос — поиск идёт по всем папкам</p>
         </div>
+        {/* Подсказка по операторам показана сразу: это единственное место,
+            где человек её ещё готов прочитать — искать ему пока нечего. */}
+        <SearchHelp onPick={(sample) => goQuery(`${state.query} ${sample}`.trim())} />
       </div>
     );
   }
@@ -87,6 +147,21 @@ export function SearchPage() {
           </Button>
         )}
 
+        {savedSearches.available && (
+          <Button mode="secondary" onClick={() => setSaveOpen(true)}>
+            Сохранить запрос
+          </Button>
+        )}
+
+        <button
+          type="button"
+          className={styles.helpToggle}
+          aria-expanded={helpOpen}
+          onClick={() => setHelpOpen((open) => !open)}
+        >
+          {helpOpen ? 'Скрыть подсказку' : 'Как искать точнее'}
+        </button>
+
         <div className={styles.spacer} />
 
         {!search.isPending && (
@@ -96,6 +171,13 @@ export function SearchPage() {
         )}
       </div>
 
+      {helpOpen && <SearchHelp onPick={(sample) => goQuery(`${state.query} ${sample}`.trim())} />}
+
+      <SearchChips
+        chips={search.plan.chips}
+        onDrop={(chip) => goQuery(dropSearchChip(state.query, chip.field))}
+      />
+
       {/*
         Поиск префиксный (docs/search.md), поэтому на сервер уходит основа
         слова, а не то, что набрал пользователь. Показываем это честно —
@@ -104,6 +186,18 @@ export function SearchPage() {
       {search.serverQuery !== state.query.trim() && (
         <div className={styles.note}>
           Ищем по основам слов: <b>{search.serverQuery}</b>
+        </div>
+      )}
+
+      {/*
+        Названа папка, которой нет. Молчать здесь нельзя: человек увидел бы
+        «ничего не найдено» и искал бы ошибку в словах запроса, а ошибка
+        в названии папки.
+      */}
+      {search.plan.unknownFolder !== null && (
+        <div className={styles.note}>
+          Папки <b>{search.plan.unknownFolder}</b> нет. Уберите условие «Папка» или назовите
+          папку так, как она называется в левой колонке.
         </div>
       )}
 
@@ -121,6 +215,21 @@ export function SearchPage() {
 
       {!search.isPending && visible.length > 0 && (
         <SearchResults items={visible} stems={search.stems} folders={folders ?? NO_FOLDERS} />
+      )}
+
+      {saveOpen && (
+        <SaveSearchDialog
+          query={state.query.trim()}
+          includeJunk={state.includeJunk}
+          busy={createSaved.isPending}
+          onClose={() => setSaveOpen(false)}
+          onSave={(name) => {
+            createSaved.mutate(
+              { name, query: state.query.trim(), includeJunk: state.includeJunk },
+              { onSuccess: () => setSaveOpen(false) },
+            );
+          }}
+        />
       )}
     </div>
   );

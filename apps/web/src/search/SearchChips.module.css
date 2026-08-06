@@ -1,0 +1,65 @@
+/*
+ * Полоса чипов над выдачей. Геометрия та же, что у чипов категорий в списке
+ * писем: высота 24px, радиус 12px, шрифт 13px — чтобы поиск не выглядел
+ * приехавшим из другого продукта.
+ */
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 20px 8px;
+}
+
+.caption {
+  font-size: var(--mt-font-caption-size, 13px);
+  color: var(--mt-color-text-secondary);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 10px;
+  border-radius: 12px;
+  background: var(--mt-color-background-accent-tint-alpha);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 16px;
+  white-space: nowrap;
+  /* Длинное значение (вставленная фраза) не должно растягивать полосу */
+  max-width: 320px;
+}
+
+.chipTitle {
+  color: var(--mt-color-text-secondary);
+}
+
+.chipValue {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mt-color-text-primary);
+}
+
+.chipDrop {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mt-color-text-secondary);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .chipDrop:hover {
+    background: var(--mt-color-background-modal-hover, rgba(0, 0, 0, 0.08));
+    color: var(--mt-color-text-primary);
+  }
+}

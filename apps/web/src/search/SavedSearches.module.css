@@ -1,0 +1,124 @@
+/*
+ * Геометрия левой колонки: пункт 200×36 с шагом 37px, радиус 8px — те же
+ * метрики, что у папок (Sidebar.module.css) и у фасетных фильтров.
+ * Строка запроса под именем делает пункт выше папки — это намеренно:
+ * сохранённый запрос не должен читаться как ещё одна папка.
+ */
+
+.block {
+  margin-top: 12px;
+}
+
+.groupTitle {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  margin-bottom: 4px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-sidebar-counter-text);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: var(--mt-size-border-radius, 8px);
+  color: var(--mt-sidebar-item-text);
+  text-decoration: none;
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--mt-sidebar-item-bg-hover);
+  }
+}
+
+.active {
+  background: var(--mt-sidebar-item-bg-active, var(--mt-sidebar-item-bg-hover));
+}
+
+.itemIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--mt-sidebar-counter-text);
+}
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itemName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 18px;
+}
+
+/* Сама строка запроса — тише имени: это пояснение, а не заголовок */
+.itemQuery {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 16px;
+  color: var(--mt-color-text-tertiary);
+}
+
+/*
+ * Крестик проявляется при наведении — как чекбокс в списке писем. На
+ * касании наведения не бывает вовсе, поэтому там он показан сразу:
+ * иначе убрать сохранённый запрос с телефона было бы нечем.
+ */
+.remove {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--mt-color-text-secondary);
+  cursor: pointer;
+}
+
+.remove:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .remove {
+    opacity: 0;
+  }
+
+  .row:hover .remove {
+    opacity: 1;
+  }
+
+  .remove:hover {
+    background: var(--mt-color-background-modal-hover, rgba(0, 0, 0, 0.08));
+    color: var(--mt-color-text-primary);
+  }
+}
+
+.remove:disabled {
+  cursor: default;
+  opacity: 0.4;
+}

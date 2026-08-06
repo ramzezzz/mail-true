@@ -19,6 +19,23 @@
   flex: 1 1 auto;
 }
 
+/* «Как искать точнее» — ссылкой, а не третьей кнопкой: подсказка нужна
+   не каждый раз, и равняться с действиями поиска ей не за что. */
+.helpToggle {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-accent, #005ff9);
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .helpToggle:hover {
+    text-decoration: underline;
+  }
+}
+
 .total {
   font-size: var(--mt-font-subhead-size, 14px);
   color: var(--mt-color-text-secondary);
