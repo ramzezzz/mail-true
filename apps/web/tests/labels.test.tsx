@@ -12,6 +12,9 @@
  *      передаёт на сервер именно ответ человека, а не своё умолчание.
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,11 +23,20 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { MessageSummary } from '@mail-true/shared';
+import { useUiStore } from '../src/app/store';
 import { isServiceLabel, userLabelKeys } from '../src/lib/categories';
 import { applyFacets, computeAggregates, EMPTY_SELECTION } from '../src/lib/searchFacets';
-import { labelPresence, labelsApi, labelsOfMessage, nextLabelAction, type MailLabel } from '../src/mail/labelsApi';
+import {
+  labelPresence,
+  labelsApi,
+  labelsOfMessage,
+  nextLabelAction,
+  rowLabelUnion,
+  type MailLabel,
+} from '../src/mail/labelsApi';
 import { LabelMenu } from '../src/mail/LabelMenu';
 import { LabelPills } from '../src/mail/LabelPill';
+import { MessageList, ROW_HEIGHT } from '../src/mail/MessageList';
 import { LabelsPage } from '../src/pages/settings/LabelsPage';
 import {
   buildSearchParams,
@@ -253,6 +265,136 @@ describe('меню меток', () => {
     click(button('Оплатить')!);
     await waitFor(() => apply.mock.calls.length === 2, 'запрос снятия');
     expect(apply.mock.calls[1]?.[0]).toEqual({ ids: ['1'], remove: ['mt-oplatit'] });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Строка списка: переписка                                            */
+/* ------------------------------------------------------------------ */
+
+describe('метка на строке-переписке', () => {
+  it('строка показывает объединение меток разговора, а не последнего письма', () => {
+    // Разговор из трёх писем. Метку поставили на весь разговор, потом
+    // пришёл ответ — у него ключевого слова нет. По последнему письму
+    // пометка исчезла бы из списка ровно тогда, когда разговор ожил.
+    const row = { id: 'inbox:3', labels: [], threadIds: ['inbox:1', 'inbox:2', 'inbox:3'] };
+    const union = rowLabelUnion(row, { 'inbox:1': ['mt-oplatit'], 'inbox:2': ['mt-yurist'] });
+    expect(union).toEqual(['mt-oplatit', 'mt-yurist']);
+  });
+
+  it('до ответа сервера показываются метки самого показанного письма', () => {
+    // Список обязан рисоваться и без дополнительного запроса: метки —
+    // украшение строки, а не её содержание.
+    const row = { id: 'inbox:3', labels: ['mt-oplatit'], threadIds: ['inbox:1', 'inbox:3'] };
+    expect(rowLabelUnion(row, {})).toEqual(['mt-oplatit']);
+  });
+
+  it('одна и та же метка не задваивается', () => {
+    const row = { id: 'inbox:2', labels: ['mt-oplatit'], threadIds: ['inbox:1', 'inbox:2'] };
+    // И регистр не создаёт второй пилюли: ключевые слова у Dovecot
+    // нечувствительны к регистру.
+    expect(rowLabelUnion(row, { 'inbox:1': ['MT-OPLATIT'] })).toEqual(['mt-oplatit']);
+  });
+
+  it('строка-письмо (без группировки) остаётся при своих метках', () => {
+    expect(rowLabelUnion({ id: 'inbox:1', labels: ['mt-oplatit'] }, {})).toEqual(['mt-oplatit']);
+  });
+});
+
+describe('пилюля в строке не растит строку', () => {
+  const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
+  const listCss = readFileSync(join(SRC, 'mail/MessageList.module.css'), 'utf8');
+  const pillCss = readFileSync(join(SRC, 'mail/LabelPill.module.css'), 'utf8');
+
+  /** Тело правила по селектору (первое вхождение). */
+  function rule(css: string, selector: string): string {
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at, `в CSS нет правила ${selector}`).toBeGreaterThanOrEqual(0);
+    const open = css.indexOf('{', at);
+    return css.slice(open + 1, css.indexOf('}', open));
+  }
+
+  it('пилюля ниже самой низкой строки списка', () => {
+    // Высоту строки виртуализация кладёт в transform числом (ROW_HEIGHT),
+    // и разойтись с CSS ей нельзя: список поедет тем сильнее, чем дальше
+    // пролистали. Самый жёсткий случай — компактный режим, 40px.
+    const height = Number(/height:\s*(\d+)px/u.exec(rule(pillCss, '.pill'))?.[1]);
+    expect(height).toBeGreaterThan(0);
+    expect(height).toBeLessThan(ROW_HEIGHT.desktop.compact);
+    // И не выше счётчика переписки, который в строке уже живёт
+    const badge = Number(/height:\s*(\d+)px/u.exec(rule(listCss, '.threadCount'))?.[1]);
+    expect(height).toBeLessThanOrEqual(badge);
+  });
+
+  it('ряд меток не переносится на вторую строку', () => {
+    // Перенос — единственный способ, которым ряд пилюль мог бы вырасти
+    // выше своей высоты и растянуть строку.
+    expect(rule(listCss, '.rowLabels')).toMatch(/flex-wrap:\s*nowrap/u);
+    expect(rule(listCss, '.rowLabels')).toMatch(/overflow:\s*hidden/u);
+  });
+
+  it('строка списка рисует метку названием, а не только цветом', () => {
+    useUiStore.setState({ selectedIds: new Set<string>() });
+    const message = summary('1', ['mt-oplatit']);
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <MessageList
+            messages={[message]}
+            labels={[OPLATIT, YURIST]}
+            rowLabels={new Map([['1', ['mt-oplatit']]])}
+          />
+        </MemoryRouter>,
+      );
+    });
+    const pill = host.querySelector('[class*="rowLabels"]');
+    expect(pill, 'пилюля метки не отрисовалась в строке').not.toBeNull();
+    expect(pill!.textContent).toContain('Оплатить');
+    // Обратный ход: чужого и служебного в строке нет
+    expect(host.textContent).not.toContain('юриста');
+  });
+
+  it('без справочника строка выглядит как прежде', () => {
+    // Список рисуется и в проверках, где запроса к серверу нет вовсе:
+    // требовать провайдер запросов ради украшения строки нельзя.
+    useUiStore.setState({ selectedIds: new Set<string>() });
+    act(() => {
+      root.render(
+        <MemoryRouter>
+          <MessageList messages={[summary('1', ['mt-oplatit'])]} />
+        </MemoryRouter>,
+      );
+    });
+    expect(host.querySelector('[class*="rowLabels"]')).toBeNull();
+  });
+});
+
+describe('меню меток над перепиской', () => {
+  it('галочка считается по строке, а метка ставится на весь разговор', async () => {
+    vi.spyOn(labelsApi, 'getLabels').mockResolvedValue({
+      available: true,
+      reason: null,
+      items: [OPLATIT],
+    });
+    const apply = vi
+      .spyOn(labelsApi, 'applyLabels')
+      .mockResolvedValue({ updated: 3, added: [], removed: [] });
+
+    // Строка — переписка из трёх писем; метка стоит (объединение),
+    // поэтому нажатие обязано СНЯТЬ её со всех трёх.
+    render(
+      <LabelMenu
+        messages={[{ id: 'inbox:3', labels: ['mt-oplatit'] }]}
+        targetIds={['inbox:1', 'inbox:2', 'inbox:3']}
+      />,
+    );
+    await waitFor(() => Boolean(button('Оплатить')), 'метка в меню');
+    click(button('Оплатить')!);
+    await waitFor(() => apply.mock.calls.length === 1, 'запрос снятия');
+    expect(apply.mock.calls[0]?.[0]).toEqual({
+      ids: ['inbox:1', 'inbox:2', 'inbox:3'],
+      remove: ['mt-oplatit'],
+    });
   });
 });
 

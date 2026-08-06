@@ -124,7 +124,14 @@ export function ContextMenuSeparator() {
  * Пункта нет вовсе, пока сервер не сказал, что справочник меток доступен, —
  * общее правило продукта: кнопка появляется вместе с поведением.
  */
-export function ContextMenuLabels({ messages }: { messages: readonly LabelTarget[] }) {
+export function ContextMenuLabels({
+  messages,
+  targetIds,
+}: {
+  messages: readonly LabelTarget[];
+  /** Письма, которые правятся: у строки-переписки это весь разговор. */
+  targetIds?: readonly string[] | undefined;
+}) {
   const { available } = useLabelsState();
   const [open, setOpen] = useState(false);
   if (!available) return null;
@@ -139,7 +146,7 @@ export function ContextMenuLabels({ messages }: { messages: readonly LabelTarget
       >
         Метки
       </ContextMenuItem>
-      {open && <LabelMenu messages={messages} />}
+      {open && <LabelMenu messages={messages} targetIds={targetIds} />}
     </>
   );
 }

@@ -57,6 +57,8 @@ export interface LabelPillsProps {
   dictionary: readonly MailLabel[];
   large?: boolean;
   onRemove?: ((key: string) => void) | undefined;
+  /** Класс ряда — им строка списка ужимает пилюли под свою высоту. */
+  className?: string | undefined;
 }
 
 /**
@@ -66,12 +68,18 @@ export interface LabelPillsProps {
  * произвольном порядке, и без этого одна и та же пара меток на двух
  * письмах выстраивалась бы по-разному.
  */
-export function LabelPills({ keywords, dictionary, large, onRemove }: LabelPillsProps) {
+export function LabelPills({
+  keywords,
+  dictionary,
+  large,
+  onRemove,
+  className,
+}: LabelPillsProps) {
   const lower = new Set(keywords.map((k) => k.toLowerCase()));
   const shown = dictionary.filter((label) => lower.has(label.key.toLowerCase()));
   if (shown.length === 0) return null;
   return (
-    <span className={styles.row}>
+    <span className={cx(styles.row, className)}>
       {shown.map((label) => (
         <LabelPill
           key={label.key}

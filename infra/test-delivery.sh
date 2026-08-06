@@ -69,12 +69,21 @@ else
     fail "письмо не дошло за 30 секунд"
 fi
 
-echo "=== 4. Чтение по IMAP:143 ==="
-# Ищем письмо и читаем его настоящим IMAP-протоколом (curl из контейнера postfix)
-SEQ=$("${COMPOSE[@]}" exec -T postfix curl -s --url "imap://dovecot:143/INBOX" \
+echo "=== 4. Чтение по IMAP:143 (STARTTLS) ==="
+# Ищем письмо и читаем его настоящим IMAP-протоколом (curl из контейнера postfix).
+#
+# --ssl-reqd обязателен: на правильно настроенном сервере
+# disable_plaintext_auth = yes, и Dovecot до STARTTLS объявляет LOGINDISABLED —
+# curl честно отвечает «No known authentication mechanisms supported» и уходит.
+# Без этого ключа пункт «чтение по IMAP» ВСЕГДА краснел именно там, где
+# сервер настроен как надо, и зеленел бы только на небезопасной настройке.
+# -k — сертификат внутри сети стека самоподписанный, а имени «dovecot» в нём
+# нет и быть не может; наружу это соединение не выходит.
+IMAP_CURL=(curl -s --ssl-reqd -k)
+SEQ=$("${COMPOSE[@]}" exec -T postfix "${IMAP_CURL[@]}" --url "imap://dovecot:143/INBOX" \
         --user "$TEST_USER:$TEST_PASS" -X "SEARCH SUBJECT \"$TOKEN\"" | tr -d '\r' | sed 's/^\* SEARCH //' | awk '{print $NF}')
 if [ -n "$SEQ" ]; then
-    MSG=$("${COMPOSE[@]}" exec -T postfix curl -s --url "imap://dovecot:143/INBOX;MAILINDEX=$SEQ" \
+    MSG=$("${COMPOSE[@]}" exec -T postfix "${IMAP_CURL[@]}" --url "imap://dovecot:143/INBOX;MAILINDEX=$SEQ" \
             --user "$TEST_USER:$TEST_PASS")
     echo "$MSG" | grep -q "Subject: inbound $TOKEN" && ok "IMAP: тема совпадает (Subject: inbound $TOKEN)" || fail "IMAP: тема не найдена"
     echo "$MSG" | grep -q "$BODY_TOKEN inbound"      && ok "IMAP: тело совпадает ($BODY_TOKEN inbound)" || fail "IMAP: тело не найдено"
@@ -126,7 +135,11 @@ echo "=== 7. Юникод в заголовках: обещание сервер
 # Получалась ложь с последствиями: сервер соглашался принять письмо, а на
 # доставке отбивал его НАВСЕГДА (5.6.7 «SMTPUTF8 is required, but was not
 # offered»). Проверяем обе стороны разом — согласованность, а не настройку.
-LMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "LHLO proba\r\nQUIT\r\n" | timeout 5 nc 172.28.0.54 24' 2>/dev/null || true)
+# Адрес Dovecot берём из .env (DOVECOT_IP), а не зашитый: подсеть стека
+# меняют, когда 172.28.0.0/16 занята на машине, и зашитый адрес превращал
+# эту проверку в вечное «SMTPUTF8 не анонсируется» — то есть в ложный отчёт
+# о поломке там, где всё исправно.
+LMTP_CAPS=$("${COMPOSE[@]}" exec -T -e DIP="${DOVECOT_IP:-172.28.0.54}" postfix sh -c 'printf "LHLO proba\r\nQUIT\r\n" | timeout 5 nc "$DIP" 24' 2>/dev/null || true)
 SMTP_CAPS=$("${COMPOSE[@]}" exec -T postfix sh -c     'printf "EHLO proba\r\nQUIT\r\n" | timeout 5 nc 127.0.0.1 25' 2>/dev/null || true)
 if echo "$LMTP_CAPS" | grep -qi SMTPUTF8; then
     # Dovecot научился — тогда и Postfix обязан анонсировать.

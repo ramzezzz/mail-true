@@ -46,6 +46,8 @@ import { restoreScrollTop, rowIndexOf } from '../lib/listPosition';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
 import { usePhone } from '../lib/useMediaQuery';
 import { IconArchive, IconAttach, IconClock, IconFlagFilled, IconShield, IconTrash } from './icons';
+import { LabelPills } from './LabelPill';
+import type { MailLabel } from './labelsApi';
 import styles from './MessageList.module.css';
 import { SenderAvatar } from './SenderAvatar';
 import {
@@ -60,6 +62,13 @@ import {
 export type ListRow =
   | { type: 'header'; label: string }
   | { type: 'message'; message: MessageSummary };
+
+/**
+ * Пустой справочник меток — постоянная, а не `[]` по месту.
+ * Новый массив на каждом рендере менял бы свойство каждой строки и сводил
+ * бы на нет всю экономию виртуализации.
+ */
+const NO_LABELS: readonly MailLabel[] = [];
 
 /** Заголовок группы вернувшихся писем — над всеми периодами. */
 export const RETURNED_GROUP_LABEL = 'Вернулись к вам';
@@ -204,6 +213,23 @@ export interface MessageListProps {
    * ничем: срок — единственное, что в ней есть содержательного.
    */
   snoozeLabels?: ReadonlyMap<string, string> | undefined;
+  /**
+   * Справочник своих меток: имя и цвет каждой. Приходит СВЕРХУ, а не
+   * спрашивается здесь хуком, нарочно — список рисуется и в проверках, где
+   * никакого запроса к серверу нет вовсе, и заводить ради пилюли требование
+   * «оберни список в провайдер запросов» значило бы поменять условия
+   * отрисовки всему списку ради украшения строки.
+   */
+  labels?: readonly MailLabel[] | undefined;
+  /**
+   * Метки СТРОКИ: идентификатор строки -> ключевые слова.
+   *
+   * Отдельно от `message.labels`, потому что строка бывает целой
+   * перепиской: показывается последнее письмо, а метка стоит на разговоре.
+   * Объединение считает страница (useRowLabels) — здесь только показ.
+   * Не задано — берутся метки самого показанного письма.
+   */
+  rowLabels?: ReadonlyMap<string, readonly string[]> | undefined;
 }
 
 /**
@@ -233,6 +259,9 @@ interface RowProps {
   threadCount: number;
   /** Срок возврата («завтра в 08:00») — только в папке «Отложенные». */
   snoozeLabel?: string | undefined;
+  /** Справочник меток и ключевые слова ЭТОЙ строки (см. MessageListProps). */
+  labels: readonly MailLabel[];
+  rowLabelKeys: readonly string[];
   onContextMenu?: MessageListProps['onContextMenu'];
   onSwipe?: MessageListProps['onSwipe'];
   onOpen?: MessageListProps['onOpen'];
@@ -252,6 +281,8 @@ function Row({
   tabbable,
   threadCount,
   snoozeLabel,
+  labels,
+  rowLabelKeys,
   onContextMenu,
   onSwipe,
   onOpen,
@@ -460,6 +491,22 @@ function Row({
             {threadCount}
           </span>
         )}
+        {/*
+          Свои метки — цветными пилюлями С НАЗВАНИЕМ, сразу после счётчика
+          переписки и перед темой. Название рядом с цветом обязательно:
+          цвет различают не все, и метка, показанная одним кружком, для
+          части людей не значит ничего.
+
+          Высоту строки это не меняет: пилюля 18px внутри 48px (у счётчика
+          рядом — 24px), ряд не переносится и не растёт — см. .rowLabels
+          в MessageList.module.css. Требование к вёрстке то же, что и для
+          строки-переписки: ROW_HEIGHT одно на все виды строк.
+        */}
+        <LabelPills
+          keywords={rowLabelKeys}
+          dictionary={labels}
+          className={styles.rowLabels}
+        />
         <span className={styles.subject}>{message.subject || '(без темы)'}</span>
         <span className={styles.snippet}>{message.snippet}</span>
       </span>
@@ -547,6 +594,8 @@ export function MessageList({
   highlightId,
   footer,
   snoozeLabels,
+  labels,
+  rowLabels,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -804,6 +853,11 @@ export function MessageList({
                       threadCounts.get(row.message.threadId) ?? 1,
                     )}
                     snoozeLabel={snoozeLabels?.get(row.message.id)}
+                    labels={labels ?? NO_LABELS}
+                    /* Метки СТРОКИ, а не показанного письма: у переписки
+                       это объединение по всему разговору (см. useRowLabels).
+                       Не передали — берём то, что пришло в самом письме. */
+                    rowLabelKeys={rowLabels?.get(row.message.id) ?? row.message.labels}
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}
                     onOpen={onOpen}

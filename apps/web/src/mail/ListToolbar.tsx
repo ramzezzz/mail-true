@@ -5,6 +5,7 @@
  *   В папку · Отписаться · ⋯ (меню с горячими клавишами).
  */
 
+import type { ReactNode } from 'react';
 import type { Folder, MessageFilter } from '@mail-true/shared';
 import { useUiStore } from '../app/store';
 import { folderTitle } from '../lib/folderNames';
@@ -92,6 +93,16 @@ export interface ListToolbarProps {
    * «Отложенные»: в остальных возвращать нечего.
    */
   onReturnNow?: (() => void) | undefined;
+  /**
+   * Меню «Метки» для выделенных писем — готовой разметкой.
+   *
+   * Именно разметкой, а не списком меток с обработчиком: чтобы показать
+   * галочку «стоит / стоит на части выделения», надо знать метки КАЖДОЙ
+   * выделенной строки, а строка бывает целой перепиской и её метки —
+   * объединением по разговору. Всё это знает страница папки; панель
+   * осталась бы посредником, который передаёт данные, не пользуясь ими.
+   */
+  labelMenu?: ReactNode;
 }
 
 export function ListToolbar(props: ListToolbarProps) {
@@ -232,6 +243,19 @@ export function ListToolbar(props: ListToolbarProps) {
         <MenuItem before={<IconSpam />} hint="Shift+J" onClick={props.onSpam}>
           Спам
         </MenuItem>
+        {/*
+          Метки для всего выделения. Приходят готовой разметкой, а не
+          списком меток: панель ничего не знает ни о выделенных письмах,
+          ни о том, что строка бывает целой перепиской, — это знает
+          страница папки, она и собирает меню.
+        */}
+        {props.labelMenu && (
+          <>
+            <MenuSeparator />
+            {props.labelMenu}
+            <MenuSeparator />
+          </>
+        )}
         <MenuItem before={<IconPrint />} hint="Ctrl+P" onClick={props.onPrint}>
           Распечатать
         </MenuItem>

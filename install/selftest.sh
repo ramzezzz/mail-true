@@ -222,6 +222,40 @@ step "7. Согласованность infra/.env.example, compose и уста�
 t_no "в infra/.env.example нет концов строк Windows (CRLF)" \
     grep -q $'\r' "$ENV_EXAMPLE"
 
+# И то же самое для всего, что исполняется или разбирается на сервере.
+# Это не вкусовщина: infra/test-delivery.sh был сохранён целиком в CRLF и
+# не разбирался bash-ом ВООБЩЕ — «syntax error near unexpected token $'do\r'».
+# Проверка доставки, которой полагается ловить поломки почты, сама не
+# запускалась, и заметить это можно было только запустив её вручную.
+#
+# Смотрим то, что уходит в КОММИТ, а не рабочее дерево. На Windows git при
+# выгрузке сам разворачивает LF в CRLF (core.autocrlf), поэтому проверка по
+# файлам на диске краснела бы у каждого разработчика на Windows — при том
+# что в репозитории и на сервере заказчика концы строк правильные. Ложная
+# тревога в проверке хуже отсутствующей проверки: её перестают читать.
+CRLF_FILES=''
+if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    # `git ls-files --eol` показывает концы строк ИМЕННО В ИНДЕКСЕ (колонка
+    # i/), без преобразований. Ни `grep` по файлу, ни `git show` тут не
+    # годятся: на Windows git разворачивает LF в CRLF при выгрузке и обратно
+    # при показе, и проверка краснела бы у каждого разработчика на Windows
+    # при совершенно исправном репозитории. Ложная тревога хуже отсутствующей
+    # проверки: её перестают читать.
+    while read -r eol_index _eol_work _attr path; do
+        case "$path" in
+            *.sh|*.pl|*.yml|*.template|*.conf|*.cf|*.env.example) ;;
+            *) continue ;;
+        esac
+        [ "$eol_index" = 'i/crlf' ] && CRLF_FILES="$CRLF_FILES $path"
+    done < <(git -C "$REPO_DIR" ls-files --eol install infra)
+    t_eq "в скриптах и конфигах install/ и infra/ нет CRLF (в индексе git)" "${CRLF_FILES# }" ""
+else
+    # Вне репозитория (распакованный архив) сверять не с чем — и это не повод
+    # объявлять проверку пройденной молча.
+    printf '  [ .. ]   проверка CRLF пропущена: каталог не под git
+'
+fi
+
 # И то же самое функционально: load_env обязан пережить CRLF-файл.
 CRLF_ENV="$(mktemp)"
 printf 'POSTGRES_USER=mailserver\r\nMAIL_DOMAIN=example.test\r\n' > "$CRLF_ENV"

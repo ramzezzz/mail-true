@@ -69,6 +69,20 @@ const applyBodySchema = z.object({
   remove: z.array(z.string().min(1).max(64)).max(32).default([]),
 });
 
+const labelsOfBodySchema = z.object({
+  ids: z.array(messageIdSchema).min(1).max(500),
+});
+
+/**
+ * Сколько номеров писем кладём в одну команду FETCH.
+ *
+ * Не «на всякий случай»: команда IMAP — это строка, и пятьсот номеров
+ * подряд её заметно удлиняют. Двести — то же число, которым режет запросы
+ * сам продукт в других местах, и оно заведомо влезает в предел строки
+ * у любого сервера.
+ */
+const FETCH_CHUNK = 200;
+
 export interface LabelsDeps {
   store: LabelStore | null;
   /** Почему возможности нет. Пусто — возможность есть. */
@@ -283,6 +297,80 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
     }
     await requireStore().remove(session.email, label.key);
     return { ok: true, key: label.key, purged: purge === '1', removedFromMessages };
+  });
+
+  /**
+   * Какие метки стоят на перечисленных письмах.
+   *
+   * Нужно ровно для одного места — строки списка, сгруппированного по
+   * перепискам. Строка представляет разговор, но сервер отдаёт в списке
+   * только ПОСЛЕДНЕЕ его письмо (`GET /messages?threaded=true`), а метки
+   * лежат в каждом письме отдельно. Без этого маршрута строка показывала бы
+   * метки последнего письма — и пометка «оплатить», поставленная на весь
+   * разговор, исчезала бы из списка от первого же ответа собеседника:
+   * новое письмо ключевого слова не несёт.
+   *
+   * Отдельным запросом, а не полем в списке писем, по двум причинам:
+   * сводку переписки собирает imap/service.ts (общий горячий путь всего
+   * списка, куда эта возможность лезть не должна), и запрос этот
+   * необязательный — если он не удался, список рисуется как прежде.
+   *
+   * POST, а не GET, из-за длины: пятьсот составных идентификаторов писем
+   * в строке запроса — это несколько килобайт, и такой адрес обрежет
+   * первый же посредник.
+   *
+   * Достаётся ТОЛЬКО список ключевых слов (FETCH FLAGS) — ни темы, ни тела,
+   * ни заголовков. И в ответ попадают только слова из справочника: чужое
+   * ключевое слово и служебная пометка сюда не проходят, показывать их
+   * пилюлей всё равно нечем.
+   */
+  app.post('/messages/labels/of', { preHandler: app.requireSession }, async (request) => {
+    const session = requireMailSession(request.mailSession);
+    const body = labelsOfBodySchema.parse(request.body);
+    const dictionary = await dictionaryOf(session);
+    if (dictionary.length === 0) return { labels: {} };
+
+    const known = new Map(dictionary.map((l) => [l.key.toLowerCase(), l.key]));
+    const byFolder = groupIdsByFolder(body.ids);
+    const labels: Record<string, string[]> = {};
+
+    await pool.withClient(session.email, session.password, async (client) => {
+      for (const [folderId, uids] of byFolder) {
+        let folder;
+        try {
+          folder = await requireFolder(client, folderId);
+        } catch {
+          // Папки нет — читать нечего. Это ЧТЕНИЕ, и падать из-за одной
+          // пропавшей папки нельзя: строки остальных папок остались бы
+          // без меток из-за чужой беды.
+          continue;
+        }
+        const lock = await client.getMailboxLock(folder.path);
+        try {
+          for (let i = 0; i < uids.length; i += FETCH_CHUNK) {
+            const chunk = uids.slice(i, i + FETCH_CHUNK);
+            const fetched = await client.fetchAll(chunk.join(','), { uid: true, flags: true }, {
+              uid: true,
+            });
+            for (const msg of fetched) {
+              const own: string[] = [];
+              for (const flag of msg.flags ?? []) {
+                const resolved = known.get(flag.toLowerCase());
+                if (resolved && !own.includes(resolved)) own.push(resolved);
+              }
+              // Письма без меток в ответ не кладём: пустой список — это
+              // умолчание на стороне интерфейса, и гонять его по сети
+              // на каждую строку незачем.
+              if (own.length > 0) labels[`${folder.id}:${String(msg.uid)}`] = own;
+            }
+          }
+        } finally {
+          lock.release();
+        }
+      }
+    });
+
+    return { labels };
   });
 
   /**

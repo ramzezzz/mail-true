@@ -25,19 +25,32 @@ export interface LabelTarget {
 }
 
 export interface LabelMenuProps {
-  /** Письма, к которым относится действие: одно или всё выделение. */
+  /**
+   * СТРОКИ, по которым считается состояние галочки: одна или всё выделение.
+   * Для строки-переписки это одна запись с объединением меток разговора.
+   */
   messages: readonly LabelTarget[];
+  /**
+   * Письма, которые menu действительно правит.
+   *
+   * Отдельно от `messages`, потому что строка списка бывает целой
+   * перепиской: галочка показывает состояние СТРОКИ, а поставить и снять
+   * метку надо на всех письмах разговора — иначе метка легла бы на одно
+   * письмо из шести, а строка показала бы, что помечен весь разговор.
+   * Не задано — правятся сами показанные письма.
+   */
+  targetIds?: readonly string[] | undefined;
   /** Позвать после изменения — например, чтобы закрыть родительское меню. */
   onApplied?: (() => void) | undefined;
 }
 
 export const LABELS_SETTINGS_PATH = '/settings/labels';
 
-export function LabelMenu({ messages, onApplied }: LabelMenuProps) {
+export function LabelMenu({ messages, targetIds, onApplied }: LabelMenuProps) {
   const navigate = useNavigate();
   const { items } = useLabelsState();
   const apply = useApplyLabels();
-  const ids = messages.map((m) => m.id);
+  const ids = targetIds && targetIds.length > 0 ? [...targetIds] : messages.map((m) => m.id);
 
   const toggle = (label: MailLabel): void => {
     const action = nextLabelAction(labelPresence(messages, label.key));

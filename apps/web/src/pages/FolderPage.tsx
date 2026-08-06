@@ -27,7 +27,14 @@ import { hotkeyFor } from '../lib/hotkeys';
 import { useGeneralPreferences } from '../settings/generalSettings';
 import { searchUrlFor } from '../search/searchParams';
 import { ListSkeleton } from '../mail/ListSkeleton';
-import { ContextMenu, ContextMenuItem, ContextMenuSeparator } from '../mail/ContextMenu';
+import {
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuLabels,
+  ContextMenuSeparator,
+} from '../mail/ContextMenu';
+import { LabelMenu, type LabelTarget } from '../mail/LabelMenu';
+import { useLabelDictionary, useLabelsState, useRowLabels } from '../mail/useLabels';
 import { EmptyFolder } from '../mail/EmptyFolder';
 import {
   IconArchive,
@@ -150,6 +157,35 @@ export function FolderPage() {
   const expand = useCallback(
     (rowIds: string[]): string[] => expandThreadIds(rowIds, messages),
     [messages],
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Свои метки                                                        */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * Метка относится ко ВСЕЙ переписке — как удаление, архив, флажок и
+   * откладывание. Обоснование то же и одно на все действия: строка списка
+   * представляет разговор, а не последнее письмо в нём. «Оплатить» — это
+   * про дело, а не про реплику; и если пометить одно письмо, метка уйдёт
+   * из виду от первого же ответа собеседника — строку рисует последнее
+   * письмо, а оно ключевого слова не несёт.
+   *
+   * Поэтому простановка идёт через тот же `expand`, что и всё остальное,
+   * а показ строки берёт ОБЪЕДИНЕНИЕ меток разговора (useRowLabels):
+   * метка стоит на переписке, если стоит хоть на одном её письме — ровно
+   * то же правило, по которому в сводке переписки живут `flagged`
+   * и `hasAttachments`.
+   */
+  const labelsAvailable = useLabelsState().available;
+  const labelDictionary = useLabelDictionary();
+  const rowLabels = useRowLabels(messages);
+
+  /** Строка для меню меток: её собственные метки — объединение разговора. */
+  const labelTargetsOf = useCallback(
+    (rowIds: readonly string[]): LabelTarget[] =>
+      rowIds.map((id) => ({ id, labels: rowLabels.get(id) ?? [] })),
+    [rowLabels],
   );
 
   const applyFlags = useCallback(
@@ -525,6 +561,16 @@ export function FolderPage() {
         }
         snoozeScheduledReturn={snoozeState.scheduledReturn}
         onReturnNow={snoozedFolder ? () => returnNow(targetIds()) : undefined}
+        /* Метки на всю пачку выделенных строк. Галочка считается по
+           СТРОКАМ (выделяли их), а правятся все письма их переписок. */
+        labelMenu={
+          labelsAvailable && selectedIds.size > 0 ? (
+            <LabelMenu
+              messages={labelTargetsOf([...selectedIds])}
+              targetIds={expand([...selectedIds])}
+            />
+          ) : undefined
+        }
       />
 
       {/* Скелетоны вместо пустого экрана: строки встают на те же места,
@@ -579,6 +625,11 @@ export function FolderPage() {
           /* Срок возврата в строке — только в папке «Отложенные»: в
              остальных его нет и показывать нечего. */
           snoozeLabels={snoozeLabels}
+          /* Метки строк: справочник (имена и цвета) и ключевые слова
+             каждой строки. И то и другое приходит сверху — список сам
+             к серверу не ходит. */
+          labels={labelDictionary}
+          rowLabels={rowLabels}
           /*
             Подвал уходит ВНУТРЬ списка, в его область прокрутки. Рядом со
             списком он висел под ним всегда: человек ещё не долистал, а
@@ -681,6 +732,13 @@ export function FolderPage() {
               >
                 Пометить флажком
               </ContextMenuItem>
+              {/* Метки — рядом с флажком: это соседние по смыслу пометки,
+                  только флажок один на всё, а меток сколько угодно.
+                  Правится вся переписка (см. пояснение у labelTargetsOf). */}
+              <ContextMenuLabels
+                messages={labelTargetsOf([contextMenu.message.id])}
+                targetIds={expand([contextMenu.message.id])}
+              />
               <ContextMenuSeparator />
               {/* Группа 4 */}
               <ContextMenuItem

@@ -89,6 +89,15 @@ class FakeClient {
     return [...present];
   }
 
+  /** FETCH FLAGS: ровно то, чем пользуется чтение меток строки-переписки. */
+  async fetchAll(range: string | number[]): Promise<Array<{ uid: number; flags: Set<string> }>> {
+    const uids = typeof range === 'string' ? expandSet(range) : range;
+    const present = this.boxes.get(this.selected) ?? new Set<number>();
+    return uids
+      .filter((uid) => present.has(uid))
+      .map((uid) => ({ uid, flags: this.flagsOf(this.selected, uid) }));
+  }
+
   async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
     for (const uid of uids) for (const flag of flags) this.flagsOf(this.selected, uid).add(flag);
     return true;
@@ -341,6 +350,87 @@ test('несуществующее письмо не считается изме
     });
     assert.equal(res.statusCode, 200);
     assert.equal(res.json().updated, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Метки перечисленных писем (строка-переписка)                        */
+/* ------------------------------------------------------------------ */
+
+test('метки цепочки читаются по всем её письмам, а не по последнему', async () => {
+  const { app, client } = await buildHarness();
+  try {
+    const oplatit = await createLabel(app, 'Оплатить');
+    const yurist = await createLabel(app, 'Юрист');
+    // Разговор из трёх писем: метки на первых двух, последнее — ответ,
+    // пришедший уже после того, как разговор пометили.
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:1'], add: [oplatit] },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:2'], add: [yurist] },
+    });
+    // Служебные слова в письмах есть, и в ответ они попасть не должны
+    client.flagsOf('INBOX', 3).add('$Snoozed');
+    client.flagsOf('INBOX', 3).add('finance');
+    client.flagsOf('INBOX', 2).add('chuzhoe-slovo');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels/of',
+      payload: { ids: ['inbox:1', 'inbox:2', 'inbox:3'] },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(res.json().labels, {
+      'inbox:1': [oplatit],
+      'inbox:2': [yurist],
+      // inbox:3 в ответе нет вовсе: своих меток у него ни одной,
+      // а служебные слова и чужое ключевое слово сюда не проходят
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('без единой метки в справочнике чтение не ходит в ящик', async () => {
+  const { app } = await buildHarness();
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels/of',
+      payload: { ids: ['inbox:1', 'inbox:2'] },
+    });
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.json(), { labels: {} });
+  } finally {
+    await app.close();
+  }
+});
+
+test('пропавшая папка не отменяет чтение меток по остальным', async () => {
+  const { app } = await buildHarness();
+  try {
+    const key = await createLabel(app, 'Оплатить');
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['archive:10'], add: [key] },
+    });
+    // Это ЧТЕНИЕ: одна пропавшая папка не должна оставить без меток
+    // строки всех остальных — в отличие от простановки, где 404 обязателен.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels/of',
+      payload: { ids: ['нет-такой-папки:5', 'archive:10'] },
+    });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.deepEqual(res.json().labels, { 'archive:10': [key] });
   } finally {
     await app.close();
   }
