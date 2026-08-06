@@ -682,6 +682,24 @@ export function ComposeWindow({
           if (e.key === 'Escape') {
             e.stopPropagation();
             void saveAndClose();
+            return;
+          }
+          /*
+           * Ctrl+Enter — отправить. Сочетание, к которому в Рунете привыкли
+           * все: оно есть и в mail.ru, и в Яндексе, и в Telegram.
+           *
+           * Обработчик стоит на окне целиком, а не на поле текста: отправить
+           * с клавиатуры человек хочет и из строки темы, и из «Кому», где
+           * Enter занят выбором подсказки, а Ctrl+Enter — свободен.
+           *
+           * Условие на занятость намеренно то же, что у кнопки: пока запрос
+           * отправки в работе, повторное нажатие ничего не делает — иначе
+           * нетерпеливое двойное нажатие отправляло бы письмо дважды.
+           */
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!sendMessage.isPending && !sendAsExternal.isPending) send();
           }
         }}
       >

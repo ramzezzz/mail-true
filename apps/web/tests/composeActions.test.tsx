@@ -263,3 +263,55 @@ describe('переслать как вложение', () => {
     await waitFor(() => saveDraft.mock.calls.length > 0, 'сохранение черновика');
   });
 });
+
+describe('Ctrl+Enter — отправить', () => {
+  /*
+   * Сочетание, к которому в Рунете привыкли все: mail.ru, Яндекс, Telegram.
+   * Проверяем не нажатие, а то, что ушло на сервер, — иначе «сделано»
+   * означало бы ровно то же, что и раньше.
+   */
+  const press = (target: Element, init: KeyboardEventInit) => {
+    act(() =>
+      target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init })),
+    );
+  };
+
+  it('отправляет из любого поля окна, а не только из тела письма', async () => {
+    const send = spySend();
+    render();
+    act(() => useUiStore.getState().openCompose());
+    const to = byLabel('Кому');
+    if (!to) throw new Error('нет поля «Кому»');
+    type(to, 'kto@mail.local');
+
+    press(to, { key: 'Enter', ctrlKey: true });
+    await waitFor(() => send.mock.calls.length > 0, 'письмо ушло');
+    const sent = send.mock.calls[0]?.[0] as SendRequest;
+    expect(JSON.stringify(sent.to)).toContain('kto@mail.local');
+  });
+
+  it('без получателя не отправляет, а говорит об этом', () => {
+    const send = spySend();
+    render();
+    act(() => useUiStore.getState().openCompose());
+    const subject = byLabel('Тема');
+    if (!subject) throw new Error('нет поля «Тема»');
+    type(subject, 'без адресата');
+
+    press(subject, { key: 'Enter', ctrlKey: true });
+    expect(send).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Укажите хотя бы одного получателя');
+  });
+
+  it('Enter без Ctrl письмо не отправляет', () => {
+    const send = spySend();
+    render();
+    act(() => useUiStore.getState().openCompose());
+    const to = byLabel('Кому');
+    if (!to) throw new Error('нет поля «Кому»');
+    type(to, 'kto@mail.local');
+
+    press(to, { key: 'Enter' });
+    expect(send).not.toHaveBeenCalled();
+  });
+});
