@@ -31,9 +31,16 @@ export const queryKeys = {
   session: ['session'] as const,
   folders: ['folders'] as const,
   messages: (query: MessageListQuery) => ['messages', query] as const,
-  /** Список папки целиком: страницы подгружаются под одним ключом. */
-  messageList: (folderId: string, filter: string, threaded: boolean) =>
-    ['messages', 'list', folderId, filter, threaded] as const,
+  /**
+   * Список папки целиком: страницы подгружаются под одним ключом.
+   *
+   * Отбор по метке входит в ключ, потому что отбирает СЕРВЕР: список
+   * с меткой — это другой ответ, а не подмножество прежнего. Без метки
+   * в ключе подгруженные страницы полного списка достались бы отбору
+   * как свои.
+   */
+  messageList: (folderId: string, filter: string, threaded: boolean, label?: string | null) =>
+    ['messages', 'list', folderId, filter, threaded, label ?? null] as const,
   /**
    * Письмо с картинками и без — это два разных ответа сервера,
    * поэтому и ключи разные: иначе «Показать картинки» доставало бы
@@ -162,9 +169,15 @@ export function useFolderMessages(
   folderId: string,
   filter: MessageListQuery['filter'],
   threaded = false,
+  /**
+   * Отбор по своей метке. Уходит на сервер, а не отсеивает загруженные
+   * строки: у человека с сотней помеченных писем в папке на двадцать
+   * тысяч отбор по загруженному показывал бы горстку.
+   */
+  label: string | null = null,
 ): FolderMessages {
   const result = useInfiniteQuery({
-    queryKey: queryKeys.messageList(folderId, filter, threaded),
+    queryKey: queryKeys.messageList(folderId, filter, threaded, label),
     initialPageParam: 0,
     queryFn: ({ pageParam }) =>
       api.getMessages({
@@ -173,6 +186,7 @@ export function useFolderMessages(
         limit: MESSAGES_PAGE_SIZE,
         threaded,
         filter,
+        ...(label ? { label } : {}),
       }),
     getNextPageParam: (_last, pages) => nextPageOffset(pages),
   });

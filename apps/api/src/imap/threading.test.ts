@@ -42,6 +42,8 @@ interface FakeLetter {
   seen?: boolean;
   flagged?: boolean;
   attachment?: boolean;
+  /** Ключевые слова письма: свои метки и служебные слова продукта. */
+  keywords?: string[];
 }
 
 interface FakeOptions {
@@ -83,6 +85,8 @@ function expandRange(range: string): number[] {
 class FakeMailbox {
   /** Команды THREAD, ушедшие на сервер, — по ним видно, спрашивали ли вообще. */
   readonly threadCommands: string[][] = [];
+  /** Условия поиска: по ним видно, ушёл ли отбор на сервер или сделан у нас. */
+  readonly searchQueries: Array<Record<string, unknown>> = [];
   readonly capabilities = new Map<string, boolean>();
 
   constructor(private readonly options: FakeOptions) {
@@ -95,8 +99,23 @@ class FakeMailbox {
 
   async noop(): Promise<void> {}
 
-  async search(): Promise<number[]> {
-    return this.options.letters.map((l) => l.uid);
+  /**
+   * Поиск подставного сервера.
+   *
+   * `KEYWORD` и `UNSEEN` он отрабатывает по-настоящему, и оба сразу —
+   * логическим И, как и настоящий IMAP. Иначе проверка отбора по метке
+   * доказывала бы только то, что команду послали, а не то, что список
+   * после неё верный; а проверка «отбор складывается с непрочитанными»
+   * не доказывала бы вовсе ничего.
+   */
+  async search(query: Record<string, unknown>): Promise<number[]> {
+    this.searchQueries.push(query);
+    const keyword = typeof query['keyword'] === 'string' ? query['keyword'] : null;
+    const unseen = query['seen'] === false;
+    return this.options.letters
+      .filter((l) => keyword === null || (l.keywords ?? []).includes(keyword))
+      .filter((l) => !unseen || l.seen === false)
+      .map((l) => l.uid);
   }
 
   async exec(
@@ -136,6 +155,7 @@ class FakeMailbox {
               flags: new Set<string>([
                 ...(l.seen === false ? [] : ['\\Seen']),
                 ...(l.flagged ? ['\\Flagged'] : []),
+                ...(l.keywords ?? []),
               ]),
               size: 100,
               internalDate: new Date(2026, 6, 1, 12, 0, l.uid),
@@ -149,11 +169,24 @@ class FakeMailbox {
   }
 }
 
-/** Переписка «Смета» (1, 4, 9) и два одиночных письма. */
+/**
+ * Переписка «Смета» (1, 4, 9) и два одиночных письма.
+ *
+ * Метки расставлены так, чтобы поймать главную ошибку показа: «Оплатить»
+ * стоит на ПЕРВОМ письме разговора, «Юрист» — на среднем, а последнее
+ * письмо (9) — свежий ответ, не несущий ни одного ключевого слова. Считай
+ * строка метки по показанному письму — не было бы видно ни одной.
+ * Рядом лежат служебные слова продукта: пометка возврата и чип категории.
+ */
 function conversationMailbox(overrides: Partial<FakeOptions> = {}): FakeMailbox {
   return new FakeMailbox({
     letters: [
-      { uid: 1, from: { name: 'Иван', address: 'ivan@example.com' }, subject: 'Смета' },
+      {
+        uid: 1,
+        from: { name: 'Иван', address: 'ivan@example.com' },
+        subject: 'Смета',
+        keywords: ['mt-oplatit', '$Snoozed'],
+      },
       { uid: 2, from: { name: 'Анна', address: 'anna@example.com' }, subject: 'Отпуск' },
       {
         uid: 4,
@@ -161,6 +194,7 @@ function conversationMailbox(overrides: Partial<FakeOptions> = {}): FakeMailbox 
         subject: 'Re: Смета',
         seen: false,
         attachment: true,
+        keywords: ['mt-yurist'],
       },
       {
         uid: 9,
@@ -255,6 +289,126 @@ test('флажок и скрепка переписки собираются с�
   // Обратный ход: у одиночного письма без флажка и вложений — ничего
   assert.equal(page.items[1]?.thread?.flagged, false);
   assert.equal(page.items[1]?.thread?.hasAttachments, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* Метки переписки                                                      */
+/* ------------------------------------------------------------------ */
+
+test('метка стоит на переписке, если стоит хоть на одном её письме', async () => {
+  const page = await list(conversationMailbox(), { threaded: true });
+  const thread = page.items[0];
+
+  assert.deepEqual(
+    thread?.thread?.labels,
+    ['mt-oplatit', 'mt-yurist'],
+    'в сводке — метки со всех писем разговора, в порядке писем',
+  );
+  /*
+   * Обратный ход, ради которого поле и заведено: у ПОКАЗАННОГО письма
+   * метки нет ни одной. Считай строка метки по нему — пометка «оплатить»
+   * пропадала бы из списка ровно тогда, когда на разговор пришёл ответ.
+   */
+  assert.deepEqual(thread?.labels, [], 'последнее письмо разговора без меток');
+  // И у одиночного письма без меток сводка их не выдумывает
+  assert.deepEqual(page.items[1]?.thread?.labels, []);
+});
+
+test('служебное слово продукта в метки переписки не попадает', async () => {
+  // На письме 1 лежит `$Snoozed` — пометка возврата из «Отложенных».
+  // В ряду с «Оплатить» и «Юрист» она выглядела бы как ярлык человека,
+  // а снять её он не может: слово ставит и снимает сам продукт.
+  const page = await list(conversationMailbox(), { threaded: true });
+  assert.equal(page.items[0]?.thread?.labels.includes('$Snoozed'), false);
+});
+
+test('одна метка на двух письмах разговора не задваивается', async () => {
+  // Ключевые слова у Dovecot нечувствительны к регистру: `MT-OPLATIT`
+  // и `mt-oplatit` — одно слово, и второй пилюли в строке быть не должно.
+  const mailbox = conversationMailbox({
+    letters: [
+      {
+        uid: 1,
+        from: { name: 'Иван', address: 'ivan@example.com' },
+        subject: 'Смета',
+        keywords: ['mt-oplatit'],
+      },
+      {
+        uid: 9,
+        from: { name: 'Пётр', address: 'petr@example.com' },
+        subject: 'Re: Смета',
+        keywords: ['MT-OPLATIT'],
+      },
+    ],
+    groups: [[1, 9]],
+  });
+  const page = await list(mailbox, { threaded: true });
+  assert.deepEqual(page.items[0]?.thread?.labels, ['mt-oplatit']);
+});
+
+/* ------------------------------------------------------------------ */
+/* Отбор по метке                                                       */
+/* ------------------------------------------------------------------ */
+
+test('отбор по метке уходит в поиск, а не считается по загруженному', async () => {
+  const mailbox = conversationMailbox();
+  await list(mailbox, { threaded: true, label: 'mt-oplatit' });
+  // Условие поиска — вот доказательство: отбор выполняет почтовый сервер
+  // по своему индексу, значит он видит ВСЮ папку, а не загруженную страницу.
+  assert.equal(mailbox.searchQueries.at(0)?.['keyword'], 'mt-oplatit');
+});
+
+test('строка-разговор попадает в отбор по метке на любом своём письме', async () => {
+  // «Оплатить» стоит на ПЕРВОМ письме переписки, «Юрист» — на среднем.
+  // Оба отбора обязаны показать один и тот же разговор.
+  for (const label of ['mt-oplatit', 'mt-yurist']) {
+    const page = await list(conversationMailbox(), { threaded: true, label });
+    assert.equal(page.items.length, 1, `${label}: разговор не попал в отбор`);
+    assert.equal(page.total, 1, `${label}: счётчик строк неверен`);
+    assert.equal(page.items[0]?.thread?.labels.includes(label), true);
+  }
+  // Обратный ход: метки, которой нет ни на одном письме, отбирает пусто —
+  // а не «показывает всё, раз ничего не нашлось».
+  const none = await list(conversationMailbox(), { threaded: true, label: 'mt-net-takoy' });
+  assert.equal(none.items.length, 0);
+  assert.equal(none.total, 0);
+});
+
+test('отбор по метке складывается с отбором «непрочитанные»', async () => {
+  // «Юрист» стоит на письме 4, и оно же единственное непрочитанное.
+  const both = await list(conversationMailbox(), {
+    threaded: true,
+    label: 'mt-yurist',
+    filter: 'unread',
+  });
+  assert.equal(both.items.length, 1);
+  // Обратный ход: «Оплатить» стоит на прочитанном письме 1 — вместе
+  // с «непрочитанными» не должно найтись ничего.
+  const neither = await list(conversationMailbox(), {
+    threaded: true,
+    label: 'mt-oplatit',
+    filter: 'unread',
+  });
+  assert.equal(neither.items.length, 0, 'условия перестали складываться');
+});
+
+test('служебное слово продукта отбором быть не может', async () => {
+  /*
+   * Главный замок отбора. `label=$Snoozed` показал бы список по служебной
+   * пометке продукта — список, которого в интерфейсе нет и смысла которого
+   * человек знать не может. То же и с чипом категории, и с признаком
+   * надёжного отправителя, и с системным флагом IMAP.
+   */
+  for (const label of ['$Snoozed', '$MDNSent', 'finance', 'reliable', '\\Deleted', 'chuzhoe']) {
+    const mailbox = conversationMailbox();
+    await assert.rejects(
+      list(mailbox, { threaded: true, label }),
+      /пользовательская метка/iu,
+      `${label} прошло отбором`,
+    );
+    // И до почтового сервера такой отбор не доехал вовсе
+    assert.deepEqual(mailbox.searchQueries, [], `${label}: поиск всё-таки ушёл`);
+  }
 });
 
 /* ------------------------------------------------------------------ */

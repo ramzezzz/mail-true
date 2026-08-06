@@ -68,6 +68,17 @@ export const listQuerySchema = z.object({
     .transform((value) => value === true || value === '1' || value === 'true'),
   filter: z.enum(['all', 'unread', 'flagged', 'with-attachments']).default('all'),
   search: z.string().max(500).optional(),
+  /*
+   * Отбор по своей метке. Отдельно от `filter`, потому что это не одно из
+   * готовых значений, а ключ из справочника ящика; складывается с фильтром
+   * и поиском, а не спорит с ними.
+   *
+   * Схема проверяет только длину — что это ПОЛЬЗОВАТЕЛЬСКАЯ метка, решает
+   * сборка запроса к IMAP (buildSearchQuery). Там же и отказ на служебное
+   * слово: держать этот замок в разборе строки запроса значило бы, что
+   * следующий вызывающий listMessages обойдёт его, ничего не заметив.
+   */
+  label: z.string().max(64).optional(),
   /** Быстрый режим без сниппетов */
   snippets: z.enum(['0', '1']).default('1'),
 });
@@ -236,6 +247,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         limit: q.limit,
         filter: q.filter,
         search: q.search,
+        label: q.label,
         withSnippets: q.snippets === '1',
         /*
          * Группировка по переписке. Раньше признак принимался и молча

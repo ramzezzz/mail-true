@@ -17,7 +17,8 @@ import type {
 } from '@mail-true/shared';
 import { NotFoundError, BadRequestError, UpstreamUnavailableError } from '../errors.js';
 import { mapFolders, findFolderById, type RawFolderInfo } from '../mail/folders.js';
-import { buildSummary, mapAddress } from '../mail/summary.js';
+import { isUserLabelKey } from '../mail/labels.js';
+import { buildSummary, labelsFromSet, mapAddress } from '../mail/summary.js';
 import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText, makeSnippet } from '../mail/text.js';
 import { parseSearch } from '../mail/search-query.js';
@@ -118,7 +119,11 @@ export function splitMessageId(id: string): { folderId: string; uid: number } {
   return { folderId, uid };
 }
 
-export function buildSearchQuery(filter: MessageFilter, search: string | undefined): SearchObject {
+export function buildSearchQuery(
+  filter: MessageFilter,
+  search: string | undefined,
+  label?: string | undefined,
+): SearchObject {
   const query: SearchObject = {};
   switch (filter) {
     case 'unread':
@@ -157,6 +162,33 @@ export function buildSearchQuery(filter: MessageFilter, search: string | undefin
   if (parsed.text) {
     // TEXT ищет и по заголовкам, и по телу
     query.text = parsed.text;
+  }
+  /*
+   * Отбор по своей метке — командой IMAP `KEYWORD`, а не перебором
+   * загруженных строк.
+   *
+   * Почему именно здесь: метка живёт в письме ключевым словом, и Dovecot
+   * ищет по ключевым словам своим индексом — тем же, которым отвечает на
+   * весь остальной поиск. Отбор по уже загруженной странице отвечал бы
+   * «три письма» там, где помечено сто: в папке на двадцать тысяч писем
+   * загруженного всегда меньше, чем есть.
+   *
+   * Условие складывается с остальными (IMAP соединяет их логическим И),
+   * поэтому «непрочитанные с меткой» работает без единой оговорки.
+   *
+   * ЗАМОК. Отбирать можно ТОЛЬКО пользовательскую метку. Пусти сюда любую
+   * строку — и `label=$Snoozed` стал бы отбором по служебной пометке
+   * продукта, то есть показал бы список, которого в интерфейсе нет и
+   * значения которого человек знать не может. `isUserLabelKey` проверяет
+   * и приставку `mt-`, и набор символов, и отсутствие в служебном списке;
+   * проверка стоит в сборке запроса, а не в разборе строки запроса, чтобы
+   * её нельзя было обойти ни одним вызывающим.
+   */
+  if (label !== undefined && label !== '') {
+    if (!isUserLabelKey(label)) {
+      throw new BadRequestError(`Это не пользовательская метка: ${label}`);
+    }
+    query.keyword = label;
   }
   return query;
 }
@@ -398,11 +430,28 @@ export function summarizeThread(
   let unreadCount = 0;
   let flagged = false;
   let hasAttachments = false;
+  /*
+   * Метки разговора. Ключ набора — слово в НИЖНЕМ регистре: ключевые слова
+   * у Dovecot нечувствительны к регистру, и `MT-OPLATIT` на одном письме и
+   * `mt-oplatit` на другом — это одна метка, а не две пилюли в строке.
+   * Показываем при этом первое написание, а не приведённое: справочник
+   * ищет метку по ключу без учёта регистра всё равно.
+   */
+  const labels: string[] = [];
+  const seenLabels = new Set<string>();
 
   for (const msg of messages) {
     if (!msg.flags?.has('\\Seen')) unreadCount += 1;
     if (msg.flags?.has('\\Flagged')) flagged = true;
     if (hasRealAttachments(msg.bodyStructure)) hasAttachments = true;
+    // Тот же отбор, что и у отдельного письма (buildSummary): системные
+    // флаги и служебные слова продукта в метки не попадают ни здесь, ни там.
+    for (const label of labelsFromSet(msg.flags)) {
+      const key = label.toLowerCase();
+      if (seenLabels.has(key)) continue;
+      seenLabels.add(key);
+      labels.push(label);
+    }
 
     const from = mapAddress(msg.envelope?.from?.[0]);
     // Один и тот же человек в переписке пишет много раз — в колонке
@@ -418,6 +467,7 @@ export function summarizeThread(
     messageIds: messages.map((msg) => `${folderId}:${String(msg.uid)}`),
     count: messages.length,
     unreadCount,
+    labels,
     flagged,
     hasAttachments,
     participants,
@@ -430,6 +480,15 @@ export interface ListMessagesArgs {
   limit: number;
   filter: MessageFilter;
   search?: string | undefined;
+  /**
+   * Отбор по своей метке — ключевое слово IMAP (`mt-oplatit`).
+   *
+   * Уходит в поиск командой `KEYWORD`, то есть отбирает по ВСЕЙ папке,
+   * а не по загруженной странице. С группировкой уживается сам собой:
+   * строка-разговор собирается из писем, прошедших поиск, поэтому
+   * разговор попадает в отбор, если метка стоит хоть на одном его письме.
+   */
+  label?: string | undefined;
   /** Загружать ли сниппеты (дороже на порядок). */
   withSnippets?: boolean;
   /**
@@ -493,7 +552,7 @@ async function fetchListMessages(
 
 /** Постраничный список писем в папке (новые первыми). */
 export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Promise<MessageListPage> {
-  const { folder, offset, limit, filter, search, withSnippets = true } = args;
+  const { folder, offset, limit, filter, search, label, withSnippets = true } = args;
   const lock = await client.getMailboxLock(folder.path);
   try {
     /*
@@ -515,7 +574,7 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
      */
     await client.noop();
 
-    const query = buildSearchQuery(filter, search);
+    const query = buildSearchQuery(filter, search, label);
     // Отказ поиска — это ошибка, а не пустой ящик (см. searchUids)
     let uids = await searchUids(client, query);
     // Новые письма первыми: UID возрастает со временем
@@ -538,6 +597,18 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
         : null;
 
     if (groups) {
+      /*
+       * Отбор и группировка встречаются здесь, и правило у них одно на
+       * всех: строка собирается из писем, ПРОШЕДШИХ поиск. Для отбора по
+       * метке это ровно то, что нужно, — разговор попадает в список, если
+       * метка стоит хоть на одном его письме, потому что это письмо
+       * оказалось в `uids` и потянуло за собой свою строку.
+       *
+       * И строка при этом представляет помеченные письма, а не весь
+       * разговор целиком — то же самое, что под отбором «непрочитанные»
+       * (см. buildThreadRows). Иначе действие над строкой уходило бы на
+       * письма, которых человек в отборе не выбирал.
+       */
       const rows = buildThreadRows(groups, uids);
       const pageRows = rows.slice(offset, offset + limit);
       const fetched = await fetchListMessages(client, pageRows.flat());

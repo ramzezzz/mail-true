@@ -34,7 +34,7 @@ import {
   ContextMenuSeparator,
 } from '../mail/ContextMenu';
 import { LabelMenu, type LabelTarget } from '../mail/LabelMenu';
-import { useLabelDictionary, useLabelsState, useRowLabels } from '../mail/useLabels';
+import { useLabelDictionary, useLabelsState } from '../mail/useLabels';
 import { EmptyFolder } from '../mail/EmptyFolder';
 import {
   IconArchive,
@@ -51,7 +51,7 @@ import {
 } from '../mail/icons';
 import { ListToolbar } from '../mail/ListToolbar';
 import { MessageList } from '../mail/MessageList';
-import { chunkIds, expandThreadIds, isRowFlagged } from '../mail/threadList';
+import { chunkIds, expandThreadIds, isRowFlagged, rowLabelKeys } from '../mail/threadList';
 import { SnoozeMenu } from '../mail/SnoozeMenu';
 import { PRESET_TITLES, formatWakeAt, type SnoozePreset } from '../mail/snoozeApi';
 import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
@@ -83,10 +83,20 @@ export function FolderPage() {
    * отсутствием сводки переписки.
    */
   const threaded = preferences.groupByThread;
+  /**
+   * Отбор списка по своей метке.
+   *
+   * Состояние объявлено ДО запроса списка, потому что отбирает сервер:
+   * метка уходит в запрос вместе с папкой и фильтром (`KEYWORD` в поиске
+   * IMAP), и список с меткой — это другой ответ, а не подмножество
+   * загруженного. Иначе человек, у которого помечено сто писем, а в папке
+   * двадцать тысяч, видел бы только те из них, до которых долистал.
+   */
+  const [labelFilter, setLabelFilter] = useState<string | null>(null);
   // Письма подгружаются страницами: сервер отдаёт не больше сотни за раз,
   // а в папке их бывает вдвое больше — раньше остальные были недостижимы.
   // С группировкой страница — это сотня ПЕРЕПИСОК, а не писем.
-  const page = useFolderMessages(folderId, filter, threaded);
+  const page = useFolderMessages(folderId, filter, threaded, labelFilter);
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
 
@@ -110,9 +120,7 @@ export function FolderPage() {
    * «непрочитанные» — это другой список, и ставить его на прокрутку
    * полного было бы просто неправильным местом.
    */
-  const scrollKey = `${folderId}:${filter}`;
-  /* Отбор по метке входит в ключ прокрутки ниже (labelFilter объявлен
-     после хуков списка) — список с отбором это другой список. */
+  const scrollKey = labelFilter ? `${folderId}:${filter}:${labelFilter}` : `${folderId}:${filter}`;
 
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -181,42 +189,26 @@ export function FolderPage() {
    */
   const labelsAvailable = useLabelsState().available;
   const labelDictionary = useLabelDictionary();
-  const rowLabels = useRowLabels(messages);
-
-  /** Строка для меню меток: её собственные метки — объединение разговора. */
-  const labelTargetsOf = useCallback(
-    (rowIds: readonly string[]): LabelTarget[] =>
-      rowIds.map((id) => ({ id, labels: rowLabels.get(id) ?? [] })),
-    [rowLabels],
-  );
 
   /**
-   * Отбор списка по метке.
-   *
-   * ВРЕМЕННОЕ РЕШЕНИЕ, и вот почему. Отбор идёт по УЖЕ ЗАГРУЖЕННЫМ строкам,
-   * а не по всей папке: `GET /api/messages` умеет отбирать по признакам
-   * письма (`filter=unread|flagged|with-attachments`), но не по ключевому
-   * слову — сборка запроса к IMAP живёт в imap/service.ts
-   * (`buildSearchQuery`), и поля `keyword` в ней нет. Как только оно
-   * появится, отбор переедет в параметр запроса, а этот код исчезнет
-   * целиком: снаружи ничего не изменится.
-   *
-   * Пока этого нет, честность важнее полноты — над списком стоит строка
-   * о том, по скольким письмам отбор идёт, и кнопка «Показать ещё»
-   * остаётся на месте. Молча показать три письма из сорока помеченных
-   * было бы хуже, чем не иметь отбора вовсе.
+   * Строка для меню меток: её собственные метки — объединение разговора.
+   * Считать его здесь нечего, оно приходит готовым в сводке переписки.
    */
-  const [labelFilter, setLabelFilter] = useState<string | null>(null);
+  const labelTargetsOf = useCallback(
+    (rowIds: readonly string[]): LabelTarget[] => {
+      const byId = new Map(messages.map((m) => [m.id, m]));
+      return rowIds.map((id) => {
+        const message = byId.get(id);
+        return { id, labels: message ? rowLabelKeys(message) : [] };
+      });
+    },
+    [messages],
+  );
 
   // Метка, которой больше нет (удалили в настройках), отбором быть не может
   useEffect(() => {
     if (labelFilter && !labelDictionary.some((l) => l.key === labelFilter)) setLabelFilter(null);
   }, [labelFilter, labelDictionary]);
-
-  const visibleMessages = useMemo(() => {
-    if (!labelFilter) return messages;
-    return messages.filter((m) => (rowLabels.get(m.id) ?? []).includes(labelFilter));
-  }, [messages, rowLabels, labelFilter]);
 
   const applyFlags = useCallback(
     (rowIds: string[], set: Parameters<typeof setFlags.mutate>[0]['set']) => {
@@ -610,17 +602,18 @@ export function FolderPage() {
       />
 
       {/*
-        Честная строка о пределах отбора по метке. Без неё «Найдено: 3»
-        в папке на четыреста писем читалось бы как «помечено три» — а на
-        деле это «три среди загруженных ста». Пока отбор не переехал на
-        сервер (см. labelFilter выше), молчать об этом нельзя.
+        Строки о пределах отбора здесь больше нет, и это не упрощение.
+        Отбор делает сервер по всей папке, поэтому «из загруженных N»
+        сообщать нечего: список с меткой полон по построению. Пока отбор
+        шёл по загруженным строкам, молчать об этом было нельзя.
+
+        Осталось единственное, о чём сказать надо: отбор нашёл пусто.
+        Обычная заставка пустой папки соврала бы — папка-то не пуста.
       */}
-      {labelFilter && !page.isPending && (
+      {labelFilter && !page.isPending && !page.isError && messages.length === 0 && (
         <div className={styles.labelFilterNote} role="status">
-          С меткой «{labelDictionary.find((l) => l.key === labelFilter)?.name ?? labelFilter}»:{' '}
-          {visibleMessages.length} из загруженных {messages.length}
-          {page.hasMore ? '. Долистайте список, чтобы охватить остальные письма папки' : ''}
-          {'. '}
+          С меткой «{labelDictionary.find((l) => l.key === labelFilter)?.name ?? labelFilter}»
+          писем нет.{' '}
           <button type="button" className={styles.labelFilterReset} onClick={() => setLabelFilter(null)}>
             Показать все
           </button>
@@ -646,7 +639,7 @@ export function FolderPage() {
         </div>
       )}
 
-      {!page.isPending && !page.isError && messages.length === 0 && (
+      {!page.isPending && !page.isError && messages.length === 0 && !labelFilter && (
         <EmptyFolder role={currentFolder?.role ?? folderId} />
       )}
 
@@ -655,10 +648,8 @@ export function FolderPage() {
           /* Ключ по папке: список монтируется заново — и прокрутка начинается
              сверху, и появление новой папки видно */
           key={folderId}
-          /* Отбор по метке сужает СПИСОК, но не то, что загружено: строки
-             остаются в памяти страницы, и снятие отбора возвращает их
-             мгновенно, без запроса к серверу. */
-          messages={visibleMessages}
+          /* Отбор по метке уже применил сервер — сужать здесь нечего. */
+          messages={messages}
           focusedId={focusedId}
           leavingIds={leavingIds}
           onEndReached={loadMore}
@@ -677,7 +668,7 @@ export function FolderPage() {
              которой ушли, подсвечивает: без этого при просмотре нескольких
              писем подряд место в списке приходится искать заново после
              каждого. */
-          scrollKey={labelFilter ? `${scrollKey}:${labelFilter}` : scrollKey}
+          scrollKey={scrollKey}
           highlightId={highlightId}
           /* Срок возврата в строке — только в папке «Отложенные»: в
              остальных его нет и показывать нечего. */
@@ -686,7 +677,6 @@ export function FolderPage() {
              каждой строки. И то и другое приходит сверху — список сам
              к серверу не ходит. */
           labels={labelDictionary}
-          rowLabels={rowLabels}
           /*
             Подвал уходит ВНУТРЬ списка, в его область прокрутки. Рядом со
             списком он висел под ним всегда: человек ещё не долистал, а

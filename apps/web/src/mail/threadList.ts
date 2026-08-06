@@ -14,6 +14,7 @@
  */
 
 import type { MailAddress, MessageSummary } from '@mail-true/shared';
+import { userLabelKeys } from '../lib/categories';
 
 /**
  * Письма, которых касается действие над строкой.
@@ -102,6 +103,27 @@ export function isRowFlagged(message: MessageSummary): boolean {
 /** Скрепка в строке: вложение есть у переписки, если оно есть хоть у письма. */
 export function rowHasAttachments(message: MessageSummary): boolean {
   return message.thread ? message.thread.hasAttachments : message.hasAttachments;
+}
+
+/**
+ * Свои метки строки: у переписки — объединение по всем её письмам.
+ *
+ * То же правило, что у флажка и скрепки выше, и по той же причине: строку
+ * рисует ПОСЛЕДНЕЕ письмо разговора, а ответ собеседника ключевого слова
+ * не несёт. Считай строка метки по показанному письму — пометка «оплатить»
+ * пропадала бы из списка ровно тогда, когда разговор ожил.
+ *
+ * Объединение считает СЕРВЕР (`thread.labels`), как и всё остальное в
+ * сводке. Раньше его собирал браузер отдельным запросом за метками писем,
+ * которых в списке нет, — лишний оборот к серверу на каждый показ списка
+ * за тем, что список и так получает вместе с флагами письма.
+ *
+ * `userLabelKeys` отсеивает служебные слова продукта — чипы категорий и
+ * признак надёжного отправителя приезжают в том же поле `labels`, что и
+ * метки (так же, как у отдельного письма), а пилюлей они не рисуются.
+ */
+export function rowLabelKeys(message: MessageSummary): string[] {
+  return userLabelKeys(message.thread ? message.thread.labels : message.labels);
 }
 
 /** Имя человека для колонки отправителя: имя из заголовка, иначе адрес. */

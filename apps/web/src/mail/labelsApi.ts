@@ -94,12 +94,6 @@ export interface ApplyLabelsResult {
   removed: string[];
 }
 
-/**
- * Метки писем по их идентификаторам. Письма без меток в ответе
- * отсутствуют — пустой список подставляет вызывающий.
- */
-export type LabelsByMessage = Record<string, string[]>;
-
 export const labelsApi = {
   getLabels: (): Promise<LabelsState> => apiFetch('/api/labels'),
 
@@ -125,19 +119,6 @@ export const labelsApi = {
 
   applyLabels: (request: ApplyLabelsRequest): Promise<ApplyLabelsResult> =>
     apiFetch('/api/messages/labels', { method: 'POST', body: JSON.stringify(request) }),
-
-  /**
-   * Метки перечисленных писем. Нужны строке списка, сгруппированного по
-   * перепискам: сервер отдаёт в такой строке только последнее письмо
-   * разговора, а метки лежат в каждом письме отдельно.
-   */
-  labelsOfMessages: async (ids: string[]): Promise<LabelsByMessage> =>
-    (
-      await apiFetch<{ labels: LabelsByMessage }>('/api/messages/labels/of', {
-        method: 'POST',
-        body: JSON.stringify({ ids }),
-      })
-    ).labels,
 };
 
 /** Метки письма в порядке справочника — по ключевым словам письма. */
@@ -172,38 +153,11 @@ export function labelPresence(
   return hits === messages.length ? 'all' : 'some';
 }
 
-/**
- * Метки СТРОКИ списка — объединение по всей переписке.
- *
- * Правило: метка стоит на разговоре, если стоит хоть на одном его письме.
- * То же самое правило, по которому в сводке переписки живут «есть флажок»
- * и «есть вложение», и оно здесь не для единообразия: строку рисует
- * ПОСЛЕДНЕЕ письмо, а ответ собеседника ключевого слова не несёт — по
- * последнему письму пометка «оплатить» пропадала бы из списка ровно
- * тогда, когда разговор ожил.
- *
- * `hidden` — метки писем, которых в списке нет (их отдаёт
- * `POST /api/messages/labels/of`). Пусто — показываются метки самого
- * показанного письма, и это правильное поведение до ответа сервера:
- * лучше показать часть, чем ничего.
- *
- * Чистая функция: именно здесь живёт правило, ради которого возможность
- * и делалась осторожно, — проверять его надо отдельно от разметки.
+/*
+ * Метки СТРОКИ списка (у переписки — объединение по всему разговору)
+ * живут в mail/threadList.ts, рядом с флажком и скрепкой строки: правило
+ * у них одно на троих, и считает его сервер в сводке переписки.
  */
-export function rowLabelUnion(
-  message: { id: string; labels: readonly string[]; threadIds?: readonly string[] },
-  hidden: Readonly<LabelsByMessage>,
-): string[] {
-  const union: string[] = [];
-  const add = (key: string): void => {
-    if (!union.some((k) => k.toLowerCase() === key.toLowerCase())) union.push(key);
-  };
-  for (const key of message.labels) add(key);
-  for (const id of message.threadIds ?? []) {
-    for (const key of hidden[id] ?? []) add(key);
-  }
-  return union;
-}
 
 /**
  * Что сделает нажатие по метке в меню.

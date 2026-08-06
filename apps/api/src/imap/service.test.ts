@@ -13,6 +13,7 @@ import type { Folder } from '@mail-true/shared';
 import { ApiError } from '../errors.js';
 import {
   UID_SET_MAX_CHARS,
+  buildSearchQuery,
   chunkUidSets,
   existingUids,
   listMessages,
@@ -184,6 +185,41 @@ test('отказ поиска — это ошибка, а не пустая па
 test('searchUids: успешный поиск отдаёт номера как есть', async () => {
   const mailbox = new FakeMailbox({ uids: [3, 1, 2] });
   assert.deepEqual(await searchUids(mailbox.client, { all: true }), [3, 1, 2]);
+});
+
+/* ------------------------------------------------------------------ */
+/* Отбор по своей метке — условие поиска, а не перебор загруженного      */
+/* ------------------------------------------------------------------ */
+
+test('метка становится условием KEYWORD и складывается с остальными', () => {
+  // Именно `keyword`: это команда IMAP `KEYWORD <слово>`, и Dovecot
+  // отвечает на неё по индексу — по всей папке, а не по странице.
+  assert.deepEqual(buildSearchQuery('all', undefined, 'mt-oplatit'), {
+    all: true,
+    keyword: 'mt-oplatit',
+  });
+  // Условия соединяются логическим И: «непрочитанные с меткой» —
+  // законный запрос, а не спор двух отборов
+  assert.deepEqual(buildSearchQuery('unread', undefined, 'mt-oplatit'), {
+    seen: false,
+    keyword: 'mt-oplatit',
+  });
+  // Обратный ход: без метки условия KEYWORD в запросе нет вовсе
+  assert.equal('keyword' in buildSearchQuery('all', undefined), false);
+  assert.equal('keyword' in buildSearchQuery('all', undefined, ''), false);
+});
+
+test('служебное слово продукта не становится условием поиска', () => {
+  // Отбор по `$Snoozed` или `finance` показал бы список, которого в
+  // интерфейсе нет; замок стоит в сборке запроса, а не в разборе строки
+  // запроса, — чтобы его нельзя было обойти другим вызывающим.
+  for (const label of ['$Snoozed', '$MDNSent', 'reliable', 'finance', '\\Deleted', 'oplatit']) {
+    assert.throws(
+      () => buildSearchQuery('all', undefined, label),
+      (err: unknown) => err instanceof ApiError && err.statusCode === 400,
+      `${label} прошло отбором`,
+    );
+  }
 });
 
 /**

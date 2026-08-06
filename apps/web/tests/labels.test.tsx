@@ -23,6 +23,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { MessageSummary } from '@mail-true/shared';
+import { api } from '../src/api';
 import { useUiStore } from '../src/app/store';
 import { isServiceLabel, userLabelKeys } from '../src/lib/categories';
 import { applyFacets, computeAggregates, EMPTY_SELECTION } from '../src/lib/searchFacets';
@@ -31,13 +32,14 @@ import {
   labelsApi,
   labelsOfMessage,
   nextLabelAction,
-  rowLabelUnion,
   type MailLabel,
 } from '../src/mail/labelsApi';
+import { rowLabelKeys } from '../src/mail/threadList';
 import { LabelMenu } from '../src/mail/LabelMenu';
 import { ListToolbar } from '../src/mail/ListToolbar';
 import { LabelPills } from '../src/mail/LabelPill';
 import { MessageList, ROW_HEIGHT } from '../src/mail/MessageList';
+import { FolderPage } from '../src/pages/FolderPage';
 import { LabelsPage } from '../src/pages/settings/LabelsPage';
 import {
   buildSearchParams,
@@ -274,31 +276,44 @@ describe('меню меток', () => {
 /* ------------------------------------------------------------------ */
 
 describe('метка на строке-переписке', () => {
-  it('строка показывает объединение меток разговора, а не последнего письма', () => {
+  /** Строка-переписка: показано письмо `shown`, а сводка знает про весь разговор. */
+  function row(shownLabels: string[], threadLabels: string[]): MessageSummary {
+    return {
+      ...summary('3', shownLabels),
+      thread: {
+        messageIds: ['inbox:1', 'inbox:2', 'inbox:3'],
+        count: 3,
+        unreadCount: 0,
+        flagged: false,
+        hasAttachments: false,
+        labels: threadLabels,
+        participants: [],
+      },
+    };
+  }
+
+  it('строка показывает метки разговора, а не последнего письма', () => {
     // Разговор из трёх писем. Метку поставили на весь разговор, потом
     // пришёл ответ — у него ключевого слова нет. По последнему письму
     // пометка исчезла бы из списка ровно тогда, когда разговор ожил.
-    const row = { id: 'inbox:3', labels: [], threadIds: ['inbox:1', 'inbox:2', 'inbox:3'] };
-    const union = rowLabelUnion(row, { 'inbox:1': ['mt-oplatit'], 'inbox:2': ['mt-yurist'] });
-    expect(union).toEqual(['mt-oplatit', 'mt-yurist']);
+    expect(rowLabelKeys(row([], ['mt-oplatit', 'mt-yurist']))).toEqual([
+      'mt-oplatit',
+      'mt-yurist',
+    ]);
   });
 
-  it('до ответа сервера показываются метки самого показанного письма', () => {
-    // Список обязан рисоваться и без дополнительного запроса: метки —
-    // украшение строки, а не её содержание.
-    const row = { id: 'inbox:3', labels: ['mt-oplatit'], threadIds: ['inbox:1', 'inbox:3'] };
-    expect(rowLabelUnion(row, {})).toEqual(['mt-oplatit']);
-  });
-
-  it('одна и та же метка не задваивается', () => {
-    const row = { id: 'inbox:2', labels: ['mt-oplatit'], threadIds: ['inbox:1', 'inbox:2'] };
-    // И регистр не создаёт второй пилюли: ключевые слова у Dovecot
-    // нечувствительны к регистру.
-    expect(rowLabelUnion(row, { 'inbox:1': ['MT-OPLATIT'] })).toEqual(['mt-oplatit']);
+  it('служебные слова продукта в метки строки не попадают', () => {
+    // Чипы категорий и признак надёжного отправителя приезжают в том же
+    // поле, что и метки, — пилюлей они не рисуются ни у письма, ни у строки.
+    expect(rowLabelKeys(row([], ['finance', 'reliable', '$Snoozed', 'mt-oplatit']))).toEqual([
+      'mt-oplatit',
+    ]);
   });
 
   it('строка-письмо (без группировки) остаётся при своих метках', () => {
-    expect(rowLabelUnion({ id: 'inbox:1', labels: ['mt-oplatit'] }, {})).toEqual(['mt-oplatit']);
+    // Сводки переписки нет — берутся ключевые слова самого письма,
+    // и поведение остаётся ровно прежним.
+    expect(rowLabelKeys(summary('1', ['mt-oplatit', '$Snoozed']))).toEqual(['mt-oplatit']);
   });
 });
 
@@ -377,11 +392,7 @@ describe('пилюля в строке не растит строку', () => {
     act(() => {
       root.render(
         <MemoryRouter>
-          <MessageList
-            messages={[message]}
-            labels={[OPLATIT, YURIST]}
-            rowLabels={new Map([['1', ['mt-oplatit']]])}
-          />
+          <MessageList messages={[message]} labels={[OPLATIT, YURIST]} />
         </MemoryRouter>,
       );
     });
@@ -481,6 +492,80 @@ describe('отбор списка по метке', () => {
     click(button('Фильтр')!);
     // Заголовок над пустотой ничего не сообщает
     expect(button('Оплатить')).toBeUndefined();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Отбор по метке: его делает сервер                                    */
+/* ------------------------------------------------------------------ */
+
+describe('отбор списка по метке', () => {
+  /** Ящик заглушки: помечено одно письмо из двух. */
+  function mailbox() {
+    vi.spyOn(api, 'getFolders').mockResolvedValue([]);
+    vi.spyOn(labelsApi, 'getLabels').mockResolvedValue({
+      available: true,
+      reason: null,
+      items: [OPLATIT],
+    });
+    /*
+     * Заглушка отбирает САМА, по условию запроса, — как настоящий сервер.
+     * Отбери она всё и понадейся на сито в браузере, проверка перестала бы
+     * отличать «отбор уехал на сервер» от «отбор остался у нас».
+     */
+    return vi.spyOn(api, 'getMessages').mockImplementation(async (query) => {
+      const all = [summary('1', ['mt-oplatit']), summary('2', [])];
+      const items = query.label
+        ? all.filter((m) => m.labels.includes(query.label as string))
+        : all;
+      return { items, total: items.length, offset: query.offset, limit: query.limit };
+    });
+  }
+
+  it('выбранная метка уходит в запрос списка, а не отсеивает загруженное', async () => {
+    const getMessages = mailbox();
+    useUiStore.setState({ selectedIds: new Set<string>() });
+    render(<FolderPage />);
+
+    await waitFor(() => getMessages.mock.calls.length > 0, 'первый запрос списка');
+    // Прямой ход: до выбора метки условия отбора в запросе нет
+    expect(getMessages.mock.calls[0]?.[0]?.label).toBeUndefined();
+
+    await waitFor(() => Boolean(button('Фильтр')), 'меню отбора');
+    click(button('Фильтр')!);
+    await waitFor(() => Boolean(button('Оплатить')), 'метку в меню отбора');
+    click(button('Оплатить')!);
+
+    // Ушёл НОВЫЙ запрос — с меткой. Это и есть доказательство: список
+    // с меткой сервер собирает заново по всей папке, а не браузер по
+    // загруженным строкам.
+    await waitFor(
+      () => getMessages.mock.calls.some(([q]) => q.label === 'mt-oplatit'),
+      'запрос с отбором по метке',
+    );
+  });
+
+  it('подписи «из загруженных» над списком больше нет', async () => {
+    /*
+     * Обратный ход к прежнему временному решению. Пока отбор шёл по
+     * загруженным строкам, над списком стояла честная оговорка «1 из
+     * загруженных 480». Теперь отбирает сервер по всей папке, и оговорка
+     * стала бы неправдой: список с меткой полон по построению.
+     */
+    const getMessages = mailbox();
+    useUiStore.setState({ selectedIds: new Set<string>() });
+    render(<FolderPage />);
+    await waitFor(() => getMessages.mock.calls.length > 0, 'первый запрос списка');
+
+    await waitFor(() => Boolean(button('Фильтр')), 'меню отбора');
+    click(button('Фильтр')!);
+    await waitFor(() => Boolean(button('Оплатить')), 'метку в меню отбора');
+    click(button('Оплатить')!);
+    await waitFor(
+      () => getMessages.mock.calls.some(([q]) => q.label === 'mt-oplatit'),
+      'запрос с отбором по метке',
+    );
+    expect(host.textContent).not.toContain('загруженных');
   });
 });
 

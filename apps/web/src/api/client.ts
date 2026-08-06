@@ -179,6 +179,9 @@ export const httpApi: MailApi = {
         threaded: query.threaded,
         filter: query.filter,
         search: query.search,
+        // Отбор по метке делает сервер (`KEYWORD` в поиске IMAP): список
+        // с меткой обязан охватывать всю папку, а не загруженные строки.
+        label: query.label,
       })}`,
     ),
 

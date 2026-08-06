@@ -56,6 +56,7 @@ import {
   isRowFlagged,
   isRowUnread,
   rowHasAttachments,
+  rowLabelKeys,
   rowThreadCount,
 } from './threadList';
 
@@ -221,15 +222,6 @@ export interface MessageListProps {
    * отрисовки всему списку ради украшения строки.
    */
   labels?: readonly MailLabel[] | undefined;
-  /**
-   * Метки СТРОКИ: идентификатор строки -> ключевые слова.
-   *
-   * Отдельно от `message.labels`, потому что строка бывает целой
-   * перепиской: показывается последнее письмо, а метка стоит на разговоре.
-   * Объединение считает страница (useRowLabels) — здесь только показ.
-   * Не задано — берутся метки самого показанного письма.
-   */
-  rowLabels?: ReadonlyMap<string, readonly string[]> | undefined;
 }
 
 /**
@@ -261,7 +253,7 @@ interface RowProps {
   snoozeLabel?: string | undefined;
   /** Справочник меток и ключевые слова ЭТОЙ строки (см. MessageListProps). */
   labels: readonly MailLabel[];
-  rowLabelKeys: readonly string[];
+  labelKeys: readonly string[];
   onContextMenu?: MessageListProps['onContextMenu'];
   onSwipe?: MessageListProps['onSwipe'];
   onOpen?: MessageListProps['onOpen'];
@@ -282,7 +274,7 @@ function Row({
   threadCount,
   snoozeLabel,
   labels,
-  rowLabelKeys,
+  labelKeys,
   onContextMenu,
   onSwipe,
   onOpen,
@@ -503,7 +495,7 @@ function Row({
           строки-переписки: ROW_HEIGHT одно на все виды строк.
         */}
         <LabelPills
-          keywords={rowLabelKeys}
+          keywords={labelKeys}
           dictionary={labels}
           className={styles.rowLabels}
         />
@@ -595,7 +587,6 @@ export function MessageList({
   footer,
   snoozeLabels,
   labels,
-  rowLabels,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -855,9 +846,9 @@ export function MessageList({
                     snoozeLabel={snoozeLabels?.get(row.message.id)}
                     labels={labels ?? NO_LABELS}
                     /* Метки СТРОКИ, а не показанного письма: у переписки
-                       это объединение по всему разговору (см. useRowLabels).
-                       Не передали — берём то, что пришло в самом письме. */
-                    rowLabelKeys={rowLabels?.get(row.message.id) ?? row.message.labels}
+                       это объединение по всему разговору, и приходит оно
+                       готовым в сводке от сервера (см. rowLabelKeys). */
+                    labelKeys={rowLabelKeys(row.message)}
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}
                     onOpen={onOpen}

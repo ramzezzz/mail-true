@@ -61,6 +61,20 @@ function applyQuery(query: MessageListQuery): MessageSummary[] {
   if (query.filter === 'unread') result = result.filter((m) => !m.flags.seen);
   if (query.filter === 'flagged') result = result.filter((m) => m.flags.flagged);
   if (query.filter === 'with-attachments') result = result.filter((m) => m.hasAttachments);
+  /*
+   * Отбор по метке — как у настоящего сервера, условием поиска, а не
+   * просеиванием готовой страницы. Иначе заглушка вела бы себя иначе, чем
+   * ящик, ровно в том месте, ради которого отбор и переезжал на сервер.
+   *
+   * Правило объединения то же: метка стоит на переписке, если стоит хоть
+   * на одном её письме.
+   */
+  if (query.label) {
+    const label = query.label.toLowerCase();
+    result = result.filter((m) =>
+      (m.thread ? m.thread.labels : m.labels).some((l) => l.toLowerCase() === label),
+    );
+  }
   if (query.search) {
     const needle = query.search.toLowerCase();
     result = result.filter(

@@ -8,11 +8,8 @@
  * нет, а метка без имени и цвета — это просто непонятное слово в письме.
  */
 
-import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { MessageSummary } from '@mail-true/shared';
 import { useUiStore } from '../app/store';
-import { userLabelKeys } from '../lib/categories';
 import { actionErrorText } from '../lib/errorText';
 import {
   labelsApi,
@@ -20,12 +17,9 @@ import {
   type ApplyLabelsResult,
   type LabelDeleteResult,
   type LabelDraft,
-  type LabelsByMessage,
-  rowLabelUnion,
   type LabelsState,
   type MailLabel,
 } from './labelsApi';
-import { chunkIds, threadMessageIds } from './threadList';
 
 export const labelsQueryKey = ['labels'] as const;
 
@@ -56,80 +50,15 @@ export function useLabelDictionary(): MailLabel[] {
   return useLabelsState().items;
 }
 
-/**
- * Метки СТРОКИ списка, когда строка — это переписка.
+/*
+ * Метки СТРОКИ списка хука не имеют и иметь не должны: у переписки это
+ * объединение по разговору, и считает его сервер в сводке (`thread.labels`).
+ * Показ берёт готовое поле — см. rowLabelKeys в mail/threadList.ts.
  *
- * Правило то же, что у флажка и скрепки в сводке переписки: метка стоит
- * на разговоре, если стоит хоть на одном его письме. Иначе пометка
- * «оплатить» пропадала бы из списка от первого же ответа собеседника —
- * строку рисует последнее письмо, а новое письмо ключевого слова не несёт.
- *
- * Запрос идёт только за теми письмами, которых в списке НЕТ (все, кроме
- * показанного строкой): их метки взять больше неоткуда. У строки-письма
- * (папки без группировки, разговор из одного письма) спрашивать нечего,
- * и запроса не будет вовсе.
+ * Раньше здесь жил хук, который отдельным запросом добирал метки писем,
+ * не попавших в список. Он стоил лишнего оборота к серверу на каждый показ
+ * списка и отвечал ровно тем, что список и так получает вместе с флагами.
  */
-export function useRowLabels(
-  messages: readonly MessageSummary[],
-): ReadonlyMap<string, readonly string[]> {
-  const { available } = useLabelsState();
-
-  /** Письма переписок, которых нет в списке. Порядок постоянный — он ключ. */
-  const hiddenIds = useMemo(() => {
-    const out: string[] = [];
-    for (const message of messages) {
-      if (!message.thread || message.thread.count <= 1) continue;
-      for (const id of threadMessageIds(message)) {
-        if (id !== message.id) out.push(id);
-      }
-    }
-    return out;
-  }, [messages]);
-
-  const query = useQuery({
-    queryKey: ['labels', 'of', hiddenIds.join(',')],
-    // Запросов столько, сколько нужно: маршрут принимает пятьсот писем за
-    // раз, а сотня строк-переписок — это легко больше.
-    queryFn: async (): Promise<LabelsByMessage> => {
-      const merged: LabelsByMessage = {};
-      for (const chunk of chunkIds(hiddenIds)) {
-        Object.assign(merged, await labelsApi.labelsOfMessages(chunk));
-      }
-      return merged;
-    },
-    enabled: available && hiddenIds.length > 0,
-    // Метки меняет только человек, и после каждой правки кэш сбрасывается
-    // явно (useInvalidateMessages). Минуты хватает, чтобы прокрутка списка
-    // туда-обратно не била в сервер.
-    staleTime: 60_000,
-    // Список обязан рисоваться и без этого запроса: метки — украшение
-    // строки, а не её содержание. Поэтому без повторов.
-    retry: false,
-  });
-
-  const hidden = query.data;
-
-  return useMemo(() => {
-    const rows = new Map<string, readonly string[]>();
-    for (const message of messages) {
-      // Метки самого показанного письма известны всегда — они пришли
-      // в списке; служебные слова из них отсеиваются здесь же. Остальные
-      // письма разговора добавляются, когда ответ приехал.
-      const union = rowLabelUnion(
-        {
-          id: message.id,
-          labels: userLabelKeys(message.labels),
-          ...(hidden && message.thread && message.thread.count > 1
-            ? { threadIds: threadMessageIds(message) }
-            : {}),
-        },
-        hidden ?? {},
-      );
-      if (union.length > 0) rows.set(message.id, union);
-    }
-    return rows;
-  }, [messages, hidden]);
-}
 
 function useInvalidateDictionary(): () => void {
   const client = useQueryClient();
@@ -152,9 +81,6 @@ function useInvalidateMessages(): () => void {
   return () => {
     void client.invalidateQueries({ queryKey: ['messages'] });
     void client.invalidateQueries({ queryKey: ['message'] });
-    // Метки скрытых писем переписки лежат отдельно: без сброса пилюля
-    // на строке-разговоре отставала бы на минуту от собственного нажатия.
-    void client.invalidateQueries({ queryKey: ['labels', 'of'] });
   };
 }
 

@@ -76,6 +76,7 @@ function thread(over: Partial<ThreadSummary> = {}): ThreadSummary {
     unreadCount: 0,
     flagged: false,
     hasAttachments: false,
+    labels: [],
     participants: [
       { name: 'Иван', address: 'ivan@example.com' },
       { name: 'Пётр', address: 'petr@example.com' },
