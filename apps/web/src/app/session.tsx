@@ -22,6 +22,7 @@ import { accountsApi, api } from '../api';
 import { accountsKeys } from '../api/accountsQueries';
 import { setUnauthorizedHandler } from '../api/http';
 import type { SessionInfo } from '../api/types';
+import { forgetAppearance, syncAppearance } from '../appearance/sync';
 import { publishMailEvent } from './mailEvents';
 
 interface SessionState {
@@ -45,6 +46,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const info = await api.getSession();
       setSession(info.authenticated ? info : null);
+      /*
+       * Оформление принадлежит УЧЁТНОЙ ЗАПИСИ, а не браузеру (требование
+       * заказчика: «тема оформления должна запоминаться для каждого
+       * юзера»). Здесь — единственное место, где почта узнаёт, чей это
+       * сеанс: и при старте, и при входе, и при смене ящика всё сходится
+       * в refresh. Ошибок наружу не выбрасывает, ответа не ждём —
+       * тема из кэша уже применена в main.tsx.
+       */
+      if (info.authenticated) void syncAppearance(info.email);
     } catch {
       // 401 здесь — обычное дело: просто ещё не вошли
       setSession(null);
@@ -100,6 +110,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await api.logout().catch(() => undefined);
     setSession(null);
     queryClient.clear();
+    // Тема и фон — такие же данные ящика, как письма: оставить их
+    // следующему нельзя. На общем компьютере вошедший после увидел бы
+    // оформление предыдущего (см. appearance/sync.ts).
+    forgetAppearance();
   }, [queryClient]);
 
   /**

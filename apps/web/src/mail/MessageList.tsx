@@ -13,7 +13,7 @@
  * налезали бы друг на друга в отведённых 48 пикселях.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { MessageSummary } from '@mail-true/shared';
@@ -37,6 +37,7 @@ import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
 import { usePhone } from '../lib/useMediaQuery';
 import { IconArchive, IconAttach, IconFlagFilled, IconShield, IconTrash } from './icons';
 import styles from './MessageList.module.css';
+import { SenderAvatar } from './SenderAvatar';
 
 export type ListRow =
   | { type: 'header'; label: string }
@@ -102,6 +103,22 @@ export interface MessageListProps {
    * не сообщая. Кнопка «Обновить» в панели делает то же самое.
    */
   onRefresh?(): void | Promise<unknown>;
+  /**
+   * Открыть письмо своим способом вместо перехода на страницу просмотра.
+   *
+   * Нужно папке «Черновики»: щелчок по черновику должен открывать окно
+   * написания, а не просмотр письма — дописать неотправленное письмо иначе
+   * нечем. Ссылка у строки при этом остаётся прежней, поэтому Ctrl+щелчок
+   * и «Открыть в новой вкладке» по-прежнему показывают письмо.
+   */
+  onOpen?(message: MessageSummary): void;
+  /**
+   * Подвал списка — кнопка догрузки. Принимается сюда, а не рисуется
+   * страницей рядом, потому что должен жить ВНУТРИ области прокрутки:
+   * снаружи он висел под списком постоянно, ещё до того, как человек
+   * долистал до конца.
+   */
+  footer?: ReactNode;
 }
 
 function senderName(m: MessageSummary): string {
@@ -112,12 +129,9 @@ function senderName(m: MessageSummary): string {
   return name ? name : m.from.address;
 }
 
-/** Детерминированный цвет аватара из адреса отправителя. */
-function avatarHue(address: string): number {
-  let h = 0;
-  for (const ch of address) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
+/* Цвет кружка и буква в нём переехали в SenderAvatar: тот же кружок теперь
+   умеет показывать ещё и логотип домена, и держать это в двух местах
+   значило бы рано или поздно развести букву с логотипом по виду. */
 
 interface RowProps {
   message: MessageSummary;
@@ -130,6 +144,7 @@ interface RowProps {
   threadCount: number;
   onContextMenu?: MessageListProps['onContextMenu'];
   onSwipe?: MessageListProps['onSwipe'];
+  onOpen?: MessageListProps['onOpen'];
   /** Ставится только на строку под курсором — по нему и переносится фокус. */
   rowRef?: ((node: HTMLAnchorElement | null) => void) | undefined;
 }
@@ -146,6 +161,7 @@ function Row({
   threadCount,
   onContextMenu,
   onSwipe,
+  onOpen,
   rowRef,
 }: RowProps) {
   const toggleSelected = useUiStore((s) => s.toggleSelected);
@@ -264,6 +280,13 @@ function Row({
         }
         if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.button !== 0) return;
         e.preventDefault();
+        // Папка «Черновики» открывает письмо иначе — окном написания.
+        // Проверка стоит ПОСЛЕ разбора Ctrl/Cmd и средней кнопки: открытие
+        // в новой вкладке остаётся открытием ссылки, то есть просмотром.
+        if (onOpen) {
+          onOpen(message);
+          return;
+        }
         navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`);
       }}
       onContextMenu={(e) => {
@@ -279,13 +302,16 @@ function Row({
 
       {/* Аватар 32×32; при наведении поверх — чекбокс */}
       <span className={styles.avatarCell}>
-        <span
+        <SenderAvatar
           className={styles.avatar}
-          style={{ backgroundColor: `hsl(${avatarHue(message.from.address)} 60% 55%)` }}
-          aria-hidden="true"
-        >
-          {(senderName(message)[0] ?? '?').toUpperCase()}
-        </span>
+          name={senderName(message)}
+          address={message.from.address}
+          /* Домен ставит СЕРВЕР и только письмам, чья подлинность
+             подтверждена: логотип читается как знак подлинности, и рядом
+             с подделкой он опаснее, чем буква. Здесь его не вычисляют
+             и не подменяют — см. apps/api/src/mail/sender-auth.ts. */
+          logoDomain={message.senderLogoDomain}
+        />
         {reliable && (
           <span className={styles.reliableBadge} title="Надёжный отправитель">
             <IconShield size={12} />
@@ -395,6 +421,8 @@ export function MessageList({
   onEndReached,
   onSwipe,
   onRefresh,
+  onOpen,
+  footer,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -585,12 +613,22 @@ export function MessageList({
                     threadCount={threadCounts.get(row.message.threadId) ?? 1}
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}
+                    onOpen={onOpen}
                   />
                 )}
               </div>
             );
           })}
         </div>
+        {/*
+          Подвал списка — ВНУТРИ области прокрутки, следом за письмами.
+
+          Снаружи он висел под списком всегда: человек ещё не долистал до
+          конца, а «Показать ещё» уже перед глазами. Кнопка догрузки должна
+          встречаться там, где список кончился, — иначе она не сообщает
+          ничего о том, где ты находишься, и спорит с прокруткой.
+        */}
+        {footer ? <div className={styles.footer}>{footer}</div> : null}
       </div>
     </div>
   );

@@ -192,6 +192,37 @@ export function FolderPage() {
     ],
   );
 
+  /**
+   * «Переслать как вложение» — новое письмо, к которому выбранные письма
+   * приложены целиком (`message/rfc822`), а не пересказаны цитатой.
+   *
+   * Байты писем берёт сервер прямо из ящика (см. `attachMessageIds`
+   * в apps/api/src/routes/compose.ts): тащить исходник в браузер и обратно
+   * незачем, да и портится он при этом легко. Здесь остаются только
+   * идентификаторы и темы для плашек в окне написания.
+   */
+  const forwardAsAttachment = useCallback(() => {
+    const ids = targetIds();
+    const chosen = messages.filter((m) => ids.includes(m.id));
+    if (chosen.length === 0) {
+      showNotice('Выберите письмо, которое нужно переслать вложением');
+      return;
+    }
+    const first = chosen[0];
+    openCompose({
+      // Тема — как у обычной пересылки одного письма; для пачки называем
+      // их число: перечислять десяток тем в строке темы бессмысленно
+      subject:
+        chosen.length === 1 && first
+          ? first.subject.startsWith('Fwd:')
+            ? first.subject
+            : `Fwd: ${first.subject}`
+          : `Fwd: ${String(chosen.length)} писем`,
+      attachMessages: chosen.map((m) => ({ id: m.id, label: m.subject || '(без темы)' })),
+    });
+    clearSelection();
+  }, [targetIds, messages, openCompose, showNotice, clearSelection]);
+
   /** Пометить флажком: если все цели уже с флагом — снять. */
   const toggleFlagOn = useCallback(
     (ids: string[]) => {
@@ -325,9 +356,7 @@ export function FolderPage() {
         onSpam={() => moveTo(targetIds(), 'spam')}
         onPrint={() => window.print()}
         onCreateFilter={() => createFilter()}
-        onForwardAsAttachment={() =>
-          console.info('Пересылка как вложение появится вместе с бэкендом')
-        }
+        onForwardAsAttachment={forwardAsAttachment}
       />
 
       {/* Скелетоны вместо пустого экрана: строки встают на те же места,
@@ -368,28 +397,27 @@ export function FolderPage() {
             moveTo([message.id], action === 'archive' ? 'archive' : 'trash')
           }
           onRefresh={() => page.refresh()}
+          /*
+            Подвал уходит ВНУТРЬ списка, в его область прокрутки. Рядом со
+            списком он висел под ним всегда: человек ещё не долистал, а
+            «Показать ещё» уже перед глазами — кнопка не сообщала ничего о
+            том, где ты находишься, и спорила с прокруткой.
+
+            Она нужна и при подгрузке по прокрутке: бывает, что прокручивать
+            нечего — короткое окно, мышь без колеса.
+          */
+          footer={
+            messages.length > 0 && page.hasMore ? (
+              <Button mode="secondary" onClick={loadMore} disabled={page.isLoadingMore}>
+                {page.isLoadingMore ? 'Загружаем…' : 'Показать ещё'}
+              </Button>
+            ) : null
+          }
           onContextMenu={(message, x, y) => {
             setFocusedId(message.id);
             setContextMenu({ message, x, y, view: 'main' });
           }}
         />
-      )}
-
-      {/*
-        Подвал списка — только кнопка «Показать ещё» и только пока есть что
-        показывать. Она нужна и при подгрузке по прокрутке: бывает, что
-        прокручивать нечего (короткое окно, мышь без колеса).
-
-        Подписи «Показано 11 из 11» здесь больше нет: у mail.ru такого
-        элемента не существует ни в каком виде, а на догруженном до конца
-        списке она к тому же сообщала ровно ничего.
-      */}
-      {messages.length > 0 && page.hasMore && (
-        <div className={styles.listFooter}>
-          <Button mode="secondary" onClick={loadMore} disabled={page.isLoadingMore}>
-            {page.isLoadingMore ? 'Загружаем…' : 'Показать ещё'}
-          </Button>
-        </div>
       )}
 
       {contextMenu && (

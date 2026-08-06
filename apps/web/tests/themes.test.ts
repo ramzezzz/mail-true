@@ -13,7 +13,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { composite, contrastRatio } from '../src/appearance/contrast';
-import { THEMES, THEME_IDS, WALLPAPER_SCRIM, isThemeName } from '../src/appearance/themes';
+import {
+  THEMES,
+  THEME_IDS,
+  WALLPAPER_SCRIM,
+  WALLPAPER_SURFACE,
+  isThemeName,
+} from '../src/appearance/themes';
 import {
   WALLPAPER_PRESETS,
   parseWallpaperSelection,
@@ -167,21 +173,36 @@ describe('читаемость поверх фоновой картинки (н�
     expect(block).toMatch(/--mt-app-bg-image:\s*linear-gradient\(var\(--mt-wallpaper-dim\)/u);
   });
 
-  it('карточка контента остаётся непрозрачной — письма читаются на любом фоне', () => {
+  /*
+   * Раньше здесь стояло обратное требование — «карточка контента остаётся
+   * непрозрачной». Заказчик попросил её открыть: «таблица писем должна быть
+   * немного прозрачной, чтобы было видно картинку не только под меню».
+   * Читаемость теперь держится не непрозрачностью, а расчётом доли —
+   * им занят отдельный файл tests/wallpaperSurfaces.test.ts.
+   */
+  it('карточка контента полупрозрачна, но не настолько, чтобы потерять текст', () => {
     const block = themeBlock('wallpaper');
-    expect(block).toContain('--mt-app-content-bg: var(--mt-color-background-content)');
+    expect(block).toContain('--mt-app-content-bg: rgba(255, 255, 255,');
+    expect(WALLPAPER_SURFACE.alpha).toBeGreaterThanOrEqual(0.7);
+    expect(WALLPAPER_SURFACE.alpha).toBeLessThan(1);
   });
 });
 
 describe('готовые фоны и своя картинка', () => {
-  it('набор непустой, идентификаторы уникальны, всё нарисовано кодом', () => {
+  /*
+   * Раньше здесь стояло «всё нарисовано кодом, никаких url(...)»: растровых
+   * файлов в репозитории не было вовсе. Заказчик попросил обратного —
+   * «добавь какие-то реальные картинки, а не просто градиент». Проверки
+   * самого набора фотографий (лицензии, вес, читаемость) живут в
+   * tests/wallpaperSet.test.ts, здесь остаётся только общая целостность.
+   */
+  it('набор непустой, идентификаторы уникальны, у каждого фона есть плитка', () => {
     expect(WALLPAPER_PRESETS.length).toBeGreaterThanOrEqual(6);
     const ids = new Set(WALLPAPER_PRESETS.map((p) => p.id));
     expect(ids.size).toBe(WALLPAPER_PRESETS.length);
     for (const p of WALLPAPER_PRESETS) {
-      // никаких url(...) — растровые файлы в репозиторий не кладём
-      expect(p.css).toMatch(/gradient\(/u);
-      expect(p.css).not.toMatch(/url\(/u);
+      expect(p.css).toMatch(/gradient\(|url\(/u);
+      expect(p.thumb).toBeTruthy();
       expect(p.title).toBeTruthy();
     }
   });

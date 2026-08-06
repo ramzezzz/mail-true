@@ -22,6 +22,7 @@ import { SEARCH_PATH } from '../search/searchParams';
 import { SearchProvider } from '../search/SearchContext';
 import { BottomNav } from './BottomNav';
 import bottomStyles from './BottomNav.module.css';
+import { Footer } from './Footer';
 import { Header, NAV_DRAWER_ID } from './Header';
 import { Notice } from './Notice';
 import { Sidebar } from './Sidebar';
@@ -63,8 +64,15 @@ export function AppLayout() {
             tabIndex={navOpen ? 0 : -1}
             onClick={() => setNavOpen(false)}
           />
+          {/*
+            Строка состояния стоит ВНУТРИ карточки контента, под <Outlet/>:
+            так она лежит на непрозрачной белой подложке при любой теме,
+            включая «обойную», где всё вокруг карточки — фотография
+            пользователя, и посчитать контраст текста на ней невозможно.
+          */}
           <main className={styles.content}>
             <Outlet />
+            <Footer />
           </main>
         </div>
 

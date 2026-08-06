@@ -112,7 +112,7 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  useUiStore.setState({ selectedIds: new Set<string>(), notice: null });
+  useUiStore.setState({ selectedIds: new Set<string>(), notice: null, composeWindows: [] });
   vi.spyOn(api, 'getFolders').mockResolvedValue([]);
 });
 
@@ -192,5 +192,57 @@ describe('отказ мутации', () => {
 
     await waitFor(() => text().includes('Не удалось переместить письма'), 'сообщение об отказе');
     expect(text()).toContain('Сервер не отвечает');
+  });
+});
+
+
+/**
+ * «Переслать как вложение» в меню над списком.
+ *
+ * Раньше пункт только писал в консоль браузера: человек нажимал и не
+ * понимал, сработало или сломалось. Теперь он открывает окно написания
+ * с приложенным письмом, а байты письма берёт сервер прямо из ящика —
+ * поэтому наружу уходит идентификатор, а не тело.
+ */
+describe('переслать как вложение', () => {
+  it('открывает окно написания с приложенным письмом', async () => {
+    vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
+    render();
+    await waitFor(() => Boolean(button('Показать ещё')), 'загруженный список');
+
+    // Панель с этим пунктом появляется только над выделенными письмами
+    act(() => useUiStore.getState().selectMany(['inbox:2']));
+    const more = host.querySelector('button[aria-label="Ещё действия"]');
+    act(() => more?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    const item = button('Переслать как вложение');
+    expect(item, 'пункт меню должен быть на месте').toBeTruthy();
+    act(() => item?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    const win = useUiStore.getState().composeWindows[0];
+    expect(win, 'окно написания должно открыться').toBeTruthy();
+    expect(win?.init.attachMessages).toEqual([{ id: 'inbox:2', label: 'Письмо 2' }]);
+    // Тема — как у обычной пересылки, чтобы получатель понял, что это
+    expect(win?.draft.subject).toBe('Fwd: Письмо 2');
+    expect(win?.draft.attachedMessages).toHaveLength(1);
+    // Выделение снимается: письмо уже отдано в окно написания
+    expect(useUiStore.getState().selectedIds.size).toBe(0);
+  });
+
+  it('пачку писем прикладывает целиком, а тему называет их числом', async () => {
+    vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
+    render();
+    await waitFor(() => Boolean(button('Показать ещё')), 'загруженный список');
+
+    act(() => useUiStore.getState().selectMany(['inbox:2', 'inbox:3']));
+    const more = host.querySelector('button[aria-label="Ещё действия"]');
+    act(() => more?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    act(() =>
+      button('Переслать как вложение')?.dispatchEvent(new MouseEvent('click', { bubbles: true })),
+    );
+
+    const win = useUiStore.getState().composeWindows[0];
+    expect(win?.draft.attachedMessages.map((m) => m.id)).toEqual(['inbox:2', 'inbox:3']);
+    expect(win?.draft.subject).toBe('Fwd: 2 писем');
   });
 });

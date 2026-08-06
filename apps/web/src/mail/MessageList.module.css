@@ -698,3 +698,15 @@
     line-height: 18px;
   }
 }
+
+/* Подвал списка — кнопка догрузки. Живёт ВНУТРИ области прокрутки, следом
+   за письмами: снаружи он висел под списком постоянно, ещё до того, как
+   человек долистал до конца, и потому ничего не сообщал о том, где он. */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 0 20px;
+  color: var(--mt-color-text-secondary);
+}

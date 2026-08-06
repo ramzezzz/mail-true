@@ -25,11 +25,13 @@ import { folderRoutes } from './routes/folders.js';
 import { messageRoutes } from './routes/messages.js';
 import { composeRoutes } from './routes/compose.js';
 import { uploadRoutes } from './routes/uploads.js';
+import { versionRoutes } from './routes/version.js';
 import { MailNotifier, wsRoutes } from './ws.js';
 import { adminRoutes } from './admin/index.js';
 import { aiRoutes } from './ai/index.js';
 import { settingsRoutes } from './settings/index.js';
 import { accountsRoutes } from './accounts/index.js';
+import { senderLogosRoutes } from './logos/index.js';
 
 export interface BuiltApp {
   app: FastifyInstance;
@@ -237,6 +239,8 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       await messageRoutes(api);
       await composeRoutes(api);
       await uploadRoutes(api);
+      // Версия сервера для нижней строки состояния в почте
+      await versionRoutes(api);
     },
     { prefix: '/api' }
   );
@@ -252,6 +256,11 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // подключение своих и чужих ящиков (см. src/accounts/)
   await settingsRoutes(app);
   await accountsRoutes(app);
+
+  // Логотипы доменов отправителей (см. src/logos/). Регистрируются ПОСЛЕ
+  // настроек: маршрут спрашивает у них, разрешил ли человек эту возможность,
+  // и ПОСЛЕ ИИ — помощник у них третий источник после BIMI и значка сайта.
+  await senderLogosRoutes(app);
 
   await wsRoutes(app, notifier);
 

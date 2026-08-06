@@ -1,0 +1,239 @@
+/*
+ * Нижняя строка состояния. Устройство и числа контраста — Footer.tsx
+ * и tests/footerContrast.test.ts.
+ *
+ * Цвета объявлены ЗДЕСЬ, а не в styles/themes.css, по двум причинам.
+ * Первая: общий --mt-color-text-secondary (#87898F) на белой карточке
+ * даёт 3,50:1 — для текста этого мало, и строка состояния была бы первым
+ * местом в продукте, не берущим WCAG AA. Вторая: значений всего два —
+ * для светлой основы и для тёмной, — и держать их рядом с единственным
+ * компонентом, который ими пользуется, честнее, чем добавлять пару
+ * переменных в общий реестр тем.
+ *
+ * Тем восемь, поверхностей — две: у light, emerald, violet, coral, lagoon,
+ * sunset и wallpaper карточка контента белая (#FFFFFF), у dark — #232324.
+ * Поэтому и переопределение одно, для data-theme='dark'.
+ */
+
+.footer {
+  /* Светлая основа (7 тем из 8): текст 5,10:1, отказ 6,37:1 на #FFFFFF */
+  --mt-footer-text: #6b6e76;
+  --mt-footer-alert: #b32d0b;
+  --mt-footer-track: #dadce0;
+
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  /*
+   * Высота задана жёстко и никогда не меняется: строка обязана оставаться
+   * ровно одной строкой, чем бы её ни наполнили. Без этого смена «Обновлено
+   * только что» на «Сервер не отвечает» переносила бы часть содержимого на
+   * вторую строку, и весь список писем прыгал бы вверх-вниз.
+   */
+  height: 28px;
+  min-height: 28px;
+  padding: 0 16px;
+  border-top: 1px solid var(--mt-color-separator-primary);
+  background: var(--mt-app-content-bg);
+  color: var(--mt-footer-text);
+  font-size: 12px;
+  line-height: 16px;
+  /* Моноширинные цифры: «9 писем» и «11 писем» одной ширины — соседние
+     части строки не дёргаются при каждом изменении счётчика */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+:global(html[data-theme='dark']) .footer {
+  /* Тёмная тема: текст 4,79:1, отказ 6,82:1 на #232324 */
+  --mt-footer-text: #8c8e94;
+  --mt-footer-alert: #ff8a70;
+  --mt-footer-track: #3a3a3b;
+}
+
+/*
+ * «Обойная» тема — единственная, где подложки под строкой НЕТ как
+ * постоянного цвета: карточка полупрозрачна (--mt-wallpaper-surface-alpha),
+ * и под ней лежит фотография, которую поставил пользователь. Поэтому
+ * значения свои, и считаются они на НАИХУДШЕМ случае — сплошь чёрном
+ * фото, на котором подложка светлеет меньше всего (та же модель, что
+ * в tests/wallpaperSurfaces.test.ts):
+ *
+ *   текст  #515458 — 4,55:1 (то же значение, что у вторичного текста
+ *                    всей темы: строка не должна выбиваться из неё);
+ *   отказ  #9A2408 — 4,78:1;
+ *   дорожка шкалы — не цвет, а ЗАТЕМНЕНИЕ: сплошной серый на светлой
+ *          подложке пропадал (1,22:1), а поверх любой фотографии тёмная
+ *          плёнка одинаково даёт видимую полосу (1,44–1,47:1 — как
+ *          #DADCE0 на белом в светлой теме) и оставляет заливке
+ *          3,51–5,00:1 при норме 3.
+ */
+:global(html[data-theme='wallpaper']) .footer {
+  --mt-footer-text: #515458;
+  --mt-footer-alert: #9a2408;
+  --mt-footer-track: rgba(0, 16, 61, 0.18);
+}
+
+/*
+ * Левая часть растягивается, поэтому счётчики, шкала и версия справа стоят
+ * на месте, как бы ни менялся текст состояния слева.
+ */
+.left {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Состояние связи. Пустое, пока связь есть, — место под него не резервируется:
+   строка выравнена по левому краю, и появление слов ничего не сдвигает вверх */
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mt-footer-alert);
+  font-weight: 500;
+}
+
+.linkText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Точка рядом со словами — вторая, независимая от цвета примета отказа
+   для тех, кто цвета не различает, слова остаются главными */
+.dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.fresh {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.refresh {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mt-color-text-link, var(--mt-accent));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Подсветка под курсором — только там, где курсор есть: на сенсорном
+   экране такое правило залипает после касания (см. mobileMail.test.tsx) */
+@media (hover: hover) {
+  .refresh:hover:not(:disabled) {
+    background: var(--mt-color-background-secondary);
+  }
+}
+
+/* Отключённого состояния у кнопки нет вовсе — см. комментарий в Footer.tsx */
+
+.refreshIcon {
+  display: inline-flex;
+}
+
+/* Крутится только сам значок и только пока идёт запрос */
+.spinning {
+  animation: footerSpin 1s linear infinite;
+}
+
+@keyframes footerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.counts {
+  flex: none;
+}
+
+/* Занятое место: шкала и подпись, как в карточке хранилища mail.ru */
+.quota {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.meter {
+  display: block;
+  width: 64px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--mt-footer-track);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--mt-accent);
+  transition: width var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+.meterFull {
+  background: var(--mt-footer-alert);
+}
+
+.quotaText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Версия — самое мелкое в строке: её ищут, а не читают.
+ *
+ * Приглушать её ещё и прозрачностью нельзя: opacity 0.85 превращает
+ * #6B6E76 на белом в #81848B, то есть роняет контраст с 5,10:1 до 3,72:1 —
+ * ниже нормы. Мелкий шрифт (11px) остаётся полноцветным, и это не
+ * придирка: строчку с версией читают вслух по телефону, когда всё уже
+ * плохо, и разобрать её должно получиться с первого раза.
+ */
+.version {
+  flex: none;
+  font-size: 11px;
+}
+
+/*
+ * Телефон: строки состояния нет. Внизу уже стоят навигация (56px) и кнопка
+ * написания; вторая полоса отняла бы у списка ещё 28 точек и упёрлась бы
+ * в кнопку. `display: none` убирает её и из дерева доступности — иначе
+ * чтение с экрана нашло бы невидимую строку.
+ */
+@media (max-width: 600px) {
+  .footer {
+    display: none;
+  }
+}
+
+/*
+ * Отключённые анимации: значок обновления не крутится, шкала не едет.
+ * Сведения при этом не теряются — «Обновление…» написано словами.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinning {
+    animation: none;
+  }
+
+  .meterFill {
+    transition: none;
+  }
+}

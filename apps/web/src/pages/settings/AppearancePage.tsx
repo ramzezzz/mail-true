@@ -3,12 +3,20 @@
  * и фоновая картинка «обойной» темы — готовые фоны, нарисованные кодом,
  * плюс своя картинка с устройства.
  *
- * Своя картинка хранится в IndexedDB браузера — почему именно там,
- * объяснено в src/appearance/wallpapers.ts. Пользователю об этом сказано
- * подсказкой под загрузкой: картинка живёт на этом устройстве.
+ * Выбор темы и выбор фона хранятся ЗА УЧЁТНОЙ ЗАПИСЬЮ на сервере
+ * (требование заказчика: «тема оформления должна запоминаться для каждого
+ * юзера»), поэтому страница ничего не сохраняет сама — она вызывает те же
+ * функции, что и панель тем в шапке, а отправкой занимается
+ * src/appearance/sync.ts. Отдельной кнопки «Сохранить» здесь нет и не
+ * должно быть: оформление применяется щелчком.
+ *
+ * Своя КАРТИНКА при этом остаётся в IndexedDB браузера — почему именно
+ * там, объяснено в src/appearance/wallpapers.ts. Пользователю об этом
+ * сказано подсказкой под загрузкой: за ящиком ездит выбор, а не файл.
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { onWallpaperChange } from '../../appearance/cache';
 import {
   clearCustomWallpaper,
   loadCustomWallpaperUrl,
@@ -17,6 +25,7 @@ import {
   setCustomWallpaper,
   setWallpaperPreset,
   validateWallpaperFile,
+  WALLPAPER_GROUPS,
   WALLPAPER_PRESETS,
   type WallpaperSelection,
 } from '../../appearance/wallpapers';
@@ -81,6 +90,14 @@ export function AppearancePage() {
   const [customUrl, setCustomUrl] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * Выбранный фон могут сменить и мимо этой страницы: ответ сервера
+   * приезжает после первого рендера, а вход другим пользователем стирает
+   * кэш. Без подписки отметка «выбран» осталась бы от прошлого владельца —
+   * на плитке одно, на фоне другое.
+   */
+  useEffect(() => onWallpaperChange(() => setWallpaper(readWallpaperSelection())), []);
 
   // Миниатюра своей картинки (если сохранена) — из IndexedDB
   useEffect(() => {
@@ -154,7 +171,7 @@ export function AppearancePage() {
 
       <SettingsSection
         title="Тема"
-        description="Действует сразу, на этом устройстве. «Как в системе» повторяет светлую или тёмную тему операционной системы."
+        description="Действует сразу и запоминается за вашим ящиком — на другом компьютере тема будет та же. «Как в системе» повторяет светлую или тёмную тему операционной системы."
       >
         <div className={styles.themeGrid} role="radiogroup" aria-label="Тема оформления">
           {themeOptions.map((option) => {
@@ -178,40 +195,77 @@ export function AppearancePage() {
 
       <SettingsSection
         title="Фоновая картинка"
-        description="Фон «обойной» темы. Выбор картинки сразу включает её; письма при этом остаются на белой карточке — текст читается на любом фоне."
+        description="Фон «обойной» темы. Выбор картинки сразу включает её: список писем, меню и настройки становятся полупрозрачными, и картинка видна сквозь них. Плотность подобрана так, чтобы текст читался на любом фоне."
       >
-        <div className={styles.wallpaperGrid} role="radiogroup" aria-label="Фоновая картинка">
-          {WALLPAPER_PRESETS.map((preset) => {
-            const active = wallpaper.kind === 'preset' && wallpaper.id === preset.id;
-            return (
+        {/*
+          Плитки разложены по настроениям, а не одной кучей: двадцать восемь
+          картинок подряд выбирать невозможно — глаз не за что зацепить.
+          Своя картинка стоит в конце, отдельной группой, потому что она
+          не про настроение, а про «моё».
+        */}
+        {WALLPAPER_GROUPS.map((group) => {
+          const presets = WALLPAPER_PRESETS.filter((p) => p.group === group.id);
+          if (presets.length === 0) return null;
+          return (
+            <div key={group.id} className={styles.wallpaperGroup}>
+              <div className={styles.wallpaperGroupTitle} id={`wp-group-${group.id}`}>
+                {group.title}
+              </div>
+              <div
+                className={styles.wallpaperGrid}
+                role="radiogroup"
+                aria-labelledby={`wp-group-${group.id}`}
+              >
+                {presets.map((preset) => {
+                  const active = wallpaper.kind === 'preset' && wallpaper.id === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      title={preset.title}
+                      aria-label={`Фон «${preset.title}»`}
+                      className={cx(styles.wallpaperTile, active && styles.wallpaperTileActive)}
+                      // Плитка показывает МИНИАТЮРУ: иначе открытие раздела
+                      // тянуло бы два десятка полноразмерных картинок
+                      style={{ backgroundImage: preset.thumb }}
+                      onClick={() => pickPreset(preset.id)}
+                    >
+                      <span className={styles.wallpaperTileTitle}>{preset.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+
+        {customUrl && (
+          <div className={styles.wallpaperGroup}>
+            <div className={styles.wallpaperGroupTitle} id="wp-group-custom">
+              Своя картинка
+            </div>
+            <div
+              className={styles.wallpaperGrid}
+              role="radiogroup"
+              aria-labelledby="wp-group-custom"
+            >
               <button
-                key={preset.id}
                 type="button"
                 role="radio"
-                aria-checked={active}
-                title={preset.title}
-                aria-label={`Фон «${preset.title}»`}
-                className={cx(styles.wallpaperTile, active && styles.wallpaperTileActive)}
-                style={{ backgroundImage: preset.css }}
-                onClick={() => pickPreset(preset.id)}
+                aria-checked={wallpaper.kind === 'custom'}
+                aria-label="Своя картинка"
+                className={cx(
+                  styles.wallpaperTile,
+                  wallpaper.kind === 'custom' && styles.wallpaperTileActive,
+                )}
+                style={{ backgroundImage: `url("${customUrl}")` }}
+                onClick={pickCustom}
               />
-            );
-          })}
-          {customUrl && (
-            <button
-              type="button"
-              role="radio"
-              aria-checked={wallpaper.kind === 'custom'}
-              aria-label="Своя картинка"
-              className={cx(
-                styles.wallpaperTile,
-                wallpaper.kind === 'custom' && styles.wallpaperTileActive,
-              )}
-              style={{ backgroundImage: `url("${customUrl}")` }}
-              onClick={pickCustom}
-            />
-          )}
-        </div>
+            </div>
+          </div>
+        )}
 
         <div className={styles.customRow}>
           <Button mode="secondary" onClick={() => fileInputRef.current?.click()}>
@@ -237,8 +291,9 @@ export function AppearancePage() {
         </div>
         {fileError && <SettingsError>{fileError}</SettingsError>}
         <SettingsHint>
-          Своя картинка хранится в браузере на этом устройстве и не отправляется на сервер. До 10
-          МБ, любой формат изображения.
+          Выбранный фон запоминается за ящиком. Сама загруженная картинка хранится в браузере на
+          этом устройстве и на сервер не отправляется: на другом компьютере вместо неё покажется
+          первый готовый фон. До 10 МБ, любой формат изображения.
         </SettingsHint>
       </SettingsSection>
     </>
