@@ -44,6 +44,9 @@ import type {
   MigrationSettings,
   MigrationSource,
   MigrationStarted,
+  MonitoringExpiry,
+  MonitoringFailures,
+  MonitoringHealth,
   Overview,
   OverviewHistory,
   OverviewMail,
@@ -53,6 +56,13 @@ import type {
   OverviewUsers,
   QueuePage,
   SieveSyncState,
+  SpamCheckResult,
+  SpamHistory,
+  SpamLearnResult,
+  SpamListChange,
+  SpamListsResponse,
+  SpamOverview,
+  SpamSettings,
   SignatureBulkPreview,
   SignatureBulkRequest,
   SignatureBulkResult,
@@ -374,6 +384,45 @@ export const api = {
     afterId?: string | undefined;
   }) => get<FlowHistoryPage>(`/queue/history${query(params)}`),
   flowStats: (hours: number) => get<FlowHistoryStats>(`/queue/history/stats${query({ hours })}`),
+
+  /* --- спам: статистика, списки, обучение ---
+   *
+   * Списки правит сам rspamd по запросу сервера приложения: копии в базе
+   * нет, поэтому и «сохранить всё» здесь не бывает — только добавить одну
+   * запись или убрать одну запись. Так правка из панели не может затереть
+   * то, что кто-то вписал в файл руками.
+   */
+  spamOverview: (hours: number) => get<SpamOverview>(`/spam/overview${query({ hours })}`),
+  spamHistory: (params: { limit?: number; spamOnly?: boolean }) =>
+    get<SpamHistory>(`/spam/history${query(params)}`),
+  spamLists: () => get<SpamListsResponse>('/spam/lists'),
+  spamListAdd: (id: string, value: string) =>
+    post<SpamListChange>(`/spam/lists/${encodeURIComponent(id)}/entries`, { value }),
+  /**
+   * Значение уходит строкой запроса, а не частью пути: в записях бывают
+   * косые черты (подсеть 203.0.113.0/24), а закодированная косая черта в
+   * пути по-разному понимается прокси и сервером приложения.
+   */
+  spamListRemove: (id: string, value: string) =>
+    del<SpamListChange>(
+      `/spam/lists/${encodeURIComponent(id)}/entries${query({ value })}`,
+    ),
+  spamCheck: (message: string, as: 'outside' | 'own') =>
+    post<SpamCheckResult>('/spam/check', { message, as }),
+  spamLearn: (message: string, kind: 'spam' | 'ham') =>
+    post<SpamLearnResult>('/spam/learn', { message, kind }),
+  spamSettings: () => get<SpamSettings>('/spam/settings'),
+
+  /* --- наблюдение: исправность сервера ---
+   *
+   * Три запроса, а не один: пробы портов, TLS-рукопожатия и запрос к базе
+   * стоят разного времени, и недоступный порт не должен задерживать показ
+   * остального. Экран открывают как раз при аварии.
+   */
+  monitoringHealth: () => get<MonitoringHealth>('/monitoring/health'),
+  monitoringExpiry: () => get<MonitoringExpiry>('/monitoring/expiry'),
+  monitoringFailures: (hours: number) =>
+    get<MonitoringFailures>(`/monitoring/failures${query({ hours })}`),
 
   /* --- журналы служб --- */
   logSources: () => get<LogSourcesResponse>('/logs/sources'),

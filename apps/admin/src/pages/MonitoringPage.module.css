@@ -1,0 +1,96 @@
+/*
+ * Раскладка раздела «Наблюдение».
+ *
+ * Правило то же, что на дашборде: ничего не задаёт себе ширину в точках.
+ * Таблицы прокручиваются внутри своей обёртки (TableWrap), а не тащат
+ * страницу вбок вместе с шапкой и меню.
+ */
+
+.taken {
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+.control {
+  min-width: 140px;
+}
+
+.note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.summary {
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Подсказка «что делать» под строкой проверки.
+ *
+ * Отдельной строкой, а не в скобках после текста: её читают только когда
+ * что-то сломалось, и в общем потоке она удлиняла бы каждую исправную
+ * строку без всякой пользы.
+ */
+.hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.group {
+  margin-top: 14px;
+}
+
+.group:first-of-type {
+  margin-top: 0;
+}
+
+.groupTitle {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Причина отказа — текст произвольной длины из журнала Postfix. Ломается
+ * по любому месту: адреса и коды DSN пробелов не содержат вовсе, и без
+ * этого одна строка растягивала бы таблицу за край экрана.
+ */
+.reason {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.emptyCell {
+  padding: 14px 8px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+}
+
+.shellOnly {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shellOnly li {
+  padding: 8px 0;
+  border-top: 1px solid var(--mt-admin-border);
+}
+
+.shellOnly li:first-child {
+  border-top: none;
+}
+
+.shellOnlyTitle {
+  display: block;
+  font-size: 13px;
+}

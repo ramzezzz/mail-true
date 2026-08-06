@@ -26,8 +26,13 @@ import { BrandingStore } from './branding.js';
 import { adminAuthRoutes } from './routes/auth.js';
 import { adminDomainRoutes } from './routes/domains.js';
 import { adminMailboxRoutes } from './routes/mailbox.js';
+import { adminMonitoringRoutes } from './routes/monitoring.js';
 import { adminOverviewRoutes } from './routes/overview.js';
 import { adminQueueRoutes } from './routes/queue.js';
+import { adminSpamRoutes } from './routes/spam.js';
+import { RspamdClient } from './rspamd.js';
+import { SpamCollector } from './spam-collector.js';
+import { SpamStore } from './spam-store.js';
 import { adminLogRoutes } from './routes/logs.js';
 import { QueueAgent } from './queue-agent.js';
 import { FlowCollector } from './flow-collector.js';
@@ -158,6 +163,37 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /*
+   * Антиспам. Один клиент на всю админку: к контроллеру rspamd ходят и
+   * раздел «Спам», и раздел «Наблюдение», и заводить два клиента с двумя
+   * копиями пароля незачем.
+   */
+  const rspamd = new RspamdClient({
+    host: adminConfig.RSPAMD_HOST,
+    port: adminConfig.RSPAMD_CONTROLLER_PORT,
+    password: adminConfig.RSPAMD_PASSWORD,
+  });
+  if (!rspamd.configured) {
+    logger.warn(
+      'Не задан RSPAMD_PASSWORD: раздел «Спам» сможет показать только то, отвечает ли ' +
+        'антиспам. Ни статистики, ни списков, ни обучения без пароля контроллера нет.',
+    );
+  }
+
+  /*
+   * Съёмка счётчиков антиспама. Отдельно от MetricsCollector намеренно:
+   * тот обязан продолжать снимать нагрузку сервера, даже когда rspamd
+   * лежит (подробно — в spam-collector.ts).
+   */
+  const spamCollector = new SpamCollector({
+    db,
+    logger,
+    rspamd,
+    intervalSeconds: adminConfig.MAIL_METRICS_INTERVAL_SECONDS,
+    retentionDays: adminConfig.MAIL_METRICS_RETENTION_DAYS,
+    maxRows: adminConfig.MAIL_METRICS_MAX_ROWS,
+  });
+
+  /*
    * Перенос почты с чужого сервера.
    *
    * Приёмник — всегда наш сервер, и входим мы в него служебным доступом
@@ -198,6 +234,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     queueAgent,
     branding,
     metrics,
+    rspamd,
     cookieSecure: config.COOKIE_SECURE,
     importBox: createImportBox(adminConfig.importSecret),
     migrationBox,
@@ -313,10 +350,35 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     })
     .catch((err: unknown) => logger.error({ err }, 'Не удалось проверить схему переноса почты'));
 
+  /*
+   * Съёмка счётчиков антиспама. Запускается только при применённой
+   * миграции 0022: без таблицы каждый проход писал бы в журнал ошибку раз
+   * в минуту, а «за период» всё равно не появилось бы. Всё остальное в
+   * разделе «Спам» (состояние, списки, обучение) работает и без неё —
+   * оно берётся у rspamd напрямую.
+   */
+  new SpamStore(db)
+    .schemaReady()
+    .then((ready: boolean) => {
+      if (!ready) {
+        logger.warn(
+          'Таблицы снимков антиспама нет. Примените ' +
+            'infra/postgres/migrations/0022_rspamd_stats.sql — до этого раздел «Спам» ' +
+            'покажет состояние «прямо сейчас», но без сравнения с прошлыми часами.',
+        );
+        return;
+      }
+      spamCollector.start();
+    })
+    .catch((err: unknown) =>
+      logger.error({ err }, 'Не удалось проверить схему снимков антиспама'),
+    );
+
   app.addHook('onClose', async () => {
     janitor.stop();
     flow.stop();
     metrics.stop();
+    spamCollector.stop();
     // Сначала попросить перенос остановиться, потом ДОЖДАТЬСЯ, пока он
     // отпустит свои задания, и только потом закрывать базу: иначе запись
     // «я ничей» не проходит, и задание висит с биением мертвеца, пока не
@@ -346,6 +408,10 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       // Очередь писем и история обработанных, журналы служб по уровням
       await adminQueueRoutes(scope);
       await adminLogRoutes(scope);
+      // Антиспам: статистика, списки, обучение. И исправность сервера —
+      // то же, что показывает install/selfcheck.sh, только из панели.
+      await adminSpamRoutes(scope);
+      await adminMonitoringRoutes(scope);
       // Своё оформление входа (OEM). Два его маршрута ОТКРЫТЫЕ: логотип
       // показывается тому, кто ещё не вошёл. Живут здесь, а не в почтовом
       // API, потому что на имени хоста админки nginx пробрасывает только
@@ -397,6 +463,11 @@ export * from './metrics-host.js';
 export * from './metrics-disk.js';
 export * from './metrics-store.js';
 export * from './metrics-tls.js';
+export * from './rspamd.js';
+export * from './spam-lists.js';
+export * from './spam-store.js';
+export * from './selfcheck.js';
+export { SpamCollector } from './spam-collector.js';
 export { MetricsCollector } from './metrics-collector.js';
 export * from './branding.js';
 export * from './branding-image.js';

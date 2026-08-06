@@ -1,0 +1,174 @@
+/*
+ * Раскладка раздела «Спам».
+ *
+ * Как и на дашборде: ничего не задаёт себе ширину в точках, широкое
+ * прокручивается внутри своей обёртки. Списков шесть-восемь, и на широком
+ * экране они обязаны идти в две колонки — иначе разбор одного обращения
+ * («разрешить отправителя и запретить домен») превращается в прокрутку
+ * туда-сюда через весь экран.
+ */
+
+.control {
+  min-width: 150px;
+}
+
+.note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.readonly {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Ноль в минимуме обязателен: без него колонка не может стать уже
+   своего содержимого, и длинный адрес растягивает сетку за край. */
+.lists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: var(--mt-admin-gap);
+}
+
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mt-admin-gap-s);
+  margin-bottom: 10px;
+}
+
+.addInput {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.entries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  min-height: var(--mt-admin-row-height);
+  padding: 2px 0;
+  border-top: 1px solid var(--mt-admin-border);
+}
+
+.entry:first-child {
+  border-top: none;
+}
+
+/*
+ * Запись списка — моноширинным: адреса и подсети читают посимвольно, и
+ * пропорциональный шрифт здесь мешает заметить опечатку в домене.
+ */
+.entryValue {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+}
+
+.entryRemove {
+  flex: none;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--mt-color-text-negative);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--mt-admin-radius);
+  cursor: pointer;
+}
+
+.entryRemove:hover:not(:disabled) {
+  border-color: var(--mt-admin-border);
+}
+
+.entryRemove:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.empty {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+.emptyCell {
+  padding: 14px 8px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+}
+
+.file {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.message {
+  width: 100%;
+  min-height: 160px;
+  margin-bottom: 10px;
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.verdict {
+  margin-top: 12px;
+}
+
+/*
+ * Знак вклада правила. Цвет НЕ единственный признак: плюс и минус стоят
+ * перед числом, поэтому таблица читается и без различения цветов.
+ */
+.plus {
+  color: var(--mt-color-text-negative);
+}
+
+.minus {
+  color: var(--mt-color-text-positive);
+}
+
+.wrapCell {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.size {
+  display: block;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Пометка «свой» у письма аутентифицированного отправителя: к таким
+   письмам применяются другие пороги, и без пометки строка непонятна. */
+.own {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--mt-color-text-secondary);
+  border: 1px solid var(--mt-admin-border);
+  border-radius: 8px;
+}

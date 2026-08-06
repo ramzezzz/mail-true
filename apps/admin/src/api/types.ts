@@ -1254,3 +1254,195 @@ export interface MigrationListInput {
   sourceDomain?: string;
   destDomain?: string;
 }
+
+/* ================================================================== */
+/* Спам: статистика, списки, обучение                                  */
+/* ================================================================== */
+
+/** Сколько раз сработало правило rspamd и сколько оно весит. */
+export interface SpamSymbol {
+  symbol: string;
+  weight: number;
+  hits: number;
+}
+
+/** Разность счётчиков за выбранное окно (по снимкам, миграция 0022). */
+export interface SpamPeriod {
+  scanned: number;
+  reject: number;
+  addHeader: number;
+  rewriteSubject: number;
+  greylist: number;
+  softReject: number;
+  noAction: number;
+  learned: number;
+  /** Сколько раз за окно перезапускали rspamd — по ним видны разрывы. */
+  restarts: number;
+  samples: number;
+  from: string | null;
+  to: string | null;
+  /** Признано спамом = отклонено + помечено. */
+  spam: number;
+  spamPercent: number | null;
+}
+
+export interface SpamOverview {
+  hours: number;
+  available: boolean;
+  unavailable: string | null;
+  live: {
+    version: string;
+    uptimeSeconds: number;
+    scanned: number;
+    learned: number;
+    actions: Record<string, number>;
+    bayes: Array<{ symbol: string; type: string; revision: number }>;
+  } | null;
+  period: SpamPeriod | null;
+  periodNote: string;
+  collectingSince: string | null;
+  manualLearns: { spam: number; ham: number };
+  /** Действующие пороги; null у действия означает «выключено». */
+  thresholds: Record<string, number | null>;
+  thresholdsNote: string;
+  settingsNote: string;
+  symbols: SpamSymbol[];
+  symbolsNote: string;
+  selfProbeNote: string;
+}
+
+export interface SpamHistoryItem {
+  at: string;
+  action: string;
+  actionTitle: string;
+  score: number;
+  requiredScore: number | null;
+  subject: string;
+  sender: string;
+  recipients: string[];
+  ip: string;
+  /** Непустое — письмо нашего аутентифицированного пользователя. */
+  user: string;
+  sizeBytes: number;
+  symbols: Array<{ name: string; score: number; description: string }>;
+}
+
+export interface SpamHistory {
+  available: boolean;
+  note: string;
+  total: number;
+  items: SpamHistoryItem[];
+}
+
+export interface SpamList {
+  id: string;
+  title: string;
+  tone: 'allow' | 'deny';
+  value: 'address' | 'domain' | 'ip';
+  symbol: string;
+  score: number;
+  editable: boolean;
+  hint: string;
+  file: string;
+  entries: string[];
+  /** Почему список не прочитан; null — прочитан. */
+  problem: string | null;
+}
+
+export interface SpamListsResponse {
+  available: boolean;
+  unavailable: string | null;
+  items: SpamList[];
+  note: string;
+}
+
+export interface SpamListChange {
+  ok: true;
+  /** false — запись уже была (или её уже не было): ничего не изменилось. */
+  changed: boolean;
+  entries: string[];
+}
+
+export interface SpamCheckResult {
+  as: 'outside' | 'own';
+  /** Отправитель конверта — взят из заголовка From самого письма. */
+  sender: string;
+  score: number;
+  action: string;
+  actionTitle: string;
+  thresholds: Record<string, number>;
+  symbols: Array<{ name: string; score: number; description: string }>;
+  note: string;
+}
+
+export interface SpamLearnResult {
+  ok: true;
+  kind: 'spam' | 'ham';
+  note: string;
+}
+
+export interface SpamSettings {
+  controller: string;
+  configured: boolean;
+  mailDomain: string;
+  resolver: string;
+  smtpHost: string;
+}
+
+/* ================================================================== */
+/* Наблюдение: исправность сервера                                     */
+/* ================================================================== */
+
+export type CheckState = 'ok' | 'warn' | 'fail' | 'unknown';
+
+export interface HealthCheck {
+  id: string;
+  group: string;
+  title: string;
+  state: CheckState;
+  detail: string;
+  hint?: string;
+}
+
+export interface CheckSummary {
+  state: CheckState;
+  ok: number;
+  warn: number;
+  fail: number;
+  unknown: number;
+}
+
+export interface MonitoringHealth {
+  takenAt: string;
+  summary: CheckSummary;
+  checks: HealthCheck[];
+  /** Что умеет только install/selfcheck.sh — и почему. */
+  shellOnly: Array<{ title: string; why: string }>;
+  shellOnlyNote: string;
+}
+
+export interface MonitoringExpiry {
+  takenAt: string;
+  warnDays: number;
+  summary: CheckSummary;
+  checks: HealthCheck[];
+  certificateNote: string;
+  dnsNote: string;
+}
+
+export interface MonitoringFailures {
+  available: boolean;
+  note: string;
+  hours: number;
+  counts: Record<string, number>;
+  items: Array<{
+    id: string;
+    at: string;
+    status: string;
+    sender: string | null;
+    recipient: string | null;
+    dsn: string | null;
+    reason: string | null;
+  }>;
+  rspamdErrors: Array<{ at: string; type: string; module: string; message: string }>;
+}

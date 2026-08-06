@@ -12,6 +12,7 @@ import type { AdminSessionStore, AdminSessionData } from './session.js';
 import type { MailboxMasterAccess } from './mailbox.js';
 import type { MetricsCollector } from './metrics-collector.js';
 import type { QueueAgent } from './queue-agent.js';
+import type { RspamdClient } from './rspamd.js';
 
 /** Всё, что нужно админским маршрутам. Собирается один раз при регистрации. */
 export interface AdminContext {
@@ -47,6 +48,19 @@ export interface AdminContext {
    * маршрут говорит это словами вместо выдуманных чисел.
    */
   metrics?: MetricsCollector;
+  /**
+   * Управляющий интерфейс антиспама (rspamd, порт 11334).
+   *
+   * В контексте, а не создаётся в маршруте, ровно по той же причине, что и
+   * metrics: раздел «Спам» и раздел «Наблюдение» обращаются к одному и
+   * тому же контроллеру, и заводить два клиента с двумя копиями пароля
+   * незачем. Сюда же его подменяют проверки маршрутов — живой rspamd для
+   * них не нужен.
+   *
+   * Поле НЕОБЯЗАТЕЛЬНОЕ: контекст собирают и проверки, которым до
+   * антиспама дела нет; тогда маршрут заводит клиента сам по конфигурации.
+   */
+  rspamd?: RspamdClient;
   /** Куки подписываются тем же секретом, что и почтовые, но имя — своё. */
   cookieSecure: boolean;
   /**

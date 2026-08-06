@@ -11,7 +11,9 @@ import { requireAdmin } from '../guard.js';
 const querySchema = z.object({
   action: z.string().trim().max(64).optional(),
   adminLogin: z.string().trim().max(128).optional(),
-  targetType: z.enum(['user', 'alias', 'domain', 'admin', 'mailbox', 'settings']).optional(),
+  targetType: z
+    .enum(['user', 'alias', 'domain', 'admin', 'mailbox', 'settings', 'branding', 'backup', 'migration', 'antispam'])
+    .optional(),
   search: z.string().trim().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
