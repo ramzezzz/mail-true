@@ -33,5 +33,8 @@ export function templateCsv(): string {
  * системной кодировке и превращает русские имена в «ÐÐ²Ð°Ð½».
  */
 export function templateCsvWithBom(): string {
-  return `﻿${templateCsv()}`;
+  // Метка пишется escape-последовательностью, а не самим символом:
+  // невидимый байт в исходнике — ловушка для того, кто будет править
+  // строку следом (и повод для законного замечания линтера).
+  return `\uFEFF${templateCsv()}`;
 }

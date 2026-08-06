@@ -751,7 +751,7 @@ export class MailboxMigrator extends EventEmitter {
     //    Читаем ДО создания папки-приёмника: если папку создать не удастся,
     //    в отчёте всё равно будет видно, сколько писем осталось непереехавшими.
     const sourceLock = await source.getMailboxLock(sourcePath, { readOnly: true });
-    let metas: SourceMessageMeta[] = [];
+    const metas: SourceMessageMeta[] = [];
     let uidValidity = '0';
     let sinceUid = 0;
     /** Читаем только письма новее курсора (а не всю папку). */

@@ -367,6 +367,32 @@ function estimateUsage(prompt: string, completion: string): TokenUsage {
  * Разбирает ответ совместимого API. Устойчив к искажениям:
  * непонятный ответ даёт понятную ошибку, а не исключение.
  */
+/**
+ * Неизвестное значение — в текст, который не стыдно показать человеку.
+ *
+ * Обычный `String(value)` на объекте даёт «[object Object]»: сервис ИИ
+ * кладёт в поле ошибки то вложенный объект, то массив, и в сообщении
+ * пользователя оказывалось именно это — вместо причины отказа. Строку
+ * берём как есть, объект разворачиваем в JSON (обрезая: сообщение об
+ * ошибке не место для мегабайта), остальное приводим обычным способом.
+ */
+function readableValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return 'неизвестная ошибка';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value).slice(0, 300);
+    } catch {
+      // Круговая ссылка: другого способа рассказать о ней нет.
+      return 'ответ сервиса не удалось прочитать';
+    }
+  }
+  // Здесь остались только простые значения: число, логическое, символ,
+  // функция. Тип назван явно — иначе `unknown` и у читателя, и у линтера
+  // оставляет вопрос, не попадёт ли сюда объект.
+  return String(value as number | boolean | symbol | bigint);
+}
+
 export function parseChatCompletion(
   raw: string,
   promptText: string,
@@ -390,10 +416,11 @@ export function parseChatCompletion(
   // Некоторые сервисы кладут ошибку в тело с кодом 200.
   const errorField = root['error'];
   if (errorField != null) {
-    const message =
+    const message = readableValue(
       typeof errorField === 'object' && errorField !== null
-        ? String((errorField as Record<string, unknown>)['message'] ?? 'неизвестная ошибка')
-        : String(errorField);
+        ? ((errorField as Record<string, unknown>)['message'] ?? errorField)
+        : errorField,
+    );
     return aiFail('http', `Сервис ИИ вернул ошибку: ${message}`, { retryable: false });
   }
 
@@ -418,11 +445,14 @@ export function parseChatCompletion(
     else if (Array.isArray(content)) {
       // Форма с массивом частей содержимого.
       text = content
-        .map((part) =>
-          typeof part === 'object' && part !== null
-            ? String((part as Record<string, unknown>)['text'] ?? '')
-            : '',
-        )
+        .map((part) => {
+          if (typeof part !== 'object' || part === null) return '';
+          const value = (part as Record<string, unknown>)['text'];
+          // Только строка: часть с картинкой или вызовом инструмента текста
+          // не несёт, и «[object Object]» посреди ответа — не текст, а мусор,
+          // который человек увидит в письме.
+          return typeof value === 'string' ? value : '';
+        })
         .join('');
     }
   } else if (typeof choice['text'] === 'string') {

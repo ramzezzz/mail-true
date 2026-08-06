@@ -41,9 +41,12 @@ export interface FakeServer {
 export function requestMessages(request: RecordedRequest): { role: string; content: string }[] {
   const messages = request.body?.['messages'];
   if (!Array.isArray(messages)) return [];
+  // Только строки: проверки смотрят, ЧТО ушло наружу, и «[object Object]»
+  // вместо содержимого письма спрятало бы настоящую утечку.
+  const text = (value: unknown): string => (typeof value === 'string' ? value : '');
   return messages.map((m) => {
     const item = m as Record<string, unknown>;
-    return { role: String(item['role'] ?? ''), content: String(item['content'] ?? '') };
+    return { role: text(item['role']), content: text(item['content']) };
   });
 }
 
