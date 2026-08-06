@@ -15,7 +15,8 @@ export function buildHelpPage(settings: MailSettings): string {
     ['Входящая почта (IMAP)', host, settings.imap.startTlsPort, 'STARTTLS'],
     ['Входящая почта (POP3)', host, settings.pop3.sslPort, 'SSL/TLS'],
     ['Входящая почта (POP3)', host, settings.pop3.startTlsPort, 'STARTTLS'],
-    ['Исходящая почта (SMTP)', host, settings.smtp.startTlsPort, 'STARTTLS'],
+    ['Исходящая почта (SMTP, рекомендуется)', host, settings.smtp.startTlsPort, 'STARTTLS'],
+    ['Исходящая почта (SMTP)', host, settings.smtp.sslPort, 'SSL/TLS'],
   ];
   return `<!DOCTYPE html>
 <html lang="ru">

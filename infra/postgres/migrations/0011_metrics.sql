@@ -95,9 +95,48 @@ CREATE TABLE IF NOT EXISTS server_metric_samples (
     queue_oldest_seconds INTEGER
 );
 
--- Единственный способ читать эту таблицу — окно времени назад от «сейчас».
-CREATE INDEX IF NOT EXISTS idx_metric_samples_time
-    ON server_metric_samples (taken_at DESC);
+COMMIT;
+
+-- ==================================================================
+-- ИНДЕКСЫ — ОТДЕЛЬНО ОТ ТРАНЗАКЦИИ И ТОЛЬКО CONCURRENTLY
+-- ==================================================================
+-- Обычный CREATE INDEX берёт на таблицу блокировку SHARE: чтение
+-- продолжается, а любая ЗАПИСЬ ждёт окончания построения. Для
+-- mail_flow_events это прямой отказ в обслуживании на живом сервере:
+-- в неё непрерывно пишет сборщик журнала Postfix, и на потолке в
+-- 500 000 строк (MAIL_FLOW_MAX_ROWS) построение индекса с INCLUDE из
+-- пяти колонок занимает секунды — всё это время история доставки не
+-- пишется. А запускают это обновлением работающего сервера.
+--
+-- CONCURRENTLY строит индекс в два прохода, не блокируя запись. Платим
+-- за это тем, что команда не может выполняться внутри транзакции —
+-- отсюда COMMIT выше и отсутствие BEGIN ниже. По той же причине
+-- CONCURRENTLY нельзя вызвать из блока DO: тело DO выполняется как
+-- транзакция. Поэтому условие «таблица существует» проверяется не в
+-- PL/pgSQL, а запросом, который ПОРОЖДАЕТ команду, и psql выполняет
+-- порождённое (\gexec). Команда не строится вовсе, если строить нечего.
+--
+-- Незавершённое построение CONCURRENTLY оставляет НЕДЕЙСТВИТЕЛЬНЫЙ
+-- индекс: планировщик им не пользуется, а `IF NOT EXISTS` считает имя
+-- занятым и молча пропускает повтор — то есть один сбой отключал бы
+-- индекс навсегда. Поэтому сначала убираем такие остатки.
+-- ==================================================================
+
+SELECT format('DROP INDEX CONCURRENTLY IF EXISTS %I', c.relname)
+  FROM pg_index i
+  JOIN pg_class c ON c.oid = i.indexrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public'
+   AND NOT i.indisvalid
+   AND c.relname IN ('idx_metric_samples_time', 'idx_mail_flow_agg')
+\gexec
+
+-- Единственный способ читать таблицу снимков — окно времени назад
+-- от «сейчас».
+SELECT 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_metric_samples_time
+            ON server_metric_samples (taken_at DESC)'
+ WHERE to_regclass('public.server_metric_samples') IS NOT NULL
+\gexec
 
 -- ------------------------------------------------------------------
 -- 2. Индекс под агрегаты почтового потока.
@@ -131,14 +170,12 @@ CREATE INDEX IF NOT EXISTS idx_metric_samples_time
 -- Индекс создаётся только если таблица есть: миграция 0007 могла быть не
 -- применена (тогда раздел «Почтовый поток» и так не работает), и падать
 -- из-за этого целиком нельзя — снимки показателей от истории не зависят.
-DO $$
-BEGIN
-    IF to_regclass('public.mail_flow_events') IS NOT NULL THEN
-        CREATE INDEX IF NOT EXISTS idx_mail_flow_agg
+--
+-- Проверка сделана порождающим запросом, а не блоком DO: тело DO —
+-- это транзакция, а CONCURRENTLY в транзакции запрещён (см. пояснение
+-- выше). Пустой результат SELECT означает «выполнять нечего».
+SELECT 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_flow_agg
             ON mail_flow_events (occurred_at)
-            INCLUDE (direction, status, sender, recipient, size_bytes);
-    END IF;
-END
-$$;
-
-COMMIT;
+            INCLUDE (direction, status, sender, recipient, size_bytes)'
+ WHERE to_regclass('public.mail_flow_events') IS NOT NULL
+\gexec

@@ -296,6 +296,36 @@ while read -r key; do
 done < <(grep -oE '^[A-Z_0-9]+=' "$ENV_EXAMPLE" | tr -d '=')
 t_eq "каждый ключ .env.example подставляется хотя бы в один compose-файл" "${DEAD_KEYS# }" ""
 
+# --- И обратная сторона: код читает — а нигде не описано --------------
+# Проверка выше ловит только «ключ описан, но никуда не идёт». Обратный
+# случай не ловил никто, и накопилось его втрое больше: схемы разбора
+# окружения (apps/**/config.ts) читали PUSH_*, SENDER_LOGO_*, AI_ENABLED,
+# COLLECTOR_* и ещё полсотни ключей, которых не было ни в этом примере,
+# ни в docker-compose.yml. Настройка при этом работала — но добраться до
+# неё можно было только пересборкой образа. Целые разделы продукта
+# (уведомления при закрытой вкладке, логотипы отправителей) оказывались
+# ненастраиваемыми на боевой установке вместе со своими выключателями.
+#
+# Ключ считается описанным, если его ИМЯ ВСТРЕЧАЕТСЯ в .env.example —
+# строкой, закомментированной строкой (так помечены те, чьё умолчание
+# «пусто») или пояснением в разделе «что настройкой не является». Условие
+# ровно такое: поиск по имени в файле настроек обязан приводить к ответу,
+# а не в пустоту. Либо ключ задан в compose — тогда это устройство стека
+# (пути томов, имена сервисов), и в .env ему делать нечего.
+UNDOC_ENV=''
+while read -r key; do
+    [ -n "$key" ] || continue
+    grep -qF "$key" "$ENV_EXAMPLE" && continue
+    grep -qE "^[[:space:]]+${key}:" "$COMPOSE_FILE" && continue
+    UNDOC_ENV="$UNDOC_ENV $key"
+done < <(grep -rhoE '^[[:space:]]+[A-Z][A-Z_0-9]{2,}:' \
+             "$REPO_DIR"/apps/api/src/config.ts \
+             "$REPO_DIR"/apps/api/src/*/config.ts \
+             "$REPO_DIR"/apps/autoconfig/src/config.ts 2>/dev/null |
+         tr -d ' :' | sort -u)
+t_eq "переменные из схем окружения описаны в .env.example или заданы в compose" \
+     "${UNDOC_ENV# }" ""
+
 # --- Всё, что пишет установщик, описано в примере --------------------
 # Иначе ключ существует, но найти его можно только чтением install.sh.
 UNDOCUMENTED=''
@@ -313,7 +343,7 @@ step "8. Порядок и громкость установки/обновле�
 # старой схемы, и его планировщики (отложенная отправка, отложенные письма,
 # контакты, показатели) теряют каждый тик, обращаясь к несуществующим
 # таблицам.
-MIG_LINE="$(grep -n 'postgres/migrations/\*\.sql' "$INSTALL_DIR/install.sh" | head -1 | cut -d: -f1)"
+MIG_LINE="$(grep -n 'apply_migrations' "$INSTALL_DIR/install.sh" | head -1 | cut -d: -f1)"
 BUILD_LINE="$(grep -n 'dc up -d --build' "$INSTALL_DIR/install.sh" | head -1 | cut -d: -f1)"
 t_eq "миграции применяются раньше сборки образов" \
      "$([ -n "$MIG_LINE" ] && [ -n "$BUILD_LINE" ] && [ "$MIG_LINE" -lt "$BUILD_LINE" ] && echo yes || echo no)" "yes"
@@ -324,8 +354,46 @@ t_eq "миграции применяются раньше сборки обра
 t_ok "install.sh отказывается продолжать при непринятой миграции" \
     bash -c "grep -q 'база не соответствует версии продукта' '$INSTALL_DIR/install.sh'"
 # Причина отказа psql раньше уходила в /dev/null — оставалось гадать.
-t_no "install.sh не выбрасывает вывод ошибки миграции в /dev/null" \
-    bash -c "grep -A2 'postgres/migrations/\*\.sql' '$INSTALL_DIR/install.sh' | grep -q '2>&1'"
+# Проверяем в common.sh: перебор каталога переехал туда (apply_migrations),
+# и раньше эта проверка искала цикл в install.sh — после переезда она
+# перестала бы находить что-либо и «проходила» бы впустую.
+t_ok "ошибка миграции показывается человеку, а не уходит в /dev/null" \
+    bash -c "grep -A3 'if psql_migrate < \"\$mig\"' '$INSTALL_DIR/lib/common.sh' | grep -q 'errfile'"
+
+# --- Журнал применённых миграций --------------------------------------
+# Раньше журнала не было: применялся ВЕСЬ каталог при каждом запуске, и
+# содержательные миграции (0008 переписывает историю доставки UPDATE-ом по
+# таблице) выполнялись заново на каждом обновлении продукта. А ответить,
+# какие миграции на сервере применены, было нечем вовсе.
+t_ok "есть миграция, заводящая журнал schema_migrations" \
+    test -f "$REPO_DIR/infra/postgres/migrations/0000_schema_migrations.sql"
+t_ok "журнал заводится раньше всех остальных миграций (по имени файла)" \
+    bash -c "[ \"\$(ls -1 '$REPO_DIR/infra/postgres/migrations/'*.sql | head -1 | xargs basename)\" = '0000_schema_migrations.sql' ]"
+t_ok "install.sh применяет миграции через журнал (apply_migrations)" \
+    bash -c "grep -q 'apply_migrations' '$INSTALL_DIR/install.sh'"
+t_ok "restore.sh применяет миграции через журнал (apply_migrations)" \
+    bash -c "grep -q 'apply_migrations' '$INSTALL_DIR/restore.sh'"
+t_ok "в журнал пишется контрольная сумма файла" \
+    bash -c "grep -q 'sha256sum' '$INSTALL_DIR/lib/common.sh'"
+# Запись в журнал идёт ЧЕРЕЗ stdin: в аргументе -c psql не подставляет
+# свои переменные (:'fn'), и запрос уходит на сервер как есть. Поймано
+# живым прогоном — схема накатывалась, журнал молча оставался пустым.
+t_no "запись в журнал не делается ключом -c (там нет подстановки :'var')" \
+    bash -c "grep -q -- \"-c .INSERT INTO schema_migrations\" '$INSTALL_DIR/lib/common.sh'"
+
+# Индексы на живых таблицах строятся только CONCURRENTLY: обычный
+# CREATE INDEX держит запись в таблице до конца построения, а запускают
+# это обновлением РАБОТАЮЩЕГО сервера. Проверяем на mail_flow_events —
+# в неё непрерывно пишет сборщик журнала Postfix.
+t_ok "индекс агрегатов почтового потока строится CONCURRENTLY" \
+    bash -c "grep -q 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_flow_agg' '$REPO_DIR/infra/postgres/migrations/0011_metrics.sql'"
+
+# Таблицы, которые заводил код на лету, не попадали ни в план обновления,
+# ни в проверку схемы (selfcheck берёт список из CREATE TABLE в миграциях).
+for tbl in sender_logo_cache migrate_messages migrate_cursors; do
+    t_ok "таблица $tbl объявлена в миграциях, а не только в коде" \
+        bash -c "grep -qi 'CREATE TABLE IF NOT EXISTS $tbl' '$REPO_DIR/infra/postgres/migrations/'*.sql"
+done
 
 # --- Подсеть стека и адреса внутри неё --------------------------------
 # Подсеть меняют, когда 172.28.0.0/16 занята на машине чем-то ещё. Но
@@ -398,9 +466,13 @@ t_ok "selfcheck проверяет служебный вход Dovecot наст�
     bash -c "grep -q 'doveadm auth test' '$INSTALL_DIR/selfcheck.sh'"
 t_ok "selfcheck предупреждает про CRLF в infra/.env" \
     bash -c "grep -q 'CRLF' '$INSTALL_DIR/selfcheck.sh'"
-# Восстановление тоже должно называть причину, а не только файл
-t_ok "restore.sh печатает ошибку psql при непринятой миграции" \
-    bash -c "grep -q 'mig.err' '$INSTALL_DIR/restore.sh'"
+# Восстановление тоже должно называть причину, а не только файл.
+# Печать причины переехала в общий apply_migrations (lib/common.sh) —
+# проверяем там; от restore.sh требуется подсказка, как повторить руками.
+t_ok "причина отказа миграции печатается человеку" \
+    bash -c "grep -q \"sed -n '1,5p' \\\"\\\$errfile\\\"\" '$INSTALL_DIR/lib/common.sh'"
+t_ok "restore.sh подсказывает команду для ручного применения миграции" \
+    bash -c "grep -q 'postgres/migrations/<файл>' '$INSTALL_DIR/restore.sh'"
 
 # ==================================================================
 step "Итог"

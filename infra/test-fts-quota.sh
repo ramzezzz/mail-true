@@ -20,8 +20,24 @@ INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml")
 set -a; . <(tr -d '\r' < "$INFRA_DIR/.env"); set +a
 
-# docker exec с аргументами-путями: под Git Bash MSYS иначе ломает /tmp/... в C:\...
-dex() { MSYS_NO_PATHCONV=1 docker exec "$@"; }
+# Выполнить команду в контейнере СЕРВИСА (первый аргумент — имя сервиса
+# из docker-compose.yml: dovecot, postfix, postgres).
+#
+# Раньше здесь стоял `docker exec mail-dovecot …`, то есть обращение по
+# жёсткому имени контейнера. Жёсткие имена из docker-compose.yml убраны:
+# они глобальны на весь демон Docker и не давали поднять два стенда на
+# одной машине. Теперь контейнер называется <имя проекта>-<сервис>-<номер>,
+# и обращаться к нему нужно через compose — тогда скрипт работает при любом
+# COMPOSE_PROJECT_NAME.
+#
+# -T обязателен: без него compose пытается выделить псевдотерминал, а
+# скрипт запускают из конвейеров и без tty.
+# MSYS_NO_PATHCONV: под Git Bash MSYS иначе ломает /tmp/... в C:\...
+dex() { local svc="$1"; shift; MSYS_NO_PATHCONV=1 "${COMPOSE[@]}" exec -T "$svc" "$@"; }
+
+# Идентификатор контейнера сервиса — нужен там, где compose не подходит
+# (у `docker cp` аналога в compose нет).
+cid() { "${COMPOSE[@]}" ps -q "$1" 2>/dev/null | head -1; }
 
 FTS_USER="fts@${MAIL_DOMAIN}";     FTS_PASS="fts12345"
 QUO_USER="ftsquota@${MAIL_DOMAIN}"; QUO_PASS="quota12345"
@@ -44,7 +60,7 @@ send() { # send <кому> <тема> <тело-файл-или-текст> [д�
     local to="$1" subj="$2" body="$3"; shift 3
     local subj_enc
     subj_enc="=?UTF-8?B?$(printf '%s' "$subj" | base64 -w0)?="
-    dex mail-postfix swaks --server postfix:25 --helo client.example.com \
+    dex postfix swaks --server postfix:25 --helo client.example.com \
         --from sender@example.com --to "$to" --header "Subject: $subj_enc" \
         --header 'Content-Type: text/plain; charset=UTF-8' \
         --header 'Content-Transfer-Encoding: 8bit' \
@@ -53,35 +69,35 @@ send() { # send <кому> <тема> <тело-файл-или-текст> [д�
 
 # IMAP-сессия: печатает ответ сервера
 imap() { # imap <логин> <пароль> <команды одной строкой с \r\n>
-    dex mail-dovecot sh -c \
+    dex dovecot sh -c \
         "printf 'a login $1 $2\r\n$3z logout\r\n' | nc -q 3 127.0.0.1 143"
 }
 
 # Число писем, найденных поиском (doveadm)
-found() { dex mail-dovecot doveadm search -u "$1" mailbox INBOX "${@:2}" 2>/dev/null | grep -c .; }
+found() { dex dovecot doveadm search -u "$1" mailbox INBOX "${@:2}" 2>/dev/null | grep -c .; }
 
 echo "=== 0. Подготовка ==="
 for u in "$FTS_USER:$FTS_PASS" "$QUO_USER:$QUO_PASS" "$PRF_USER:$PRF_PASS"; do
     bash "$INFRA_DIR/scripts/create-mailbox.sh" "${u%%:*}" "${u##*:}" >/dev/null 2>&1 \
         && ok "ящик ${u%%:*}" || fail "не создан ящик ${u%%:*}"
-    dex mail-dovecot doveadm expunge -u "${u%%:*}" mailbox INBOX all >/dev/null 2>&1
+    dex dovecot doveadm expunge -u "${u%%:*}" mailbox INBOX all >/dev/null 2>&1
 done
-dex mail-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+dex postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
     "UPDATE virtual_users SET quota_bytes=1073741824 WHERE email IN ('$FTS_USER','$PRF_USER');" >/dev/null 2>&1
-dex mail-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+dex postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
     "UPDATE virtual_users SET quota_bytes=102400 WHERE email='$QUO_USER';" >/dev/null 2>&1
-dex mail-dovecot doveadm quota recalc -u "$QUO_USER" >/dev/null 2>&1
+dex dovecot doveadm quota recalc -u "$QUO_USER" >/dev/null 2>&1
 
 echo "=== 1. Плагины и службы ==="
-CONF=$(dex mail-dovecot doveadm config 2>/dev/null)
+CONF=$(dex dovecot doveadm config 2>/dev/null)
 grep -q "fts = xapian"           <<<"$CONF" && ok "плагин fts = xapian включён"          || fail "fts не настроен"
 grep -q "fts_decoder = decode2text" <<<"$CONF" && ok "разбор вложений (fts_decoder)"     || fail "fts_decoder не настроен"
 grep -q "quota = maildir"        <<<"$CONF" && ok "плагин quota (бэкенд maildir)"        || fail "quota не настроен"
 grep -q "imap_quota"             <<<"$CONF" && ok "IMAP-расширение QUOTA"                || fail "imap_quota не подключён"
-dex mail-dovecot sh -c '/usr/lib/dovecot/decode2text.sh | grep -q "application/pdf"' \
+dex dovecot sh -c '/usr/lib/dovecot/decode2text.sh | grep -q "application/pdf"' \
     && ok "decode2text отвечает списком форматов" || fail "decode2text не работает"
 for bin in pdftotext catdoc xls2csv unzip unrtf; do
-    dex mail-dovecot sh -c "command -v $bin >/dev/null" \
+    dex dovecot sh -c "command -v $bin >/dev/null" \
         && ok "разборщик $bin в образе" || fail "нет разборщика $bin"
 done
 
@@ -94,8 +110,9 @@ send "$FTS_USER" "Новогодняя ёлка" "Ёлка стоит в при�
 ATT_DIR="$INFRA_DIR/data/fts-test"
 node "$INFRA_DIR/scripts/make-test-attachments.mjs" "$ATT_DIR" >/dev/null 2>&1 \
     && ok "тестовые вложения созданы" || fail "не удалось создать вложения"
-docker cp "$ATT_DIR/fts-test.pdf"  mail-postfix:/tmp/fts-test.pdf  >/dev/null 2>&1
-docker cp "$ATT_DIR/fts-test.docx" mail-postfix:/tmp/fts-test.docx >/dev/null 2>&1
+POSTFIX_CID="$(cid postfix)"
+docker cp "$ATT_DIR/fts-test.pdf"  "$POSTFIX_CID:/tmp/fts-test.pdf"  >/dev/null 2>&1
+docker cp "$ATT_DIR/fts-test.docx" "$POSTFIX_CID:/tmp/fts-test.docx" >/dev/null 2>&1
 send "$FTS_USER" "Счёт во вложении PDF" "Файл приложен" \
     --attach-type application/pdf --attach-name fts-test.pdf --attach @/tmp/fts-test.pdf >/dev/null
 send "$FTS_USER" "Отчёт во вложении DOCX" "Файл приложен" \
@@ -126,12 +143,12 @@ grep -qa "^\* SEARCH [0-9]" <<<"$IMAP_OUT" && ok "IMAP SEARCH TEXT находи�
     || fail "IMAP SEARCH не нашёл слово из PDF"
 
 echo "=== 5. Скорость на ящике из 120 писем ==="
-BULK=$(dex mail-dovecot doveadm search -u "$PRF_USER" mailbox INBOX all 2>/dev/null | grep -c .)
+BULK=$(dex dovecot doveadm search -u "$PRF_USER" mailbox INBOX all 2>/dev/null | grep -c .)
 if [ "$BULK" -lt 120 ]; then
-    dex mail-dovecot sh -c "i=1; while [ \$i -le 120 ]; do printf 'From: bulk%d@example.com\nTo: $PRF_USER\nSubject: Массовое письмо %d\n\nТекст номер %d, слово наполнитель, ещё немного букв\n' \$i \$i \$i | doveadm save -u $PRF_USER -m INBOX; i=\$((i+1)); done" >/dev/null 2>&1
+    dex dovecot sh -c "i=1; while [ \$i -le 120 ]; do printf 'From: bulk%d@example.com\nTo: $PRF_USER\nSubject: Массовое письмо %d\n\nТекст номер %d, слово наполнитель, ещё немного букв\n' \$i \$i \$i | doveadm save -u $PRF_USER -m INBOX; i=\$((i+1)); done" >/dev/null 2>&1
     sleep 5
 fi
-BULK=$(dex mail-dovecot doveadm search -u "$PRF_USER" mailbox INBOX all 2>/dev/null | grep -c .)
+BULK=$(dex dovecot doveadm search -u "$PRF_USER" mailbox INBOX all 2>/dev/null | grep -c .)
 [ "$BULK" -ge 120 ] && ok "в ящике $BULK писем" || fail "не удалось наполнить ящик ($BULK)"
 SEARCH_OUT=$(imap "$PRF_USER" "$PRF_PASS" 'b select INBOX\r\nc search TEXT "наполнитель"\r\n')
 # Dovecot сам сообщает время выполнения в теге ответа: «c OK Search completed (… secs)»
@@ -160,7 +177,7 @@ for _ in $(seq 1 30); do
     [ "$state" = "healthy" ] && break
     sleep 1
 done
-dex mail-dovecot sh -c "ls /var/mail/index/${MAIL_DOMAIN}/fts/xapian-indexes >/dev/null 2>&1" \
+dex dovecot sh -c "ls /var/mail/index/${MAIL_DOMAIN}/fts/xapian-indexes >/dev/null 2>&1" \
     && ok "каталог xapian-indexes на месте (том mailindex)" || fail "индекс не сохранился"
 [ "$(found "$FTS_USER" text kryptonorbis)" -ge 1 ] \
     && ok "поиск работает сразу после перезапуска, без переиндексации" \
@@ -168,7 +185,7 @@ dex mail-dovecot sh -c "ls /var/mail/index/${MAIL_DOMAIN}/fts/xapian-indexes >/d
 
 echo "=== 8. Квоты: лимит из Postgres и IMAP GETQUOTAROOT ==="
 # doveadm quota get: «User quota STORAGE <занято> <лимит> <процент>» (в КБ)
-Q=$(dex mail-dovecot doveadm quota get -u "$QUO_USER" 2>/dev/null | awk '/STORAGE/{print $5}')
+Q=$(dex dovecot doveadm quota get -u "$QUO_USER" 2>/dev/null | awk '/STORAGE/{print $5}')
 [ "$Q" = "100" ] && ok "лимит из virtual_users.quota_bytes: 100 КБ" || fail "лимит не подхватился (получено «$Q»)"
 QOUT=$(imap "$QUO_USER" "$QUO_PASS" 'b select INBOX\r\nc getquotaroot INBOX\r\n')
 grep -qa '^\* QUOTA "User quota" (STORAGE 0 100)' <<<"$QOUT" \
@@ -177,12 +194,12 @@ grep -qa '^\* QUOTA "User quota" (STORAGE 0 100)' <<<"$QOUT" \
 grep -qa "QUOTA" <<<"$QOUT" && ok "расширение QUOTA объявлено в CAPABILITY" || fail "нет QUOTA в CAPABILITY"
 
 echo "=== 9. Заполняем ящик до лимита ==="
-dex mail-postfix sh -c 'head -c 12000 /dev/urandom | base64 | head -c 12000 > /tmp/fts-fill.txt'
+dex postfix sh -c 'head -c 12000 /dev/urandom | base64 | head -c 12000 > /tmp/fts-fill.txt'
 for i in $(seq 1 8); do send "$QUO_USER" "Наполнение $i" @/tmp/fts-fill.txt >/dev/null; done
 sleep 3
-USED=$(dex mail-dovecot doveadm quota get -u "$QUO_USER" 2>/dev/null | awk '/STORAGE/{print $6}')
+USED=$(dex dovecot doveadm quota get -u "$QUO_USER" 2>/dev/null | awk '/STORAGE/{print $6}')
 [ "${USED:-0}" -ge 90 ] && ok "ящик заполнен на ${USED}%" || fail "не удалось заполнить ящик (${USED}%)"
-dex mail-dovecot doveadm search -u "$QUO_USER" mailbox INBOX subject заполнен 2>/dev/null | grep -q . \
+dex dovecot doveadm search -u "$QUO_USER" mailbox INBOX subject заполнен 2>/dev/null | grep -q . \
     && ok "владелец получил предупреждение «Ящик заполнен на 90%»" \
     || fail "предупреждение о заполнении не пришло"
 
@@ -200,11 +217,11 @@ else
     fi
 fi
 # Policy-сервис Dovecot, который спрашивает Postfix на RCPT TO
-POL=$(dex mail-dovecot sh -c "printf 'request=smtpd_access_policy\nrecipient=$QUO_USER\nsize=60000\n\n' | nc -q 2 127.0.0.1 12340")
+POL=$(dex dovecot sh -c "printf 'request=smtpd_access_policy\nrecipient=$QUO_USER\nsize=60000\n\n' | nc -q 2 127.0.0.1 12340")
 grep -qa "action=552 5.2.2" <<<"$POL" \
     && ok "quota-status отвечает Postfix отказом: $(tr -d '\r' <<<"$POL" | head -1)" \
     || fail "quota-status не отказал переполненному ящику: $POL"
-POL_OK=$(dex mail-dovecot sh -c "printf 'request=smtpd_access_policy\nrecipient=$FTS_USER\nsize=60000\n\n' | nc -q 2 127.0.0.1 12340")
+POL_OK=$(dex dovecot sh -c "printf 'request=smtpd_access_policy\nrecipient=$FTS_USER\nsize=60000\n\n' | nc -q 2 127.0.0.1 12340")
 grep -qa "action=DUNNO" <<<"$POL_OK" && ok "обычному ящику quota-status не мешает" || fail "quota-status мешает обычному ящику"
 grep -q "check_policy_service inet:dovecot:12340" "$INFRA_DIR/postfix/conf/main.cf.template" \
     && ok "Postfix спрашивает квоту на RCPT TO (check_policy_service)" \

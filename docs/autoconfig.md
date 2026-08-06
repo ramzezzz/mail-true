@@ -51,10 +51,21 @@ Nginx (infra/nginx/templates/autoconfig.conf.template) разводит хост
 | `IMAPS_PORT` / `IMAP_STARTTLS_PORT` | `993` / `143` | анонсируемые порты IMAP |
 | `POP3S_PORT` / `POP3_STARTTLS_PORT` | `995` / `110` | анонсируемые порты POP3 |
 | `SUBMISSION_PORT` | `587` | анонсируемый порт SMTP (STARTTLS) |
+| `SUBMISSIONS_PORT` | `465` | анонсируемый порт SMTP («TLS сразу») |
 | `DKIM_SELECTOR` | `mail` | селектор DKIM (как у rspamd) |
 | `DKIM_DNS_DIR` | `/rspamd/dkim` | каталог с `<домен>.<селектор>.dns.txt` от rspamd |
 | `DMARC_RUA` | `postmaster@<домен>` | адрес отчётов DMARC |
 | `DNS_TTL` | `3600` | TTL в рекомендуемых записях |
+
+**Как эти значения задаются на установке.** В таблице — имена внутри
+контейнера. В `infra/.env` порты называются с приставкой `AUTOCONFIG_`
+(`AUTOCONFIG_IMAPS_PORT`, `AUTOCONFIG_SUBMISSION_PORT` и т. д.), и
+`infra/docker-compose.yml` подставляет их сюда. Приставка не косметика:
+в том же файле уже есть `IMAPS_PORT`/`SUBMISSION_PORT`, и означают они
+другое — порт публикации на ХОСТЕ. Анонсируемый порт обязан оставаться
+стандартным даже там, где публикация сдвинута ради второго стенда;
+раньше сюда не пробрасывалось ни одно значение вовсе, и настраиваемость
+существовала только в схеме.
 
 DKIM-ключ генерирует rspamd; autoconfig читает готовую DNS-запись из общего
 тома `rspamd-data` (смонтирован read-only в `/rspamd`). Файлы `*.dns.txt`

@@ -28,8 +28,21 @@ export const settingsEnvSchema = z.object({
   SIEVE_TRANSPORT: z.enum(['local', 'docker', 'off']).default('docker'),
   /** Корень почтового хранилища (%d/%n внутри него). */
   SIEVE_ROOT: z.string().default('/var/mail/vhosts'),
-  /** Имя контейнера Dovecot для транспорта docker. */
-  SIEVE_DOCKER_CONTAINER: z.string().default('mail-dovecot'),
+  /**
+   * Имя контейнера Dovecot для транспорта docker.
+   *
+   * Значение по умолчанию именно такое, потому что имя контейнера теперь
+   * складывается из имени проекта: `<проект>-dovecot-1`. Жёсткие
+   * `container_name: mail-dovecot` из infra/docker-compose.yml убраны —
+   * с ними на одной машине не поднимался второй стенд, — и прежний
+   * умолчательный `mail-dovecot` больше не существует ни в одной установке.
+   *
+   * В самом стеке это значение не используется: там SIEVE_TRANSPORT=local
+   * (каталог хранилища примонтирован в контейнер API, сокет Docker внутрь
+   * не пробрасывается и не должен). Транспорт docker — только для запуска
+   * API вне контейнера, и там имя всё равно задаётся явно.
+   */
+  SIEVE_DOCKER_CONTAINER: z.string().default('mailtrue-dovecot-1'),
   /** Имя файла скрипта в каталоге sieve/ (без расширения). */
   SIEVE_SCRIPT_NAME: z.string().default('mailtrue'),
   /** Владелец файлов в хранилище: под этим пользователем работает LMTP. */

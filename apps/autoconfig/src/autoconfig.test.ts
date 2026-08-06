@@ -42,11 +42,15 @@ test('clientConfig: валидный XML со строгой структуро�
     'password-cleartext'
   );
 
+  // Два исходящих сервера: 587 STARTTLS (основной — клиент берёт первый)
+  // и 465 «TLS сразу» для тех, кто предпочитает или умеет только его.
   const outgoing = [...provider.getElementsByTagName('outgoingServer')];
-  assert.equal(outgoing.length, 1);
+  assert.equal(outgoing.length, 2);
   assert.equal(outgoing[0]!.getAttribute('type'), 'smtp');
   assert.equal(outgoing[0]!.getElementsByTagName('port')[0]?.textContent, '587');
   assert.equal(outgoing[0]!.getElementsByTagName('socketType')[0]?.textContent, 'STARTTLS');
+  assert.equal(outgoing[1]!.getElementsByTagName('port')[0]?.textContent, '465');
+  assert.equal(outgoing[1]!.getElementsByTagName('socketType')[0]?.textContent, 'SSL');
 });
 
 test('clientConfig: алиасный домен добавляется вторым <domain>', () => {

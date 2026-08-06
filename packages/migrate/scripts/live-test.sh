@@ -21,7 +21,12 @@ DST_USER="${MIGRATE_TEST_DST:-migdst@mail.local}"
 PASSWORD="${MIGRATE_TEST_PASS:-migr8-test-12345}"
 
 echo "== Проверка стека =="
-docker compose -f "$ROOT/infra/docker-compose.yml" ps --format '{{.Name}} {{.Status}}' | grep -q "mail-dovecot Up" \
+# Спрашиваем про СЕРВИС dovecot, а не про имя контейнера: жёстких имён
+# (`mail-dovecot`) в docker-compose.yml больше нет — они не давали поднять
+# два стенда на одной машине, — и контейнер теперь зовётся по имени проекта.
+# Раньше здесь искалась строка «mail-dovecot Up» в общем списке, и при любом
+# COMPOSE_PROJECT_NAME, кроме стандартного, проверка объявляла стек не поднятым.
+docker compose -f "$ROOT/infra/docker-compose.yml" ps --format '{{.Status}}' dovecot 2>/dev/null | grep -q '^Up' \
   || { echo "Стек не поднят: docker compose -f infra/docker-compose.yml up -d"; exit 1; }
 
 echo "== Создание тестовых ящиков =="

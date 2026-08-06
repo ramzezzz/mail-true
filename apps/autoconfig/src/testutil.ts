@@ -10,7 +10,7 @@ export const testSettings: MailSettings = {
   providerShortName: 'Mail.True',
   imap: { sslPort: 993, startTlsPort: 143 },
   pop3: { sslPort: 995, startTlsPort: 110 },
-  smtp: { startTlsPort: 587 },
+  smtp: { startTlsPort: 587, sslPort: 465 },
   dkimSelector: 'mail',
   dkimDnsDir: '/nonexistent',
   dmarcRua: 'postmaster@mail.local',

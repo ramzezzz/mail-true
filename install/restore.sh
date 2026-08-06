@@ -122,26 +122,22 @@ if want db && [ -f "$WORK/database.sql" ]; then
     # Дамп заменяет схему целиком — вместе с ней откатывается и версия схемы.
     # Восстановление СТАРОЙ копии на более новую установку оставляло базу без
     # миграций, появившихся позже: таблицы настроек и внешних ящиков просто
-    # исчезали. Миграции идемпотентны, применяем их все заново.
-    MIG_FAILED=0
-    for mig in "$INFRA_DIR"/postgres/migrations/*.sql; do
-        [ -f "$mig" ] || continue
-        mig_name="$(basename "$mig")"
-        if dc exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q \
-                < "$mig" >/dev/null 2>"$WORK/mig.err"; then
-            info "миграция $mig_name применена"
-        else
-            fail "миграция $mig_name не применилась"
-            # Причина уходила в /dev/null, и человеку оставалось повторять
-            # команду вручную только ради того, чтобы прочитать одну строку.
-            sed -n '1,5p' "$WORK/mig.err" | sed 's/^/           /'
-            hint "  docker compose -f infra/docker-compose.yml exec -T postgres \\"
-            hint "    psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $POSTGRES_DB < infra/postgres/migrations/$mig_name"
-            MIG_FAILED=1
-        fi
-    done
-    if [ "$MIG_FAILED" = "0" ]; then
+    # исчезали. Миграции идемпотентны, применяем недостающие.
+    #
+    # Журнал schema_migrations восстанавливается ИЗ ДАМПА вместе со схемой —
+    # то есть отражает состояние копии, а не текущей установки. Это ровно то,
+    # что здесь нужно: миграции, появившиеся после снятия копии, в журнале
+    # копии отсутствуют и потому будут применены. Если копия старая настолько,
+    # что журнала в ней ещё нет, apply_migrations заведёт его и применит
+    # каталог целиком — как и раньше.
+    apply_migrations "restore.sh" || true
+    if [ -z "$MT_MIG_FAILED" ]; then
         ok "миграции схемы применены поверх дампа (копия могла быть от старой версии)"
+        MIG_FAILED=0
+    else
+        MIG_FAILED=1
+        hint "  docker compose -f infra/docker-compose.yml exec -T postgres \\"
+        hint "    psql -v ON_ERROR_STOP=1 -U $POSTGRES_USER -d $POSTGRES_DB < infra/postgres/migrations/<файл>"
     fi
 fi
 

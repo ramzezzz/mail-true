@@ -1,7 +1,40 @@
 # Почтовый стек Mail.True (локальная разработка)
 # Запуск:  docker compose -f infra/docker-compose.yml up -d
 # Перед первым запуском: скопировать .env.example -> .env и запустить scripts/gen-certs.sh
-name: mailtrue
+#
+# ------------------------------------------------------------------
+# ИМЕНА КОНТЕЙНЕРОВ ЗАДАЁТ ИМЯ ПРОЕКТА, А НЕ container_name
+# ------------------------------------------------------------------
+# Здесь намеренно НЕТ ни одного `container_name:`. Жёсткое имя — это
+# глобальное имя на всём демоне Docker, а не имя внутри стека: два стенда
+# на одной машине с ним не поднять вовсе. Второй `docker compose up`
+# падал на первом же сервисе:
+#
+#   Error response from daemon: Conflict. The container name
+#   "/mail-postgres" is already in use by container "…"
+#
+# То есть ни проверить обновление рядом с рабочим стендом, ни держать
+# тестовый контур на той же машине было нельзя.
+#
+# Без container_name Docker Compose называет контейнеры сам:
+# <имя проекта>-<сервис>-<номер>, например `mailtrue-postgres-1`.
+# Имя проекта берётся отсюда (`name:` ниже), а переопределяется
+# переменной COMPOSE_PROJECT_NAME или ключом `-p` — именно так уже
+# работают install/backup.sh, install/restore.sh и install/uninstall.sh.
+#
+# Второй стенд рядом с первым (все три группы значений обязаны отличаться):
+#   COMPOSE_PROJECT_NAME=mailtrue2 \
+#   DOCKER_SUBNET=172.29.0.0/16 RESOLVER_IP=172.29.0.53 DOVECOT_IP=172.29.0.54 \
+#   SMTP_PORT=2525 SUBMISSION_PORT=2587 ... \
+#   docker compose -f infra/docker-compose.yml up -d
+#
+# ОБРАЩЕНИЕ К КОНТЕЙНЕРАМ. Внутри сети стека службы по-прежнему видят друг
+# друга по ИМЕНИ СЕРВИСА (postgres, redis, dovecot, postfix, rspamd) —
+# это имя даёт встроенный DNS Docker, и от имени контейнера оно не зависит.
+# Снаружи обращаться нужно через compose (`docker compose exec postgres …`),
+# а не `docker exec mail-postgres …`.
+# ------------------------------------------------------------------
+name: ${COMPOSE_PROJECT_NAME:-mailtrue}
 
 services:
   # ------------------------------------------------------------------
@@ -14,7 +47,6 @@ services:
   # ------------------------------------------------------------------
   unbound:
     build: ./unbound
-    container_name: mail-unbound
     restart: unless-stopped
     environment:
       # Логирование каждого DNS-запроса (для отладки «уходит ли запрос к списку»).
@@ -32,7 +64,6 @@ services:
   # ------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: mail-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -76,7 +107,6 @@ services:
   # ------------------------------------------------------------------
   redis:
     image: redis:7-alpine
-    container_name: mail-redis
     restart: unless-stopped
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
     volumes:
@@ -96,7 +126,6 @@ services:
   # ------------------------------------------------------------------
   dovecot:
     build: ./dovecot
-    container_name: mail-dovecot
     restart: unless-stopped
     hostname: ${MAIL_HOSTNAME}
     environment:
@@ -161,7 +190,6 @@ services:
   # ------------------------------------------------------------------
   rspamd:
     build: ./rspamd
-    container_name: mail-rspamd
     restart: unless-stopped
     # Весь внешний DNS (списки, SPF, DKIM, DMARC) — только через свой резольвер.
     dns:
@@ -202,7 +230,6 @@ services:
   # ------------------------------------------------------------------
   postfix:
     build: ./postfix
-    container_name: mail-postfix
     restart: unless-stopped
     hostname: ${MAIL_HOSTNAME}
     # MX/A-записи и проверки при приёме — через свой резольвер.
@@ -280,7 +307,6 @@ services:
       # Контекст — корень репозитория: сборке нужен tsconfig.base.json
       context: ..
       dockerfile: apps/autoconfig/Dockerfile
-    container_name: mail-autoconfig
     restart: unless-stopped
     environment:
       HOST: 0.0.0.0
@@ -290,6 +316,37 @@ services:
       DKIM_SELECTOR: ${DKIM_SELECTOR:-mail}
       # Каталог DKIM-ключей rspamd (примонтирован ниже read-only)
       DKIM_DNS_DIR: /rspamd/dkim
+
+      # ------------------------------------------------------------
+      # Имя провайдера и анонсируемые порты.
+      #
+      # Сервис их ЧИТАЛ из окружения (apps/autoconfig/src/config.ts), но
+      # сюда не проброшено было ни одно — то есть настраиваемость
+      # существовала только на бумаге: правка infra/.env не меняла ничего,
+      # и в мастере настройки Thunderbird у любой установки, под каким бы
+      # именем её ни продавали, стояло «Mail.True».
+      #
+      # Имена намеренно с приставкой AUTOCONFIG_: это АНОНСИРУЕМЫЕ порты,
+      # а не порты публикации. Одноимённые IMAPS_PORT/SUBMISSION_PORT выше
+      # в этом же файле означают совсем другое — порт хоста, на котором
+      # сервис опубликован на машине разработчика. Взять их сюда значило бы
+      # разослать почтовым клиентам порт с чужой машины: на боевом сервере
+      # список портов задан заново (install/compose.prod.yml) и всегда
+      # стандартный.
+      # ------------------------------------------------------------
+      PROVIDER_NAME: ${PROVIDER_NAME:-Mail.True}
+      PROVIDER_SHORT_NAME: ${PROVIDER_SHORT_NAME:-Mail.True}
+      IMAPS_PORT: ${AUTOCONFIG_IMAPS_PORT:-993}
+      IMAP_STARTTLS_PORT: ${AUTOCONFIG_IMAP_STARTTLS_PORT:-143}
+      POP3S_PORT: ${AUTOCONFIG_POP3S_PORT:-995}
+      POP3_STARTTLS_PORT: ${AUTOCONFIG_POP3_STARTTLS_PORT:-110}
+      SUBMISSION_PORT: ${AUTOCONFIG_SUBMISSION_PORT:-587}
+      SUBMISSIONS_PORT: ${AUTOCONFIG_SUBMISSIONS_PORT:-465}
+      # Адрес отчётов DMARC в рекомендуемых DNS-записях.
+      # Пусто = postmaster@<домен> (подставляется в коде).
+      DMARC_RUA: ${DMARC_RUA:-}
+      DNS_TTL: ${DNS_TTL:-3600}
+      LOG_LEVEL: ${AUTOCONFIG_LOG_LEVEL:-info}
     volumes:
       # Ключи DKIM генерирует rspamd; autoconfig читает готовую DNS-запись
       - rspamd-data:/rspamd:ro
@@ -312,7 +369,6 @@ services:
       # Контекст — корень репозитория: это npm workspaces
       context: ..
       dockerfile: apps/api/Dockerfile
-    container_name: mail-api
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -350,8 +406,24 @@ services:
       # за пределы docker-сети. На боевом сервере значение то же:
       # имя контейнера в сертификате Let's Encrypt не значится.
       TLS_REJECT_UNAUTHORIZED: ${TLS_REJECT_UNAUTHORIZED:-false}
-      IMAPS_PORT: ${IMAPS_PORT:-993}
-      SUBMISSION_PORT: ${SUBMISSION_PORT:-587}
+
+      # Порты, которые панель ПОДСКАЗЫВАЕТ: SRV-записи в разделе «Домены»
+      # и заготовка «свой ящик» при подключении внешних учётных записей.
+      # Не порты подключения — те заданы выше (IMAP_PORT 143, SMTP_PORT 587
+      # внутри сети стека).
+      #
+      # Берутся из AUTOCONFIG_*, то есть из того же источника, что и выдача
+      # сервиса автонастройки: подсказка в панели и настройка, которую
+      # получает почтовая программа, обязаны совпадать. Раньше сюда шли
+      # IMAPS_PORT/SUBMISSION_PORT из .env — а это порты ПУБЛИКАЦИИ на
+      # хосте, их двигают, чтобы развести два стенда, и панель начинала
+      # советовать порт с чужой машины. Третий из тройки, POP3S_PORT,
+      # код читал (apps/api/src/admin/config.ts), но сюда его не пробросили
+      # вовсе — правка в .env не меняла подсказку SRV для POP3S ничем.
+      IMAPS_PORT: ${AUTOCONFIG_IMAPS_PORT:-993}
+      SUBMISSION_PORT: ${AUTOCONFIG_SUBMISSION_PORT:-587}
+      POP3S_PORT: ${AUTOCONFIG_POP3S_PORT:-995}
+      PROVIDER_NAME: ${PROVIDER_NAME:-Mail.True}
 
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -395,6 +467,8 @@ services:
       # docker-сокет внутрь контейнера не пробрасывается и не должен.
       SIEVE_TRANSPORT: ${SIEVE_TRANSPORT:-local}
       SIEVE_ROOT: /var/mail/vhosts
+      # Предел просмотра писем при «применить правило к уже полученным».
+      FILTER_APPLY_MAX_MESSAGES: ${FILTER_APPLY_MAX_MESSAGES:-5000}
 
       # Антиспам и свой резольвер — только для сводки состояния админки.
       # Ни то, ни другое не мешает почте ходить при отказе, поэтому в пробу
@@ -447,6 +521,121 @@ services:
       # а таблица истории продолжает расти по прежним 14 дням.
       MAIL_FLOW_RETENTION_DAYS: ${MAIL_FLOW_RETENTION_DAYS:-14}
       MAIL_FLOW_MAX_ROWS: ${MAIL_FLOW_MAX_ROWS:-500000}
+      # Как часто сборщик заглядывает в журнал Postfix. 0 — не собирать
+      # вовсе (раздел «Почтовый поток» останется пустым).
+      MAIL_FLOW_INTERVAL_SECONDS: ${MAIL_FLOW_INTERVAL_SECONDS:-5}
+
+      # Снимки показателей сервера для графиков дашборда.
+      MAIL_METRICS_INTERVAL_SECONDS: ${MAIL_METRICS_INTERVAL_SECONDS:-60}
+      MAIL_METRICS_RETENTION_DAYS: ${MAIL_METRICS_RETENTION_DAYS:-7}
+      MAIL_METRICS_MAX_ROWS: ${MAIL_METRICS_MAX_ROWS:-50000}
+
+      # ------------------------------------------------------------
+      # Дальше — переменные, которые код ЧИТАЛ, но которых не было ни
+      # здесь, ни в infra/.env.example. То есть настройки существовали
+      # только в схеме разбора окружения: поменять их можно было
+      # исключительно пересборкой образа.
+      #
+      # Целые разделы продукта оказывались ненастраиваемыми на боевой
+      # установке — уведомления при закрытой вкладке и логотипы
+      # отправителей целиком, включая их выключатели.
+      # ------------------------------------------------------------
+
+      # --- Вход в админку и уборка ящиков ---
+      ADMIN_SESSION_COOKIE_NAME: ${ADMIN_SESSION_COOKIE_NAME:-mt_admin}
+      ADMIN_SESSION_TTL_SECONDS: ${ADMIN_SESSION_TTL_SECONDS:-28800}
+      ADMIN_LOGIN_MAX_FAILURES: ${ADMIN_LOGIN_MAX_FAILURES:-5}
+      ADMIN_LOCKOUT_MINUTES: ${ADMIN_LOCKOUT_MINUTES:-15}
+      ADMIN_MAILBOX_TTL_SECONDS: ${ADMIN_MAILBOX_TTL_SECONDS:-3600}
+      ADMIN_DEFAULT_QUOTA_BYTES: ${ADMIN_DEFAULT_QUOTA_BYTES:-1073741824}
+      ADMIN_MAILBOX_PURGE_DELAY_MINUTES: ${ADMIN_MAILBOX_PURGE_DELAY_MINUTES:-0}
+      ADMIN_JANITOR_INTERVAL_SECONDS: ${ADMIN_JANITOR_INTERVAL_SECONDS:-60}
+      # Каталоги внутри контейнера, из .env не выносятся: это точки
+      # монтирования томов выше, а не настройка.
+      ADMIN_MAIL_ROOT: /var/mail/vhosts
+      ADMIN_MAIL_INDEX_ROOT: /var/mail/index
+
+      # --- Сессии почты, пределы запросов и частоты ---
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-mt_session}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
+      RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-26214400}
+      # Должен совпадать с message_size_limit в
+      # infra/postfix/conf/main.cf.template — иначе письмо, принятое
+      # веб-интерфейсом, отобьёт собственный же Postfix.
+      MESSAGE_MAX_BYTES: ${MESSAGE_MAX_BYTES:-26214400}
+      # Предел тела JSON при написании письма. Связан с потолком кучи
+      # (NODE_OPTIONS выше): разбор запроса держит в памяти несколько
+      # его копий.
+      COMPOSE_BODY_MAX_BYTES: ${COMPOSE_BODY_MAX_BYTES:-12582912}
+      IMAP_POOL_IDLE_MS: ${IMAP_POOL_IDLE_MS:-300000}
+      HEALTH_CACHE_MS: ${HEALTH_CACHE_MS:-2000}
+      HEALTH_PROBE_TIMEOUT_MS: ${HEALTH_PROBE_TIMEOUT_MS:-3000}
+
+      # --- Уведомления при закрытой вкладке (Web Push) ---
+      # Ключи VAPID сервер генерирует сам при первом запуске и хранит
+      # в базе. Задавать их здесь нужно ровно в одном случае — при
+      # переносе установки на другой сервер: смена ключей обесценивает
+      # все выданные браузерам подписки, и людям придётся разрешать
+      # уведомления заново.
+      PUSH_ENABLED: ${PUSH_ENABLED:-true}
+      PUSH_VAPID_PUBLIC_KEY: ${PUSH_VAPID_PUBLIC_KEY:-}
+      PUSH_VAPID_PRIVATE_KEY: ${PUSH_VAPID_PRIVATE_KEY:-}
+      PUSH_CONTACT: ${PUSH_CONTACT:-}
+      PUSH_TIMEOUT_MS: ${PUSH_TIMEOUT_MS:-10000}
+      PUSH_TTL_SECONDS: ${PUSH_TTL_SECONDS:-86400}
+      PUSH_PENDING_MAX: ${PUSH_PENDING_MAX:-50}
+      PUSH_PENDING_TTL_MS: ${PUSH_PENDING_TTL_MS:-21600000}
+
+      # --- Логотипы отправителей (BIMI и favicon) ---
+      # Единственная часть продукта, которая по своей работе ходит в
+      # интернет с сервера. Выключатель здесь — не удобство, а требование:
+      # на закрытом контуре эти запросы недопустимы, и погасить их надо
+      # уметь не пересобирая образ.
+      SENDER_LOGOS_ENABLED: ${SENDER_LOGOS_ENABLED:-true}
+      SENDER_LOGO_DNS_TIMEOUT_MS: ${SENDER_LOGO_DNS_TIMEOUT_MS:-2500}
+      SENDER_LOGO_HTTP_TIMEOUT_MS: ${SENDER_LOGO_HTTP_TIMEOUT_MS:-4000}
+      SENDER_LOGO_WAIT_MS: ${SENDER_LOGO_WAIT_MS:-3500}
+      SENDER_LOGO_CONCURRENCY: ${SENDER_LOGO_CONCURRENCY:-4}
+      SENDER_LOGO_LOOKUPS_PER_MINUTE: ${SENDER_LOGO_LOOKUPS_PER_MINUTE:-60}
+      SENDER_LOGO_TTL_HOURS: ${SENDER_LOGO_TTL_HOURS:-720}
+      SENDER_LOGO_MISS_TTL_HOURS: ${SENDER_LOGO_MISS_TTL_HOURS:-168}
+      SENDER_LOGO_ERROR_TTL_HOURS: ${SENDER_LOGO_ERROR_TTL_HOURS:-6}
+
+      # --- Помощник на основе ИИ ---
+      # Какой сервис и с каким ключом — настройка в админке. Здесь только
+      # общий выключатель на весь сервер и служебные значения.
+      AI_ENABLED: ${AI_ENABLED:-true}
+      AI_SETTINGS_CACHE_MS: ${AI_SETTINGS_CACHE_MS:-15000}
+      AI_REDIS_PREFIX: ${AI_REDIS_PREFIX:-mt:ai:}
+
+      # --- Чужие ящики и сборщик почты с них ---
+      EXTERNAL_ACCOUNTS_ENABLED: ${EXTERNAL_ACCOUNTS_ENABLED:-true}
+      COLLECTOR_SCHEDULER: ${COLLECTOR_SCHEDULER:-true}
+      COLLECTOR_TICK_MS: ${COLLECTOR_TICK_MS:-60000}
+      COLLECTOR_CONCURRENCY: ${COLLECTOR_CONCURRENCY:-2}
+      COLLECTOR_BATCH_SIZE: ${COLLECTOR_BATCH_SIZE:-50}
+      # Предел на один сбор и срок, после которого «идёт сбор» считается
+      # брошенным. Второе нужно из-за перезапуска: пометка о начале
+      # остаётся в базе, и без срока давности ящик залипал бы навсегда.
+      COLLECTOR_TIMEOUT_MS: ${COLLECTOR_TIMEOUT_MS:-600000}
+      COLLECTOR_STALE_MINUTES: ${COLLECTOR_STALE_MINUTES:-30}
+      # Автоопределение настроек чужого сервера по адресу ящика: ходить
+      # ли при этом в сеть. На закрытом контуре — false.
+      AUTODETECT_NETWORK: ${AUTODETECT_NETWORK:-true}
+      AUTODETECT_TIMEOUT_MS: ${AUTODETECT_TIMEOUT_MS:-4000}
+      # Разделитель служебного пользователя в логине «ящик*мастер».
+      #
+      # Значение ЗАШИТО намеренно и из .env не берётся. Оно обязано
+      # совпадать с auth_master_user_separator в конфигурации Dovecot
+      # (infra/dovecot/conf/dovecot.conf.template), а там сейчас записана
+      # звёздочка без всякой подстановки. Сделай этот ключ настраиваемым
+      # здесь — и правка в .env развела бы две стороны одного логина:
+      # сервер приложения собирал бы «ящик#мастер», Dovecot ждал бы
+      # «ящик*мастер», и вход администратора в чужой ящик перестал бы
+      # работать без единого сообщения о причине.
+      DOVECOT_MASTER_SEPARATOR: "*"
 
       # Публичный адрес сервера — по нему панель проверяет обратную запись
       # (PTR), без которой крупные почтовые службы отбивают письма ещё на
@@ -501,7 +690,6 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
-    container_name: mail-web
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q '\"ok\":true'"]
@@ -516,7 +704,6 @@ services:
     build:
       context: ..
       dockerfile: apps/admin/Dockerfile
-    container_name: mail-admin
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz | grep -q '\"ok\":true'"]
@@ -534,7 +721,6 @@ services:
   # ------------------------------------------------------------------
   nginx:
     image: nginx:1.27-alpine
-    container_name: mail-nginx
     restart: unless-stopped
     environment:
       MAIL_DOMAIN: ${MAIL_DOMAIN}
@@ -579,7 +765,6 @@ services:
   # ------------------------------------------------------------------
   clamav:
     image: clamav/clamav:1.4_base
-    container_name: mail-clamav
     profiles: ["clamav"]
     restart: unless-stopped
     environment:

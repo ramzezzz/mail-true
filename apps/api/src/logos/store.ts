@@ -79,23 +79,10 @@ export function logoVersion(domain: string, bytes: Buffer | null): string {
     .slice(0, 16);
 }
 
-const CREATE_TABLE = `
-CREATE TABLE IF NOT EXISTS sender_logo_cache (
-    domain      VARCHAR(255) PRIMARY KEY,
-    source      VARCHAR(16),
-    mime        VARCHAR(64),
-    image       BYTEA,
-    width       INTEGER,
-    height      INTEGER,
-    version     VARCHAR(32)  NOT NULL,
-    fetched_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ  NOT NULL,
-    last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)`;
-
-const CREATE_INDEX = `
-CREATE INDEX IF NOT EXISTS sender_logo_cache_last_used
-    ON sender_logo_cache (last_used_at)`;
+// Описание таблицы sender_logo_cache живёт в
+// infra/postgres/migrations/0021_code_created_tables.sql, а не здесь.
+// Держать его в двух местах — это схема, которая зависит от того, что
+// случилось раньше: миграция или первое обращение кода.
 
 interface Row {
   domain: string;
@@ -177,22 +164,37 @@ export class LogoStore {
   }
 
   /**
-   * Создаёт таблицу при первом обращении.
+   * Проверяет, что таблица кэша есть в базе.
    *
-   * Схема заводится КОДОМ, а не миграцией, намеренно: это кэш, а не данные.
-   * Его можно потерять целиком без последствий, он ничего не значит без
-   * сети, и держать ради него ещё один файл миграции — лишний повод
-   * столкнуться с соседним агентом на одинаковом номере.
+   * Раньше этот метод её СОЗДАВАЛ — с доводом «это кэш, а не данные,
+   * ради него не стоит заводить файл миграции». Довод про ценность строк
+   * верен, вывод из него — нет: таблицы, объявленной в коде, не существует
+   * для всего, что разбирает схему. install/selfcheck.sh берёт список
+   * ожидаемых таблиц из файлов миграций и пропажи этой не заметил бы;
+   * в план обновления она тоже не попадала. Теперь таблицу заводит
+   * миграция 0021_code_created_tables.sql, а здесь только проверка.
+   *
+   * Отсутствие таблицы — не авария: логотипы просто не показываются,
+   * почта работает как обычно. Поэтому предупреждение, а не отказ, —
+   * но с прямым указанием, что делать.
    */
   async ready(): Promise<boolean> {
     if (this.#pool === null) return false;
     if (this.#schemaOk !== null) return this.#schemaOk;
     try {
-      await this.#pool.query(CREATE_TABLE);
-      await this.#pool.query(CREATE_INDEX);
-      this.#schemaOk = true;
+      const res = await this.#pool.query<{ present: boolean }>(
+        `SELECT to_regclass('public.sender_logo_cache') IS NOT NULL AS present`,
+      );
+      this.#schemaOk = res.rows[0]?.present === true;
+      if (!this.#schemaOk) {
+        this.#logger.warn(
+          'Нет таблицы sender_logo_cache — логотипы отправителей показываться не будут. ' +
+            'Примените infra/postgres/migrations/0021_code_created_tables.sql ' +
+            '(это делает install/install.sh).',
+        );
+      }
     } catch (err) {
-      this.#logger.warn(errorInfo(err), 'Не удалось завести таблицу кэша логотипов');
+      this.#logger.warn(errorInfo(err), 'Не удалось проверить таблицу кэша логотипов');
       this.#schemaOk = false;
     }
     return this.#schemaOk;

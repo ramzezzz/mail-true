@@ -30,14 +30,67 @@
 -- одно письмо, и направление у него одно. Где такого «брата» нет, запись
 -- остаётся неизвестной: честное «неизвестно» лучше уверенной ошибки.
 
-UPDATE mail_flow_events AS u
-   SET direction = k.direction
-  FROM (
-        SELECT DISTINCT ON (queue_id) queue_id, direction
-          FROM mail_flow_events
-         WHERE direction <> 'unknown' AND queue_id IS NOT NULL
-         ORDER BY queue_id, occurred_at
-       ) AS k
- WHERE u.direction = 'unknown'
-   AND u.queue_id IS NOT NULL
-   AND u.queue_id = k.queue_id;
+-- ------------------------------------------------------------------
+-- ПОЧЕМУ У ПЕРЕПИСЫВАНИЯ ЕСТЬ ГРАНИЦА ПО ВРЕМЕНИ
+-- ------------------------------------------------------------------
+-- Раньше границы не было вовсе: UPDATE шёл по ВСЕЙ таблице, и делал это
+-- заново при каждом запуске установщика — а установщик запускают и для
+-- обновления продукта. На потолке в 500 000 строк (MAIL_FLOW_MAX_ROWS)
+-- это два полных прохода по таблице (подзапрос и сам UPDATE) ради
+-- нескольких строк, которые уже были исправлены прошлым разом. Причём
+-- проход блокирующий, а идёт он на работающем сервере, где в ту же
+-- таблицу пишет сборщик журнала Postfix.
+--
+-- Повторные запуски теперь отсекает журнал миграций
+-- (0000_schema_migrations.sql): применённый файл второй раз не
+-- выполняется. Но одного журнала мало — первый-то проход остаётся, и на
+-- сервере с накопленной историей он длинный. Поэтому здесь ещё и рамка
+-- по времени.
+--
+-- Тридцать суток взяты не наугад: история доставки и так живёт
+-- MAIL_FLOW_RETENTION_DAYS суток (по умолчанию 14) и старше этого срока
+-- вычищается сборщиком. Тридцать — двукратный запас на случай, когда
+-- срок хранения увеличили. Всё, что старше, чинить бессмысленно: эти
+-- строки будут удалены раньше, чем кто-нибудь откроет их в панели.
+--
+-- Индекс idx_mail_flow_time (миграция 0007) стоит по occurred_at, так что
+-- рамка не просто ограничивает объём работы, а реально сужает чтение.
+--
+-- Сначала — быстрая проверка «есть ли вообще что чинить». На свежей
+-- установке (а это самый частый случай: таблица только что создана
+-- миграцией 0007) она отвечает мгновенно, и UPDATE не запускается вовсе.
+DO $$
+DECLARE
+    horizon  timestamptz := now() - interval '30 days';
+    touched  bigint;
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM mail_flow_events
+         WHERE direction = 'unknown'
+           AND queue_id IS NOT NULL
+           AND occurred_at >= horizon
+         LIMIT 1
+    ) THEN
+        RAISE NOTICE 'mail_flow_events: записей без направления за последние 30 суток нет, правка не нужна';
+        RETURN;
+    END IF;
+
+    UPDATE mail_flow_events AS u
+       SET direction = k.direction
+      FROM (
+            SELECT DISTINCT ON (queue_id) queue_id, direction
+              FROM mail_flow_events
+             WHERE direction <> 'unknown'
+               AND queue_id IS NOT NULL
+               AND occurred_at >= horizon
+             ORDER BY queue_id, occurred_at
+           ) AS k
+     WHERE u.direction = 'unknown'
+       AND u.queue_id IS NOT NULL
+       AND u.occurred_at >= horizon
+       AND u.queue_id = k.queue_id;
+
+    GET DIAGNOSTICS touched = ROW_COUNT;
+    RAISE NOTICE 'mail_flow_events: направление восстановлено у % записей', touched;
+END
+$$;
