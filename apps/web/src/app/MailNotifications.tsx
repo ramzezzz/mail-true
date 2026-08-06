@@ -1,17 +1,21 @@
 /**
- * Уведомления о новой почте: всплывающее окно браузера и счётчик
- * непрочитанных в заголовке вкладки.
+ * Уведомления о новой почте и счётчик непрочитанных в заголовке вкладки.
  *
- * Обе настройки живут в «Общих настройках» и до сих пор не делали ничего:
- * их сохраняли, читать было некому. Компонент ничего не рисует — он
- * подключает поведение и висит в каркасе страницы.
+ * Компонент ничего не рисует — он подключает поведение и висит в каркасе
+ * страницы (см. router.tsx).
+ *
+ * Сам показ окна живёт в `notifications/local.ts`: там же договорённость
+ * между вкладками (три открытых вкладки не должны дать три окна) и выбор
+ * между Service Worker и прямым показом. Здесь остаётся только то, что
+ * касается каркаса приложения: чтение настроек и заголовок вкладки.
  */
 
 import { useEffect, useRef } from 'react';
 import { useUnreadTotal } from '../api/accountsQueries';
-import { newMailNotification, stripTabCounter, tabTitle } from '../lib/notifications';
+import { stripTabCounter, tabTitle } from '../lib/notifications';
 import { useGeneralPreferences } from '../settings/generalSettings';
-import { useMailEvents } from './mailEvents';
+import { useLocalNotifications } from '../notifications/local';
+import { ensureServiceWorker } from '../notifications/subscribe';
 
 /**
  * Счётчик непрочитанных — в заголовок вкладки.
@@ -35,34 +39,30 @@ export function useTabUnreadCounter(enabled: boolean): void {
   }, [unread, enabled]);
 }
 
-/** Всплывающие уведомления браузера о новых письмах. */
-export function useBrowserNewMailNotifications(enabled: boolean): void {
-  // Разрешение спрашиваем только когда настройка включена: без неё
-  // спрашивать не за что, а браузер запоминает первый отказ надолго.
+/**
+ * Поднимает Service Worker, если уведомления уже разрешены.
+ *
+ * Именно «уже разрешены»: регистрация работника сама по себе ничего не
+ * спрашивает и ничего не показывает, но заводить фоновую службу тому,
+ * кто уведомлений не просил, незачем. А тому, кто просил, она нужна на
+ * каждой загрузке страницы: работник мог быть снят браузером, и без
+ * него не будет ни кнопок в окне, ни уведомлений с закрытой вкладкой.
+ */
+function useServiceWorker(enabled: boolean): void {
+  const done = useRef(false);
   useEffect(() => {
-    if (!enabled || typeof Notification === 'undefined') return;
-    if (Notification.permission === 'default') void Notification.requestPermission();
-  }, [enabled]);
-
-  const enabledRef = useRef(enabled);
-  enabledRef.current = enabled;
-
-  useMailEvents((event) => {
-    if (!enabledRef.current || event.type !== 'new-message') return;
+    if (!enabled || done.current) return;
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
-    // «Когда вкладка свёрнута» — так обещает сама настройка. Открытую
-    // вкладку и так видно: письмо появляется в списке само.
-    if (typeof document !== 'undefined' && !document.hidden) return;
-    const { title, body } = newMailNotification(event);
-    // tag — чтобы повторное событие об одном письме (переподключение
-    // сокета) не выкладывало второе такое же уведомление.
-    new Notification(title, { body, tag: event.id });
-  });
+    done.current = true;
+    void ensureServiceWorker();
+  }, [enabled]);
 }
 
 export function MailNotifications() {
   const preferences = useGeneralPreferences();
+  const enabled = preferences.notifications.browser;
   useTabUnreadCounter(preferences.notifications.tabCounter);
-  useBrowserNewMailNotifications(preferences.notifications.browser);
+  useServiceWorker(enabled);
+  useLocalNotifications({ enabled });
   return null;
 }

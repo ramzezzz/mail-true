@@ -6,6 +6,8 @@ import { api } from '../api/client';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
+import { RowActions } from '../components/RowActions';
+import { IconPower, IconTrash } from '../components/icons';
 import {
   ActiveBadge,
   ErrorNotice,
@@ -81,9 +83,14 @@ export function AliasesPage() {
             <tr>
               <th>Откуда</th>
               <th>Куда</th>
-              <th>Домен</th>
+              {/*
+                Домен виден в самом адресе, дата создания на телефоне
+                не нужна: без этого колонка действий уезжала за правый
+                край внутрь прокрутки (замер на 390 — за краем обе кнопки).
+              */}
+              <th className={tableStyles.optionalNarrow}>Домен</th>
               <th>Состояние</th>
-              <th className={tableStyles.nowrap}>Создан</th>
+              <th className={`${tableStyles.nowrap} ${tableStyles.optional}`}>Создан</th>
               <th />
             </tr>
           </thead>
@@ -92,23 +99,31 @@ export function AliasesPage() {
               <tr key={alias.id}>
                 <td className="mt-mono">{alias.source}</td>
                 <td className="mt-mono">{alias.destination}</td>
-                <td className="mt-mono">{alias.domain}</td>
+                <td className={`mt-mono ${tableStyles.optionalNarrow}`}>{alias.domain}</td>
                 <td><ActiveBadge active={alias.active} /></td>
-                <td className={tableStyles.nowrap}>{formatDateTime(alias.createdAt)}</td>
+                <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>
+                  {formatDateTime(alias.createdAt)}
+                </td>
                 <td>
                   {can('aliases.write') && (
-                    <div className={tableStyles.actions}>
-                      <Button
-                        mode="tertiary"
-                        size="s"
-                        onClick={() => toggle.mutate({ id: alias.id, active: !alias.active })}
-                      >
-                        {alias.active ? 'Отключить' : 'Включить'}
-                      </Button>
-                      <Button mode="tertiary" size="s" onClick={() => remove.mutate(alias.id)}>
-                        Удалить
-                      </Button>
-                    </div>
+                    <RowActions
+                      subject={alias.source}
+                      actions={[
+                        {
+                          id: 'active',
+                          icon: <IconPower />,
+                          label: alias.active ? 'Отключить' : 'Включить',
+                          onClick: () => toggle.mutate({ id: alias.id, active: !alias.active }),
+                        },
+                        {
+                          id: 'delete',
+                          icon: <IconTrash />,
+                          label: 'Удалить',
+                          danger: true,
+                          onClick: () => remove.mutate(alias.id),
+                        },
+                      ]}
+                    />
                   )}
                 </td>
               </tr>

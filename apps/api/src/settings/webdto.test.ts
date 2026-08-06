@@ -237,3 +237,40 @@ test('состояние сборщика переводится в три со�
   assert.equal(toWebStatus('ok'), 'ok');
   assert.equal(toWebStatus('never'), 'ok');
 });
+
+/* ------------------------------------------------------------------ */
+/* Логотипы отправителей                                               */
+/* ------------------------------------------------------------------ */
+
+test('логотипы отправителей: значение доходит до заплатки в обе стороны', () => {
+  const settings = { ...defaultMailSettings('a@mail.local'), senderLogos: true };
+  const dto = toWebGeneral(settings, []);
+  assert.equal(dto.showSenderLogos, true);
+  assert.equal(fromWebGeneral(dto).senderLogos, true);
+  assert.equal(fromWebGeneral({ ...dto, showSenderLogos: false }).senderLogos, false);
+});
+
+test('логотипы отправителей: тело БЕЗ поля не гасит настройку молча', () => {
+  /*
+   * Тот же контракт правит админка (admin/user-settings.ts), и о поле она
+   * не знает. Отсутствие поля обязано означать «не трогать»: иначе каждое
+   * сохранение из панели выключало бы человеку логотипы, и он бы гадал,
+   * почему они пропадают сами.
+   */
+  const dto = toWebGeneral(defaultMailSettings('a@mail.local'), []);
+  delete dto.showSenderLogos;
+  assert.equal('senderLogos' in fromWebGeneral(dto), false);
+});
+
+test('логотипы отправителей: маршрут не выбрасывает поле из тела запроса', async () => {
+  /*
+   * Ошибка, найденная на живом стенде: поля не было в схеме zod, а zod
+   * молча выбрасывает незнакомое. Интерфейс слал настройку, сервер отвечал
+   * «сохранено», в базе оставалось прежнее. Проверяем именно схему.
+   */
+  const { generalSchema } = await import('./routes.js');
+  const parsed = generalSchema.parse({ senderName: 'x', showSenderLogos: true });
+  assert.equal(parsed.showSenderLogos, true);
+  // А тело без поля остаётся телом без поля — значения по умолчанию нет.
+  assert.equal(generalSchema.parse({ senderName: 'x' }).showSenderLogos, undefined);
+});

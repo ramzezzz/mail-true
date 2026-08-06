@@ -12,6 +12,7 @@
  */
 import { Pool, type QueryResultRow } from 'pg';
 import type { Logger } from 'pino';
+import { normalizeThemeSetting, normalizeWallpaperChoice } from '@mail-true/shared';
 import { errorInfo } from '../log.js';
 import {
   DEFAULT_ACTIONS,
@@ -41,11 +42,26 @@ export interface SettingsDbOptions {
 interface SettingsRow extends QueryResultRow {
   account_email: string;
   sender_name: string | null;
+  /**
+   * Колонки оформления добавлены миграцией 0009 и объявлены необязательными
+   * нарочно: пока её не применили, `SELECT *` вернёт строку без них, и
+   * настройки должны продолжать работать (без запомненной темы), а не
+   * разваливаться на undefined. Нормализация ниже приводит это к умолчанию.
+   */
+  theme?: string | null;
+  wallpaper?: string | null;
   reply_quote: boolean;
   after_delete: string;
   notify_browser: boolean;
   notify_tab: boolean;
   collect_contacts: boolean;
+  /**
+   * Добавлена миграцией 0010 и объявлена необязательной по той же причине,
+   * что и колонки оформления выше: пока миграцию не применили, `SELECT *`
+   * вернёт строку без неё, и настройки обязаны работать дальше — просто
+   * без логотипов, то есть ровно как до появления возможности.
+   */
+  sender_logos?: boolean | null;
   autoreply_enabled: boolean;
   autoreply_subject: string | null;
   autoreply_text: string;
@@ -149,11 +165,15 @@ function toSettings(row: SettingsRow): MailSettings {
   return {
     accountEmail: row.account_email,
     senderName: row.sender_name,
+    theme: normalizeThemeSetting(row.theme),
+    wallpaper: normalizeWallpaperChoice(row.wallpaper),
     replyQuote: row.reply_quote,
     afterDelete: row.after_delete === 'next' ? 'next' : 'list',
     notifyBrowser: row.notify_browser,
     notifyTab: row.notify_tab,
     collectContacts: row.collect_contacts,
+    // `?? false` — это и значение по умолчанию, и поведение до миграции 0010.
+    senderLogos: row.sender_logos ?? false,
     autoReply: {
       enabled: row.autoreply_enabled,
       subject: row.autoreply_subject,
@@ -192,6 +212,18 @@ function toRule(row: FilterRow): FilterRule {
 /** Отсутствующая таблица (42P01) — миграция 0005 не применена. */
 export function isUndefinedTable(err: unknown): boolean {
   return Boolean(err && typeof err === 'object' && (err as { code?: string }).code === '42P01');
+}
+
+/**
+ * Отсутствующая колонка (42703) — миграция 0009 не применена.
+ *
+ * Отличать от отсутствующей таблицы приходится: таблицы настроек есть,
+ * работает всё, кроме запоминания оформления, и подсказка тут другая —
+ * применить 0009, а не 0005. Пока код был один, человек шёл применять
+ * миграцию, которая уже применена, и упирался в тупик.
+ */
+export function isUndefinedColumn(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as { code?: string }).code === '42703');
 }
 
 /* ------------------------------------------------------------------ */
@@ -267,11 +299,17 @@ export class SettingsDb {
     };
 
     if (patch.senderName !== undefined) put('sender_name', patch.senderName);
+    // Оформление правится отдельным маршрутом и отдельной заплаткой:
+    // смена темы не должна ни трогать, ни требовать остальную форму
+    // настроек (см. appearance.ts).
+    if (patch.theme !== undefined) put('theme', patch.theme);
+    if (patch.wallpaper !== undefined) put('wallpaper', patch.wallpaper);
     if (patch.replyQuote !== undefined) put('reply_quote', patch.replyQuote);
     if (patch.afterDelete !== undefined) put('after_delete', patch.afterDelete satisfies AfterDelete);
     if (patch.notifyBrowser !== undefined) put('notify_browser', patch.notifyBrowser);
     if (patch.notifyTab !== undefined) put('notify_tab', patch.notifyTab);
     if (patch.collectContacts !== undefined) put('collect_contacts', patch.collectContacts);
+    if (patch.senderLogos !== undefined) put('sender_logos', patch.senderLogos);
     if (patch.autoReply) {
       const ar = patch.autoReply;
       if (ar.enabled !== undefined) put('autoreply_enabled', ar.enabled);

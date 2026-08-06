@@ -8,6 +8,7 @@ import type { SecretBox } from './crypto.js';
 import type { HealthMonitor } from './health.js';
 import type { SessionStore } from './session.js';
 import type { ImapPool } from './imap/pool.js';
+import type { DeferredSender } from './mail/deferred-send.js';
 import type { UploadStore } from './uploads.js';
 
 /** Аутентифицированная сессия текущего запроса. */
@@ -35,6 +36,12 @@ declare module 'fastify' {
     health: HealthMonitor;
     /** preHandler: требует валидную сессию, кладёт её в request.mailSession. */
     requireSession: preHandlerAsyncHookHandler;
+    /**
+     * Работник очереди отложенной отправки (см. routes/compose.ts).
+     * Обычно он просыпается сам; наружу выведен, чтобы проверки могли
+     * позвать один проход, не дожидаясь таймера.
+     */
+    deferredSender: DeferredSender;
   }
   interface FastifyRequest {
     mailSession: MailSession | null;

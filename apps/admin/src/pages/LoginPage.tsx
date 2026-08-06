@@ -4,20 +4,38 @@
  * Отдельная точка входа: почтовый ящик здесь не примут, и наоборот —
  * админский логин не пустит в почту. Так требует docs/admin-spec.md.
  *
- * Оформление устроено как у входа в почту — тёмный фон с созвездием точек,
- * проволочный глобус слева, светлая карточка справа, ни одной растровой
- * картинки, — но в своей гамме и со своими значками (см. login/loginPalette.ts
- * и login/adminIcons.tsx). Это не украшательство: администратор, увидев
- * привычный синий экран почты, набирает почтовый пароль вслепую.
+ * Оформление устроено как у входа в почту — тёмный фон со звёздами и
+ * паутиной точек, вращающаяся проволочная сфера слева, светлая карточка
+ * справа, ни одной растровой картинки, — но в своей гамме и со своими
+ * значками. Это не украшательство: администратор, увидев привычный синий
+ * экран почты, набирает почтовый пароль вслепую.
+ *
+ * Сама сцена (холст и сфера) — ОДИН компонент на оба входа, он живёт в
+ * apps/web/src/pages/login. Своей копии у панели нет намеренно: две копии
+ * одной сцены разъезжаются, и чинить их приходится дважды. Панель отличают
+ * только цвета (login/loginPalette.ts) и значки (login/adminIcons.tsx).
  */
 import { useState, type FormEvent } from 'react';
 import { Button } from '@web/components';
+import { DEFAULT_PRODUCT_NAME, logoAlt, logoSrc, useBranding } from '@web/lib/branding';
+import { LoginConstellation } from '@web/pages/login/LoginConstellation';
+import { LoginGlobe } from '@web/pages/login/LoginGlobe';
+import { pausedAttr, usePageVisible } from '@web/pages/login/usePageVisible';
 import { useSession } from '../app/session';
-import { AdminIconSprite, ICON_PREFIX } from './login/adminIcons';
-import { LoginConstellation } from './login/LoginConstellation';
-import { LoginGlobe } from './login/LoginGlobe';
-import { paletteVars } from './login/loginPalette';
+import { ADMIN_CENTER_ICON, ADMIN_ORBIT_ICONS, AdminIconSprite, ICON_PREFIX } from './login/adminIcons';
+import { constellationLook, paletteVars } from './login/loginPalette';
 import styles from './LoginPage.module.css';
+
+/**
+ * Значки сцены в том виде, в каком их ждёт общий компонент: адрес символа,
+ * а не имя. Символы вставлены в саму страницу (AdminIconSprite) — своей
+ * папки со статикой у панели нет, файл спрайта в её сборку не попадает.
+ */
+const GLOBE_ICONS = ADMIN_ORBIT_ICONS.map((icon) => ({
+  id: icon.id,
+  href: `#${ICON_PREFIX}${icon.id}`,
+}));
+const GLOBE_CENTER = { id: ADMIN_CENTER_ICON.id, href: `#${ICON_PREFIX}${ADMIN_CENTER_ICON.id}` };
 
 export function LoginPage() {
   const { login } = useSession();
@@ -27,6 +45,10 @@ export function LoginPage() {
   const [capsOn, setCapsOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** Своё оформление входа: тот же логотип, что и на входе в почту. */
+  const branding = useBranding();
+  /** Пока вкладку не видно, украшения фона стоят: они всё равно никому не видны. */
+  const visible = usePageVisible();
 
   async function onSubmit(event: FormEvent): Promise<void> {
     event.preventDefault();
@@ -47,24 +69,39 @@ export function LoginPage() {
   }
 
   return (
-    <div className={styles.page} style={paletteVars() as React.CSSProperties}>
+    <div
+      className={styles.page}
+      style={paletteVars() as React.CSSProperties}
+      data-paused={pausedAttr(visible)}
+    >
       {/* Значки рисуются кодом и живут прямо в странице: своей папки со
           статикой у админки нет, файл спрайта в её сборку не попадает. */}
       <AdminIconSprite />
 
-      <LoginConstellation />
+      <LoginConstellation look={constellationLook()} />
       <div className={styles.hazeTeal} aria-hidden="true" />
       <div className={styles.hazeSteel} aria-hidden="true" />
 
-      <LoginGlobe />
+      <LoginGlobe icons={GLOBE_ICONS} center={GLOBE_CENTER} />
 
       <section className={styles.panel}>
         <form className={styles.card} onSubmit={(e) => void onSubmit(e)}>
+          {/* Логотип и название берутся из настроек оформления (OEM): продукт
+              ставят под своим именем, и вход в панель обязан выглядеть так же,
+              как вход в почту, — иначе администратор решит, что попал не туда.
+              Пока своего логотипа нет, остаётся нарисованный знак консоли:
+              он отличает панель от почты, что и требовалось изначально. */}
           <div className={styles.brand}>
-            <svg className={styles.brandMark} viewBox="0 0 24 24" aria-hidden="true">
-              <use href={`#${ICON_PREFIX}console`} />
-            </svg>
-            <span className={styles.brandName}>Mail.True</span>
+            {branding.logo ? (
+              <img className={styles.brandLogo} src={logoSrc(branding)} alt={logoAlt(branding)} />
+            ) : (
+              <svg className={styles.brandMark} viewBox="0 0 24 24" aria-hidden="true">
+                <use href={`#${ICON_PREFIX}console`} />
+              </svg>
+            )}
+            <span className={styles.brandName}>
+              {branding.companyName ?? branding.productName ?? DEFAULT_PRODUCT_NAME}
+            </span>
           </div>
 
           {/* Заголовок первого уровня, а не подпись: по нему человек,

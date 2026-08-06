@@ -334,3 +334,7 @@ export const IconCopy = (p: IconProps = {}) =>
 
 /** Галочка — значение скопировано. */
 export const IconCheck = (p: IconProps = {}) => stroke(['M5 12.5l4.5 4.5L19 7'], p);
+
+/** Угловые скобки — «показать исходный текст письма». */
+export const IconCode = (p: IconProps = {}) =>
+  stroke(['M9 7.5 4.5 12 9 16.5', 'M15 7.5 19.5 12 15 16.5'], p);

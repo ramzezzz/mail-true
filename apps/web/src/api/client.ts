@@ -3,7 +3,7 @@
  * Все функции следуют контракту packages/shared; бэкенд пишется параллельно.
  */
 
-import type { Account, Folder, MessageListQuery } from '@mail-true/shared';
+import type { Account, DraftContent, Folder, MessageListQuery } from '@mail-true/shared';
 import { apiFetch, apiFetchBlob, buildQuery } from './http';
 import { connectWithRetry } from '../lib/reconnectingSocket';
 import type {
@@ -35,6 +35,7 @@ import type {
   MessagesPage,
   MoveRequest,
   MoveResponse,
+  ReadReceiptResponse,
   SendRequest,
   SendResponse,
   SessionInfo,
@@ -65,6 +66,18 @@ export interface MailApi {
   moveMessages(request: MoveRequest): Promise<MoveResponse>;
   sendMessage(request: SendRequest): Promise<SendResponse>;
   saveDraft(request: SendRequest): Promise<DraftSaveResponse>;
+  /**
+   * Сохранённый черновик обратно в окно написания. Без этого дописать своё
+   * же неотправленное письмо было нельзя: черновик сохранялся и на этом
+   * заканчивался.
+   */
+  getDraft(draftUid: number): Promise<DraftContent>;
+  /**
+   * Исходник письма целиком (RFC822) — все заголовки и тело как есть.
+   * Именно ТЕКСТ, а не разметка: письмо от кого угодно не должно
+   * выполниться в интерфейсе.
+   */
+  getMessageSource(messageId: string): Promise<string>;
   uploadAttachment(file: File): Promise<UploadResponse>;
   /**
    * Байты части письма — вложения или встроенной картинки. Тот же маршрут,
@@ -73,6 +86,12 @@ export interface MailApi {
    * а потом загружается обратно обычным `POST /api/uploads`.
    */
   getMessagePart(messageId: string, partId: string): Promise<Blob>;
+  /**
+   * Ответ на просьбу отправителя уведомить о прочтении. `send: false` —
+   * человек отказался; уведомление не уходит, но спрашивать второй раз
+   * сервер больше не будет.
+   */
+  sendReadReceipt(messageId: string, send: boolean): Promise<ReadReceiptResponse>;
   /** Подписка на серверные события; возвращает функцию отписки. */
   subscribe(onEvent: (event: WsEvent) => void): () => void;
 
@@ -180,6 +199,15 @@ export const httpApi: MailApi = {
     };
   },
 
+  getDraft: (draftUid) => apiFetch(`/api/drafts/${encodeURIComponent(String(draftUid))}`),
+
+  // Исходник отдаётся как файл (message/rfc822), поэтому берём его байтами
+  // и читаем текстом: apiFetch споткнулся бы о response.json().
+  getMessageSource: async (messageId) => {
+    const blob = await apiFetchBlob(`/api/messages/${encodeURIComponent(messageId)}/source`);
+    return blob.text();
+  },
+
   // Сервер отвечает списком `{ files: [...] }`, даже когда файл один.
   uploadAttachment: async (file) => {
     const form = new FormData();
@@ -197,6 +225,12 @@ export const httpApi: MailApi = {
     apiFetchBlob(
       `/api/messages/${encodeURIComponent(messageId)}/parts/${encodeURIComponent(partId)}`,
     ),
+
+  sendReadReceipt: (messageId, send) =>
+    apiFetch(`/api/messages/${encodeURIComponent(messageId)}/read-receipt`, {
+      method: 'POST',
+      body: JSON.stringify({ send }),
+    }),
 
   /* --- Помощник на основе ИИ ---------------------------------------- */
 

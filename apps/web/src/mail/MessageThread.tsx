@@ -21,6 +21,7 @@ import { formatListDate, formatMessageDate } from '../lib/listDates';
 import { threadRowStates } from '../lib/threads';
 import { IconAttach, IconNewTab } from './icons';
 import styles from './MessageThread.module.css';
+import { SenderAvatar } from './SenderAvatar';
 
 export interface MessageThreadProps {
   /** Остальные письма цепочки, старые сверху — как в mail.ru. */
@@ -116,9 +117,18 @@ function ThreadLetter({
         <span className={styles.readStatus}>
           {!message.flags.seen && <span className={styles.unreadDot} aria-hidden="true" />}
         </span>
-        <span className={styles.avatar} aria-hidden="true">
-          {(sender[0] ?? '?').toUpperCase()}
-        </span>
+        {/* Тот же кружок, что в списке и в шапке открытого письма.
+            `tint={false}` — потому что кружки цепочки намеренно серые, одним
+            цветом из темы: в переписке двух человек разноцветная лесенка
+            выглядела бы пестрее самих писем. Логотип это не отменяет: под
+            ним подложка своя. */}
+        <SenderAvatar
+          className={styles.avatar}
+          name={sender}
+          address={message.from.address}
+          logoDomain={message.senderLogoDomain}
+          tint={false}
+        />
         <span className={styles.details}>
           <span className={styles.detailsLine}>
             <span className={styles.sender}>{sender}</span>

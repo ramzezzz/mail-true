@@ -1,10 +1,14 @@
 /*
- * Задник страницы входа: холст с созвездием и проволочный глобус.
+ * Задник страницы входа: холст с фоном и проволочная сфера.
  * Перенесено из прототипа `login_page/styles.css`.
  *
- * Глобус собран из плоских колец, повёрнутых в трёх измерениях, — растровой
- * картинки нет вовсе. Кольца расставляет LoginGlobe.tsx: их два десятка, и
- * держать такое в разметке руками невозможно.
+ * Растровых картинок нет вовсе — сфера собрана из плоских колец, повёрнутых
+ * в трёх измерениях. Кольца, шары и значки расставляет LoginGlobe.tsx.
+ *
+ * Файл общий для почты и панели управления. Все цвета взяты из переменных
+ * `--mt-login-*`: значения по умолчанию — фирменная синяя гамма почты, а
+ * панель подменяет их на свою (см. admin/pages/login/loginPalette.ts).
+ * Так одна и та же сцена служит обоим входам и не разъезжается.
  */
 
 .fx {
@@ -16,45 +20,59 @@
   display: block;
 }
 
+/*
+ * Сцена. Сторона намеренно больше сферы: внутри неё сфера занимает 76%
+ * (inset 12%), а поля нужны, чтобы значки на орбите и свечение не
+ * обрезались краем.
+ */
 .stage {
   position: absolute;
   z-index: 2;
-  left: 8%;
+  left: 6%;
   top: 50%;
-  width: 34rem;
-  height: 34rem;
+  width: 46rem;
+  height: 46rem;
   transform: translateY(-50%);
-  perspective: 1400px;
+  perspective: 1900px;
   animation: mtStageIn 1s ease both;
 }
 
 /* Слабое свечение под сферой */
 .aura {
   position: absolute;
-  inset: 8%;
+  inset: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(0, 110, 198, 0.2) 0%, transparent 62%);
+  background: radial-gradient(circle, var(--mt-login-aura, rgba(0, 110, 198, 0.22)) 0%, transparent 62%);
 }
 .aura::before,
 .aura::after {
   content: '';
   position: absolute;
   border-radius: 50%;
-  border: 1px solid rgba(120, 170, 240, 0.1);
+  border: 1px solid var(--mt-login-aura-ring, rgba(120, 170, 240, 0.1));
 }
 .aura::before {
   inset: 4%;
 }
 .aura::after {
   inset: 16%;
-  border-color: rgba(120, 170, 240, 0.07);
+  border-color: var(--mt-login-aura-ring-far, rgba(120, 170, 240, 0.07));
 }
 
+/*
+ * Вращающаяся часть сцены: проволока и шары на ней.
+ *
+ * Наклон записан и в правиле, и в кадрах анимации. Это не дублирование:
+ * когда анимацию гасят (движение выключено или вкладку спрятали), остаётся
+ * ровно то положение, что задано правилом, — сфера стоит наклонённой, а не
+ * заваливается плашмя.
+ */
 .globe {
   position: absolute;
-  inset: 0;
+  inset: 12%;
   transform-style: preserve-3d;
-  animation: mtSpin 34s linear infinite;
+  transform: rotateX(61deg) rotateY(-16deg);
+  animation: mtGlobeSpin 60s linear infinite;
 }
 .rings {
   position: absolute;
@@ -62,16 +80,74 @@
   transform-style: preserve-3d;
 }
 
-/* Одно кольцо сферы. Углы поворота задаёт LoginGlobe.tsx. */
+/* Одно кольцо сферы — полный круг. Угол поворота задаёт LoginGlobe.tsx. */
 .ring {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(150, 190, 245, 0.28);
+  border: 1px solid var(--mt-login-ring, rgba(150, 195, 246, 0.3));
   border-radius: 50%;
   transform: rotateX(var(--mt-ring-x, 0deg)) rotateY(var(--mt-ring-y, 0deg));
 }
 .ringBright {
-  border-color: rgba(170, 205, 250, 0.42);
+  border-color: var(--mt-login-ring-bright, rgba(175, 210, 250, 0.5));
+}
+
+/* --- Светящиеся шары, бегущие по кольцам ------------------------------- */
+
+.balls {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+/* Плоскость одного кольца: шар обходит круг именно в ней */
+.ballPlane {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--mt-ring-x, 0deg)) rotateY(var(--mt-ring-y, 0deg));
+}
+.ballOrbit {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  animation: mtSpin360 var(--mt-ball-duration, 11s) linear infinite;
+  animation-delay: var(--mt-ball-delay, 0s);
+}
+.ball {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin: -0.25rem 0 0 -0.25rem;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    #fff 0%,
+    var(--mt-login-ball-mid, rgba(150, 205, 255, 0.95)) 34%,
+    var(--mt-login-ball-edge, rgba(90, 160, 250, 0.55)) 60%,
+    transparent 78%
+  );
+  box-shadow: 0 0 11px 3px var(--mt-login-ball-halo, rgba(140, 195, 255, 0.8));
+  /*
+   * Вынос шара на радиус сферы. Число подогнано к геометрии сцены:
+   * сторона 46rem, сфера занимает 76% от неё, значит её радиус —
+   * 46 × 0.76 ÷ 2 ≈ 17.5rem. Меняешь размер сцены — меняй и это.
+   */
+  transform: translateY(calc(var(--mt-login-ball-radius, 17.2rem) * -1));
+}
+
+/* --- Неподвижный слой: значки и середина ------------------------------- */
+
+/*
+ * Тот же прямоугольник, что и у сферы, но БЕЗ вращения: значки стоят на
+ * месте. Раньше они крутились вместе со сферой, и каждому приходилось
+ * задавать встречное вращение, чтобы он не вставал вверх ногами.
+ */
+.fxLayer {
+  position: absolute;
+  inset: 12%;
 }
 
 .node {
@@ -79,30 +155,34 @@
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: rgba(15, 32, 64, 0.55);
-  border: 1px solid rgba(150, 190, 245, 0.45);
-  color: #cfe0f8;
+  background: var(--mt-login-node-bg, rgba(15, 32, 64, 0.55));
+  border: 1px solid var(--mt-login-node-border, rgba(150, 190, 245, 0.45));
+  color: var(--mt-login-node-icon, #cfe0f8);
   width: 3.1rem;
   height: 3.1rem;
-  box-shadow: 0 0 16px rgba(0, 110, 198, 0.4);
+  box-shadow: 0 0 16px var(--mt-login-node-glow, rgba(0, 110, 198, 0.4));
 }
 .node svg {
   width: 55%;
   height: 55%;
 }
 
+/* Светящаяся середина: стоит на месте и ровно дышит */
 .nodeCenter {
   left: 50%;
   top: 50%;
   width: 5.4rem;
   height: 5.4rem;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle at 50% 40%, rgba(0, 110, 198, 0.55), rgba(15, 32, 64, 0.7));
-  border-color: rgba(180, 210, 250, 0.7);
-  color: #eaf2ff;
+  background: radial-gradient(
+    circle at 50% 40%,
+    var(--mt-login-center-core, rgba(0, 110, 198, 0.55)),
+    var(--mt-login-center-shell, rgba(15, 32, 64, 0.7))
+  );
+  border-color: var(--mt-login-center-border, rgba(180, 210, 250, 0.7));
   box-shadow:
-    0 0 34px rgba(0, 110, 198, 0.55),
-    inset 0 0 18px rgba(120, 175, 245, 0.4);
+    0 0 34px var(--mt-login-center-glow, rgba(0, 110, 198, 0.55)),
+    inset 0 0 18px var(--mt-login-center-inner, rgba(120, 175, 245, 0.4));
   z-index: 5;
   animation: mtPulse 4s ease-in-out infinite;
 }
@@ -112,25 +192,87 @@
   inset: 0;
 }
 
-@keyframes mtSpin {
+/*
+ * Обёртка значка держит увеличение при наведении переходом, а не анимацией:
+ * переход разгоняется и тормозит сам и работает в обе стороны, поэтому
+ * значок так же плавно возвращается к прежнему размеру, когда курсор ушёл.
+ */
+.nodeWrap {
+  position: absolute;
+  width: 3.1rem;
+  height: 3.1rem;
+  transform: scale(1);
+  transition: transform 0.45s cubic-bezier(0.22, 0.61, 0.28, 1);
+}
+@media (hover: hover) {
+  .nodeWrap:hover {
+    transform: scale(1.42);
+    z-index: 6;
+  }
+  /* Один оборот по часовой стрелке — разгон и торможение внутри самой
+     анимации, поэтому она не спорит с увеличением на обёртке. */
+  .nodeWrap:hover .node {
+    animation: mtIconSpin 0.95s ease-in-out;
+  }
+}
+.nodeWrap .node {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  animation: mtIconPulse var(--mt-node-duration, 2.6s) ease-in-out infinite alternate;
+  animation-delay: var(--mt-node-delay, 0s);
+}
+.nodeIcon {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Движение ---------------------------------------------------------- */
+
+@keyframes mtGlobeSpin {
   from {
-    transform: rotateY(0deg);
+    transform: rotateX(61deg) rotateY(-16deg) rotateZ(0deg);
   }
   to {
-    transform: rotateY(360deg);
+    transform: rotateX(61deg) rotateY(-16deg) rotateZ(360deg);
+  }
+}
+@keyframes mtSpin360 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes mtIconPulse {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.78);
+    opacity: 0.5;
+  }
+}
+@keyframes mtIconSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 @keyframes mtPulse {
   0%,
   100% {
     box-shadow:
-      0 0 30px rgba(0, 110, 198, 0.45),
-      inset 0 0 16px rgba(120, 175, 245, 0.35);
+      0 0 30px var(--mt-login-center-glow, rgba(0, 110, 198, 0.45)),
+      inset 0 0 16px var(--mt-login-center-inner, rgba(120, 175, 245, 0.35));
   }
   50% {
     box-shadow:
-      0 0 46px rgba(0, 130, 230, 0.7),
-      inset 0 0 22px rgba(140, 190, 250, 0.5);
+      0 0 46px var(--mt-login-center-glow-peak, rgba(0, 130, 230, 0.7)),
+      inset 0 0 22px var(--mt-login-center-inner-peak, rgba(140, 190, 250, 0.5));
   }
 }
 @keyframes mtStageIn {
@@ -144,20 +286,50 @@
   }
 }
 
+/*
+ * Вкладку спрятали — сцена замирает. Пауза, а не остановка: вернувшись,
+ * человек застаёт картинку там же, где оставил, без рывка к началу круга.
+ */
+.stage[data-paused='true'] .globe,
+.stage[data-paused='true'] .ballOrbit,
+.stage[data-paused='true'] .node,
+.stage[data-paused='true'] .nodeCenter {
+  animation-play-state: paused;
+}
+
+/*
+ * Просьбу не двигать картинку выполняем целиком: останавливается и
+ * вращение сферы, и бег шаров, и дыхание значков. Именно останавливается —
+ * не замедляется. Картинка при этом остаётся: сфера стоит в своём наклоне
+ * (он задан правилом .globe, а не только кадрами), значки на местах.
+ * Скрывать сцену было бы неправильно — человеку, которому мешает движение,
+ * картинка нужна не меньше.
+ */
 @media (prefers-reduced-motion: reduce) {
   .globe,
-  .nodeCenter {
-    animation: none;
+  .nodeCenter,
+  .ballOrbit,
+  .node {
+    /*
+     * `!important` здесь не про вес вообще, а про одно конкретное правило:
+     * оборот при наведении записан как `.nodeWrap:hover .node` и по
+     * селектору точнее, чем `.node`. Без пометки он пережил бы остановку —
+     * и значок всё равно крутился бы под курсором.
+     */
+    animation: none !important;
+  }
+  .nodeWrap {
+    transition: none;
   }
   .stage {
     animation-duration: 0.001s;
   }
 }
 
-/* На узком экране глобус уводим к краю, на телефоне убираем совсем. */
+/* На узком экране сцену уводим к краю, на телефоне убираем совсем. */
 @media (max-width: 1024px) {
   .stage {
-    left: -6%;
+    left: -14%;
     opacity: 0.5;
   }
 }

@@ -17,6 +17,23 @@ const loginSchema = z.object({
   password: z.string().min(1).max(1024),
 });
 
+/**
+ * Тема оформления панели.
+ *
+ * Проверяется ФОРМА значения, а не принадлежность к списку тем: названия
+ * тем — понятие интерфейса (apps/admin/src/appearance/adminThemes.ts), и
+ * список на сервере означал бы правку сервера на каждую новую расцветку.
+ * Незнакомое имя панель молча заменяет темой по умолчанию, так что худшее,
+ * что может записать сюда чужой запрос, — бесполезная строка в своей же
+ * учётной записи. null — «вернуть тему по умолчанию».
+ */
+const themeSchema = z.object({
+  theme: z
+    .string()
+    .regex(/^[a-z][a-z0-9-]{0,31}$/u, 'Недопустимое имя темы')
+    .nullable(),
+});
+
 function setAdminCookie(app: FastifyInstance, reply: FastifyReply, sessionId: string): void {
   const ctx = app.adminCtx;
   reply.setCookie(ctx.config.ADMIN_SESSION_COOKIE_NAME, sessionId, {
@@ -181,7 +198,29 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       roleLabel: isAdminRole(admin.role) ? ROLE_LABELS[admin.role] : admin.role,
       permissions: permissionsOf(admin.role),
       masterAccess: ctx.mailbox.configured,
+      // Оформление панели у ЭТОГО администратора. Приезжает вместе с
+      // сессией, а не отдельным запросом: панель применяет тему сразу,
+      // как только узнала, кто вошёл, — лишний рейс сюда означал бы
+      // лишнюю вспышку чужой темы на экране.
+      theme: await ctx.db.getAdminTheme(admin.adminId),
     };
+  });
+
+  /*
+   * Смена темы. Пишется в ту учётную запись, под которой вошли: id берётся
+   * из сессии, а не из тела запроса, — сменить оформление соседу нельзя.
+   *
+   * В журнал аудита НЕ пишется намеренно: там перечислены изменения, за
+   * которые администратор отвечает перед другими (ящики, домены, права),
+   * а цвет интерфейса не меняет ничего ни для кого, кроме автора. Заносить
+   * его в журнал значит топить настоящие события в шуме.
+   */
+  app.put('/auth/theme', async (request) => {
+    const admin = await loadAdminSession(app, request);
+    if (!admin) throw new UnauthorizedError();
+    const { theme } = themeSchema.parse(request.body);
+    await ctx.db.setAdminTheme(admin.adminId, theme);
+    return { ok: true, theme };
   });
 
   // Список администраторов — только для роли с правом admins.manage

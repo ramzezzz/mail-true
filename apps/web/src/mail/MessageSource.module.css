@@ -1,0 +1,98 @@
+/*
+ * Окно «Исходный текст письма». Шире обычного модального окна: строки
+ * заголовков RFC822 длинные, и переносить их лишний раз значит мешать
+ * тому, ради чего исходник и открывают. Все цвета — только из токенов --mt-*.
+ */
+
+.card {
+  max-width: 900px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.subject {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.download {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-subhead-size, 14px);
+  text-decoration: none;
+}
+
+/* Только там, где курсор существует: на телефоне «наведение» прилипает —
+   коснулся ссылки, и она осталась подсвеченной до следующего касания. */
+@media (hover: hover) {
+  .download:hover {
+    background: var(--mt-color-background-secondary);
+  }
+}
+
+.notice {
+  margin: 0 0 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+}
+
+.error {
+  margin: 0 0 8px;
+  color: var(--mt-color-text-negative, #e02c2c);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: 32px;
+}
+
+/*
+ * Сам исходник. Моноширинный шрифт и сохранение переносов — иначе заголовки
+ * письма перестают быть заголовками: выравнивание по столбцам и границы
+ * строк здесь несут смысл (продолжение заголовка начинается с пробела).
+ *
+ * Прокрутка своя, внутри окна: письмо бывает в тысячи строк, и растить окно
+ * до высоты письма значит потерять и кнопки, и возможность его закрыть.
+ */
+.source {
+  margin: 0;
+  max-height: 64vh;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-primary);
+  font-family: var(--mt-font-mono, 'JetBrains Mono', ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  /* Длинная строка (та же подпись DKIM) переносится, а не уезжает вбок:
+     горизонтальная прокрутка на несколько экранов делает текст нечитаемым */
+  white-space: pre-wrap;
+  word-break: break-all;
+  tab-size: 4;
+}

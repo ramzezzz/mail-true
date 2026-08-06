@@ -274,7 +274,13 @@ async function selectUidsWithAttachments(client: ImapFlow, uids: number[]): Prom
 }
 
 /** Пытается получить сниппет письма, скачав начало текстовой части. */
-async function fetchSnippet(client: ImapFlow, msg: FetchMessageObject): Promise<string> {
+/*
+ * Экспортируется ради уведомлений о новой почте (см. src/push/messages.ts):
+ * «первые фразы письма» во всплывающем окне обязаны быть теми же самыми,
+ * что человек видит в списке. Своя вторая реализация сниппета неизбежно
+ * разошлась бы с этой — по обрезке, по разбору HTML или по кодировке.
+ */
+export async function fetchSnippet(client: ImapFlow, msg: FetchMessageObject): Promise<string> {
   const ref = pickTextPart(msg.bodyStructure);
   if (!ref) return '';
   try {
@@ -350,7 +356,14 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
         // прислал восьмибитные байты без кодирования по RFC 2047 (старые
         // почтовые программы так делают до сих пор). Стоит несколько
         // десятков байт на письмо; см. mail/header-charset.ts.
-        headers: ['subject'],
+        // Authentication-Results — результат проверки подлинности
+        // отправителя, вписанный НАШИМ сервером при приёме. Нужен, чтобы
+        // решить, можно ли показать в кружке логотип домена: логотип
+        // читается как знак подлинности, и рядом с непроверенным письмом
+        // он опаснее, чем его отсутствие (см. mail/sender-auth.ts).
+        // Стоит ещё сотню байт на письмо и ни одного лишнего оборота
+        // к серверу: заголовок едет тем же ответом, что и тема.
+        headers: ['subject', 'authentication-results'],
       }, { uid: true });
       fetched.sort((a, b) => b.uid - a.uid);
       for (const msg of fetched) {

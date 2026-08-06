@@ -32,6 +32,7 @@ import { aiRoutes } from './ai/index.js';
 import { settingsRoutes } from './settings/index.js';
 import { accountsRoutes } from './accounts/index.js';
 import { senderLogosRoutes } from './logos/index.js';
+import { pushNotificationRoutes } from './push/index.js';
 
 export interface BuiltApp {
   app: FastifyInstance;
@@ -261,6 +262,19 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // настроек: маршрут спрашивает у них, разрешил ли человек эту возможность,
   // и ПОСЛЕ ИИ — помощник у них третий источник после BIMI и значка сайта.
   await senderLogosRoutes(app);
+
+  /*
+   * Уведомления о новой почте (см. src/push/). Регистрируются ПОСЛЕДНИМИ
+   * из разделов: они собирают у себя всё сразу — главный выключатель из
+   * настроек ящика, сводку у помощника ИИ и значок отправителя у
+   * логотипов. Все три берутся готовыми сервисами из декораций, поэтому
+   * порядок здесь не «для красоты»: раньше — и декораций ещё нет.
+   */
+  await pushNotificationRoutes(app);
+
+  // Наблюдатель за ящиками узнаёт о новых письмах первым — ему и звать
+  // рассылку уведомлений (см. ws.ts).
+  notifier.attachPush(app.pushService);
 
   await wsRoutes(app, notifier);
 

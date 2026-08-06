@@ -15,6 +15,19 @@ export type Permission =
   | 'domains.dnscheck'
   | 'audit.read'
   | 'mailbox.impersonate'
+  /** Настройки чужого ящика: смотреть, менять, ставить подписи пачкой. */
+  | 'usersettings.read'
+  | 'usersettings.write'
+  | 'usersettings.bulk'
+  /** Своё оформление входа (OEM): логотип и подписи страниц входа. */
+  | 'branding.read'
+  | 'branding.write'
+  /** Резервная копия настроек: выгрузка отдельно от восстановления. */
+  | 'backup.export'
+  | 'backup.restore'
+  /** Перенос почты с чужого сервера: смотреть ход отдельно от запуска. */
+  | 'migration.read'
+  | 'migration.run'
   | 'admins.manage';
 
 export interface AdminSession {
@@ -25,6 +38,13 @@ export interface AdminSession {
   roleLabel: string;
   permissions: Permission[];
   masterAccess: boolean;
+  /**
+   * Тема оформления, запомненная за ЭТОЙ учётной записью (миграция 0009).
+   * null — администратор темы не выбирал: панель берёт свою по умолчанию.
+   * Строка приходит как есть: незнакомое имя панель заменяет умолчанием
+   * сама, поэтому тип здесь широкий, а не перечисление тем.
+   */
+  theme: string | null;
 }
 
 export interface LoginResult {
@@ -607,4 +627,609 @@ export interface LogTailPage {
   rotated: boolean;
   /** Новых строк было больше предела: остальное придёт следующим запросом. */
   more: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Настройки чужого ящика                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Формы ниже повторяют контракт ПОЛЬЗОВАТЕЛЬСКИХ настроек
+ * (apps/web/src/api/settingsTypes.ts): админка правит те же самые
+ * настройки тем же самым телом запроса. Своего диалекта здесь нет
+ * намеренно — иначе сохранённое админкой пришлось бы переводить
+ * обратно для формы пользователя.
+ */
+export interface UserSignature {
+  id: string;
+  name: string;
+  text: string;
+}
+
+export interface UserGeneralSettings {
+  senderName: string;
+  signatures: UserSignature[];
+  defaultSignatureId: string | null;
+  autoReply: { enabled: boolean; text: string; from: string | null; to: string | null };
+  notifications: { browser: boolean; tabCounter: boolean };
+  quoteOriginalOnReply: boolean;
+  afterDelete: 'next-message' | 'list';
+  autoCollectContacts: boolean;
+}
+
+export type UserFilterField =
+  'from' | 'to' | 'subject' | 'cc' | 'size' | 'resent-from' | 'resent-to';
+export type UserFilterOperator = 'contains' | 'not-contains' | 'equals' | 'greater' | 'less';
+
+export interface UserFilterCondition {
+  field: UserFilterField;
+  operator: UserFilterOperator;
+  value: string;
+}
+
+export interface UserFilterRule {
+  id: string;
+  enabled: boolean;
+  auto: boolean;
+  conditions: UserFilterCondition[];
+  actions: {
+    moveToFolderId: string | null;
+    markRead: boolean;
+    markFlagged: boolean;
+    applyToExistingFolderIds: string[];
+    forwardTo: string | null;
+    autoReply: string | null;
+    continueOtherFilters: boolean;
+    applyToSpam: boolean;
+  };
+}
+
+/** Папка ящика в модели почтового API: идентификатор, путь, вложенность. */
+export interface UserMailFolder {
+  id: string;
+  path: string;
+  name: string;
+  role: string;
+  depth: number;
+  unreadCount: number;
+  totalCount: number;
+  system: boolean;
+}
+
+export interface UserSettingsBundle {
+  mailbox: {
+    id: number;
+    email: string;
+    displayName: string | null;
+    domain: string;
+    active: boolean;
+  };
+  general: UserGeneralSettings;
+  filters: UserFilterRule[];
+  folders: UserMailFolder[];
+  /** Служебный доступ Dovecot не настроен — папок нет, настройки работают. */
+  foldersAvailable: boolean;
+  foldersError: string | null;
+}
+
+/** Состояние переписывания личного файла правил Sieve после правки. */
+export interface SieveSyncState {
+  transport: string;
+  path: string;
+  activeRules: number;
+  /** Файл записан И проверен компилятором. */
+  ok: boolean;
+  /**
+   * Файл правил лежит в ящике и будет применён к почте. Отдельно от `ok`:
+   * без sievec рядом с сервером приложения правила записаны и работают,
+   * а вот при ошибке компиляции действующий файл намеренно не подменяется.
+   */
+  written: boolean;
+  error: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Групповая установка подписей по шаблону                             */
+/* ------------------------------------------------------------------ */
+
+export type SignatureBulkMode = 'replace' | 'append' | 'skip-existing';
+export type SignatureBulkOutcome = 'add' | 'replace' | 'skip-existing' | 'skip-incomplete';
+
+export interface SignatureBulkRequest {
+  ids?: number[];
+  domainId?: number;
+  template: string;
+  name?: string;
+  mode: SignatureBulkMode;
+  makeDefault?: boolean;
+  extras?: Record<string, string>;
+  skipIncomplete?: boolean;
+  previewEmail?: string;
+}
+
+export interface SignatureBulkRow {
+  id: number;
+  email: string;
+  displayName: string | null;
+  /** Сколько подписей у человека уже есть. */
+  existing: number;
+  outcome: SignatureBulkOutcome;
+  /** Подстановки, значения которых у этого человека нет. */
+  missing: string[];
+}
+
+/** Счётчики, которые администратор обязан увидеть ДО применения. */
+export interface SignatureBulkCounts {
+  total: number;
+  willAdd: number;
+  willReplace: number;
+  willSkipExisting: number;
+  willSkipIncomplete: number;
+  /** Сколько чужих подписей будет уничтожено. */
+  signaturesReplaced: number;
+  withExistingSignatures: number;
+}
+
+export interface SignatureBulkPreview extends SignatureBulkCounts {
+  /** Шаблон применять нельзя — здесь сказано, почему. */
+  problem: string | null;
+  mode: SignatureBulkMode;
+  rows: SignatureBulkRow[];
+  rowsTruncated: number;
+  sample: {
+    email: string;
+    displayName: string | null;
+    outcome: SignatureBulkOutcome;
+    missing: string[];
+    text: string;
+  } | null;
+}
+
+export interface SignatureBulkResult extends SignatureBulkCounts {
+  ok: true;
+  applied: number;
+  failed: Array<{ email: string; error: string }>;
+}
+
+export interface SignatureVariable {
+  name: string;
+  hint: string;
+  /** Значение задаёт администратор, а не карточка ящика. */
+  manual: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Своё оформление входа (OEM)                                          */
+/* ------------------------------------------------------------------ */
+
+export interface BrandingLimits {
+  maxBytes: number;
+  maxBytesText: string;
+  minWidth: number;
+  minHeight: number;
+  maxWidth: number;
+  maxHeight: number;
+  formats: string[];
+  nameMax: number;
+}
+
+export interface BrandingSettings {
+  companyName: string | null;
+  productName: string | null;
+  logo: {
+    /** Адрес с отпечатком содержимого: смена файла меняет адрес. */
+    url: string;
+    mime: string;
+    width: number;
+    height: number;
+    size: number;
+    version: string;
+    updatedAt: string;
+  } | null;
+  /** Пределы называются интерфейсом ДО загрузки, а не только в отказе. */
+  limits: BrandingLimits;
+}
+
+/* ------------------------------------------------------------------ */
+/* Резервная копия НАСТРОЕК (не писем: письма — install/backup.sh)      */
+/* ------------------------------------------------------------------ */
+
+export interface BackupSectionInfo {
+  id: string;
+  title: string;
+}
+
+export interface BackupSectionsResponse {
+  formatVersion: number;
+  sections: BackupSectionInfo[];
+  /** Что внутри файла из секретов — показывается рядом с кнопкой. */
+  secretsNote: string;
+}
+
+export interface BackupSectionPlan {
+  id: string;
+  title: string;
+  /** Появится заново. */
+  create: string[];
+  /** Будет перезаписано — то самое «что именно». */
+  overwrite: string[];
+  /** Есть здесь, но в копии нет: восстановление это не трогает. */
+  untouched: number;
+  warnings: string[];
+}
+
+export interface BackupRestorePlan {
+  version: number;
+  createdAt: string;
+  source: { hostname: string; domain: string };
+  sections: BackupSectionPlan[];
+  warnings: string[];
+}
+
+export interface BackupPreviewResponse {
+  plan: BackupRestorePlan;
+  counts: Record<string, number>;
+}
+
+export interface BackupRestoreResponse {
+  ok: true;
+  applied: Record<string, { created: number; updated: number }>;
+  plan: BackupRestorePlan;
+  sieve: { resynced: number; errors: string[] };
+  note: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Дашборд наблюдения                                                   */
+/*                                                                      */
+/* Показатель здесь — это ПАРА «значение или null» и строка о том,       */
+/* откуда оно взято. Голое число не годится: сервер приложения живёт     */
+/* в контейнере и часть показателей увидеть не может, а прочерк без      */
+/* причины выглядит как поломка панели, а не как честное «недоступно».   */
+/* ------------------------------------------------------------------ */
+
+export interface Measured {
+  value: number | null;
+  /** Файл, из которого прочитано, или объяснение, почему не прочитано. */
+  source: string;
+}
+
+export interface VolumeUsage {
+  path: string;
+  device: number | null;
+  totalBytes: number;
+  freeBytes: number;
+  usedBytes: number;
+}
+
+/** Статья расхода места: письма, индексы, база, журналы, очередь. */
+export interface DiskSlice {
+  id: string;
+  title: string;
+  bytes: number | null;
+  source: string;
+}
+
+export interface QueueBrief {
+  available: boolean;
+  total: number | null;
+  deferred: number | null;
+  oldestSeconds: number | null;
+  topDeferredDomains: Array<{ domain: string; count: number }>;
+  note: string;
+}
+
+export interface OverviewResources {
+  takenAt: string | null;
+  intervalSeconds: number;
+  cpu: {
+    nodePercent: Measured;
+    apiPercent: Measured;
+    cores: Measured;
+    apiLimit: Measured;
+    load1: Measured;
+  } | null;
+  memory: { total: Measured; used: Measured; api: Measured; apiLimit: Measured } | null;
+  volumes: VolumeUsage[];
+  singleDevice: boolean;
+  slices: DiskSlice[];
+  queue: QueueBrief | null;
+  /** Что недоступно из контейнера и почему — показывается словами. */
+  unavailable: string[];
+}
+
+export interface MetricPoint {
+  at: string;
+  cpuNodePercent: number | null;
+  cpuApiPercent: number | null;
+  load1: number | null;
+  memUsedPercent: number | null;
+  memApiBytes: number | null;
+  diskUsedPercent: number | null;
+  vmailBytes: number | null;
+  dbBytes: number | null;
+  queueTotal: number | null;
+  queueDeferred: number | null;
+  queueOldestSeconds: number | null;
+}
+
+export interface OverviewHistory {
+  available: boolean;
+  note: string;
+  hours: number;
+  stepSeconds: number;
+  points: MetricPoint[];
+}
+
+export interface OverviewMail {
+  hours: number;
+  stepSeconds: number;
+  buckets: Array<{ at: string; counts: Record<string, number> }>;
+  totals: Record<string, number>;
+  byDirection: Record<string, number>;
+  spamRejected: number;
+  spamNote: string;
+  rejectReasons: Array<{ reason: string; count: number }>;
+  deferReasons: Array<{ reason: string; count: number }>;
+  sizes: {
+    messages: number;
+    totalBytes: number;
+    avgBytes: number | null;
+    medianBytes: number | null;
+    maxBytes: number | null;
+  };
+  hourly: Array<{ hour: number; count: number }>;
+  historyStartsAt: string | null;
+  historyEndsAt: string | null;
+  mailboxesTotal: number;
+  mailboxesActive: number;
+  activityNote: string;
+}
+
+export type UserTrafficSort =
+  | 'sentMessages'
+  | 'sentBytes'
+  | 'receivedMessages'
+  | 'receivedBytes'
+  | 'totalMessages'
+  | 'totalBytes';
+
+export interface UserTrafficRow {
+  id: number;
+  email: string;
+  active: boolean;
+  quotaBytes: number;
+  sentMessages: number;
+  sentBytes: number;
+  receivedMessages: number;
+  receivedBytes: number;
+}
+
+export interface OverviewUsers {
+  hours: number;
+  sort: UserTrafficSort;
+  limit: number;
+  offset: number;
+  total: number;
+  items: UserTrafficRow[];
+}
+
+export interface MailboxDiskRow {
+  email: string;
+  bytes: number;
+  messages: number;
+  quotaBytes: number;
+  /** Доля квоты в процентах; null — квоты нет вовсе. */
+  usedPercent: number | null;
+  active: boolean;
+  known: boolean;
+}
+
+export interface OverviewMailboxes {
+  available: boolean;
+  note: string;
+  takenAt: string | null;
+  totalBytes: number;
+  withoutAccounting: number;
+  total: number;
+  items: MailboxDiskRow[];
+}
+
+export interface TlsCertificate {
+  title: string;
+  host: string;
+  port: number;
+  available: boolean;
+  subject: string | null;
+  issuer: string | null;
+  validFrom: string | null;
+  validTo: string | null;
+  daysLeft: number | null;
+  selfSigned: boolean;
+  names: string[];
+  error: string | null;
+}
+
+export interface OverviewSecurity {
+  warnDays: number;
+  certificateNote: string;
+  certificates: TlsCertificate[];
+  domains: Array<{
+    id: number;
+    name: string;
+    dnsOverall: DnsStatus;
+    dnsCheckedAt: string | null;
+    dkimSelector: string | null;
+    dkimConfigured: boolean;
+  }>;
+}
+
+/* --- Логотипы доменов отправителей ---------------------------------- */
+
+/**
+ * Что действует у домена сейчас:
+ *   blocked — логотип запрещён администратором, в кружке буква;
+ *   manual  — картинка загружена вручную (она сильнее найденной);
+ *   auto    — найдено само (BIMI или значок сайта);
+ *   none    — не нашлось ничего, в кружке буква.
+ */
+export type SenderLogoState = 'blocked' | 'manual' | 'auto' | 'none';
+
+export interface SenderLogoRow {
+  domain: string;
+  state: SenderLogoState;
+  /** Откуда взята автоматическая картинка: 'bimi' | 'favicon' | 'ai'. */
+  autoSource: string | null;
+  /** Своя картинка есть — даже если домен запрещён и её не видно. */
+  hasManual: boolean;
+  width: number | null;
+  height: number | null;
+  /** Отпечаток действующей картинки: с ним предпросмотр не берётся из кэша. */
+  version: string | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface SenderLogoList {
+  items: SenderLogoRow[];
+  total: number;
+  limit: number;
+  offset: number;
+  limits: {
+    maxBytes: number;
+    maxBytesText: string;
+    minWidth: number;
+    minHeight: number;
+    maxWidth: number;
+    maxHeight: number;
+  };
+}
+
+/** Ответ на изменение: состояние одного домена после действия. */
+export interface SenderLogoDomainState {
+  domain: string;
+  state: SenderLogoState;
+  autoSource: string | null;
+  hasManual: boolean;
+  version: string | null;
+}
+
+/* --- Перенос почты с чужого сервера ---------------------------------- */
+
+/**
+ * Готовность раздела. Раздел работает только целиком, поэтому вместо
+ * одного «недоступно» показываются все три условия по отдельности:
+ * человеку нужно знать, что именно настроить.
+ */
+export interface MigrationSettings {
+  ready: boolean;
+  /** Служебный доступ к нашему Dovecot: без него писать в ящики нечем. */
+  masterConfigured: boolean;
+  /** Секрет шифрования: без него пароли исходных ящиков негде хранить. */
+  secretConfigured: boolean;
+  /** Применена ли миграция 0011. */
+  schemaReady: boolean;
+  destHost: string | null;
+  destPort: number | null;
+  defaultMasterSeparator: string;
+}
+
+/** Итог проверки связи с исходным сервером. */
+export interface MigrationCheck {
+  ok: boolean;
+  /** Имя, под которым входили: в служебном режиме «ящик*служебный». */
+  loginName: string;
+  folders: number | null;
+  messages: number | null;
+  /** Разобранное объяснение отказа — не код и не «ошибка». */
+  error: string | null;
+}
+
+/** Строка разобранного списка. Пароля здесь нет и быть не может. */
+export interface MigrationRowPreview {
+  sourceUser: string;
+  destUser: string;
+  /** Принесла ли строка пароль. Сам пароль остаётся на сервере. */
+  hasPassword: boolean;
+}
+
+export interface MigrationListPreview {
+  format: 'kerio-csv' | 'kerio-cfg' | 'pairs-csv' | 'plain';
+  total: number;
+  withPassword: number;
+  problems: string[];
+  rows: MigrationRowPreview[];
+}
+
+export type MigrationJobState = 'queued' | 'running' | 'done' | 'failed' | 'stopped';
+
+export interface MigrationJob {
+  id: number;
+  adminLogin: string;
+  state: MigrationJobState;
+  stopRequested: boolean;
+  sourceHost: string;
+  sourcePort: number;
+  sourceSecure: boolean;
+  /** Имя служебного пользователя источника (не секрет). */
+  masterUser: string | null;
+  total: number;
+  done: number;
+  copied: number;
+  skipped: number;
+  failed: number;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  /** Ведёт ли задание живой работник — иначе числа замрут не из-за поломки. */
+  live: boolean;
+}
+
+export type MigrationItemState = 'queued' | 'running' | 'ok' | 'partial' | 'failed' | 'stopped';
+
+export interface MigrationItem {
+  position: number;
+  sourceUser: string;
+  destUser: string;
+  state: MigrationItemState;
+  total: number;
+  copied: number;
+  skipped: number;
+  failed: number;
+  /** Папка, которая переносится прямо сейчас. */
+  currentFolder: string | null;
+  errors: string[];
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface MigrationJobDetails {
+  job: MigrationJob;
+  items: MigrationItem[];
+}
+
+export interface MigrationStarted {
+  ok: true;
+  jobId: number;
+  total: number;
+  state: 'queued';
+  retryOf?: number;
+}
+
+/** Настройки исходного сервера, которые вводит человек. Секретов здесь нет. */
+export interface MigrationSource {
+  host: string;
+  port: number;
+  secure: boolean;
+  allowInsecureTls: boolean;
+  masterUser?: string;
+  masterSeparator?: string;
+}
+
+/** Список ящиков: текст как есть, разбирает его сервер. */
+export interface MigrationListInput {
+  text: string;
+  sourceDomain?: string;
+  destDomain?: string;
 }

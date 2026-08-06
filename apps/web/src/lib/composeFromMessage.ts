@@ -6,8 +6,9 @@
  * значило бы получить два разных ответа.
  */
 
-import type { Message } from '@mail-true/shared';
+import type { DraftContent, Message } from '@mail-true/shared';
 import type { ComposeInit } from '../app/store';
+import { formatAddresses } from './addresses';
 
 /** Цитата исходного письма для ответа/пересылки. */
 export function quoteHtml(message: Message): string {
@@ -30,6 +31,32 @@ export function replyInit(message: Message, quoteOriginal: boolean): ComposeInit
     inReplyTo: message.messageId ?? undefined,
     references: message.messageId ? [...message.references, message.messageId] : undefined,
     sourceMessageId: message.id,
+  };
+}
+
+/**
+ * Дописывание сохранённого черновика.
+ *
+ * Ключевое здесь — `draftUid`. По нему окно написания понимает, что письмо
+ * продолжают, а не начинают: тело берётся как есть (подпись в нём уже есть),
+ * а сохранение перезаписывает ТОТ ЖЕ черновик, а не кладёт в папку ещё одну
+ * копию. Без этого дописывание превращало один черновик в три.
+ */
+export function draftInit(draft: DraftContent): ComposeInit {
+  return {
+    draftUid: draft.draftUid,
+    to: formatAddresses(draft.to),
+    cc: formatAddresses(draft.cc),
+    bcc: formatAddresses(draft.bcc),
+    subject: draft.subject,
+    bodyHtml: draft.bodyHtml,
+    attachments: draft.attachments,
+    requestReadReceipt: draft.requestReadReceipt,
+    // Черновик ответа остаётся ответом: без этих двух полей дописанное
+    // письмо ушло бы новой перепиской, и у получателя оно встало бы
+    // отдельной веткой вместо продолжения разговора.
+    inReplyTo: draft.inReplyTo ?? undefined,
+    references: draft.references.length > 0 ? draft.references : undefined,
   };
 }
 

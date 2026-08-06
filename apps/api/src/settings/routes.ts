@@ -64,6 +64,21 @@ export const generalSchema = z.object({
   quoteOriginalOnReply: z.boolean().default(true),
   afterDelete: z.enum(['next-message', 'list']).default('list'),
   autoCollectContacts: z.boolean().default(true),
+  /*
+   * Логотипы доменов в кружках списка писем.
+   *
+   * БЕЗ `.default()` — и это не небрежность. Zod выбрасывает поля, которых
+   * нет в схеме, поэтому без этой строки настройка не доходила до базы
+   * вовсе: интерфейс её слал, сервер отвечал «сохранено», а в базе
+   * оставалось прежнее значение. Найдено на живом стенде.
+   *
+   * Но и значение по умолчанию здесь ставить нельзя: этот же маршрут
+   * (и этот же контракт) правит админка, которая о поле не знает. С
+   * `.default(false)` каждое сохранение из админки молча выключало бы
+   * человеку логотипы. `undefined` означает «не трогать» — так это и
+   * разбирает fromWebGeneral.
+   */
+  showSenderLogos: z.boolean().optional(),
 });
 
 const conditionSchema = z.object({

@@ -115,6 +115,58 @@ export interface ImportJobRow {
   expires_at: Date;
 }
 
+/**
+ * Строка задания переноса почты (миграция 0011).
+ *
+ * secret_enc — шифротекст паролей исходных ящиков. Наружу не отдаётся
+ * НИКОГДА, даже в таком виде: унесённый шифротекст ждёт компрометации
+ * ключа. Поэтому читающие запросы подставляют вместо него NULL, а полное
+ * чтение делает только работник (см. findMigrationJobWithSecret).
+ */
+export interface MigrationJobRow {
+  id: string;
+  admin_login: string;
+  state: string;
+  stop_requested: boolean;
+  source_host: string;
+  source_port: number;
+  source_secure: boolean;
+  source_insecure_tls: boolean;
+  source_master_user: string | null;
+  source_master_separator: string | null;
+  secret_enc: string | null;
+  total: number;
+  done_count: number;
+  copied: string | number;
+  skipped: string | number;
+  failed: string | number;
+  error: string | null;
+  runner: string | null;
+  heartbeat_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+  started_at: Date | null;
+  finished_at: Date | null;
+}
+
+/** Строка «ящик задания переноса». */
+export interface MigrationItemRow {
+  id: string;
+  job_id: string;
+  position: number;
+  source_user: string;
+  dest_user: string;
+  state: string;
+  total: number;
+  copied: number;
+  skipped: number;
+  failed: number;
+  current_folder: string | null;
+  errors: string | null;
+  started_at: Date | null;
+  finished_at: Date | null;
+}
+
 /** Уникальное нарушение Postgres (23505) — адрес/домен уже занят. */
 export function isUniqueViolation(err: unknown): boolean {
   return Boolean(err && typeof err === 'object' && (err as { code?: string }).code === '23505');
@@ -123,6 +175,11 @@ export function isUniqueViolation(err: unknown): boolean {
 /** Отсутствующая таблица (42P01) — миграция 0003 не применена. */
 export function isUndefinedTable(err: unknown): boolean {
   return Boolean(err && typeof err === 'object' && (err as { code?: string }).code === '42P01');
+}
+
+/** Отсутствующий столбец (42703) — например, миграция 0009 не применена. */
+export function isUndefinedColumn(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && (err as { code?: string }).code === '42703');
 }
 
 export class AdminDb {
@@ -208,6 +265,42 @@ export class AdminDb {
          FROM admin_users WHERE id = $1`,
       [id],
     );
+  }
+
+  /**
+   * Тема оформления панели у администратора (миграция 0009).
+   *
+   * Отдельный запрос, а не столбец в общих SELECT: тема нужна ровно двум
+   * местам (ответ о сессии и её запись), а строку администратора читают
+   * с десяток мест, включая вход, — им лишний столбец ни к чему.
+   *
+   * База без миграции 0009 не должна ронять вход в панель: столбца нет —
+   * значит, темы нет, панель возьмёт свою по умолчанию. Ошибка при этом
+   * попадает в журнал ОДИН раз на запрос, а не на экран администратора.
+   */
+  async getAdminTheme(id: number): Promise<string | null> {
+    try {
+      const row = await this.one<{ theme: string | null }>(
+        `SELECT theme FROM admin_users WHERE id = $1`,
+        [id],
+      );
+      return row?.theme ?? null;
+    } catch (err) {
+      if (!isUndefinedColumn(err)) throw err;
+      this.opts.logger.warn(
+        { ...errorInfo(err) },
+        'В admin_users нет столбца theme: примените infra/postgres/migrations/0009_admin_appearance.sql. Панель работает с темой по умолчанию.',
+      );
+      return null;
+    }
+  }
+
+  /** Запомнить тему за администратором. null — «вернуть тему по умолчанию». */
+  async setAdminTheme(id: number, theme: string | null): Promise<void> {
+    await this.query(`UPDATE admin_users SET theme = $2, updated_at = now() WHERE id = $1`, [
+      id,
+      theme,
+    ]);
   }
 
   async listAdmins(): Promise<AdminUserRow[]> {
@@ -1059,6 +1152,300 @@ export class AdminDb {
   async deleteExpiredImportJobs(): Promise<number> {
     const rows = await this.query<{ id: string }>(
       `DELETE FROM user_import_jobs WHERE expires_at <= now() RETURNING id::text`,
+    );
+    return rows.length;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Задания переноса почты (миграция 0011)                             */
+  /* ---------------------------------------------------------------- */
+
+  /** Применена ли миграция 0011: без неё раздел переноса честно отвечает 503. */
+  async migrationSchemaReady(): Promise<boolean> {
+    const row = await this.one<{ ok: boolean }>(
+      `SELECT to_regclass('public.mail_migration_jobs') IS NOT NULL AS ok`,
+    );
+    return row?.ok === true;
+  }
+
+  /**
+   * Завести задание вместе со списком ящиков одной транзакцией.
+   *
+   * Именно транзакцией: задание без строк ящиков — это «идёт перенос
+   * ничего», а строки без задания вообще никто никогда не увидит.
+   */
+  async createMigrationJob(input: {
+    adminId: number;
+    adminLogin: string;
+    source: {
+      host: string;
+      port: number;
+      secure: boolean;
+      allowInsecureTls: boolean;
+      masterUser: string | null;
+      masterSeparator: string | null;
+    };
+    secretEnc: string;
+    mailboxes: ReadonlyArray<{ sourceUser: string; destUser: string }>;
+  }): Promise<number> {
+    return this.transaction(async (client) => {
+      const job = await client.query<{ id: string }>(
+        `INSERT INTO mail_migration_jobs
+           (admin_id, admin_login, source_host, source_port, source_secure,
+            source_insecure_tls, source_master_user, source_master_separator,
+            secret_enc, total)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING id::text`,
+        [
+          input.adminId > 0 ? input.adminId : null,
+          input.adminLogin,
+          input.source.host,
+          input.source.port,
+          input.source.secure,
+          input.source.allowInsecureTls,
+          input.source.masterUser,
+          input.source.masterSeparator,
+          input.secretEnc,
+          input.mailboxes.length,
+        ],
+      );
+      const id = Number(job.rows[0]?.id ?? 0);
+      for (const [index, box] of input.mailboxes.entries()) {
+        await client.query(
+          `INSERT INTO mail_migration_items (job_id, position, source_user, dest_user)
+           VALUES ($1, $2, $3, $4)`,
+          [id, index, box.sourceUser, box.destUser],
+        );
+      }
+      return id;
+    });
+  }
+
+  /**
+   * Взять незавершённые задания под себя.
+   *
+   * Именно так перенос переживает перезапуск контейнера: у нового процесса
+   * другой runner, а heartbeat_at прежнего перестал обновляться — задание
+   * со «стухшим» биением подхватывается и продолжается с того места, где
+   * его застал перезапуск (состояние докачки лежит в migrate_cursors).
+   *
+   * @param staleSeconds после какого молчания считать прежнего работника мёртвым
+   */
+  async claimMigrationJobs(runner: string, staleSeconds: number): Promise<MigrationJobRow[]> {
+    return this.query<MigrationJobRow>(
+      `UPDATE mail_migration_jobs
+          SET runner = $1, heartbeat_at = now(), updated_at = now()
+        WHERE state IN ('queued', 'running')
+          AND (runner IS NULL
+               OR runner = $1
+               OR heartbeat_at IS NULL
+               OR heartbeat_at < now() - make_interval(secs => $2::double precision))
+        RETURNING id::text, admin_login, state, stop_requested, source_host, source_port,
+                  source_secure, source_insecure_tls, source_master_user,
+                  source_master_separator, secret_enc, total, done_count, copied,
+                  skipped, failed, error, runner, heartbeat_at, created_at, updated_at,
+                  started_at, finished_at`,
+      [runner, staleSeconds],
+    );
+  }
+
+  /**
+   * Отпустить задание при остановке процесса, НЕ завершая его.
+   *
+   * Разница с updateMigrationJob({finished:true}) принципиальная: там
+   * задание заканчивается и пароли стираются, здесь оно остаётся идущим
+   * и пароли остаются. Перезапуск контейнера — не решение человека
+   * прекратить перенос; закончив задание по SIGTERM, мы стирали бы пароли
+   * и превращали обновление образа в потерю ночи переноса.
+   *
+   * Обнулённый runner значит «ничей»: следующий процесс забирает задание
+   * немедленно, не выжидая срока молчания.
+   */
+  async releaseMigrationJob(id: number, runner: string): Promise<void> {
+    await this.query(
+      `UPDATE mail_migration_jobs
+          SET runner = NULL, heartbeat_at = NULL, updated_at = now()
+        WHERE id = $1 AND runner = $2 AND state IN ('queued', 'running')`,
+      [id, runner],
+    );
+  }
+
+  /** Отметиться живым. Пока биение идёт, задание не отберёт другой процесс. */
+  async touchMigrationJob(id: number, runner: string): Promise<void> {
+    await this.query(
+      `UPDATE mail_migration_jobs SET heartbeat_at = now(), updated_at = now()
+        WHERE id = $1 AND runner = $2`,
+      [id, runner],
+    );
+  }
+
+  /** Нажали ли «Остановить». Работник спрашивает это между письмами. */
+  async isMigrationStopRequested(id: number): Promise<boolean> {
+    const row = await this.one<{ stop_requested: boolean }>(
+      'SELECT stop_requested FROM mail_migration_jobs WHERE id = $1',
+      [id],
+    );
+    return row?.stop_requested === true;
+  }
+
+  async requestMigrationStop(id: number): Promise<void> {
+    await this.query(
+      `UPDATE mail_migration_jobs SET stop_requested = TRUE, updated_at = now()
+        WHERE id = $1 AND state IN ('queued', 'running')`,
+      [id],
+    );
+  }
+
+  async updateMigrationJob(
+    id: number,
+    patch: {
+      state?: 'queued' | 'running' | 'done' | 'failed' | 'stopped';
+      doneCount?: number;
+      copied?: number;
+      skipped?: number;
+      failed?: number;
+      error?: string | null;
+      started?: boolean;
+      /**
+       * Завершение. Здесь же СТИРАЕТСЯ свёрток паролей: они нужны ровно
+       * столько, сколько идёт задание, и ни секундой дольше. Отдельной
+       * командой этого не делают намеренно — отдельную команду можно
+       * не выполнить (упал процесс, оборвалась связь), и пароль останется
+       * лежать в базе, хотя переносить уже нечего.
+       */
+      finished?: boolean;
+    },
+  ): Promise<void> {
+    const sets: string[] = ['updated_at = now()'];
+    const values: unknown[] = [];
+    const put = (column: string, value: unknown): void => {
+      values.push(value);
+      sets.push(`${column} = $${String(values.length)}`);
+    };
+    if (patch.state !== undefined) put('state', patch.state);
+    if (patch.doneCount !== undefined) put('done_count', patch.doneCount);
+    if (patch.copied !== undefined) put('copied', patch.copied);
+    if (patch.skipped !== undefined) put('skipped', patch.skipped);
+    if (patch.failed !== undefined) put('failed', patch.failed);
+    if (patch.error !== undefined) put('error', patch.error);
+    if (patch.started === true) sets.push('started_at = COALESCE(started_at, now())');
+    if (patch.finished === true) {
+      sets.push('finished_at = now()', 'secret_enc = NULL', 'runner = NULL');
+    }
+    values.push(id);
+    await this.query(
+      `UPDATE mail_migration_jobs SET ${sets.join(', ')} WHERE id = $${String(values.length)}`,
+      values,
+    );
+  }
+
+  /** Полная строка задания ВМЕСТЕ с шифротекстом — только для работника. */
+  async findMigrationJobWithSecret(id: number): Promise<MigrationJobRow | null> {
+    return this.one<MigrationJobRow>(
+      `SELECT id::text, admin_login, state, stop_requested, source_host, source_port,
+              source_secure, source_insecure_tls, source_master_user,
+              source_master_separator, secret_enc, total, done_count, copied, skipped,
+              failed, error, runner, heartbeat_at, created_at, updated_at, started_at,
+              finished_at
+         FROM mail_migration_jobs WHERE id = $1`,
+      [id],
+    );
+  }
+
+  /** Строка задания для интерфейса: шифротекст заменён на NULL. */
+  async findMigrationJob(id: number): Promise<MigrationJobRow | null> {
+    return this.one<MigrationJobRow>(
+      `SELECT id::text, admin_login, state, stop_requested, source_host, source_port,
+              source_secure, source_insecure_tls, source_master_user,
+              source_master_separator, NULL::text AS secret_enc, total, done_count,
+              copied, skipped, failed, error, runner, heartbeat_at, created_at,
+              updated_at, started_at, finished_at
+         FROM mail_migration_jobs WHERE id = $1`,
+      [id],
+    );
+  }
+
+  async listMigrationJobs(limit: number): Promise<MigrationJobRow[]> {
+    return this.query<MigrationJobRow>(
+      `SELECT id::text, admin_login, state, stop_requested, source_host, source_port,
+              source_secure, source_insecure_tls, source_master_user,
+              source_master_separator, NULL::text AS secret_enc, total, done_count,
+              copied, skipped, failed, error, runner, heartbeat_at, created_at,
+              updated_at, started_at, finished_at
+         FROM mail_migration_jobs
+        ORDER BY created_at DESC, id DESC
+        LIMIT $1`,
+      [limit],
+    );
+  }
+
+  async listMigrationItems(jobId: number): Promise<MigrationItemRow[]> {
+    return this.query<MigrationItemRow>(
+      `SELECT id::text, job_id::text, position, source_user, dest_user, state, total,
+              copied, skipped, failed, current_folder, errors, started_at, finished_at
+         FROM mail_migration_items WHERE job_id = $1 ORDER BY position`,
+      [jobId],
+    );
+  }
+
+  async updateMigrationItem(
+    jobId: number,
+    position: number,
+    patch: {
+      state?: 'queued' | 'running' | 'ok' | 'partial' | 'failed' | 'stopped';
+      total?: number;
+      copied?: number;
+      skipped?: number;
+      failed?: number;
+      currentFolder?: string | null;
+      errors?: string | null;
+      started?: boolean;
+      finished?: boolean;
+    },
+  ): Promise<void> {
+    const sets: string[] = ['updated_at = now()'];
+    const values: unknown[] = [];
+    const put = (column: string, value: unknown): void => {
+      values.push(value);
+      sets.push(`${column} = $${String(values.length)}`);
+    };
+    if (patch.state !== undefined) put('state', patch.state);
+    if (patch.total !== undefined) put('total', patch.total);
+    if (patch.copied !== undefined) put('copied', patch.copied);
+    if (patch.skipped !== undefined) put('skipped', patch.skipped);
+    if (patch.failed !== undefined) put('failed', patch.failed);
+    if (patch.currentFolder !== undefined) put('current_folder', patch.currentFolder);
+    if (patch.errors !== undefined) put('errors', patch.errors);
+    if (patch.started === true) sets.push('started_at = COALESCE(started_at, now())');
+    if (patch.finished === true) sets.push('finished_at = now()');
+    values.push(jobId, position);
+    await this.query(
+      `UPDATE mail_migration_items SET ${sets.join(', ')}
+        WHERE job_id = $${String(values.length - 1)} AND position = $${String(values.length)}`,
+      values,
+    );
+  }
+
+  /**
+   * Пароли заданий, которые уже никто не ведёт.
+   *
+   * Страховка на случай, за который иначе никто не отвечает: работник
+   * умер, задание никем не подхвачено (раздел выключили, сервер перевели
+   * в другой режим) — а свёрток паролей лежит. Здесь он стирается, а само
+   * задание честно помечается неудавшимся: продолжить его без паролей всё
+   * равно нельзя, и делать вид, что оно «идёт», — обман.
+   */
+  async expireStaleMigrationJobs(maxHours: number): Promise<number> {
+    const rows = await this.query<{ id: string }>(
+      `UPDATE mail_migration_jobs
+          SET state = 'failed', secret_enc = NULL, runner = NULL,
+              finished_at = now(), updated_at = now(),
+              error = COALESCE(error, 'Задание брошено: работник не выходил на связь дольше допустимого. '
+                                    || 'Пароли стёрты, продолжить можно новым заданием.')
+        WHERE state IN ('queued', 'running')
+          AND created_at < now() - make_interval(hours => $1::int)
+        RETURNING id::text`,
+      [maxHours],
     );
     return rows.length;
   }

@@ -142,6 +142,7 @@ export function MessagePage() {
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
   const openCompose = useUiStore((s) => s.openCompose);
+  const setVisitedMessage = useUiStore((s) => s.setVisitedMessage);
   const readReceipt = useSendReadReceipt(id);
   const preferences = useGeneralPreferences();
 
@@ -171,6 +172,19 @@ export function MessagePage() {
       delete document.body.dataset.mtPrint;
     };
   }, []);
+
+  /**
+   * Запоминаем, какое письмо человек смотрит: вернувшись в список, он увидит
+   * его строку подсвеченной и на прежнем месте.
+   *
+   * Ставится на КАЖДОЕ показанное письмо, а не один раз при входе, — и это
+   * не мелочь: стрелки «предыдущее/следующее» листают письма прямо здесь,
+   * и вернуться человек ждёт к последнему прочитанному, а не к тому,
+   * с которого начал.
+   */
+  useEffect(() => {
+    if (id) setVisitedMessage(folderId, id);
+  }, [folderId, id, setVisitedMessage]);
 
   // Открытое письмо помечаем прочитанным
   useEffect(() => {

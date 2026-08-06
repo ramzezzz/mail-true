@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { api, ApiError } from '../api/client';
 import type { AdminSession, Permission } from '../api/types';
+import { adoptServerTheme, forgetAdminTheme } from '../appearance/themeStore';
 import { can as hasPermission } from '../lib/access';
 
 interface SessionState {
@@ -33,7 +34,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     try {
-      setSession(await api.session());
+      const fresh = await api.session();
+      setSession(fresh);
+      /*
+       * Оформление принадлежит учётной записи, а не браузеру: до ответа
+       * панель покрашена по кэшу, а здесь — по тому, что помнит сервер.
+       * Если за тем же компьютером вошёл другой администратор, кэш чужой,
+       * и adoptServerTheme его не примет.
+       */
+      adoptServerTheme(fresh.login, fresh.theme ?? null);
     } catch (err) {
       if (err instanceof ApiError && err.isUnauthorized) setSession(null);
       else setSession(null);
@@ -57,6 +66,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     await api.logout().catch(() => undefined);
     setSession(null);
+    // Кэш темы уходит вместе с сеансом: следующий администратор за этим
+    // компьютером обязан увидеть СВОЮ расцветку, а не расцветку предыдущего.
+    forgetAdminTheme();
   }, []);
 
   const value = useMemo<SessionState>(

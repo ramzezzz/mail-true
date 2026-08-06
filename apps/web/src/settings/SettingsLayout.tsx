@@ -30,6 +30,7 @@ const HOME: NavItem = { to: '/settings', title: 'Главная', end: true };
 const NAV: NavItem[] = [
   HOME,
   { to: '/settings/general', title: 'Общие' },
+  { to: '/settings/notifications', title: 'Уведомления' },
   { to: '/settings/appearance', title: 'Оформление' },
   { to: '/settings/filters', title: 'Фильтры' },
   { to: '/settings/folders', title: 'Папки' },

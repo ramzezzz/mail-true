@@ -18,6 +18,7 @@ import {
 } from '../api/queries';
 import { useUiStore } from '../app/store';
 import { Button } from '../components';
+import { useOpenDraft } from '../compose/useOpenDraft';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { actionErrorText, errorText } from '../lib/errorText';
 import { serializeRulePrefill } from '../lib/filterRules';
@@ -69,8 +70,23 @@ export function FolderPage() {
   const selectMany = useUiStore((s) => s.selectMany);
   const clearSelection = useUiStore((s) => s.clearSelection);
   const openCompose = useUiStore((s) => s.openCompose);
+  const visitedMessage = useUiStore((s) => s.visitedMessage);
+  const clearVisitedMessage = useUiStore((s) => s.clearVisitedMessage);
   const preferences = useGeneralPreferences();
   const queryClient = useQueryClient();
+
+  /**
+   * Подсветка «отсюда ты вышел» — только для ЭТОЙ папки. В соседней папке
+   * то же письмо ничего не значит, а после смены отбора список другой —
+   * поэтому подсветка снимается вместе с ним (см. onFilterChange).
+   */
+  const highlightId = visitedMessage?.folderId === folderId ? visitedMessage.messageId : null;
+  /**
+   * Ключ, под которым помнится прокрутка. Отбор входит в ключ: список
+   * «непрочитанные» — это другой список, и ставить его на прокрутку
+   * полного было бы просто неправильным местом.
+   */
+  const scrollKey = `${folderId}:${filter}`;
 
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -130,9 +146,31 @@ export function FolderPage() {
   /** Подгрузка следующей страницы — по прокрутке до конца списка. */
   const loadMore = page.loadMore;
 
+  /**
+   * Папка «Черновики» — папка НЕОТПРАВЛЕННЫХ писем, и открывать их надо на
+   * дописывание, а не на чтение. Раньше щелчок по черновику вёл на обычный
+   * просмотр письма, и продолжить набранное было нельзя ничем — черновик
+   * оставался в папке навсегда как мусор.
+   *
+   * Смотрим на роль папки, а не на её идентификатор: имя папки черновиков
+   * в IMAP бывает любым, роль ставит сервер.
+   */
+  const currentFolder = (folders ?? []).find((f) => f.id === folderId);
+  const draftsFolder = (currentFolder?.role ?? folderId) === 'drafts';
+  const { openDraft } = useOpenDraft();
+
   const openMessage = useCallback(
-    (id: string) => navigate(`/${folderId}/${encodeURIComponent(id)}`),
-    [navigate, folderId],
+    (id: string) => {
+      if (draftsFolder) {
+        const message = messages.find((m) => m.id === id);
+        if (message) {
+          openDraft(message.uid);
+          return;
+        }
+      }
+      navigate(`/${folderId}/${encodeURIComponent(id)}`);
+    },
+    [navigate, folderId, draftsFolder, messages, openDraft],
   );
 
   /**
@@ -321,7 +359,6 @@ export function FolderPage() {
   ]);
 
   const otherFolders = (folders ?? []).filter((f) => f.id !== folderId);
-  const currentFolder = (folders ?? []).find((f) => f.id === folderId);
   const allIds = useMemo(() => messages.map((m) => m.id), [messages]);
   /** Список загружен и в нём нет ни одного письма. */
   const emptyFolder = !page.isPending && !page.isError && messages.length === 0;
@@ -333,7 +370,12 @@ export function FolderPage() {
         selectAllLabel={selectAllLabel(page.loaded, page.total)}
         emptyFolder={emptyFolder}
         filter={filter}
-        onFilterChange={setFilter}
+        /* Со сменой отбора список становится другим, и подсветка «отсюда ты
+           вышел» перестаёт что-либо значить: она про место в ЭТОМ списке. */
+        onFilterChange={(next) => {
+          setFilter(next);
+          clearVisitedMessage();
+        }}
         folders={otherFolders}
         onSelectAll={() => selectMany(allIds)}
         onClearSelection={clearSelection}
@@ -397,6 +439,17 @@ export function FolderPage() {
             moveTo([message.id], action === 'archive' ? 'archive' : 'trash')
           }
           onRefresh={() => page.refresh()}
+          /* В «Черновиках» щелчок открывает окно написания с уже набранным
+             письмом, а не просмотр: это папка неотправленных писем, и
+             приходят в неё дописывать. В остальных папках проп не задан, и
+             строка ведёт себя как прежде — ссылкой на просмотр. */
+          onOpen={draftsFolder ? (message) => openDraft(message.uid) : undefined}
+          /* Возврат из письма ставит список на то же место, а строку, из
+             которой ушли, подсвечивает: без этого при просмотре нескольких
+             писем подряд место в списке приходится искать заново после
+             каждого. */
+          scrollKey={scrollKey}
+          highlightId={highlightId}
           /*
             Подвал уходит ВНУТРЬ списка, в его область прокрутки. Рядом со
             списком он висел под ним всегда: человек ещё не долистал, а

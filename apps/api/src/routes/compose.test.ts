@@ -5,6 +5,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import type { AppConfig } from '../config.js';
@@ -90,6 +92,9 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     TLS_REJECT_UNAUTHORIZED: false,
     MESSAGE_MAX_BYTES: 25 * 1024 * 1024,
     COMPOSE_BODY_MAX_BYTES: 12 * 1024 * 1024,
+    // Рядом с этим каталогом маршруты написания заводят очередь отложенной
+    // отправки. Здесь она не используется, но путь должен быть настоящим.
+    UPLOAD_DIR: join(tmpdir(), 'mail-true-test-uploads'),
     ...overrides,
   } as unknown as AppConfig;
 }

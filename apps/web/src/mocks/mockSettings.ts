@@ -31,6 +31,7 @@ let general: GeneralSettings = {
   quoteOriginalOnReply: true,
   afterDelete: 'list',
   autoCollectContacts: true,
+  showSenderLogos: false,
 };
 
 let signatureSeq = 30;

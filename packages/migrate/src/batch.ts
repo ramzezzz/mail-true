@@ -153,6 +153,9 @@ export async function migrateBatch(options: BatchOptions): Promise<BatchReport> 
     for (;;) {
       const item = queue.shift();
       if (!item) return;
+      // Остановка задания: ящики, до которых очередь не дошла, не начинаем
+      // вовсе. Отчёта у них не будет — и это честно: их не трогали.
+      if (options.migrate?.signal?.aborted === true) return;
       const { account, index } = item;
       const migrator = new MailboxMigrator({
         ...options.migrate,
@@ -170,12 +173,17 @@ export async function migrateBatch(options: BatchOptions): Promise<BatchReport> 
   await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, () => worker()));
 
   const finishedAt = new Date();
+  // Дыры в массиве отчётов остаются после остановки: до части ящиков очередь
+  // не дошла. В отчёт они попадать не должны — «ящик без отчёта» читается
+  // как сломанный, а он просто не начинался.
+  const done = reports.filter((r): r is MailboxReport => r !== undefined);
   return {
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
-    accounts: reports,
-    ok: reports.filter((r) => r?.status === 'ok').length,
-    partial: reports.filter((r) => r?.status === 'partial').length,
-    failed: reports.filter((r) => r?.status === 'failed').length,
+    accounts: done,
+    ok: done.filter((r) => r.status === 'ok').length,
+    partial: done.filter((r) => r.status === 'partial').length,
+    failed: done.filter((r) => r.status === 'failed').length,
+    stopped: done.filter((r) => r.status === 'stopped').length,
   };
 }

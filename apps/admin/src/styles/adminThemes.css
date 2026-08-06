@@ -1,0 +1,178 @@
+/*
+ * Темы панели управления.
+ *
+ * Дизайн-система одна на два приложения: базу --mt-* и темы light/dark/
+ * emerald/violet/coral/lagoon/sunset даёт apps/web/src/styles/themes.css,
+ * подключённый в main.tsx до этого файла. Здесь только то, чего почта про
+ * панель знать не может:
+ *
+ *   1) ГРАФИТ — фирменная тёмная гамма панели (графит и бирюза со страницы
+ *      входа). В почте такой темы нет и быть не должно, поэтому её блок
+ *      целиком здесь;
+ *   2) поправки на мелкий шрифт для цветных светлых тем — те же, что
+ *      admin.css делает для светлой (панель набрана 11–13px, палитровые
+ *      вторичные цвета на таком кегле не читаются);
+ *   3) служебные цвета состояний для тёмных тем: светлые #0A7B44/#C42500
+ *      на тёмной поверхности дают 2,94:1 и 4,10:1 — пока тёмных тем в
+ *      панели не было, это никого не задевало.
+ *
+ * Значения обязаны совпадать с реестром src/appearance/adminThemes.ts —
+ * оттуда же их берёт расчёт контраста tests/adminThemes.test.ts. Разъехаться
+ * им не дадут: тест сверяет ЭТОТ файл с реестром.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Графит — фирменная тема панели, стоит по умолчанию                   */
+/* ------------------------------------------------------------------ */
+/*
+ * Поверхность #16222A — это --mt-adm-login-bg-center со страницы входа:
+ * панель продолжает ту же гамму, которой встретила администратора.
+ *
+ * Блок переопределяет базовые --mt-color-*, потому что в themes.css у
+ * графита нет своего блока и он унаследовал бы светлые значения из :root —
+ * то есть белую карточку с белым текстом.
+ */
+:root[data-theme='graphite'] {
+  color-scheme: dark;
+
+  /* Текст и значки */
+  --mt-color-text-primary: #e4ecef;
+  --mt-color-text-secondary: #9fb4bc;
+  --mt-color-text-tertiary: #8aa2ab;
+  --mt-color-text-subhead: #9fb4bc;
+  /* Текст на акцентной заливке: акцент светлый, подпись обязана быть тёмной */
+  --mt-color-text-contrast: #06171a;
+  --mt-color-icon-primary: #e4ecef;
+  --mt-color-icon-secondary: #9fb4bc;
+  --mt-color-icon-tertiary: #6d858e;
+
+  /* Поверхности */
+  --mt-color-background: #0d151a;
+  --mt-color-background-secondary: #1e2c35;
+  --mt-color-background-tertiary: #26353f;
+  --mt-color-background-content: #16222a;
+  --mt-color-background-modal: #1e2c35;
+  --mt-color-header-background: #16222a;
+  --mt-color-field-background: #1e2c35;
+  --mt-color-field-border-alpha: rgba(255, 255, 255, 0.18);
+  --mt-color-field-border-alpha-hover: rgba(255, 255, 255, 0.28);
+  --mt-color-separator-primary: #2c3a43;
+  --mt-color-separator-secondary: #223038;
+  --mt-color-image-border-alpha: rgba(255, 255, 255, 0.08);
+
+  /* Акцент — бирюза входа, осветлённая до нормы на тёмной поверхности.
+     Весь «синий кластер» токенов замкнут на --mt-accent-* в themes.css,
+     поэтому кнопки, ссылки и обводка фокуса подхватывают её сами. */
+  --mt-accent: #3ec7cf;
+  --mt-accent-hover: #62d5db;
+  --mt-accent-press: #2fb2ba;
+
+  /* Каркас страницы */
+  --mt-app-bg: #0d151a;
+  --mt-app-content-bg: #16222a;
+
+  /* Полупрозрачные подложки наведения: на тёмном они светлые, а не тёмные */
+  --mt-ph-color-transparent-hover: rgba(255, 255, 255, 0.08);
+  --mt-ph-color-transparent-press: rgba(255, 255, 255, 0.14);
+  --mt-ph-color-background-secondary-alpha: rgba(255, 255, 255, 0.08);
+  --mt-ph-color-background-secondary-alpha-hover: rgba(255, 255, 255, 0.12);
+  --mt-ph-color-background-secondary-alpha-press: rgba(255, 255, 255, 0.16);
+  --mt-ph-custom-color-tooltip-bg: #26353f;
+  --mt-ph-custom-color-tooltip-text: #e4ecef;
+
+  /* Третичные кнопки почты покрашены в #333 — на графите их не видно */
+  --mt-mail-color-button-text: var(--mt-color-text-primary);
+  --mt-mail-color-button-icon: var(--mt-color-text-primary);
+
+  /* Затемнение под диалогом: на тёмном фоне оно обязано быть плотнее */
+  --mt-color-overlay-primary: rgba(2, 8, 12, 0.62);
+  --mt-modal-overlay: rgba(2, 8, 12, 0.62);
+
+  /* Переключатель: у третичного значка тёмного варианта нет ступеней */
+  --mt-switch-track-off-hover: #7c949d;
+  --mt-switch-track-off-press: #8ea6af;
+  --mt-switch-thumb: var(--mt-color-text-primary);
+
+  /* Служебные состояния и их тонированные плашки */
+  --mt-admin-ok: #5fd69f;
+  --mt-admin-warn: #f2c469;
+  --mt-admin-fail: #ff9d88;
+  --mt-color-background-positive-tint: #0f2d24;
+  --mt-color-background-negative-tint: #38211e;
+  --mt-color-background-warning-tint: #352c17;
+  --mt-color-accent-red: #ff9d88;
+  --mt-color-stroke-negative: #ff9d88;
+}
+
+/* ------------------------------------------------------------------ */
+/* Цветные светлые темы: те же поправки, что светлая получает в admin.css */
+/* ------------------------------------------------------------------ */
+/*
+ * Числа объяснены там же (admin.css, блок «Тёмные значения текстовых
+ * токенов на светлой теме»): #63666B — 5,76:1 на белом против 3,50:1 у
+ * палитрового #87898F.
+ *
+ * Ссылка и активный пункт меню — САМАЯ ТЁМНАЯ ступень акцента темы, а не
+ * сам акцент: пункт лежит на подложке, тонированной этим же акцентом, и на
+ * ней акцент себя не показывает (изумруд на своей пилюле — 4,49:1 при
+ * норме 4,5). Ступень press уже посчитана почтой, ни одного нового числа.
+ */
+:root[data-theme='emerald'],
+:root[data-theme='violet'],
+:root[data-theme='coral'],
+:root[data-theme='lagoon'],
+:root[data-theme='sunset'] {
+  --mt-color-text-secondary: #63666b;
+  --mt-color-text-link: var(--mt-accent-press);
+  --mt-color-text-positive: #0a7b44;
+  --mt-color-text-negative: #c42500;
+}
+
+/* ------------------------------------------------------------------ */
+/* Семейство тёмных тем                                                 */
+/* ------------------------------------------------------------------ */
+/*
+ * Ссылка и активный пункт — сам акцент: на тёмном он и есть светлый цвет,
+ * а ступень press увела бы подпись в темноту. Положительное и отрицательное
+ * берутся из служебных цветов темы, чтобы не держать два набора.
+ */
+:root[data-theme='dark'],
+:root[data-theme='graphite'] {
+  --mt-color-text-link: var(--mt-accent);
+  --mt-color-text-positive: var(--mt-admin-ok);
+  --mt-color-text-negative: var(--mt-admin-fail);
+}
+
+/* Тёмная тема почты: свои служебные цвета и подложки под них. */
+:root[data-theme='dark'] {
+  /* #8C8E94 из почты даёт 4,21:1 на третичной подложке — почте с её
+     кеглем хватает, панели с 11px нет. Тот же тон, светлее на ступень. */
+  --mt-color-text-secondary: #9ea1a6;
+  /* Вторая поверхность у почты совпадает с карточкой (#232324): плашка
+     администратора и погашенная кнопка сливались бы с шапкой. */
+  --mt-color-background-secondary: #2c2d2e;
+  --mt-admin-ok: #5fd693;
+  --mt-admin-warn: #f5c164;
+  --mt-admin-fail: #ff9c85;
+  /* Светлые тинты палитры в тёмной теме остались светлыми: значок
+     «работает» показывал #0DC268 на почти белом #ECFAF3 — 2,19:1 */
+  --mt-color-background-positive-tint: #12301f;
+  --mt-color-background-negative-tint: #3b1f1a;
+  --mt-color-background-warning-tint: #362b12;
+}
+
+/*
+ * Погашенная кнопка на тёмных темах.
+ *
+ * admin.css гасит её заливкой и подписью #63666B — на тёмной поверхности
+ * это 2,2:1, надпись пропадает. Правило там оставлено как есть (светлое
+ * семейство и проверка контраста опираются на записанный в нём цвет),
+ * а тёмные темы поправляют только подпись.
+ */
+:root[data-theme='dark'] button:disabled:disabled {
+  color: #9ea1a6;
+}
+
+:root[data-theme='graphite'] button:disabled:disabled {
+  color: #9fb4bc;
+}

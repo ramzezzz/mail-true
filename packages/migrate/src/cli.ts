@@ -117,12 +117,19 @@ async function endpointFromArgs(
 ): Promise<ImapEndpoint> {
   const port = opt(options, `${prefix}-port`);
   const secure = options.has(`${prefix}-secure`);
+  // Служебный доступ: один пароль на все ящики вместо пароля каждого
+  // владельца. Пароль в этом режиме берётся оттуда же (--*-pass-file и
+  // прочие), но принадлежит служебному пользователю.
+  const masterUser = opt(options, `${prefix}-master-user`);
+  const masterSeparator = opt(options, `${prefix}-master-separator`);
   return {
     host: required(options, `${prefix}-host`),
     ...(port !== undefined ? { port: Number.parseInt(port, 10) } : {}),
     secure,
     user: required(options, `${prefix}-user`),
     pass: await passwordFromArgs(options, prefix),
+    ...(masterUser !== undefined ? { masterUser } : {}),
+    ...(masterSeparator !== undefined ? { masterSeparator } : {}),
     // В dev и при самоподписанных сертификатах проверку отключаем;
     // --strict-tls возвращает строгую проверку.
     allowInsecureTls: !options.has('strict-tls'),
@@ -320,6 +327,11 @@ const HELP = `Перенос почты Mail.True (IMAP -> IMAP)
   --source-pass-env ИМЯ   / --dest-pass-env ИМЯ     имя переменной окружения
   MIGRATE_SOURCE_PASS / MIGRATE_DEST_PASS           переменные по умолчанию
   --source-pass ... / --dest-pass ...               небезопасно, с предупреждением
+
+  Служебный доступ (один пароль вместо пароля каждого ящика). Вход идёт
+  под именем «ящик<разделитель>служебный», пароль — служебного пользователя:
+  --source-master-user ИМЯ / --dest-master-user ИМЯ
+  --source-master-separator С / --dest-master-separator С   (по умолчанию «*»)
 
   --state <файл.jsonl | pg:postgres://...>   состояние для докачки
   --map 'Источник=Приёмник'                  переопределение папки (повторяемый)

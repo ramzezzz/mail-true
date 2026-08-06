@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import type { Folder } from '@mail-true/shared';
 import { settingsApi } from './index';
 import { queryKeys } from './queries';
+import { resetSenderLogos } from '../mail/senderLogos';
 import type { FilterRule } from '../lib/filterRules';
 import type {
   CollectorAccount,
@@ -30,7 +31,16 @@ export function useSaveGeneralSettings() {
     mutationFn: (settings: GeneralSettings) => settingsApi.saveGeneral(settings),
     // Кладём ответ сервера прямо в кэш: сохранение — единственный источник
     // правды о том, что реально записалось (сервер мог нормализовать поля).
-    onSuccess: (saved) => client.setQueryData(settingsKeys.general, saved),
+    onSuccess: (saved) => {
+      client.setQueryData(settingsKeys.general, saved);
+      /*
+       * Реестр логотипов запоминает ответ сервера «выключено» на весь сеанс,
+       * чтобы не спрашивать зря. После сохранения настроек этот ответ мог
+       * устареть в любую сторону — сбрасываем, иначе только что включённая
+       * настройка выглядела бы сломанной до перезагрузки страницы.
+       */
+      resetSenderLogos();
+    },
   });
 }
 

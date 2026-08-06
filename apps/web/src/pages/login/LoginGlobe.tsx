@@ -1,29 +1,47 @@
 /**
- * Проволочный глобус на странице входа.
+ * Проволочная сфера на странице входа.
  *
- * Перенесено из прототипа `login_page/`. Сфера собрана из плоских колец,
- * повёрнутых в трёх измерениях: шесть меридианов и пять параллелей. Вокруг
- * по окружности расставлены значки — у нас это значки почты из фирменного
- * спрайта, а не сетевого оборудования, как было в прототипе.
+ * Перенесено из прототипа `login_page/`. Сцена состоит из трёх частей, и
+ * разделены они не для красоты:
  *
- * Кольца и узлы считаются здесь, а не записаны в разметке: их два десятка,
- * и руками такое держать в согласии невозможно.
+ *  - ВРАЩАЮЩАЯСЯ сфера: кольца-меридианы и светящиеся шары. Оба семейства
+ *    лежат внутри одного наклонённого куба (`rotateX(61deg) rotateY(-16deg)`),
+ *    который крутится вокруг своей оси за минуту. Шары живут в плоскостях
+ *    колец и обходят их по кругу — оттого и кажется, что они бегут по
+ *    проволоке, а не летают сами по себе;
+ *  - НЕПОДВИЖНЫЙ слой поверх неё: значки и узел в середине. Раньше значки
+ *    крутились вместе со сферой, и приходилось разворачивать каждый обратно,
+ *    чтобы они не вставали вверх ногами. Теперь они просто не вращаются:
+ *    меньше движущихся элементов и ни одного встречного вращения;
+ *  - свечение под сферой (`aura`), которое ничего не делает.
+ *
+ * Кольца, шары и значки считаются здесь, а не записаны в разметке: их больше
+ * трёх десятков, и руками такое в согласии не удержать.
+ *
+ * Компонент общий для почты и панели управления. Меняются только значки
+ * (свойства `icons` и `center`) и цвета — цвета приходят переменными CSS,
+ * которые страница ставит на себя (см. admin/pages/login/loginPalette.ts).
  */
+import { Fragment } from 'react';
+import { pausedAttr, usePageVisible } from './usePageVisible';
 import styles from './LoginBackdrop.module.css';
 
+/** Один значок сцены: чем его рисовать и как его звать. */
+export interface LoginGlobeIcon {
+  /** Ключ для React и для проверок. */
+  id: string;
+  /** Адрес символа для `<use href>`: файл спрайта или символ на странице. */
+  href: string;
+}
+
+/** Фирменный спрайт почты. */
 const SPRITE = '/brand/icons/sprite.svg';
 
-/** Меридианы: вертикальные кольца, равномерно повёрнутые вокруг оси. */
-const MERIDIANS = 6;
-
-/** Параллели: горизонтальные кольца, поднятые вдоль оси и сжатые к полюсам. */
-const PARALLELS = [-55, -28, 0, 28, 55];
-
 /**
- * Значки вокруг глобуса — то, чем занимается почта: получить, отправить,
- * написать, ответить, найти, вложить, пометить, настроить.
+ * Значки вокруг сферы на входе в почту — то, чем занимается почта: получить,
+ * отправить, написать, ответить, найти, вложить, пометить, настроить.
  */
-const ORBIT_ICONS = [
+export const MAIL_GLOBE_ICONS: readonly LoginGlobeIcon[] = [
   'folder-inbox',
   'folder-sent',
   'compose',
@@ -32,73 +50,155 @@ const ORBIT_ICONS = [
   'attach',
   'label',
   'settings',
-] as const;
+].map((name) => ({ id: name, href: `${SPRITE}#icon-${name}` }));
+
+/** Знак в середине сферы на входе в почту. */
+export const MAIL_GLOBE_CENTER: LoginGlobeIcon = {
+  id: 'folder-inbox',
+  href: `${SPRITE}#icon-folder-inbox`,
+};
+
+/**
+ * Колец на каждую ось. Всего их вдвое больше: одно семейство повёрнуто
+ * вокруг X, другое вокруг Y, и вместе они читаются как сетка параллелей и
+ * меридианов.
+ *
+ * В прототипе стоит восемь (шестнадцать колец). У нас шесть — двенадцать
+ * колец. Причина посчитана, а не выдумана: на живом стенде 1440×900 при
+ * замедлении процессора в шесть раз двенадцать колец давали 67.7 кадра в
+ * секунду, шестнадцать — 58.7, то есть кадр удлинялся на 2.3 мс (около
+ * 0.4 мс на обычной машине). Сама сфера при этом стоит примерно 0.3 мс на
+ * кадр — четыре лишних кольца УДВАИВАЛИ её цену. На глаз двенадцать от
+ * шестнадцати не отличить: сфера и так читается сплошной сеткой.
+ */
+const RINGS_PER_AXIS = 6;
+
+/** Сколько светящихся шаров бегает по кольцам. */
+const BALLS = 5;
 
 /** Радиус расстановки значков в долях от половины стороны. */
-const ORBIT_RADIUS = 44;
+const ORBIT_RADIUS = 45;
 
-export function LoginGlobe() {
+export interface LoginGlobeProps {
+  /** Значки вокруг сферы. По умолчанию — почтовые. */
+  icons?: readonly LoginGlobeIcon[];
+  /** Знак в середине. */
+  center?: LoginGlobeIcon;
+}
+
+export function LoginGlobe({ icons = MAIL_GLOBE_ICONS, center = MAIL_GLOBE_CENTER }: LoginGlobeProps = {}) {
+  const visible = usePageVisible();
+
   return (
-    <div className={styles.stage} aria-hidden="true">
+    <div
+      className={styles.stage}
+      aria-hidden="true"
+      // Пауза ставится на всю сцену разом: остановить каждую анимацию
+      // по отдельности из кода значило бы держать ссылки на все элементы.
+      data-paused={pausedAttr(visible)}
+    >
       <div className={styles.aura} />
+
+      {/* Вращающаяся часть: проволока и шары на ней */}
       <div className={styles.globe}>
         <div className={styles.rings}>
-          {Array.from({ length: MERIDIANS }, (_, i) => (
-            <div
-              key={`m${String(i)}`}
-              className={`${styles.ring} ${i === 0 ? styles.ringBright : ''}`}
-              style={
-                {
-                  '--mt-ring-x': '80deg',
-                  '--mt-ring-y': `${String((i * 180) / MERIDIANS)}deg`,
-                } as React.CSSProperties
-              }
-            />
-          ))}
-          {PARALLELS.map((deg) => {
-            // Кольцо тем меньше, чем ближе к полюсу, и поднято по оси на синус.
-            const scale = Math.cos((deg * Math.PI) / 180);
-            const lift = Math.sin((deg * Math.PI) / 180) * 17;
+          {Array.from({ length: RINGS_PER_AXIS }, (_, i) => {
+            const angle = `${String((i * 180) / RINGS_PER_AXIS)}deg`;
+            // Первое кольцо каждого семейства ярче: без него сфера читается
+            // как ровный шум, а с ним видно, где у неё «экватор».
+            const bright = i === 0 ? ` ${styles.ringBright}` : '';
             return (
-              <div
-                key={`p${String(deg)}`}
-                className={`${styles.ring} ${deg === 0 ? styles.ringBright : ''}`}
-                style={{
-                  width: `${String(scale * 100)}%`,
-                  height: `${String(scale * 100)}%`,
-                  left: `${String((1 - scale) * 50)}%`,
-                  top: `${String((1 - scale) * 50)}%`,
-                  transform: `translateZ(${String(lift)}rem) rotateX(90deg)`,
-                }}
-              />
+              // Именно Fragment, а не общий div: любой промежуточный элемент
+              // без preserve-3d расплющил бы кольца в одну плоскость, и
+              // сферы не получилось бы вовсе.
+              <Fragment key={`ring${String(i)}`}>
+                <div
+                  className={`${styles.ring}${bright}`}
+                  style={{ '--mt-ring-x': angle } as React.CSSProperties}
+                />
+                <div
+                  className={`${styles.ring}${bright}`}
+                  style={{ '--mt-ring-y': angle } as React.CSSProperties}
+                />
+              </Fragment>
             );
           })}
         </div>
 
-        {/* Светящийся узел в центре — марка Mail.True */}
-        <div className={`${styles.node} ${styles.nodeCenter}`}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <use href={`${SPRITE}#icon-folder-inbox`} />
-          </svg>
-        </div>
-
-        <div className={styles.orbit}>
-          {ORBIT_ICONS.map((name, i) => {
-            const angle = ((-90 + i * (360 / ORBIT_ICONS.length)) * Math.PI) / 180;
-            const x = 50 + Math.cos(angle) * ORBIT_RADIUS;
-            const y = 50 + Math.sin(angle) * ORBIT_RADIUS;
+        <div className={styles.balls}>
+          {Array.from({ length: BALLS }, (_, i) => {
+            // Шар кладём в плоскость одного из колец — тогда он бежит ровно
+            // по проволоке. Чётные берут семейство X, нечётные — семейство Y.
+            const angle = `${String((((i * 2 + 1) % RINGS_PER_AXIS) * 180) / RINGS_PER_AXIS)}deg`;
+            const plane = i % 2 === 0 ? '--mt-ring-x' : '--mt-ring-y';
             return (
               <div
-                key={name}
-                className={styles.node}
-                style={{ left: `calc(${String(x)}% - 1.55rem)`, top: `calc(${String(y)}% - 1.55rem)` }}
+                key={`ball${String(i)}`}
+                className={styles.ballPlane}
+                style={{ [plane]: angle } as React.CSSProperties}
               >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <use href={`${SPRITE}#icon-${name}`} />
-                </svg>
+                {/* Отрицательная задержка — это старт с середины круга:
+                    шары не выстраиваются в одну точку при загрузке. */}
+                <div
+                  className={styles.ballOrbit}
+                  style={
+                    {
+                      '--mt-ball-duration': `${String(9 + i * 2.1)}s`,
+                      '--mt-ball-delay': `${String(-i * 2.7)}s`,
+                    } as React.CSSProperties
+                  }
+                >
+                  <div className={styles.ball} />
+                </div>
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Неподвижный слой: значки и середина не вращаются со сферой */}
+      <div className={styles.fxLayer}>
+        <div className={styles.orbit}>
+          {icons.map((icon, i) => {
+            const angle = ((-90 + i * (360 / icons.length)) * Math.PI) / 180;
+            const x = 50 + Math.cos(angle) * ORBIT_RADIUS;
+            const y = 50 + Math.sin(angle) * ORBIT_RADIUS;
+            return (
+              // Увеличение при наведении держит обёртка (переход по transform),
+              // а дыхание — кружок внутри (анимация). Порознь потому, что
+              // одно свойство не может одновременно вести переход и анимацию:
+              // раньше значок при наведении прыгал скачком.
+              <div
+                key={icon.id}
+                className={styles.nodeWrap}
+                style={{ left: `calc(${String(x)}% - 1.55rem)`, top: `calc(${String(y)}% - 1.55rem)` }}
+              >
+                <div
+                  className={styles.node}
+                  style={
+                    {
+                      // Разная задержка и разная длительность: иначе восемь
+                      // значков дышат в такт, и это читается как мигание.
+                      '--mt-node-delay': `${String(i * 0.34)}s`,
+                      '--mt-node-duration': `${String(2.4 + (i % 3) * 0.4)}s`,
+                    } as React.CSSProperties
+                  }
+                >
+                  <span className={styles.nodeIcon}>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <use href={icon.href} />
+                    </svg>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className={`${styles.node} ${styles.nodeCenter}`}>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <use href={center.href} />
+          </svg>
         </div>
       </div>
     </div>

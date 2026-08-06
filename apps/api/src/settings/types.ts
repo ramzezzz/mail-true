@@ -5,6 +5,13 @@
  * (docs/features-mailru.md, разделы «Общие настройки» и «Правила
  * фильтрации»), потому что интерфейс должен повторяться до мелочей.
  */
+import {
+  DEFAULT_THEME_SETTING,
+  DEFAULT_WALLPAPER_CHOICE,
+  type ThemeSetting,
+} from '@mail-true/shared';
+
+export type { ThemeSetting };
 
 /* ------------------------------------------------------------------ */
 /* Общие настройки                                                      */
@@ -30,6 +37,17 @@ export interface MailSettings {
   accountEmail: string;
   /** Имя отправителя в заголовке From. null — берётся из адреса. */
   senderName: string | null;
+  /**
+   * Оформление: выбранная тема и фон «обойной» темы.
+   *
+   * Лежит здесь, а не в отдельной таблице, потому что это такая же
+   * настройка ящика, как всё остальное в этом типе: требование заказчика
+   * — «тема оформления должна запоминаться для каждого юзера», то есть
+   * за учётной записью, а не за браузером (см. миграцию 0009).
+   */
+  theme: ThemeSetting;
+  /** Выбор фона: 'preset:<id>' | 'custom' | '' (не выбирали). */
+  wallpaper: string;
   /** Включать содержимое исходного письма в ответ. */
   replyQuote: boolean;
   afterDelete: AfterDelete;
@@ -37,6 +55,16 @@ export interface MailSettings {
   notifyTab: boolean;
   /** Автоматически пополнять адресную книгу. */
   collectContacts: boolean;
+  /**
+   * Показывать логотипы доменов вместо букв в кружках списка писем.
+   *
+   * По умолчанию ВЫКЛЮЧЕНО, и это не осторожность ради осторожности:
+   * включение означает, что сервер начнёт ходить в интернет за картинками
+   * доменов, с которых пришли письма ЭТОМУ человеку. Пусть решение
+   * принимает он, а не мы за него. Сами письма при этом наружу не уходят
+   * никуда — см. apps/api/src/logos/.
+   */
+  senderLogos: boolean;
   autoReply: AutoReplySettings;
   updatedAt: string | null;
 }
@@ -49,11 +77,14 @@ export type AutoReplyPatch = {
 /** Заплатка общих настроек: передаются только изменяемые поля. */
 export interface MailSettingsPatch {
   senderName?: string | null | undefined;
+  theme?: ThemeSetting | undefined;
+  wallpaper?: string | undefined;
   replyQuote?: boolean | undefined;
   afterDelete?: AfterDelete | undefined;
   notifyBrowser?: boolean | undefined;
   notifyTab?: boolean | undefined;
   collectContacts?: boolean | undefined;
+  senderLogos?: boolean | undefined;
   autoReply?: AutoReplyPatch | undefined;
 }
 
@@ -158,11 +189,15 @@ export function defaultMailSettings(email: string): MailSettings {
   return {
     accountEmail: email,
     senderName: null,
+    theme: DEFAULT_THEME_SETTING,
+    wallpaper: DEFAULT_WALLPAPER_CHOICE,
     replyQuote: true,
     afterDelete: 'list',
     notifyBrowser: false,
     notifyTab: true,
     collectContacts: true,
+    // Выключено намеренно: см. пояснение у поля в MailSettings.
+    senderLogos: false,
     autoReply: {
       enabled: false,
       subject: null,

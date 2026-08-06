@@ -27,10 +27,15 @@
     <!-- ============ Left: CSS-3D wireframe globe with orbiting icon nodes ============ -->
     <section class="globe-stage" id="globeStage" aria-hidden="true">
       <div class="aura"></div>
+      <!-- The tilted sphere spins; rings AND the glowing balls live inside it so
+           the balls travel ALONG the wireframe rings. Both filled in by app.js. -->
       <div class="globe" id="globe">
-        <!-- Latitude / longitude wireframe rings (filled in by app.js) -->
         <div class="globe__rings" id="globeRings"></div>
-        <!-- Glowing center node -->
+        <div class="globe__balls" id="globeBalls"></div>
+      </div>
+      <!-- Static overlay: pulsing icon nodes + center node (do NOT rotate). -->
+      <div class="globe-fx">
+        <div class="orbit" id="orbit"></div>
         <div class="node node--center">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="7" cy="8" r="2.4"/><circle cx="17" cy="8" r="2.4"/>
@@ -38,8 +43,6 @@
             <path d="M7 8 12 16 17 8" fill="none" stroke="currentColor" stroke-width="1.4"/>
           </svg>
         </div>
-        <!-- Orbiting icon nodes (positioned by app.js) -->
-        <div class="orbit" id="orbit"></div>
       </div>
     </section>
 

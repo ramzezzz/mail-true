@@ -92,7 +92,9 @@ test('threadIdOf: ответы группируются с исходным пи
 });
 
 test('flagsFromSet: все системные флаги', () => {
-  const flags = flagsFromSet(new Set(['\\Seen', '\\Flagged', '\\Answered', '\\Draft', '\\Deleted', '$Forwarded']));
+  const flags = flagsFromSet(
+    new Set(['\\Seen', '\\Flagged', '\\Answered', '\\Draft', '\\Deleted', '$Forwarded', '$MDNSent']),
+  );
   assert.deepEqual(flags, {
     seen: true,
     flagged: true,
@@ -100,7 +102,18 @@ test('flagsFromSet: все системные флаги', () => {
     forwarded: true,
     draft: true,
     deleted: true,
+    mdnSent: true,
   });
+});
+
+/**
+ * `$MDNSent` — не пользовательская метка, а ответ на просьбу уведомить
+ * о прочтении (RFC 3503). В список меток он не попадает, поэтому без
+ * отдельного поля интерфейс не отличил бы «ещё не спрашивали» от «уже
+ * ответили» и спрашивал бы при каждом открытии письма.
+ */
+test('flagsFromSet: без $MDNSent поле честно false, а не отсутствует', () => {
+  assert.equal(flagsFromSet(new Set(['\\Seen'])).mdnSent, false);
 });
 
 test('labelsFromSet: системные ключевые слова отфильтрованы', () => {

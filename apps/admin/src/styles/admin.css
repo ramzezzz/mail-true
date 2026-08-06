@@ -37,7 +37,15 @@ body {
   font-size: var(--mt-font-footnote-size, 13px);
   line-height: var(--mt-font-footnote-line-height, 16px);
   color: var(--mt-color-text-primary);
-  background: var(--mt-color-background-secondary);
+  /*
+   * Фон страницы берётся из темы (--mt-app-bg), а не из палитрового
+   * --mt-color-background-secondary. Разница видна только с темами: цветные
+   * темы красят именно --mt-app-bg, а background-secondary у них остаётся
+   * нейтральным #F0F1F3 — на прежней записи изумрудная тема меняла один
+   * акцент, а страница вокруг карточек оставалась серой. Запасное значение
+   * — прежнее, поэтому светлая тема выглядит ровно как раньше.
+   */
+  background: var(--mt-app-bg, var(--mt-color-background-secondary));
   -webkit-font-smoothing: antialiased;
 }
 
@@ -99,7 +107,8 @@ body {
  *
  * Правило переопределяет токены точечно и только для светлой темы
  * (селектор специфичнее, чем :root в themes.css) — тёмная тема остаётся
- * такой, какой её задала дизайн-система.
+ * такой, какой её задала дизайн-система. Те же поправки для остальных
+ * светлых тем и служебные цвета тёмных — в styles/adminThemes.css.
  *
  *   #63666B — 5,76:1 на белом, 5,10:1 на #F0F1F3
  *   #0059C2 — 6,55:1 на белом, 5,02:1 на подложке активного пункта

@@ -47,8 +47,10 @@ input { font-family: inherit; }
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  /* dark navy field, brighter toward the upper-left (where the glow cluster sits) */
   background:
-    radial-gradient(120% 120% at 42% 44%, var(--bg-center) 0%, #081431 55%, var(--bg-edge) 100%);
+    radial-gradient(46% 44% at 21% 29%, rgba(48,92,166,0.34) 0%, transparent 60%),
+    radial-gradient(130% 120% at 60% 48%, #0c2149 0%, #0a1a3c 44%, #071433 72%, #050f28 100%);
 }
 
 /* Constellation canvas fills the viewport, behind UI, above gradient */
@@ -82,21 +84,21 @@ input { font-family: inherit; }
 .globe-stage {
   position: absolute;
   z-index: 2;
-  left: 8%;
+  left: 6%;
   top: 50%;
-  width: 34rem;
-  height: 34rem;
+  width: 46rem;
+  height: 46rem;
   transform: translateY(-50%);
-  perspective: 1400px;
+  perspective: 1900px;
   animation: stageIn 1s ease both;
 }
 
 /* faint tech aura circles under the globe */
 .aura {
   position: absolute;
-  inset: 8%;
+  inset: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(40,90,180,0.20) 0%, transparent 62%);
+  background: radial-gradient(circle, rgba(40,90,180,0.22) 0%, transparent 62%);
 }
 .aura::before, .aura::after {
   content: "";
@@ -107,26 +109,31 @@ input { font-family: inherit; }
 .aura::before { inset: 4%; }
 .aura::after  { inset: 16%; border-color: rgba(120,170,240,0.07); }
 
+/* The spinning wireframe sphere: tilted, spins around its axis over 60s.
+   app.js appends ~16 .ring circles rotated on X and Y to build the mesh. */
 .globe {
   position: absolute;
-  inset: 0;
+  inset: 12%;
   transform-style: preserve-3d;
-  animation: spin 34s linear infinite;
+  transform: rotateX(61deg) rotateY(-16deg);  /* base tilt (kept when animation is frozen) */
+  animation: globeSpin 60s linear infinite;
 }
 .globe__rings { position: absolute; inset: 0; transform-style: preserve-3d; }
 
-/* Individual wireframe ring (ellipse). --rx/--ry/--rz set per-ring in JS. */
+/* Individual wireframe ring — a full great-circle. --rx/--ry set per-ring in JS. */
 .ring {
   position: absolute;
   inset: 0;
-  border: 1px solid rgba(150,190,245,0.28);
+  border: 1.1px solid rgba(150,195,246,0.30);
   border-radius: 50%;
-  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) rotateZ(var(--rz, 0deg));
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
 }
-/* the "equator-ish" great circles a touch brighter */
-.ring--bright { border-color: rgba(170,205,250,0.42); }
+.ring--bright { border-color: rgba(175,210,250,0.5); }
 
-/* ---------- Nodes on / around the globe ---------- */
+/* Static overlay (does NOT rotate with the sphere): balls, icons, center. */
+.globe-fx { position: absolute; inset: 12%; }
+
+/* ---------- Nodes around / at the globe ---------- */
 .node {
   position: absolute;
   display: grid;
@@ -137,9 +144,9 @@ input { font-family: inherit; }
   color: #cfe0f8;
   backdrop-filter: blur(2px);
 }
-.node svg { width: 60%; height: 60%; fill: currentColor; }
+.node svg { width: 58%; height: 58%; fill: currentColor; }
 
-/* glowing center node */
+/* glowing center node (stationary, soft breathing glow) */
 .node--center {
   left: 50%; top: 50%;
   width: 5.4rem; height: 5.4rem;
@@ -152,11 +159,54 @@ input { font-family: inherit; }
   animation: pulse 4s ease-in-out infinite;
 }
 
-/* orbiting icon nodes container; individual nodes placed by JS */
+/* Icon nodes. A positioned WRAP owns the hover scale via a CSS transition, so
+   the icon grows and shrinks SMOOTHLY (accelerate/decelerate) — not a snap.
+   The inner .node circle gently PULSES (breathes); staggered delay set in JS. */
 .orbit { position: absolute; inset: 0; }
-.orbit .node {
+.orbit .node-wrap {
+  position: absolute;
   width: 3.1rem; height: 3.1rem;
+  transform: scale(1);
+  transition: transform 0.45s cubic-bezier(.22,.61,.28,1);
+  will-change: transform;
+}
+.orbit .node-wrap:hover { transform: scale(1.42); z-index: 6; }
+.orbit .node-wrap .node {
+  inset: 0;
+  width: 100%; height: 100%;
   box-shadow: 0 0 16px rgba(40,90,170,0.4);
+  animation: iconPulse var(--pdur, 2.6s) ease-in-out infinite alternate;
+  animation-delay: var(--pd, 0s);
+}
+.orbit .node .node__i { display: grid; place-items: center; width: 100%; height: 100%; }
+/* While hovered: ONE clockwise spin (ease-in-out => accelerate then decelerate).
+   Growing is handled by the wrap's transition, so it stays smooth both ways. */
+.orbit .node-wrap:hover .node { animation: iconSpin 0.95s ease-in-out; }
+
+/* ---------- Glowing balls that run ALONG the globe's wireframe rings ----------
+   Each ball lives inside the spinning 3D globe on a plane matching one ring
+   (--rx / --ry), and orbits within that plane, so it slides along the ring. */
+.globe__balls { position: absolute; inset: 0; transform-style: preserve-3d; }
+.ball-plane {
+  position: absolute; inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+}
+.ball-orb {
+  position: absolute; inset: 0;
+  transform-style: preserve-3d;
+  animation: spin360 var(--dur, 11s) linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+.ball {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 0.5rem; height: 0.5rem;
+  margin: -0.25rem 0 0 -0.25rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff 0%, rgba(150,205,255,0.95) 34%, rgba(90,160,250,0.55) 60%, transparent 78%);
+  box-shadow: 0 0 11px 3px rgba(140,195,255,0.8);
+  transform: translateY(calc(var(--r, 13rem) * -1));
 }
 
 /* =========================================================================
@@ -359,8 +409,10 @@ input { font-family: inherit; }
 /* =========================================================================
    ANIMATIONS
    ========================================================================= */
-@keyframes spin      { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+@keyframes globeSpin { from { transform: rotateX(61deg) rotateY(-16deg) rotateZ(0deg); } to { transform: rotateX(61deg) rotateY(-16deg) rotateZ(360deg); } }
 @keyframes spin360   { to { transform: rotate(360deg); } }
+@keyframes iconPulse { from { transform: scale(1); opacity: 1; } to { transform: scale(0.78); opacity: 0.5; } }
+@keyframes iconSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 @keyframes pulse     { 0%,100% { box-shadow: 0 0 30px rgba(70,140,235,0.45), inset 0 0 16px rgba(120,175,245,0.35); } 50% { box-shadow: 0 0 46px rgba(90,160,250,0.7), inset 0 0 22px rgba(140,190,250,0.5); } }
 @keyframes drift1    { 0%,100% { transform: translate(0,0); } 50% { transform: translate(30px,-20px); } }
 @keyframes drift2    { 0%,100% { transform: translate(0,0); } 50% { transform: translate(-24px,26px); } }
@@ -370,7 +422,9 @@ input { font-family: inherit; }
 
 /* Reduced motion: freeze particles/globe/decorative motion */
 @media (prefers-reduced-motion: reduce) {
-  .globe, .node--center, .bokeh, .verify__refresh { animation: none !important; }
+  .globe, .node--center, .bokeh, .verify__refresh,
+  .orbit .node, .ball-orb { animation: none !important; }
+  .orbit .node-wrap { transition: none !important; }
   .card, .globe-stage, .footer { animation-duration: 0.001s !important; }
 }
 

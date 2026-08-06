@@ -13,7 +13,16 @@
  * налезали бы друг на друга в отведённых 48 пикселях.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type TouchEvent as ReactTouchEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type TouchEvent as ReactTouchEvent,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { MessageSummary } from '@mail-true/shared';
@@ -33,6 +42,7 @@ import {
 } from '../lib/gestures';
 import { HOTKEY_SCOPE_ATTR, HOTKEY_SCOPE_LIST } from '../lib/hotkeys';
 import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
+import { restoreScrollTop, rowIndexOf } from '../lib/listPosition';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
 import { usePhone } from '../lib/useMediaQuery';
 import { IconArchive, IconAttach, IconFlagFilled, IconShield, IconTrash } from './icons';
@@ -111,7 +121,23 @@ export interface MessageListProps {
    * нечем. Ссылка у строки при этом остаётся прежней, поэтому Ctrl+щелчок
    * и «Открыть в новой вкладке» по-прежнему показывают письмо.
    */
-  onOpen?(message: MessageSummary): void;
+  /* Свойством, а не методом: страница передаёт сюда `undefined`, когда папка
+     обычная, и при exactOptionalPropertyTypes это разные типы. */
+  onOpen?: ((message: MessageSummary) => void) | undefined;
+  /**
+   * Ключ, под которым запоминается прокрутка списка («папка + отбор»).
+   *
+   * Без него список ничего не помнит и ведёт себя как раньше. С ним уход
+   * в письмо и возврат обратно оставляют человека на том же месте — иначе
+   * при просмотре нескольких писем подряд место приходится искать заново
+   * после каждого.
+   */
+  scrollKey?: string | undefined;
+  /**
+   * Письмо, из которого вернулись: строка подсвечивается, и к ней же
+   * доводится прокрутка, если она оказалась за пределами окна.
+   */
+  highlightId?: string | null | undefined;
   /**
    * Подвал списка — кнопка догрузки. Принимается сюда, а не рисуется
    * страницей рядом, потому что должен жить ВНУТРИ области прокрутки:
@@ -137,6 +163,8 @@ interface RowProps {
   message: MessageSummary;
   selection: RowSelectionState;
   focused: boolean;
+  /** Из этого письма человек только что вернулся — строка подсвечена. */
+  visited: boolean;
   /** Письмо уезжает из папки — строка гаснет и сдвигается. */
   leaving: boolean;
   /** Единственная строка списка, попадающая в обход по Tab (roving tabindex). */
@@ -156,6 +184,7 @@ function Row({
   message,
   selection,
   focused,
+  visited,
   leaving,
   tabbable,
   threadCount,
@@ -255,6 +284,10 @@ function Row({
         selection.firstSelected && styles.firstSelected,
         selection.lastSelected && styles.lastSelected,
         focused && styles.focused,
+        // Подсветка «отсюда ты вышел» — третье состояние строки, тише и
+        // выделения галочкой, и клавиатурного курсора; поэтому и стоит
+        // в списке классов после них.
+        visited && styles.visited,
         leaving && styles.leaving,
       )}
       aria-hidden={leaving || undefined}
@@ -422,10 +455,15 @@ export function MessageList({
   onSwipe,
   onRefresh,
   onOpen,
+  scrollKey,
+  highlightId,
   footer,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
+  // Запомненная прокрутка читается разово, при восстановлении, а не
+  // подпиской: подписка перерисовывала бы список на каждое сохранение.
+  const rememberListScroll = useUiStore((s) => s.rememberListScroll);
   const phone = usePhone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -466,6 +504,55 @@ export function MessageList({
   useEffect(() => {
     virtualizer.measure();
   }, [rowHeight, virtualizer]);
+
+  /* --- Возврат в список на то же место --------------------------------
+   *
+   * Уход в письмо размонтирует страницу папки вместе со списком, поэтому
+   * положение приходится и запоминать, и восстанавливать самим. Прокрутка
+   * держится в ссылке и обновляется по событию: читать её у DOM в момент
+   * размонтирования поздно — узла может уже не быть.
+   */
+
+  const scrollTopRef = useRef(0);
+  /** Восстанавливаем ровно один раз на монтирование списка. */
+  const restored = useRef(false);
+
+  useEffect(() => {
+    if (!scrollKey) return;
+    return () => {
+      rememberListScroll(scrollKey, scrollTopRef.current);
+    };
+  }, [scrollKey, rememberListScroll]);
+
+  /**
+   * Восстановление ждёт, пока в списке появятся строки: до первого ответа
+   * сервера прокручивать нечего, и попытка встать на прежнее место просто
+   * пропала бы. Ровно поэтому же оно в layout-эффекте — иначе человек
+   * успел бы увидеть начало списка и прыжок.
+   */
+  useLayoutEffect(() => {
+    if (!scrollKey || restored.current || rows.length === 0) return;
+    const element = scrollRef.current;
+    if (!element) return;
+    restored.current = true;
+    const top = restoreScrollTop({
+      savedTop: useUiStore.getState().listScroll[scrollKey],
+      highlightIndex: rowIndexOf(rows, highlightId),
+      rows,
+      metrics: { rowHeight, headerHeight: HEADER_HEIGHT },
+      viewportHeight: element.offsetHeight,
+    });
+    if (top === null) return;
+    scrollTopRef.current = top;
+    /**
+     * Прокручиваем сам узел, а не через `scrollToOffset` виртуализации:
+     * тот ходит в `element.scrollTo`, а высоту списка к этому моменту
+     * задаёт уже отрисованная подложка (`inner`), поэтому обычного
+     * присваивания достаточно и оно ведёт себя одинаково везде.
+     */
+    element.scrollTop = top;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scrollKey, rows.length]);
 
   // Долистали до последних строк — подгружаем следующую страницу.
   // Порог в несколько строк, чтобы новые письма успели приехать
@@ -576,6 +663,11 @@ export function MessageList({
       <div
         ref={scrollRef}
         className={cx(styles.scroll, compact && styles.compact)}
+        // Прокрутку держим в ссылке, а не читаем при уходе: к моменту
+        // размонтирования узла может уже не быть
+        onScroll={(e) => {
+          scrollTopRef.current = e.currentTarget.scrollTop;
+        }}
         onTouchStart={onPullStart}
         onTouchMove={onPullMove}
         onTouchEnd={onPullEnd}
@@ -607,6 +699,7 @@ export function MessageList({
                     message={row.message}
                     selection={selectionStates.get(row.message.id) ?? emptySelection}
                     focused={row.message.id === focusedId}
+                    visited={row.message.id === highlightId}
                     leaving={leavingSet.has(row.message.id)}
                     tabbable={row.message.id === tabbableId}
                     rowRef={row.message.id === focusedId ? focusedRowRef : undefined}

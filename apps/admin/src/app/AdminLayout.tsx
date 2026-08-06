@@ -6,6 +6,7 @@ import { cx } from '@web/lib/cx';
 import { visibleNav, type NavItem } from '../lib/access';
 import { breadcrumbsFor } from '../lib/breadcrumbs';
 import { useSession } from './session';
+import { ThemeMenu } from './ThemeMenu';
 import styles from './AdminLayout.module.css';
 
 export function AdminLayout() {
@@ -27,6 +28,10 @@ export function AdminLayout() {
         </Link>
 
         <span className={styles.spacer} />
+
+        {/* Смена оформления — на виду, а не закопана в настройки: тему
+            меняют, увидев экран, а не разыскав раздел */}
+        <ThemeMenu className={styles.theme} />
 
         <div className={styles.account}>
           <span className={styles.accountAvatar} aria-hidden="true">

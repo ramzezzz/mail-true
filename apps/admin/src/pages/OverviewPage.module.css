@@ -1,0 +1,191 @@
+/*
+ * Раскладка дашборда.
+ *
+ * Правило одно и сквозное: НИЧЕГО не задаёт себе ширину в точках. На 390
+ * точках (это ширина типичного телефона за вычетом полей) любая колонка
+ * с фиксированной шириной выталкивает соседей за правый край, и страница
+ * начинает ездить вбок целиком — вместе с шапкой и меню. Поэтому колонки
+ * задаются через minmax(0, 1fr), а таблицы прокручиваются внутри своей
+ * обёртки, а не тащат за собой страницу.
+ */
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.taken {
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Сетка карточек. minmax(0, …) обязателен: без нуля в минимуме колонка
+ * не может стать уже своего содержимого, и широкая таблица внутри неё
+ * растягивает всю сетку за край экрана.
+ */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.gridWide {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.section {
+  margin: 18px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--mt-color-text-primary);
+}
+
+.sectionHint {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Строка «показатель — полоса — число» в карточке ресурсов. */
+.gauges {
+  display: grid;
+  gap: 10px;
+}
+
+.gauge {
+  display: grid;
+  gap: 3px;
+}
+
+.gaugeHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.gaugeTitle {
+  color: var(--mt-color-text-primary);
+}
+
+.gaugeNumber {
+  font-variant-numeric: tabular-nums;
+  color: var(--mt-color-text-primary);
+}
+
+/*
+ * Откуда взято число. Мелко и приглушённо: это не сообщение, а сноска,
+ * но она обязана быть рядом — иначе «занято 42 %» не отвечает на вопрос
+ * «чего именно и по чьим данным».
+ */
+.source {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--mt-color-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Список «чего не видно из контейнера». */
+.notes {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.notes li + li {
+  margin-top: 4px;
+}
+
+/* Кольцо и его легенда рядом, а на узком — друг под другом. */
+.donutRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.donutLegend {
+  display: grid;
+  flex: 1 1 190px;
+  gap: 4px;
+  min-width: 0;
+}
+
+.donutLegendRow {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+.donutLegendName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mt-color-text-primary);
+}
+
+.donutLegendValue {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.swatch {
+  width: 14px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* Заголовок сортируемой колонки — кнопка, а не текст с onClick. */
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--mt-color-text-primary);
+}
+
+.sortActive {
+  color: var(--mt-color-text-primary);
+  font-weight: 600;
+}
+
+/* Узкая ячейка с полосой заполнения квоты. */
+.quotaCell {
+  min-width: 110px;
+}
+
+.reasonText {
+  overflow-wrap: anywhere;
+}

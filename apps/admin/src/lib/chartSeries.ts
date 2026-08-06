@@ -1,0 +1,200 @@
+/**
+ * Палитра рядов данных на графиках — единый источник истины.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ У ГРАФИКОВ СВОЯ ПАЛИТРА, А НЕ АКЦЕНТЫ ТЕМ
+ * ------------------------------------------------------------------
+ * Соблазн взять цвета прямо из темы (акцент, «работает», «внимание», «не
+ * отвечает») велик — их пять, и они уже проверены на контраст. Но на
+ * графике они сталкиваются: в теме «Изумруд» акцент #047857 и «работает»
+ * #0a7b44 — два зелёных, различить которые в двух линиях толщиной в два
+ * пикселя нельзя. То же в «Коралле» с акцентом и «не отвечает». То есть
+ * ряды данных сливались бы ровно в тех темах, где заказчик их и выберет.
+ *
+ * Поэтому палитра рядов своя и от акцента темы НЕ ЗАВИСИТ. Меняется она
+ * только вместе с ПОВЕРХНОСТЬЮ, на которой лежит: белая карточка светлых
+ * тем, серая тёмной темы почты и графитовая фирменной темы панели. Ровно
+ * три набора — по той же причине и в том же виде, что цветные строки
+ * журнала (styles/logLevels.css): у цветных светлых тем карточка белая,
+ * и свой набор им не нужен.
+ *
+ * ------------------------------------------------------------------
+ * ЦВЕТ — НЕ ЕДИНСТВЕННОЕ ОТЛИЧИЕ
+ * ------------------------------------------------------------------
+ * Примерно каждый двенадцатый мужчина не различает красный и зелёный. На
+ * графике «доставлено/отбито», раскрашенном только цветом, он видит две
+ * одинаковые линии. Поэтому у каждого ряда есть ещё:
+ *   * своя штриховка линии (dash) — видна и на чёрно-белой печати;
+ *   * своя заливка-узор для площадей и столбцов (pattern);
+ *   * подпись словом в легенде и в подсказке.
+ * Проверка tests/chartContrast.test.ts требует и того, и другого.
+ *
+ * ------------------------------------------------------------------
+ * ОТКУДА ЧИСЛА
+ * ------------------------------------------------------------------
+ * Контраст к своей поверхности и различимость между рядами СЧИТАЮТСЯ, а не
+ * подбираются на глаз: WCAG 2.1 для контраста (порог 3:1 — норма 1.4.11 для
+ * нетекстовых элементов, к которым относятся линии и столбцы) и ΔE76 в Lab
+ * для различимости. Замеры — в tests/chartContrast.test.ts, значения
+ * обязаны совпадать со styles/charts.css.
+ */
+
+/** Семейство поверхностей: у каждого свой набор цветов рядов. */
+export type ChartSurface = 'light' | 'dark' | 'graphite';
+
+/** Слоты палитры. Названы по тону, а не по смыслу: смысл задаёт ряд. */
+export type ChartHue = 'blue' | 'green' | 'amber' | 'red' | 'violet' | 'teal' | 'magenta' | 'gray';
+
+export const CHART_HUES: readonly ChartHue[] = [
+  'blue',
+  'green',
+  'amber',
+  'red',
+  'violet',
+  'teal',
+  'magenta',
+  'gray',
+];
+
+/** Поверхность, на которой лежат графики каждого семейства тем. */
+export const CHART_SURFACES: Readonly<Record<ChartSurface, string>> = {
+  // Карточка светлых тем — белая; цветные светлые темы её не красят.
+  light: '#ffffff',
+  // Карточка тёмной темы почты.
+  dark: '#232324',
+  // Карточка фирменного «Графита».
+  graphite: '#16222a',
+};
+
+/**
+ * Цвета слотов по семействам.
+ *
+ * Тёмные наборы светлее и чуть менее насыщены, чем светлый: на тёмной
+ * подложке насыщенный цвет «звенит» и линия расплывается, а контраст даёт
+ * не насыщенность, а светлота.
+ */
+export const CHART_PALETTE: Readonly<Record<ChartSurface, Readonly<Record<ChartHue, string>>>> = {
+  light: {
+    blue: '#1d63d1',
+    green: '#0a7b44',
+    amber: '#8a5200',
+    red: '#c42500',
+    violet: '#6b3fd4',
+    // Бирюзовый заметно синее «серого»: на первом варианте (#0a6b7a) они
+    // расходились на ΔE 23, и в паре «диск/нагрузка» линии читались с трудом.
+    teal: '#00707f',
+    magenta: '#b0197a',
+    gray: '#63666b',
+  },
+  dark: {
+    blue: '#6cb2f7',
+    green: '#5fd693',
+    amber: '#f5c164',
+    red: '#ff9c85',
+    violet: '#b79bf5',
+    teal: '#5bd3d0',
+    magenta: '#f58ac4',
+    gray: '#9ea1a6',
+  },
+  graphite: {
+    blue: '#7bb8f2',
+    green: '#5fd69f',
+    amber: '#f2c469',
+    red: '#ff9d88',
+    violet: '#bfa4f0',
+    teal: '#4fd8dd',
+    magenta: '#f78fc2',
+    gray: '#9fb4bc',
+  },
+};
+
+/** Узор заливки — второй, нецветовой признак ряда. */
+export type ChartPattern = 'solid' | 'diagonal' | 'grid' | 'dots' | 'reverse' | 'dense';
+
+/** Описание одного ряда данных. */
+export interface ChartSeries {
+  id: string;
+  /** Слово в легенде — оно, а не цвет, объясняет ряд. */
+  title: string;
+  hue: ChartHue;
+  /**
+   * Штриховка линии (stroke-dasharray). Пустая строка — сплошная.
+   * Различает ряды там, где цвет не работает: чёрно-белая печать,
+   * дальтонизм, снимок экрана с искажёнными цветами.
+   */
+  dash: string;
+  /** Узор заливки для столбцов, площадей и долей. */
+  pattern: ChartPattern;
+}
+
+/** Цвет слота на заданной поверхности. */
+export function chartColor(surface: ChartSurface, hue: ChartHue): string {
+  return CHART_PALETTE[surface][hue];
+}
+
+/**
+ * Состояния письма — ряды графика почтового потока.
+ *
+ * Тона выбраны по смыслу, а не по порядку: доставлено — зелёный, отложено —
+ * янтарный, безнадёжно потеряно — красный. Читателю не приходится сверяться
+ * с легендой, чтобы понять, хороший день или плохой.
+ */
+export const FLOW_SERIES: readonly ChartSeries[] = [
+  { id: 'sent', title: 'Доставлено', hue: 'green', dash: '', pattern: 'solid' },
+  { id: 'deferred', title: 'Отложено', hue: 'amber', dash: '6 3', pattern: 'diagonal' },
+  { id: 'bounced', title: 'Отбито', hue: 'red', dash: '2 3', pattern: 'grid' },
+  { id: 'rejected', title: 'Отклонено на приёме', hue: 'magenta', dash: '9 3 2 3', pattern: 'dots' },
+  { id: 'expired', title: 'Истёк срок', hue: 'violet', dash: '1 3', pattern: 'reverse' },
+  { id: 'held', title: 'Задержано вручную', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },
+];
+
+/** Ряды графика ресурсов. */
+export const RESOURCE_SERIES: readonly ChartSeries[] = [
+  { id: 'cpuNode', title: 'Процессор узла', hue: 'blue', dash: '', pattern: 'solid' },
+  { id: 'cpuApi', title: 'Процессор: сервер приложения', hue: 'violet', dash: '6 3', pattern: 'diagonal' },
+  { id: 'mem', title: 'Память узла', hue: 'magenta', dash: '2 3', pattern: 'grid' },
+  { id: 'disk', title: 'Диск', hue: 'teal', dash: '9 3 2 3', pattern: 'dots' },
+  { id: 'load', title: 'Средняя нагрузка', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },
+];
+
+/** Ряды графика очереди. */
+export const QUEUE_SERIES: readonly ChartSeries[] = [
+  { id: 'queueTotal', title: 'Всего в очереди', hue: 'blue', dash: '', pattern: 'solid' },
+  { id: 'queueDeferred', title: 'Из них отложено', hue: 'amber', dash: '6 3', pattern: 'diagonal' },
+];
+
+/** Статьи расхода места — ряды круговой диаграммы. */
+export const DISK_SERIES: readonly ChartSeries[] = [
+  { id: 'vmail', title: 'Письма', hue: 'blue', dash: '', pattern: 'solid' },
+  { id: 'mailindex', title: 'Поисковые индексы', hue: 'teal', dash: '6 3', pattern: 'diagonal' },
+  { id: 'db', title: 'База данных', hue: 'violet', dash: '2 3', pattern: 'grid' },
+  { id: 'dbindex', title: 'Индексы базы', hue: 'magenta', dash: '9 3 2 3', pattern: 'dots' },
+  { id: 'logs', title: 'Журналы служб', hue: 'amber', dash: '1 3', pattern: 'reverse' },
+  { id: 'free', title: 'Свободно', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },
+];
+
+/** Все ряды всех графиков — для проверок и подстановки цветов. */
+export const ALL_SERIES: readonly ChartSeries[] = [
+  ...FLOW_SERIES,
+  ...RESOURCE_SERIES,
+  ...QUEUE_SERIES,
+  ...DISK_SERIES,
+];
+
+/** Ряд по идентификатору; неизвестный — серый сплошной, а не падение. */
+export function seriesOf(list: readonly ChartSeries[], id: string): ChartSeries {
+  return (
+    list.find((s) => s.id === id) ?? {
+      id,
+      title: id,
+      hue: 'gray',
+      dash: '',
+      pattern: 'solid',
+    }
+  );
+}
+
+/** Имя переменной CSS со цветом слота (значения — в styles/charts.css). */
+export function hueVar(hue: ChartHue): string {
+  return `var(--mt-chart-${hue})`;
+}

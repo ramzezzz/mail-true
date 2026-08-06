@@ -834,3 +834,29 @@
     text-decoration: underline;
   }
 }
+
+/*
+ * Плашка черновика: письмо ещё не отправлено, и его можно дописать.
+ *
+ * Раскраска — не как у остальных плашек (серый фон): черновик в списке
+ * писем выглядит ровно как полученное письмо, и именно на этом человек
+ * и обжигался — открывал, читал и не понимал, ушло оно или нет. Плашка
+ * обязана отличаться с первого взгляда, поэтому у неё своя рамка.
+ */
+.draftBanner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 8px 12px;
+  padding: 10px 16px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-left: 3px solid var(--mt-color-text-accent, #0a5cd5);
+  border-radius: var(--mt-size-border-radius, 8px);
+  background: var(--mt-color-background-secondary);
+  font-size: var(--mt-font-subhead-size, 14px);
+}
+
+.draftText {
+  flex: 1 1 auto;
+  min-width: 0;
+}

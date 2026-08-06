@@ -16,12 +16,25 @@
   min-height: 100dvh;
   width: 100%;
   overflow: hidden;
-  background: radial-gradient(
-    120% 120% at 42% 44%,
-    var(--mt-adm-login-bg-center, #16222a) 0%,
-    var(--mt-adm-login-bg-middle, #101a21) 55%,
-    var(--mt-adm-login-bg-edge, #0b1218) 100%
-  );
+  /*
+   * Тёмное поле, светлее к верхнему левому углу — туда, где стоит сфера.
+   * Два перехода, а не один: нижний задаёт глубину (четыре остановки, к
+   * краю почти чёрный), верхний подсвечивает угол. Форма та же, что у входа
+   * в почту, — гамма другая.
+   */
+  background:
+    radial-gradient(
+      46% 44% at 21% 29%,
+      var(--mt-adm-login-bg-glow, rgba(15, 106, 114, 0.3)) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      130% 120% at 60% 48%,
+      var(--mt-adm-login-bg-center, #16222a) 0%,
+      var(--mt-adm-login-bg-middle, #101a21) 44%,
+      var(--mt-adm-login-bg-edge, #0b1218) 72%,
+      var(--mt-adm-login-bg-deep, #070c10) 100%
+    );
   color: var(--mt-adm-login-footer, #9db8c1);
   font-size: 14px;
   line-height: 1.45;
@@ -89,6 +102,15 @@
 .brandMark {
   width: 1.9rem;
   height: 1.9rem;
+  flex: none;
+}
+/* Свой логотип (OEM). Бывает любых пропорций, поэтому высота задана, а
+   ширина ограничена карточкой: широкий знак не должен её распирать. */
+.brandLogo {
+  height: 1.9rem;
+  width: auto;
+  max-width: 60%;
+  object-fit: contain;
   flex: none;
 }
 .brandName {
@@ -269,6 +291,16 @@
   50% {
     transform: translate(-24px, 26px);
   }
+}
+
+/*
+ * Вкладку спрятали — пятна замирают вместе со сценой. Без этого правила
+ * они оставались единственным, что продолжало двигаться в никуда:
+ * анимации CSS считает поток компоновщика, а он про видимость не знает.
+ */
+.page[data-paused='true'] .hazeTeal,
+.page[data-paused='true'] .hazeSteel {
+  animation-play-state: paused;
 }
 
 /* Движение гасим, но всё остаётся на своих местах и видимым. */

@@ -18,14 +18,20 @@ const CONFIG = {
   accentHover: "#1A7FD8",
   accentPress: "#135A9E",
 
-  /* ---- Background constellation ---- */
-  particleCount: 90,                 // number of drifting dots
-  particleColor: "150,190,245",      // dot/line RGB (used with varying alpha)
-  linkDistance: 130,                 // px: connect two dots closer than this
-  mouseDistance: 180,                // px: draw a line from a dot to the cursor within this
+  /* ---- Background: constellation WEB + twinkling STARS (both layers) ---- */
+  particleCount: 72,                 // web nodes — the network that links up + reaches toward the cursor
+  webColor: "150,190,245",           // web dot/line RGB
+  linkDistance: 132,                 // px: link two web nodes closer than this
+  mouseDistance: 185,                // px: link a node to the cursor within this
+  starCount: 190,                    // twinkling stars (extra layer behind the web)
+  starColor: "208,228,255",          // star RGB (varying alpha => twinkle)
+
+  /* ---- Globe ---- */
+  showGlobe: true,                   // left CSS-3D wireframe globe
+  globeRings: 8,                     // wireframe rings PER axis (X & Y) — higher = denser sphere
+  lightBalls: 6,                     // glowing balls that run along the globe rings
 
   /* ---- Feature switches ---- */
-  showGlobe: true,                   // left CSS-3D wireframe globe
   showVerifyCode: false,             // captcha field (default off for the dark look)
   defaultLang: "en",                 // "en" | "zh"
 
@@ -128,95 +134,140 @@ const CONFIG = {
   }
 
   /* =======================================================================
-     BACKGROUND CONSTELLATION (canvas) — drifting dots, links between near
-     dots, and links reaching toward the mouse cursor. Damped via rAF.
+     BACKGROUND (canvas) — three layers, all generated in code:
+       1) twinkling STARS (many small dots slowly fading in/out at varying alpha)
+       2) constellation WEB (drifting nodes linked to near nodes + to the cursor)
+       3) a subtle wave-MESH in the bottom-right corner
      ======================================================================= */
-  function initConstellation() {
+  function initBackground() {
     const canvas = $("fx");
     const ctx = canvas.getContext("2d");
     let W = 0, H = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const dots = [];
-    const mouse = { x: -9999, y: -9999, active: false };
-    const [pr, pg, pb] = CONFIG.particleColor.split(",").map(Number);
+    const stars = [], dots = [];
+    const [sr, sg, sb] = CONFIG.starColor.split(",").map(Number);
+    const [wr, wg, wb] = CONFIG.webColor.split(",").map(Number);
     const LINK = CONFIG.linkDistance, MDIST = CONFIG.mouseDistance;
+    const mouse = { x: -9999, y: -9999, active: false };
 
     function resize() {
-      // Fall back to the viewport if layout isn't measurable yet (avoids a 0-sized, blank canvas).
       W = canvas.clientWidth || window.innerWidth;
       H = canvas.clientHeight || window.innerHeight;
       canvas.width = W * dpr; canvas.height = H * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     }
     function seed() {
+      stars.length = 0;
+      for (let i = 0; i < CONFIG.starCount; i++) {
+        stars.push({
+          x: Math.random() * W, y: Math.random() * H,
+          r: Math.random() * 1.7 + 0.55,
+          base: Math.random() * 0.45 + 0.55,   // base brightness (brighter floor)
+          tw: Math.random() * 0.9 + 0.20,       // twinkle speed
+          ph: Math.random() * Math.PI * 2,      // phase (out of sync)
+          dx: (Math.random() - 0.5) * 0.04, dy: (Math.random() - 0.5) * 0.04,
+        });
+      }
       dots.length = 0;
       for (let i = 0; i < CONFIG.particleCount; i++) {
         dots.push({
           x: Math.random() * W, y: Math.random() * H,
-          vx: (Math.random() - 0.5) * 0.28,
-          vy: (Math.random() - 0.5) * 0.28,
-          r: Math.random() * 1.6 + 0.6,
+          vx: (Math.random() - 0.5) * 0.28, vy: (Math.random() - 0.5) * 0.28,
+          r: Math.random() * 1.5 + 0.7,
         });
       }
     }
 
     window.addEventListener("pointermove", (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true; });
     window.addEventListener("pointerleave", () => { mouse.active = false; mouse.x = mouse.y = -9999; });
-    // On resize we re-size (which clears the canvas) and reseed; when the animation
-    // loop is frozen (reduced-motion) we must repaint the static frame here, otherwise
-    // the canvas would stay blank after any resize.
     window.addEventListener("resize", () => { resize(); seed(); if (reduceMotion) frame(); });
 
     resize(); seed();
 
+    function drawMesh(t) {
+      // faint dotted sine "ribbons" sweeping into the bottom-right corner
+      const x0 = W * 0.60;
+      for (let row = 0; row < 5; row++) {
+        const alpha = 0.11 - row * 0.014;
+        if (alpha <= 0) break;
+        ctx.fillStyle = `rgba(120,170,240,${alpha})`;
+        const baseY = H * 0.66 + row * 20;
+        for (let x = x0; x < W; x += 7) {
+          const yy = baseY + Math.sin(x * 0.012 + t * 0.4 + row * 0.7) * 11 + (x - x0) * 0.07;
+          if (yy > 0 && yy < H) { ctx.beginPath(); ctx.arc(x, yy, 0.9, 0, Math.PI * 2); ctx.fill(); }
+        }
+      }
+      // a few faint triangulated lines in the very corner
+      const p = [[0.78,0.60],[0.90,0.72],[0.70,0.82],[0.96,0.87],[0.83,0.96],[0.66,0.70]].map(q => [q[0]*W, q[1]*H]);
+      ctx.strokeStyle = "rgba(130,175,240,0.10)"; ctx.lineWidth = 1;
+      for (let i = 0; i < p.length; i++)
+        for (let j = i + 1; j < p.length; j++)
+          if (Math.hypot(p[i][0]-p[j][0], p[i][1]-p[j][1]) < W * 0.23) {
+            ctx.beginPath(); ctx.moveTo(p[i][0], p[i][1]); ctx.lineTo(p[j][0], p[j][1]); ctx.stroke();
+          }
+    }
+
+    let t = 0;
     function frame() {
+      t += 0.016;
       ctx.clearRect(0, 0, W, H);
 
-      // move + draw dots
+      // 1) twinkling stars (behind)
+      for (const s of stars) {
+        s.x += s.dx; s.y += s.dy;
+        if (s.x < 0) s.x += W; else if (s.x > W) s.x -= W;
+        if (s.y < 0) s.y += H; else if (s.y > H) s.y -= H;
+        const a = Math.max(0.12, s.base * (0.5 + 0.5 * Math.sin(t * s.tw + s.ph)));
+        // soft halo for the brighter/larger stars so the field reads clearly
+        if (s.r > 1.3) {
+          ctx.beginPath(); ctx.arc(s.x, s.y, s.r * 2.6, 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(${sr},${sg},${sb},${a * 0.16})`;
+          ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${sr},${sg},${sb},${a})`;
+        ctx.fill();
+      }
+
+      // 3) corner wave-mesh (drawn under the web)
+      drawMesh(t);
+
+      // 2) constellation web — nodes + links + links to the cursor
       for (const d of dots) {
         d.x += d.vx; d.y += d.vy;
         if (d.x < 0 || d.x > W) d.vx *= -1;
         if (d.y < 0 || d.y > H) d.vy *= -1;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${pr},${pg},${pb},0.75)`;
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${wr},${wg},${wb},0.8)`; ctx.fill();
       }
-
-      // links between nearby dots
       for (let i = 0; i < dots.length; i++) {
         for (let j = i + 1; j < dots.length; j++) {
           const a = dots[i], b = dots[j];
-          const dx = a.x - b.x, dy = a.y - b.y;
-          const dist = Math.hypot(dx, dy);
+          const dist = Math.hypot(a.x - b.x, a.y - b.y);
           if (dist < LINK) {
-            ctx.strokeStyle = `rgba(${pr},${pg},${pb},${0.18 * (1 - dist / LINK)})`;
+            ctx.strokeStyle = `rgba(${wr},${wg},${wb},${0.18 * (1 - dist / LINK)})`;
             ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
           }
         }
-        // links reaching toward the mouse (the key interaction)
         if (mouse.active) {
           const a = dots[i];
           const dm = Math.hypot(a.x - mouse.x, a.y - mouse.y);
           if (dm < MDIST) {
-            ctx.strokeStyle = `rgba(${pr},${pg},${pb},${0.5 * (1 - dm / MDIST)})`;
+            ctx.strokeStyle = `rgba(${wr},${wg},${wb},${0.5 * (1 - dm / MDIST)})`;
             ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(mouse.x, mouse.y); ctx.stroke();
           }
         }
       }
-
       if (mouse.active) {
-        ctx.beginPath();
-        ctx.arc(mouse.x, mouse.y, 2.4, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(${pr},${pg},${pb},0.95)`;
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(mouse.x, mouse.y, 2.4, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${wr},${wg},${wb},0.95)`; ctx.fill();
       }
 
       if (!reduceMotion) requestAnimationFrame(frame);
     }
 
-    frame(); // paint the first frame synchronously (frame() schedules the loop unless reduced-motion)
+    frame();
   }
 
   /* =======================================================================
@@ -225,32 +276,21 @@ const CONFIG = {
   function buildGlobe() {
     if (!CONFIG.showGlobe) { $("globeStage").style.display = "none"; return; }
 
-    // Longitude rings: vertical ellipses rotated around Y
+    // Dense wireframe sphere: N great-circle rings rotated around X, and N around
+    // Y, so the two families cross to suggest a globe of lat/long lines.
     const rings = $("globeRings");
-    const LONG = 6;
-    for (let i = 0; i < LONG; i++) {
-      const el = document.createElement("div");
-      el.className = "ring" + (i === 0 ? " ring--bright" : "");
-      el.style.setProperty("--ry", (i * 180 / LONG) + "deg");
-      el.style.setProperty("--rx", "80deg");
-      rings.appendChild(el);
+    const N = Math.max(3, CONFIG.globeRings || 8);
+    for (let i = 0; i < N; i++) {
+      const rx = document.createElement("div");
+      rx.className = "ring" + (i === 0 ? " ring--bright" : "");
+      rx.style.setProperty("--rx", (i * 180 / N).toFixed(1) + "deg");
+      rings.appendChild(rx);
+
+      const ry = document.createElement("div");
+      ry.className = "ring" + (i === 0 ? " ring--bright" : "");
+      ry.style.setProperty("--ry", (i * 180 / N).toFixed(1) + "deg");
+      rings.appendChild(ry);
     }
-    // Latitude rings: horizontal circles squashed on X, stacked on Y
-    const LAT = [ -55, -28, 0, 28, 55 ];
-    LAT.forEach((deg) => {
-      const el = document.createElement("div");
-      const scale = Math.cos(deg * Math.PI / 180);
-      el.className = "ring" + (deg === 0 ? " ring--bright" : "");
-      el.style.setProperty("--rx", "90deg");
-      // squash toward the pole + lift along the sphere's axis
-      el.style.width = (scale * 100) + "%";
-      el.style.height = (scale * 100) + "%";
-      el.style.left = ((1 - scale) * 50) + "%";
-      el.style.top = ((1 - scale) * 50) + "%";
-      el.style.transform =
-        `translateZ(${Math.sin(deg * Math.PI / 180) * 17}rem) rotateX(90deg)`;
-      rings.appendChild(el);
-    });
 
     // Orbiting icon nodes — simple inline line glyphs, placed on a circle.
     const ICONS = {
@@ -265,22 +305,60 @@ const CONFIG = {
     };
     const order = ["chart", "monitor", "shield", "search", "bulb", "gear", "map", "wifi"];
     const orbit = $("orbit");
-    const R = 44; // % radius from center
+    const R = 45; // % radius from center
     order.forEach((key, i) => {
       const ang = (-90 + i * (360 / order.length)) * Math.PI / 180;
       const x = 50 + Math.cos(ang) * R;
       const y = 50 + Math.sin(ang) * R;
+      // A positioned WRAP scales smoothly on hover (CSS transition); the inner
+      // .node circle gently pulses and does one clockwise spin while hovered.
+      const wrap = document.createElement("div");
+      wrap.className = "node-wrap";
+      wrap.style.left = `calc(${x}% - 1.55rem)`;
+      wrap.style.top = `calc(${y}% - 1.55rem)`;
+
       const n = document.createElement("div");
       n.className = "node";
-      n.style.left = `calc(${x}% - 1.55rem)`;
-      n.style.top = `calc(${y}% - 1.55rem)`;
-      n.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[key]}</svg>`;
-      // counter-spin so icons stay upright while the globe rotates
-      if (!reduceMotion) {
-        n.style.animation = "spin360 34s linear infinite reverse";
-      }
-      orbit.appendChild(n);
+      // stationary icons that gently pulse, out of sync (staggered delay)
+      n.style.setProperty("--pd", (i * 0.34).toFixed(2) + "s");
+      n.style.setProperty("--pdur", (2.4 + (i % 3) * 0.4).toFixed(2) + "s");
+      n.innerHTML = `<span class="node__i"><svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[key]}</svg></span>`;
+      wrap.appendChild(n);
+      orbit.appendChild(wrap);
     });
+
+    buildBalls();
+  }
+
+  /* Glowing balls that run ALONG the globe's wireframe rings. Each ball sits on
+     a plane matching one ring (same --rx / --ry) and orbits within that plane;
+     because it lives inside the spinning globe, it rides the ring in 3D. */
+  function buildBalls() {
+    const wrap = $("globeBalls");
+    if (!wrap) return;
+    const N = Math.max(0, CONFIG.lightBalls || 0);
+    const NR = Math.max(3, CONFIG.globeRings || 8);
+    const RAD = "17.2rem";                 // ball orbit radius ≈ globe ring radius
+    for (let i = 0; i < N; i++) {
+      const plane = document.createElement("div");
+      plane.className = "ball-plane";
+      const ang = ((i * 2 + 1) % NR) * 180 / NR;   // pick a ring angle
+      plane.style.setProperty(i % 2 === 0 ? "--rx" : "--ry", ang.toFixed(1) + "deg");
+
+      const orb = document.createElement("div");
+      orb.className = "ball-orb";
+      orb.style.setProperty("--dur", (9 + i * 2.1).toFixed(1) + "s");
+      orb.style.setProperty("--delay", (-i * 2.7).toFixed(1) + "s");
+      if (reduceMotion) orb.style.animation = "none";
+
+      const ball = document.createElement("div");
+      ball.className = "ball";
+      ball.style.setProperty("--r", RAD);
+
+      orb.appendChild(ball);
+      plane.appendChild(orb);
+      wrap.appendChild(plane);
+    }
   }
 
   /* ---- Captcha (cosmetic canvas) ---- */
@@ -362,7 +440,7 @@ const CONFIG = {
     if (CONFIG.showVerifyCode) { $("verifyField").hidden = false; drawCaptcha(); }
 
     buildGlobe();
-    initConstellation();
+    initBackground();
 
     $("username").addEventListener("input", syncClear);
     $("userClear").addEventListener("click", () => { $("username").value = ""; syncClear(); $("username").focus(); });

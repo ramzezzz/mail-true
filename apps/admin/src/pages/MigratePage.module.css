@@ -1,0 +1,101 @@
+/* Раздел «Перенос почты». Только то, чего нет в общих элементах.
+ *
+ * Цвета берутся ТОЛЬКО из переменных панели (--mt-color-*, --mt-admin-*):
+ * у панели несколько тем, и захардкоженный синий оставался бы синим
+ * и в изумрудной, и в коралловой — то есть выглядел бы чужим элементом,
+ * попавшим на страницу по ошибке. */
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+/* Полоса выполнения. Именно полоса, а не кружок: перенос идёт часами,
+   и человеку нужно видеть, СКОЛЬКО осталось, а не что «что-то происходит». */
+.bar {
+  background: var(--mt-color-background-secondary);
+  border: 1px solid var(--mt-admin-border);
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 12px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.barFill {
+  background: var(--mt-color-icon-accent-themed);
+  border-radius: 999px;
+  display: block;
+  height: 100%;
+  /* Перерисовка раз в три секунды рывком читается как подёргивание;
+     плавный переход показывает именно движение. */
+  transition: width 400ms ease;
+}
+
+.barFill_stopped {
+  background: var(--mt-admin-warn);
+}
+
+.barFill_failed {
+  background: var(--mt-admin-fail);
+}
+
+/* Строка «что происходит прямо сейчас»: главный признак движения.
+   В одну строку с многоточием намеренно: она меняется несколько раз
+   в секунду, и перескок высоты блока от длинного имени папки дёргал бы
+   всё, что ниже. */
+.activity {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Итог завершённого задания. Здесь многоточие недопустимо: в этой строке
+   лежит объяснение («перенос остановлен, уже перенесённое повторно не
+   поедет»), и обрезать его на середине — значит спрятать ровно то,
+   ради чего человек на неё смотрит. Дёргаться уже нечему: задание стоит. */
+.finalNote {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 6px;
+  max-width: 78ch;
+}
+
+.jobRow {
+  cursor: pointer;
+}
+
+.jobRow_active {
+  background: var(--mt-color-background-accent-themed-alpha);
+}
+
+.errors {
+  color: var(--mt-color-text-negative);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.wide {
+  width: 100%;
+}
+
+/* Пояснение под переключателем способа входа: почему один путь лучше. */
+.why {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 4px 0 12px;
+  max-width: 78ch;
+}

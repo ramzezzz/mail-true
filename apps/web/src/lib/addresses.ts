@@ -18,3 +18,17 @@ export function parseAddresses(value: string): MailAddress[] {
       return { name: null, address: part };
     });
 }
+
+/**
+ * Обратное действие: адреса в строку для поля окна написания.
+ *
+ * Нужно при дописывании сохранённого черновика — его получатели приходят
+ * с сервера разобранными, а в поле «Кому» лежит текст. Разбор и сборка
+ * обязаны быть согласованы: иначе открытие и сохранение черновика подряд
+ * меняли бы адреса сами по себе.
+ */
+export function formatAddresses(list: readonly MailAddress[]): string {
+  return list
+    .map((a) => (a.name ? `${a.name} <${a.address}>` : a.address))
+    .join(', ');
+}

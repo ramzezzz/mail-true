@@ -57,6 +57,15 @@ export interface WebGeneralSettings {
   quoteOriginalOnReply: boolean;
   afterDelete: WebAfterDelete;
   autoCollectContacts: boolean;
+  /**
+   * Логотипы доменов вместо букв в кружках списка писем.
+   *
+   * Необязательное поле намеренно: этот же контракт правит админка
+   * (admin/user-settings.ts) и им же пользуются готовые проверки. Форма,
+   * которая о поле не знает, не должна МОЛЧА ЕГО ГАСИТЬ — а именно это
+   * и произошло бы с обязательным полем, приходящим как `undefined`.
+   */
+  showSenderLogos?: boolean;
 }
 
 /** Внутренние настройки + подписи -> DTO интерфейса. */
@@ -86,6 +95,7 @@ export function toWebGeneral(
     quoteOriginalOnReply: settings.replyQuote,
     afterDelete: settings.afterDelete === 'next' ? 'next-message' : 'list',
     autoCollectContacts: settings.collectContacts,
+    showSenderLogos: settings.senderLogos,
   };
 }
 
@@ -98,6 +108,9 @@ export function fromWebGeneral(dto: WebGeneralSettings): MailSettingsPatch {
     notifyBrowser: dto.notifications.browser,
     notifyTab: dto.notifications.tabCounter,
     collectContacts: dto.autoCollectContacts,
+    // Поля нет в запросе — значит его прислал тот, кто о нём не знает
+    // (админка, старый интерфейс). Настройку человека это трогать не должно.
+    ...(dto.showSenderLogos === undefined ? {} : { senderLogos: dto.showSenderLogos }),
     autoReply: {
       enabled: dto.autoReply.enabled,
       text: dto.autoReply.text,

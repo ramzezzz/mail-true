@@ -31,6 +31,7 @@ import cookiePlugin from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { pino } from 'pino';
 import { registerErrorHandling } from '../http-errors.js';
+import { BrandingStore } from './branding.js';
 import { loadAdminConfig } from './config.js';
 import type { AdminDb } from './db.js';
 import { createImportBox, ImportSecretBox, packResult, unpackResult } from './import-jobs.js';
@@ -299,6 +300,9 @@ async function harness(options?: {
     // маршруты, а не про очередь. Ненастроенный посредник честно отвечает
     // 503 и никуда не ходит — сеть в проверках не нужна.
     queueAgent: new QueueAgent({ baseUrl: '', token: '', logger: pino({ level: 'silent' }) }),
+    // Оформление входа этим проверкам не нужно, но контекст обязан быть
+    // полным: каталог указываем во временном, ни один тест в него не пишет.
+    branding: new BrandingStore(path.join(tmpdir(), 'mailtrue-admin-routes-branding')),
     cookieSecure: false,
     importBox: createImportBox(SECRET),
   };

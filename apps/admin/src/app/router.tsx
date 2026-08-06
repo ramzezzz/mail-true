@@ -10,6 +10,8 @@ import { LoginPage } from '../pages/LoginPage';
 import { OverviewPage } from '../pages/OverviewPage';
 import { UsersPage } from '../pages/UsersPage';
 import { ImportPage } from '../pages/ImportPage';
+import { UserSettingsPage } from '../pages/UserSettingsPage';
+import { SignatureBulkPage } from '../pages/SignatureBulkPage';
 import { AliasesPage } from '../pages/AliasesPage';
 import { DomainsPage } from '../pages/DomainsPage';
 import { AiPage } from '../pages/AiPage';
@@ -17,6 +19,10 @@ import { AuditPage } from '../pages/AuditPage';
 import { MailboxPage } from '../pages/MailboxPage';
 import { FlowPage } from '../pages/FlowPage';
 import { LogsPage } from '../pages/LogsPage';
+import { BrandingPage } from '../pages/BrandingPage';
+import { SenderLogosPage } from '../pages/SenderLogosPage';
+import { BackupPage } from '../pages/BackupPage';
+import { MigratePage } from '../pages/MigratePage';
 import { StubPage } from '../pages/StubPage';
 
 const router = createBrowserRouter([
@@ -27,6 +33,10 @@ const router = createBrowserRouter([
       { index: true, element: <OverviewPage /> },
       { path: 'users', element: <UsersPage /> },
       { path: 'users/import', element: <ImportPage /> },
+      // Подписи по шаблону объявлены ДО 'users/:id/settings' и с более
+      // конкретным путём: иначе «signatures» приняли бы за номер ящика.
+      { path: 'users/signatures', element: <SignatureBulkPage /> },
+      { path: 'users/:id/settings', element: <UserSettingsPage /> },
       { path: 'aliases', element: <AliasesPage /> },
       { path: 'domains', element: <DomainsPage /> },
       { path: 'ai', element: <AiPage /> },
@@ -34,9 +44,16 @@ const router = createBrowserRouter([
       { path: 'audit', element: <AuditPage /> },
       { path: 'flow', element: <FlowPage /> },
       { path: 'logs', element: <LogsPage /> },
+      // Оформление входа (OEM) и резервные копии настроек: заглушками
+      // эти разделы больше не являются.
+      { path: 'branding', element: <BrandingPage /> },
+      // Логотипы доменов отправителей: что видно в кружке рядом с письмом
+      { path: 'sender-logos', element: <SenderLogosPage /> },
+      { path: 'backups', element: <BackupPage /> },
+      // Перенос почты с чужого сервера (Kerio Connect и прочие)
+      { path: 'migrate', element: <MigratePage /> },
       { path: 'spam', element: <StubPage id="spam" /> },
       { path: 'monitoring', element: <StubPage id="monitoring" /> },
-      { path: 'backups', element: <StubPage id="backups" /> },
       { path: '*', element: <Navigate to="/" replace /> },
     ],
   },

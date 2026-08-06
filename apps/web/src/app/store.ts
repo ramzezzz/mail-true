@@ -5,30 +5,21 @@
  */
 
 import { create } from 'zustand';
-import { isThemeName, type ThemeName, type ThemeSetting } from '../appearance/themes';
+import { readCachedTheme, writeCachedTheme } from '../appearance/cache';
+import { persistAppearance } from '../appearance/persist';
+import type { ThemeName, ThemeSetting } from '../appearance/themes';
 
 export type { ThemeName, ThemeSetting };
 
-const THEME_KEY = 'mt-theme';
-
-/** Хранилище браузера есть не всегда (тесты, отрисовка на сервере). */
-function storage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    // приватный режим может запрещать доступ
-    return null;
-  }
-}
-
 /**
- * Пока пользователь не выбирал тему явно, действует системная
- * (prefers-color-scheme). Явный выбор сохраняется в localStorage;
- * всё нераспознанное считается «как в системе».
+ * Тема хранится за учётной записью НА СЕРВЕРЕ (настройки ящика), а
+ * localStorage работает кэшем для мгновенного применения до ответа —
+ * требование заказчика «тема оформления должна запоминаться для каждого
+ * юзера». Всё, что касается кэша и его владельца, живёт в
+ * appearance/cache.ts, отправка на сервер — в appearance/sync.ts.
  */
 function readSavedSetting(): ThemeSetting {
-  const saved = storage()?.getItem(THEME_KEY);
-  return isThemeName(saved) ? saved : 'system';
+  return readCachedTheme();
 }
 
 /** Системная тема ОС/браузера; вне браузера (тесты) — светлая. */
@@ -62,6 +53,35 @@ export interface ComposeInit {
    * Это не то же, что `inReplyTo` — там заголовок Message-ID.
    */
   sourceMessageId?: string | undefined;
+  /**
+   * Письма, которые нужно вложить целиком, — «Переслать как вложение».
+   * Байты письма уже лежат в ящике, поэтому сюда попадает только его
+   * идентификатор и подпись для плашки в окне написания.
+   */
+  attachMessages?: readonly AttachedMessage[] | undefined;
+
+  /* --- Дописывание сохранённого черновика ----------------------------
+   * Эти поля заполняются ТОЛЬКО когда окно открывают на существующем
+   * черновике (`GET /api/drafts/:uid`). Наличие `draftUid` и означает
+   * «мы продолжаем письмо, а не начинаем новое», и от этого зависит
+   * поведение окна: тело берётся как есть, подпись второй раз не
+   * подставляется, а сохранение перезаписывает тот же черновик. */
+
+  /** UID черновика, который дописывают. */
+  draftUid?: number | undefined;
+  cc?: string | undefined;
+  bcc?: string | undefined;
+  /** Вложения черновика — уже лежащие во временном хранилище сервера. */
+  attachments?: readonly ComposeAttachment[] | undefined;
+  requestReadReceipt?: boolean | undefined;
+}
+
+/** Письмо, вложенное в другое письмо целиком (message/rfc822). */
+export interface AttachedMessage {
+  /** Составной идентификатор `${folderId}:${uid}`. */
+  id: string;
+  /** Что показать человеку — обычно тема исходного письма. */
+  label: string;
 }
 
 /** Вложение, уже загруженное на сервер. */
@@ -88,8 +108,22 @@ export interface ComposeDraft {
   /** HTML тела; собирается из редактора при каждом изменении. */
   bodyHtml: string;
   attachments: ComposeAttachment[];
+  /** Письма, вложенные целиком («Переслать как вложение»). */
+  attachedMessages: AttachedMessage[];
   showCc: boolean;
   showBcc: boolean;
+  /**
+   * Попросить получателя уведомить о прочтении. Живёт в черновике, а не
+   * в состоянии компонента, по той же причине, что и всё остальное здесь:
+   * иначе сворачивание окна тихо снимало бы просьбу.
+   */
+  requestReadReceipt: boolean;
+  /**
+   * Отложенная отправка: когда письмо должно уйти (ISO) или null.
+   * Само ожидание держит сервер — браузер к этому моменту может быть
+   * закрыт (см. apps/api/src/mail/deferred-send.ts).
+   */
+  sendAt: string | null;
   /** UID черновика на сервере — чтобы повторное сохранение не плодило копии. */
   draftUid: number | null;
   /** Когда последний раз сохранился (ISO) — подпись «Сохранено в …». */
@@ -118,22 +152,39 @@ export interface ComposeWindowState {
   draft: ComposeDraft;
 }
 
-/** Пустой черновик с подставленными значениями из `init`. */
+/**
+ * Пустой черновик с подставленными значениями из `init`.
+ *
+ * Отдельная ветка для дописывания сохранённого черновика (`init.draftUid`).
+ * Там тело письма берётся ровно таким, каким его сохранили, и считается уже
+ * готовым: подпись и цитата внутри него уже есть. Пропусти мы его через
+ * обычный путь — окно добавило бы пустой абзац, завело бы ещё один блок
+ * подписи и подставило бы подпись по умолчанию заново. За три открытия
+ * черновика письмо обросло бы тремя подписями, и человек вычищал бы их руками.
+ */
 export function emptyDraft(init: ComposeInit): ComposeDraft {
+  const continuing = init.draftUid !== undefined;
+  const cc = init.cc ?? '';
+  const bcc = init.bcc ?? '';
   return {
     to: init.to ?? '',
-    cc: '',
-    bcc: '',
+    cc,
+    bcc,
     subject: init.subject ?? '',
-    bodyHtml: '',
-    attachments: [],
-    showCc: false,
-    showBcc: false,
-    draftUid: null,
+    bodyHtml: continuing ? (init.bodyHtml ?? '') : '',
+    attachments: [...(init.attachments ?? [])],
+    attachedMessages: [...(init.attachMessages ?? [])],
+    // Заполненные «Копия» и «Скрытая» обязаны быть видны сразу: спрятанный
+    // получатель — это письмо, ушедшее не тому, кого человек видел на экране.
+    showCc: cc !== '',
+    showBcc: bcc !== '',
+    requestReadReceipt: init.requestReadReceipt ?? false,
+    sendAt: null,
+    draftUid: init.draftUid ?? null,
     savedAt: null,
-    bodyInitialized: false,
+    bodyInitialized: continuing,
     signatureId: null,
-    signatureApplied: false,
+    signatureApplied: continuing,
   };
 }
 
@@ -172,6 +223,23 @@ interface UiState {
     patch: Partial<ComposeDraft> | ((draft: ComposeDraft) => Partial<ComposeDraft>),
   ): void;
 
+  /* --- Возврат из письма в список ------------------------------------
+   * Оба поля живут здесь, а не в странице папки: страница при уходе в
+   * письмо размонтируется целиком и всё своё состояние теряет — ровно
+   * поэтому список и открывался заново сверху. */
+
+  /** Прокрутка списка по ключу «папка + отбор», px. */
+  listScroll: Readonly<Record<string, number>>;
+  rememberListScroll(key: string, top: number): void;
+  /**
+   * Письмо, которое человек смотрел последним, — его строку в списке видно
+   * подсветкой. Папка хранится вместе с идентификатором: подсветка говорит
+   * «вот отсюда ты вышел» и в другой папке не значит ничего.
+   */
+  visitedMessage: { folderId: string; messageId: string } | null;
+  setVisitedMessage(folderId: string, messageId: string): void;
+  clearVisitedMessage(): void;
+
   /**
    * Сообщение об отказе поверх интерфейса. Раньше ошибки мутаций терялись
    * молча: письмо не отправилось — кнопка просто переставала мигать.
@@ -185,9 +253,11 @@ export const useUiStore = create<UiState>((set) => ({
   themeSetting: readSavedSetting(),
   theme: resolveTheme(readSavedSetting()),
   setTheme(setting) {
-    // «Как в системе» храним явной строкой: отличать «не выбирал» от
-    // «выбрал следовать системе» не нужно — поведение одно и то же
-    storage()?.setItem(THEME_KEY, setting);
+    writeCachedTheme(setting);
+    // Выбор человека уходит за его учётную запись: за другим компьютером
+    // тема должна быть та же. Отправка не ждётся и не показывает ошибок —
+    // тема уже применена, а недоступный сервер не повод мешать работе.
+    persistAppearance({ theme: setting });
     const theme = resolveTheme(setting);
     applyTheme(theme);
     set({ themeSetting: setting, theme });
@@ -236,6 +306,23 @@ export const useUiStore = create<UiState>((set) => ({
           : w,
       ),
     })),
+
+  listScroll: {},
+  rememberListScroll: (key, top) =>
+    set((s) => {
+      const next = { ...s.listScroll, [key]: top };
+      // Держим только последние несколько списков: папок бывает много, а
+      // помнить прокрутку той, куда не заходили полдня, незачем.
+      const keys = Object.keys(next);
+      if (keys.length > 12) {
+        for (const old of keys.slice(0, keys.length - 12)) delete next[old];
+      }
+      return { listScroll: next };
+    }),
+
+  visitedMessage: null,
+  setVisitedMessage: (folderId, messageId) => set({ visitedMessage: { folderId, messageId } }),
+  clearVisitedMessage: () => set({ visitedMessage: null }),
 
   notice: null,
   showNotice: (text) => set({ notice: text }),

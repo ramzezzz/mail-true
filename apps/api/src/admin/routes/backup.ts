@@ -1,0 +1,282 @@
+/**
+ * Резервная копия НАСТРОЕК: выгрузка, разбор принесённого файла и
+ * восстановление.
+ *
+ * Копия писем здесь не делается и не читается — это install/backup.sh и
+ * install/restore.sh, они снимают тома и дамп базы снаружи. Здесь то, что
+ * администратор набивал руками: домены, ящики, алиасы, администраторы,
+ * правила пользователей, помощник ИИ, оформление входа. Состав, версия
+ * формата и решение по секретам расписаны в admin/backup-format.ts.
+ *
+ * Восстановление сделано в ДВА шага и иначе быть не может:
+ *
+ *   1) POST /backup/preview — файл разбирается, но НИЧЕГО не меняется;
+ *      в ответ уходит план: что появится, что перезапишется, чего
+ *      операция не коснётся вовсе, и чем это грозит;
+ *   2) POST /backup/restore — то же самое с явным подтверждением.
+ *
+ * Одношаговое восстановление означало бы «нажал и узнал»: копия трогает
+ * пароли ящиков и учётные записи администраторов, в том числе того, кто
+ * её восстанавливает.
+ */
+import type { FastifyInstance } from 'fastify';
+import { BadRequestError } from '../../errors.js';
+import { audit, currentAdmin, requireAdmin } from '../guard.js';
+import {
+  BACKUP_SECTIONS,
+  buildRestorePlan,
+  countSections,
+  isBackupSection,
+  parseSettingsBackup,
+  SECTION_TITLES,
+  SETTINGS_BACKUP_VERSION,
+  type BackupSection,
+  type SettingsBackupFile,
+} from '../backup-format.js';
+import { applyRestore, exportSettings, readCurrentSnapshot } from '../backup-store.js';
+
+/** Предел на файл копии. Настройки — это килобайты; логотип добавляет ещё 512 КБ. */
+const BACKUP_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Разбор формы с файлом копии.
+ *
+ * `throwFileSizeLimit: false` — чтобы предел сработал ОБРЕЗАНИЕМ, а не
+ * готовым исключением плагина: его текст «Файл слишком большой» не
+ * объясняет, что принесли не тот файл, а требование — внятный отказ.
+ * Приведение типа нужно потому, что объявление `request.parts()` в
+ * @fastify/multipart принимает только настройки busboy, тогда как сам
+ * плагин читает этот ключ из того же объекта (см. onFile в его index.js).
+ */
+const PART_OPTIONS = {
+  limits: { fileSize: BACKUP_MAX_BYTES, files: 1 },
+  throwFileSizeLimit: false,
+} as unknown as { limits: { fileSize: number; files: number } };
+
+/** Имя файла выгрузки: по нему в папке «Загрузки» видно, что это и когда снято. */
+function backupFileName(hostname: string, now: Date): string {
+  const stamp = now.toISOString().replace(/[-:]/gu, '').replace(/\.\d+Z$/u, '');
+  const host = hostname.replace(/[^a-zA-Z0-9.-]/gu, '') || 'mailtrue';
+  return `mailtrue-settings-${host}-${stamp}.json`;
+}
+
+/** Достаёт файл копии из multipart-запроса. */
+async function readBackupFile(request: {
+  isMultipart(): boolean;
+  file(options?: unknown): Promise<{ toBuffer(): Promise<Buffer>; file: { truncated: boolean } } | undefined>;
+}): Promise<SettingsBackupFile> {
+  if (!request.isMultipart()) {
+    throw new BadRequestError(
+      'Файл копии не пришёл: он отправляется формой multipart/form-data, поле «file».',
+    );
+  }
+  const part = await request.file(PART_OPTIONS);
+  if (!part) throw new BadRequestError('В запросе нет файла копии.');
+  const bytes = await part.toBuffer();
+  if (part.file.truncated) {
+    throw new BadRequestError(
+      `Файл больше ${BACKUP_MAX_BYTES / (1024 * 1024)} МБ — это не копия настроек. ` +
+        'Копия писем (install/backup.sh) восстанавливается скриптом install/restore.sh.',
+    );
+  }
+  if (bytes.length === 0) throw new BadRequestError('Файл копии пустой.');
+  return parseSettingsBackup(bytes.toString('utf8'));
+}
+
+/** Разбирает список разделов из поля формы. Пусто — все. */
+function parseSections(raw: unknown): BackupSection[] {
+  if (raw === undefined || raw === null || raw === '') return [...BACKUP_SECTIONS];
+  const list = String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== '');
+  if (list.length === 0) return [...BACKUP_SECTIONS];
+  const unknown = list.filter((s) => !isBackupSection(s));
+  if (unknown.length > 0) {
+    throw new BadRequestError(
+      `Неизвестные разделы: ${unknown.join(', ')}. Допустимы: ${BACKUP_SECTIONS.join(', ')}.`,
+    );
+  }
+  return list.filter(isBackupSection);
+}
+
+export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
+  const ctx = app.adminCtx;
+
+  /** Что вообще умеет раздел — интерфейс рисует список по этому ответу. */
+  app.get('/backup/sections', { preHandler: requireAdmin(app, 'backup.export') }, async () => ({
+    formatVersion: SETTINGS_BACKUP_VERSION,
+    sections: BACKUP_SECTIONS.map((id) => ({ id, title: SECTION_TITLES[id] })),
+    /**
+     * То, что человек обязан знать ДО того, как скачает файл: внутри хэши
+     * паролей. Показывается рядом с кнопкой, а не в документации.
+     */
+    secretsNote:
+      'В копию входят хэши паролей ящиков и администраторов — без них восстановление ' +
+      'превратилось бы в массовый сброс паролей. Хэш не разворачивается обратно в пароль, ' +
+      'но файл всё равно храните как секрет. Ключи доступа к сервисам ИИ и пароли чужих ' +
+      'ящиков в копию не входят: они зашифрованы ключом из infra/.env, которого в файле нет.',
+  }));
+
+  /** Выгрузка. Отдаётся файлом, а не телом для показа: копию сохраняют. */
+  app.post(
+    '/backup/export',
+    {
+      preHandler: requireAdmin(app, 'backup.export'),
+      config: { rateLimit: { max: 10, timeWindow: 60_000 } },
+    },
+    async (request, reply) => {
+      const file = await exportSettings(ctx.db, ctx.branding, {
+        hostname: ctx.config.MAIL_HOSTNAME,
+        domain: ctx.config.MAIL_DOMAIN,
+      });
+      const counts = countSections(file);
+      await audit(ctx, request, {
+        action: 'backup.export',
+        targetType: 'backup',
+        targetLabel: `копия настроек (формат ${file.version})`,
+        after: counts as unknown as Record<string, unknown>,
+      });
+
+      const name = backupFileName(ctx.config.MAIL_HOSTNAME, new Date(file.createdAt));
+      void reply
+        .header('Content-Type', 'application/json; charset=utf-8')
+        .header('Content-Disposition', `attachment; filename="${name}"`)
+        // Копию не должен кэшировать ни браузер, ни прокси: внутри хэши паролей.
+        .header('Cache-Control', 'no-store');
+      return reply.send(JSON.stringify(file, null, 2));
+    },
+  );
+
+  /**
+   * Разбор копии без единого изменения. Право то же, что у восстановления:
+   * план показывает логины администраторов и адреса ящиков.
+   */
+  app.post(
+    '/backup/preview',
+    {
+      preHandler: requireAdmin(app, 'backup.restore'),
+      config: { rateLimit: { max: 20, timeWindow: 60_000 } },
+    },
+    async (request) => {
+      const file = await readBackupFile(request as never);
+      const admin = currentAdmin(request);
+      const current = await readCurrentSnapshot(ctx.db, ctx.branding);
+      const plan = buildRestorePlan(file, current, {
+        currentAdminLogin: admin.login,
+        hostname: ctx.config.MAIL_HOSTNAME,
+      });
+      return { plan, counts: countSections(file) };
+    },
+  );
+
+  /**
+   * Восстановление. Требует подтверждения явным полем: план человек
+   * получил на предыдущем шаге, и «применить» должно быть отдельным
+   * осознанным действием, а не побочным эффектом загрузки файла.
+   */
+  app.post(
+    '/backup/restore',
+    {
+      preHandler: requireAdmin(app, 'backup.restore'),
+      config: { rateLimit: { max: 5, timeWindow: 60_000 } },
+    },
+    async (request) => {
+      if (!request.isMultipart()) {
+        throw new BadRequestError(
+          'Файл копии не пришёл: он отправляется формой multipart/form-data, поле «file».',
+        );
+      }
+
+      // Разбираем весь запрос сразу: кроме файла нужны поля «разделы» и
+      // «подтверждение», а они могут прийти в любом порядке.
+      let bytes: Buffer | null = null;
+      let truncated = false;
+      const fields = new Map<string, string>();
+      for await (const part of request.parts(PART_OPTIONS)) {
+        if (part.type === 'file') {
+          bytes = await part.toBuffer();
+          truncated = part.file.truncated;
+        } else {
+          fields.set(part.fieldname, String(part.value));
+        }
+      }
+      if (truncated) {
+        throw new BadRequestError(
+          `Файл больше ${BACKUP_MAX_BYTES / (1024 * 1024)} МБ — это не копия настроек.`,
+        );
+      }
+      if (!bytes || bytes.length === 0) throw new BadRequestError('В запросе нет файла копии.');
+
+      if (fields.get('confirm') !== 'yes') {
+        throw new BadRequestError(
+          'Восстановление не подтверждено. Сначала посмотрите план на шаге «Что изменится», ' +
+            'потом повторите запрос с подтверждением.',
+        );
+      }
+
+      const file = parseSettingsBackup(bytes.toString('utf8'));
+      const sections = parseSections(fields.get('sections'));
+      const admin = currentAdmin(request);
+
+      // План считаем ЗАНОВО и кладём в журнал аудита: иначе от операции,
+      // которая меняет пароли администраторов, не осталось бы следа
+      // о том, что именно она перезаписала.
+      const current = await readCurrentSnapshot(ctx.db, ctx.branding);
+      const plan = buildRestorePlan(file, current, {
+        currentAdminLogin: admin.login,
+        hostname: ctx.config.MAIL_HOSTNAME,
+        sections,
+      });
+
+      const outcome = await applyRestore(ctx.db, ctx.branding, file, sections);
+
+      // Правила фильтрации живут в базе, а работают файлом Sieve в почтовом
+      // хранилище. Без пересборки база и Dovecot разъезжаются: в панели
+      // правила видны, а письма раскладываются по-старому.
+      const sieveErrors: string[] = [];
+      for (const email of outcome.resyncSieve) {
+        try {
+          await app.settingsService.syncSieve(email);
+        } catch (err) {
+          sieveErrors.push(`${email}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+
+      await audit(ctx, request, {
+        action: 'backup.restore',
+        targetType: 'backup',
+        targetLabel: `копия от ${file.createdAt} (${file.source.hostname || 'неизвестный сервер'})`,
+        before: {
+          sections: sections.join(','),
+          overwrites: plan.sections.map((s) => `${s.id}:${s.overwrite.length}`).join(' '),
+        },
+        after: {
+          sections: sections.join(','),
+          applied: outcome.applied as unknown as Record<string, unknown>,
+          sieveErrors: sieveErrors.length,
+        },
+      });
+
+      return {
+        ok: true,
+        applied: outcome.applied,
+        plan,
+        sieve: {
+          resynced: outcome.resyncSieve.length - sieveErrors.length,
+          errors: sieveErrors,
+        },
+        /**
+         * Пароли администраторов только что могли смениться — сессия
+         * при этом остаётся действующей, и человек об этом должен узнать
+         * от нас, а не при следующем входе.
+         */
+        note:
+          sections.includes('admins') && plan.sections.some((s) => s.id === 'admins' && s.overwrite.length > 0)
+            ? 'Учётные записи администраторов перезаписаны. Текущая сессия продолжает работать, ' +
+              'но при следующем входе понадобится пароль из копии.'
+            : null,
+      };
+    },
+  );
+}

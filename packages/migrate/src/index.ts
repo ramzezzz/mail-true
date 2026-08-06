@@ -2,6 +2,7 @@
  * @mail-true/migrate — перенос почты с внешнего IMAP-сервера в Mail.True.
  *
  * Программный интерфейс для API/админки:
+ *   - probeEndpoint — проверка связи и доступа к ящику ДО начала переноса;
  *   - migrateMailbox / MailboxMigrator — перенос одного ящика с событиями
  *     прогресса;
  *   - migrateBatch / parseAccountsList — пакетный перенос по списку;
@@ -38,9 +39,11 @@ export {
   migrateMailbox,
   CursorTracker,
   PermanentFolderError,
+  MigrationStoppedError,
   describeImapError,
   isQuotaError,
 } from './migrator.js';
+export { probeEndpoint } from './probe.js';
 export { migrateBatch, parseAccountsList } from './batch.js';
 export type { BatchOptions, DestDefaults } from './batch.js';
 export {

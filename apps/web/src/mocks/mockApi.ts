@@ -172,6 +172,12 @@ export const mockApi: MailApi = {
       throw new ApiError(400, '/api/messages/send', 'Не указан ни один получатель', 'BAD_REQUEST');
     }
     console.info('[mock] отправка письма', request);
+    // Отложенное письмо сервер не отправляет, а кладёт в очередь и отвечает
+    // иначе. Заглушка обязана отличать эти два ответа: иначе окно написания
+    // скажет «отправлено» о письме, которого у получателя ещё нет.
+    if (request.sendAt && Date.parse(request.sendAt) > Date.now() + 60_000) {
+      return { ok: true, scheduled: true, sendAt: request.sendAt, sentMessageId: null };
+    }
     // Форма ответа сервера: { ok, sentMessageId }
     return { ok: true, sentMessageId: `sent:${Math.floor(Math.random() * 10_000)}` };
   },
@@ -187,6 +193,61 @@ export const mockApi: MailApi = {
       draftUid,
       savedAt: new Date().toISOString(),
     };
+  },
+
+  /**
+   * Чтение черновика обратно в окно написания. Заглушке взять настоящее
+   * письмо неоткуда, поэтому она собирает поля из того, что знает о письме
+   * в папке «Черновики», — форма ответа при этом та же, что у сервера.
+   */
+  async getDraft(draftUid) {
+    await delay(200);
+    const message = messages.find((m) => m.id === `drafts:${draftUid}`);
+    if (!message) {
+      throw new ApiError(404, `/api/drafts/${draftUid}`, 'Черновик не найден', 'NOT_FOUND');
+    }
+    const full = expandMessage(message);
+    return {
+      draftUid,
+      to: message.to,
+      cc: message.cc,
+      bcc: [],
+      subject: message.subject,
+      bodyHtml: full.bodyHtml ?? `<div>${message.snippet}</div>`,
+      attachments: full.attachments.map((a) => ({
+        id: `draft-part-${a.partId}`,
+        filename: a.filename,
+        size: a.size,
+      })),
+      inReplyTo: null,
+      references: [],
+      requestReadReceipt: false,
+    };
+  },
+
+  /**
+   * Исходник письма. Настоящих байтов у заглушки нет — собираем правдоподобный
+   * RFC822 из того, что известно: интерфейс должен быть проверяем и без
+   * бэкенда, а форма ответа (обычный текст) та же.
+   */
+  async getMessageSource(messageId) {
+    await delay(200);
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) {
+      throw new ApiError(404, `/api/messages/${messageId}/source`, 'Письмо не найдено', 'NOT_FOUND');
+    }
+    const full = expandMessage(message);
+    const headers = [
+      `Return-Path: <${message.from.address}>`,
+      `From: ${message.from.name ? `${message.from.name} <${message.from.address}>` : message.from.address}`,
+      `To: ${message.to.map((a) => a.address).join(', ')}`,
+      `Subject: ${message.subject}`,
+      `Date: ${new Date(message.date).toUTCString()}`,
+      `Message-ID: <${message.uid}@mail.local>`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/html; charset=utf-8',
+    ];
+    return `${headers.join('\r\n')}\r\n\r\n${full.bodyHtml ?? full.bodyText ?? ''}\r\n`;
   },
 
   async uploadAttachment(file) {
@@ -207,6 +268,26 @@ export const mockApi: MailApi = {
       throw new ApiError(404, `/api/messages/${messageId}/parts/${partId}`, 'Часть письма не найдена', 'NOT_FOUND');
     }
     return new Blob([new Uint8Array(Math.min(part.size, 4096))], { type: part.mimeType });
+  },
+
+  /**
+   * Заглушке отправлять некуда, но форму ответа она обязана повторять:
+   * интерфейс по ней решает, показывать ли плашку дальше.
+   */
+  async sendReadReceipt(messageId, send) {
+    await delay(200);
+    const message = messages.find((m) => m.id === messageId);
+    if (!message) {
+      throw new ApiError(
+        404,
+        `/api/messages/${messageId}/read-receipt`,
+        'Письмо не найдено',
+        'NOT_FOUND',
+      );
+    }
+    // И отправка, и отказ помечают письмо: вопрос больше не возвращается
+    message.flags.mdnSent = true;
+    return { ok: true, sent: send, alreadyAnswered: false };
   },
 
   subscribe() {

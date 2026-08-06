@@ -1,0 +1,106 @@
+/*
+ * Панель выбора темы в шапке: сетка образцов по три в ряд.
+ *
+ * Устройство и размеры повторяют переключатель почты
+ * (apps/web/src/layout/ThemeMenu.module.css) — один продукт, один способ
+ * менять оформление. Отличий два: подписи здесь длиннее («Как в системе»),
+ * поэтому панель чуть шире, и кнопка-палитра стоит в плотной шапке панели,
+ * а не в просторной почтовой.
+ */
+
+.button {
+  flex: none;
+  color: var(--mt-color-text-secondary);
+}
+
+.button:hover {
+  color: var(--mt-color-text-primary);
+}
+
+.panel {
+  width: 268px;
+}
+
+.title {
+  padding: 4px 16px 8px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+  color: var(--mt-color-text-primary);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 0 8px 4px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: none;
+  border-radius: var(--mt-admin-radius);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+@media (hover: hover) {
+  .option:hover {
+    background: var(--mt-ph-color-transparent-hover);
+  }
+}
+
+.optionActive {
+  background: var(--mt-ph-color-transparent-press);
+}
+
+.swatch {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  /* Ободок: иначе светлый образец сливается с панелью светлой темы,
+     а графитовый — с панелью графитовой */
+  box-shadow: inset 0 0 0 1px var(--mt-color-separator-primary);
+}
+
+/* Выбранная тема помечена кольцом акцентного цвета вокруг образца:
+   отметка не только заливкой строки — заливку на глаз видно хуже */
+.optionActive .swatch {
+  box-shadow:
+    0 0 0 2px var(--mt-color-background-modal, #fff),
+    0 0 0 4px var(--mt-color-icon-accent);
+}
+
+.optionTitle {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/*
+ * Телефон.
+ *
+ * Панель шире кнопки, а выровнена по её правому краю: на экране в 390px
+ * кнопка стоит примерно посередине шапки, и левый край панели уезжал за
+ * край экрана на 105px — из трёх колонок образцов было видно две (замер
+ * на стенде: boundingBox().x = −104,9). Здесь панель прижимается к правому
+ * краю ОКНА, а не кнопки, и сужается до его ширины.
+ */
+@media (max-width: 560px) {
+  .panel {
+    position: fixed;
+    top: calc(var(--mt-admin-header-height) + 4px);
+    right: 8px;
+    left: auto;
+    width: min(268px, calc(100vw - 16px));
+  }
+}

@@ -19,6 +19,8 @@ import type { DnsReport, Domain } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
+import { RowActions } from '../components/RowActions';
+import { IconKey, IconShieldCheck } from '../components/icons';
 import {
   DnsBadge,
   ErrorNotice,
@@ -118,11 +120,17 @@ export function DomainsPage() {
           <thead>
             <tr>
               <th>Домен</th>
-              <th className={tableStyles.numeric}>Ящиков</th>
-              <th className={tableStyles.numeric}>Алиасов</th>
-              <th>Селектор DKIM</th>
+              {/*
+                На узком экране счётчики, селектор и дата проверки уходят:
+                иначе колонка действий уезжает за правый край внутрь
+                прокрутки и до неё не добраться (замер на 390: за краем
+                оказывались обе кнопки, включая первую).
+              */}
+              <th className={`${tableStyles.numeric} ${tableStyles.optional}`}>Ящиков</th>
+              <th className={`${tableStyles.numeric} ${tableStyles.optional}`}>Алиасов</th>
+              <th className={tableStyles.optionalNarrow}>Селектор DKIM</th>
               <th>Состояние DNS</th>
-              <th className={tableStyles.nowrap}>Проверялось</th>
+              <th className={`${tableStyles.nowrap} ${tableStyles.optional}`}>Проверялось</th>
               <th />
             </tr>
           </thead>
@@ -130,22 +138,35 @@ export function DomainsPage() {
             {items.map((domain) => (
               <tr key={domain.id}>
                 <td className="mt-mono">{domain.name}</td>
-                <td className={tableStyles.numeric}>{domain.userCount}</td>
-                <td className={tableStyles.numeric}>{domain.aliasCount}</td>
-                <td className="mt-mono">{domain.dkimSelector}</td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{domain.userCount}</td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{domain.aliasCount}</td>
+                <td className={`mt-mono ${tableStyles.optionalNarrow}`}>{domain.dkimSelector}</td>
                 <td><DnsBadge status={domain.dnsOverall} /></td>
-                <td className={tableStyles.nowrap}>{formatRelative(domain.dnsCheckedAt)}</td>
+                <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>
+                  {formatRelative(domain.dnsCheckedAt)}
+                </td>
                 <td>
-                  <div className={tableStyles.actions}>
-                    <Button mode="tertiary" size="s" onClick={() => openFor(domain)}>
-                      Проверить DNS
-                    </Button>
-                    {can('domains.write') && (
-                      <Button mode="tertiary" size="s" onClick={() => setDkimFor(domain)}>
-                        Ключ DKIM
-                      </Button>
-                    )}
-                  </div>
+                  <RowActions
+                    subject={domain.name}
+                    actions={[
+                      {
+                        id: 'dns',
+                        icon: <IconShieldCheck />,
+                        label: 'Проверить DNS',
+                        onClick: () => openFor(domain),
+                      },
+                      ...(can('domains.write')
+                        ? [
+                            {
+                              id: 'dkim',
+                              icon: <IconKey />,
+                              label: 'Ключ DKIM',
+                              onClick: () => setDkimFor(domain),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
                 </td>
               </tr>
             ))}

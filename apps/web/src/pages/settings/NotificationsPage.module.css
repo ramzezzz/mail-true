@@ -1,0 +1,279 @@
+/*
+ * Настройки уведомлений.
+ *
+ * Главный приём страницы — ПРЕДПРОСМОТР окна рядом с каждым уровнем
+ * подробности. Он нарисован тем же значком и той же вёрсткой, что и
+ * настоящее уведомление операционной системы (значок слева, заголовок
+ * жирным, тело в две строки серым), потому что решение здесь принимается
+ * не по названию уровня, а по виду: «отправитель, тема и первые фразы»
+ * звучит безобидно, пока не увидишь, что именно прочтёт человек,
+ * заглянувший в экран через плечо.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Сообщения о состоянии                                                */
+/* ------------------------------------------------------------------ */
+
+.notice-info,
+.notice-warning,
+.notice-blocked {
+  margin: 0 0 24px;
+  padding: 16px;
+  max-width: 640px;
+  border-radius: 12px;
+  border-left: 3px solid;
+}
+
+.notice-info {
+  background: var(--mt-color-background-secondary-alpha);
+  border-left-color: var(--mt-color-accent-blue);
+}
+
+.notice-warning {
+  background: color-mix(in srgb, var(--mt-color-accent-orange) 12%, transparent);
+  border-left-color: var(--mt-color-accent-orange);
+}
+
+/* Заблокированное разрешение — самое важное сообщение на странице:
+   без него человек остаётся с неработающей настройкой и без подсказки. */
+.notice-blocked {
+  background: color-mix(in srgb, var(--mt-color-accent-red) 10%, transparent);
+  border-left-color: var(--mt-color-accent-red);
+}
+
+.noticeTitle {
+  margin: 0 0 6px;
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.noticeText {
+  margin: 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  color: var(--mt-color-text-secondary);
+}
+
+.steps {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 22px;
+  color: var(--mt-color-text-secondary);
+}
+
+.messageOk,
+.messageBad {
+  margin: 0 0 24px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.messageOk {
+  color: var(--mt-color-accent-green);
+}
+
+.messageBad {
+  color: var(--mt-color-accent-red);
+}
+
+/* ------------------------------------------------------------------ */
+/* Уровни подробности                                                   */
+/* ------------------------------------------------------------------ */
+
+.levels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.level,
+.levelDisabled {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+/* Выбранный уровень обведён цветом, а не только точкой в кружке:
+   карточки высокие, и точку в верхнем углу глаз не находит. */
+.level[data-checked='true'] {
+  border-color: var(--mt-color-accent-blue);
+  background: color-mix(in srgb, var(--mt-color-accent-blue) 5%, transparent);
+}
+
+@media (hover: hover) {
+  .level:hover {
+    border-color: var(--mt-color-separator-secondary, var(--mt-color-accent-blue));
+  }
+}
+
+.levelDisabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.levelInput {
+  margin: 3px 0 0;
+  flex: none;
+  accent-color: var(--mt-color-accent-blue);
+}
+
+.levelBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.levelTitle {
+  font-size: var(--mt-font-headline2-size, 15px);
+  line-height: 20px;
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.levelCaveat {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Причина недоступности — не серым мелким: её нужно прочитать,
+   иначе пункт выглядит просто сломанным. */
+.levelBlocked {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+  color: var(--mt-color-accent-orange-fire);
+}
+
+/* ------------------------------------------------------------------ */
+/* Предпросмотр окна уведомления                                        */
+/* ------------------------------------------------------------------ */
+
+.preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--mt-color-background-secondary-alpha);
+  max-width: 420px;
+}
+
+.previewIcon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.previewText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.previewTitle {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 19px;
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+/*
+ * Строка тела обрезается многоточием — ровно так же, как обрежет её
+ * операционная система. Предпросмотр, показывающий больше настоящего,
+ * обманывал бы в самом чувствительном месте.
+ */
+.previewLine {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 17px;
+  color: var(--mt-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Устройства                                                           */
+/* ------------------------------------------------------------------ */
+
+.devices {
+  padding: 12px 0 0;
+}
+
+.devicesTitle {
+  margin: 0 0 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.devicesEmpty {
+  margin: 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-secondary);
+}
+
+.deviceList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.device {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+}
+
+.deviceCurrent {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--mt-color-background-secondary-alpha);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: 18px;
+}
+
+.deviceError {
+  color: var(--mt-color-accent-red);
+  font-size: var(--mt-font-caption1-size, 12px);
+}
+
+/* ------------------------------------------------------------------ */
+/* Тихие часы                                                           */
+/* ------------------------------------------------------------------ */
+
+.quietRow {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.quietField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--mt-font-subhead-size, 14px);
+  color: var(--mt-color-text-secondary);
+}
+
+.quietField input {
+  padding: 8px 10px;
+  border: 1px solid var(--mt-color-separator-primary);
+  border-radius: 8px;
+  background: var(--mt-color-background-primary, transparent);
+  color: var(--mt-color-text-primary);
+  font: inherit;
+  font-size: var(--mt-font-headline2-size, 15px);
+}

@@ -16,7 +16,16 @@
   min-height: 100dvh;
   width: 100%;
   overflow: hidden;
-  background: radial-gradient(120% 120% at 42% 44%, #0b1a3a 0%, #081431 55%, #071129 100%);
+  /*
+   * Тёмно-синее поле, светлее к верхнему левому углу — туда, где стоит
+   * сфера и её свечение. Два перехода, а не один: нижний задаёт глубину
+   * (четыре остановки, к краю почти чёрный), верхний подсвечивает угол.
+   * Фон намеренно темнее прежнего: на нём и звёзды, и белая карточка
+   * читаются заметно лучше.
+   */
+  background:
+    radial-gradient(46% 44% at 21% 29%, rgba(0, 110, 198, 0.18) 0%, transparent 60%),
+    radial-gradient(130% 120% at 60% 48%, #0c2149 0%, #0a1a3c 44%, #071433 72%, #050f28 100%);
   color: #e8eefc;
 }
 
@@ -79,6 +88,21 @@
 .logo {
   height: 1.75rem;
   width: auto;
+  /* Свой логотип (OEM) бывает любых пропорций: широкий не должен
+     вылезать за карточку входа и ломать её ширину. */
+  max-width: 100%;
+  object-fit: contain;
+}
+/* Название компании рядом со своим логотипом. Тише логотипа: это подпись,
+   а не второй знак. */
+.company {
+  margin-left: 0.6rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--mt-color-text-secondary, #5a6675);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tagline {
   margin: 0 0 1.6rem;
@@ -253,14 +277,24 @@
 
 /* --- Движение ----------------------------------------------------------- */
 
+/*
+ * Приезд карточки — ТОЛЬКО вбок и по прозрачности.
+ *
+ * В прототипе в этих кадрах стояло ещё и `translateY(-50%)`, и оно
+ * переехало к нам вместе с оформлением. Это сдвигало карточку вверх на
+ * половину её высоты ПОВЕРХ центрирования, которое уже делает `.panel`:
+ * на окне высотой 818 точек верх карточки уходил за край экрана на 23
+ * точки — вместе с логотипом. Центрированием занимается панель, карточка
+ * только приезжает.
+ */
 @keyframes mtCardIn {
   from {
     opacity: 0;
-    transform: translateY(-50%) translateX(30px);
+    transform: translateX(30px);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) translateX(0);
+    transform: translateX(0);
   }
 }
 @keyframes mtFadeUp {
@@ -292,6 +326,16 @@
   }
 }
 
+/*
+ * Вкладку спрятали — пятна замирают вместе со сценой. Без этого правила
+ * они оставались единственным, что продолжало двигаться в никуда:
+ * анимации CSS считает поток компоновщика, а он про видимость не знает.
+ */
+.page[data-paused='true'] .bokehBlue,
+.page[data-paused='true'] .bokehWarm {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bokehBlue,
   .bokehWarm {
@@ -313,14 +357,19 @@
     right: 50%;
     transform: translate(50%, -50%);
   }
+  /*
+   * На узком экране карточка приезжает снизу, а не сбоку: сбоку ей уже
+   * некуда. Центрирование по-прежнему целиком на `.panel` — повторять его
+   * здесь значило бы сдвинуть карточку второй раз (см. выше).
+   */
   @keyframes mtCardIn {
     from {
       opacity: 0;
-      transform: translate(50%, -50%) translateY(30px);
+      transform: translateY(30px);
     }
     to {
       opacity: 1;
-      transform: translate(50%, -50%);
+      transform: translateY(0);
     }
   }
 }

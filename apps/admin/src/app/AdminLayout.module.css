@@ -61,17 +61,25 @@
   display: block;
 }
 
-/* Тёмное начертание включается там, где шапка тёмная */
+/*
+ * Тёмное начертание включается там, где шапка тёмная, — на ЛЮБОЙ тёмной
+ * теме, а не только на «Тёмной». Признак data-theme-kind ставит на <html>
+ * applyAdminTheme по реестру appearance/adminThemes.ts, поэтому новой
+ * тёмной теме ничего дописывать здесь не придётся. Явный [data-theme='dark']
+ * оставлен как страховка на случай, если тему выставили без него.
+ */
 .brandLogoDark,
 .brandMark {
   display: none;
 }
 
-:global([data-theme='dark']) .brandLogoLight {
+:global([data-theme='dark']) .brandLogoLight,
+:global([data-theme-kind='dark']) .brandLogoLight {
   display: none;
 }
 
-:global([data-theme='dark']) .brandLogoDark {
+:global([data-theme='dark']) .brandLogoDark,
+:global([data-theme-kind='dark']) .brandLogoDark {
   display: block;
 }
 
@@ -139,6 +147,11 @@
   white-space: nowrap;
 }
 
+/* Переключатель темы: слева от блока администратора, перед разделителем */
+.theme {
+  flex: none;
+}
+
 .headerSep {
   flex: none;
   width: 1px;
@@ -166,12 +179,21 @@
  * на новый пункт переходом transform, поэтому выделение сдвигается, а не
  * мигает. Размер приходит из разметки (SidebarNav), здесь только вид и ход.
  */
+/*
+ * Цвет подложки — акцент ТЕМЫ, разбавленный поверхностью меню.
+ *
+ * Раньше здесь стоял --mt-color-background-accent-themed-alpha: в выгрузке
+ * токенов это прибитый гвоздями rgba(0,119,255,.2), то есть синий при любой
+ * теме — в изумрудной пилюля спорила с зелёным акцентом, а на тёмной
+ * светилась. Долю задаёт NAV_ACTIVE_ALPHA в appearance/adminThemes.ts:
+ * тем же числом считается контраст подписи активного пункта.
+ */
 .navPointer {
   position: absolute;
   left: 0;
   top: 0;
   border-radius: var(--mt-admin-radius);
-  background: var(--mt-color-background-accent-themed-alpha);
+  background: color-mix(in srgb, var(--mt-accent) 14%, var(--mt-admin-surface));
   pointer-events: none;
   transition:
     transform var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease),

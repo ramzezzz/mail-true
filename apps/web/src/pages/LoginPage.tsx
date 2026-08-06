@@ -20,9 +20,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '../components';
 import { useSession } from '../app/session';
+import { logoAlt, logoSrc, useBranding } from '../lib/branding';
 import { loginErrorText } from '../lib/errorText';
 import { LoginConstellation } from './login/LoginConstellation';
 import { LoginGlobe } from './login/LoginGlobe';
+import { pausedAttr, usePageVisible } from './login/usePageVisible';
 import styles from './LoginPage.module.css';
 
 /** Где помним адрес между входами. Пароль не помним никогда. */
@@ -38,6 +40,10 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const passwordRef = useRef<HTMLInputElement | null>(null);
+  /** Своё оформление входа: логотип и название компании (см. lib/branding.ts). */
+  const branding = useBranding();
+  /** Пока вкладку не видно, украшения фона стоят: они всё равно никому не видны. */
+  const visible = usePageVisible();
 
   // Если адрес уже запомнен, курсор ставим в пароль: человеку остаётся
   // ровно одно действие вместо двух.
@@ -66,7 +72,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className={styles.page}>
+    <div className={styles.page} data-paused={pausedAttr(visible)}>
       <LoginConstellation />
       <div className={styles.bokehBlue} aria-hidden="true" />
       <div className={styles.bokehWarm} aria-hidden="true" />
@@ -76,7 +82,14 @@ export function LoginPage() {
       <section className={styles.panel}>
         <form className={styles.card} onSubmit={(e) => void onSubmit(e)}>
           <div className={styles.brand}>
-            <img className={styles.logo} src="/brand/logo-full.svg" alt="Mail.True" />
+            {/* Логотип берётся из настроек панели управления (OEM): продукт
+                ставят под своим именем, и лицо страницы входа задаёт
+                администратор, а не сборка. Пока ответа нет — стандартный
+                знак, см. lib/branding.ts. */}
+            <img className={styles.logo} src={logoSrc(branding)} alt={logoAlt(branding)} />
+            {branding.companyName !== null && (
+              <span className={styles.company}>{branding.companyName}</span>
+            )}
           </div>
           {/*
             Настоящий заголовок, а не просто подпись: у страницы должен быть

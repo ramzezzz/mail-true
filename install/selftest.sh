@@ -92,7 +92,10 @@ step "4. Тома для резервной копии"
 # привели к тому, что очередь Postfix не попала в копию.
 VOL_NAMES=''
 for spec in "${MT_BACKUP_VOLUMES[@]}"; do VOL_NAMES="$VOL_NAMES ${spec%%:*}"; done
-for want_vol in vmail rspamd-data postfix-spool redisdata api-uploads; do
+# api-branding — свой логотип страниц входа (OEM). Восстановить его
+# неоткуда: исходник лежит у заказчика. Без него после восстановления
+# обе страницы входа молча возвращаются к чужому фирменному стилю.
+for want_vol in vmail rspamd-data postfix-spool redisdata api-uploads api-branding; do
     t_ok "том $want_vol входит в резервную копию" \
         bash -c "printf '%s' '$VOL_NAMES' | grep -qw '$want_vol'"
 done

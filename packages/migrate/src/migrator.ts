@@ -32,6 +32,7 @@ import {
   sanitizeDestPath,
 } from './folder-map.js';
 import { dedupKey, DedupLedger, parseDedupHeaders } from './dedup.js';
+import { loginNameOf } from './types.js';
 import type {
   FolderMapping,
   FolderReport,
@@ -55,13 +56,22 @@ interface SourceMessageMeta {
   key: string;
 }
 
-/** Создать подключение imapflow к серверу. */
-function createClient(endpoint: ImapEndpoint, logger: MigrateMailboxOptions['logger']): ImapFlow {
+/**
+ * Создать подключение imapflow к серверу.
+ *
+ * Имя входа берётся у loginNameOf: в служебном режиме это
+ * `ящик*служебный_пользователь`, и пароль в endpoint.pass — служебного
+ * пользователя, а не владельца ящика.
+ */
+export function createClient(
+  endpoint: ImapEndpoint,
+  logger: MigrateMailboxOptions['logger'],
+): ImapFlow {
   return new ImapFlow({
     host: endpoint.host,
     port: endpoint.port ?? (endpoint.secure ? 993 : 143),
     secure: endpoint.secure ?? false,
-    auth: { user: endpoint.user, pass: endpoint.pass },
+    auth: { user: loginNameOf(endpoint), pass: endpoint.pass },
     logger: logger ?? false,
     // Переносим большие ящики: не даём серверу закрыть сессию на долгих FETCH
     socketTimeout: 10 * 60 * 1000,
@@ -82,12 +92,16 @@ function createClient(endpoint: ImapEndpoint, logger: MigrateMailboxOptions['log
  * только к операциям с письмами. Вход остался без него — и оказался самым
  * частым местом отказа: адрес и пароль вводят руками.
  */
-async function connectWithReason(
+export async function connectWithReason(
   client: ImapFlow,
   endpoint: ImapEndpoint,
   role: 'исходному' | 'целевому',
 ): Promise<void> {
-  const where = `${endpoint.user}@${endpoint.host}:${String(
+  // Имя показываем ТО, под которым входили: в служебном режиме это
+  // «ящик*служебный», и отказ «логин или пароль» относится к служебному
+  // паролю, а не к паролю ящика. Без этого администратор шёл менять
+  // не тот пароль.
+  const where = `${loginNameOf(endpoint)}@${endpoint.host}:${String(
     endpoint.port ?? (endpoint.secure ? 993 : 143),
   )}`;
   try {
@@ -97,7 +111,14 @@ async function connectWithReason(
     const code = (err as { code?: string } | null)?.code ?? '';
     let hint = '';
     if (/AUTHENTICATIONFAILED|Authentication failed|Invalid credentials/i.test(detail)) {
-      hint = 'сервер не принял логин или пароль';
+      // В служебном режиме отказ почти всегда означает не «не тот пароль
+      // ящика», а «служебный доступ на сервере не включён или разделитель
+      // другой». Не сказав этого, мы отправляем человека менять пароль
+      // ящика — то есть чинить не то.
+      hint = endpoint.masterUser
+        ? `сервер не принял служебный вход «${loginNameOf(endpoint)}»: проверьте пароль ` +
+          'служебного пользователя, разрешён ли ему вход в чужие ящики и тот ли разделитель'
+        : 'сервер не принял логин или пароль';
     } else if (code === 'ENOTFOUND' || /ENOTFOUND/.test(detail)) {
       hint = 'имя сервера не разрешается — проверьте адрес';
     } else if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(detail)) {
@@ -105,13 +126,27 @@ async function connectWithReason(
     } else if (code === 'ETIMEDOUT' || /ETIMEDOUT|timed? out/i.test(detail)) {
       hint = 'сервер не ответил — проверьте адрес, порт и то, что путь не закрыт межсетевым экраном';
     } else if (/certificate|self.signed|DEPTH_ZERO/i.test(detail)) {
+      // Подсказка не называет флаг командной строки: этот же текст
+      // показывается в панели, где никаких флагов нет, и совет «добавьте
+      // --source-insecure-tls» там отправлял бы искать несуществующее поле.
       hint =
-        'сертификат сервера не принят — для собственного сертификата добавьте --source-insecure-tls или --dest-insecure-tls';
+        'сертификат сервера не принят — для собственного сертификата разрешите его приём ' +
+        '(в панели — флажок «Принимать собственный сертификат», в командной строке — ' +
+        '--source-insecure-tls или --dest-insecure-tls)';
     }
     // Подсказку не повторяем: часть кодов (AUTHENTICATIONFAILED) уже
     // объяснена разбором ответа, и дважды одна фраза в одной строке —
     // это шум, из-за которого пропускают вторую половину сообщения.
-    const reason = hint && !detail.includes(hint) ? `${hint}; ${detail}` : detail;
+    //
+    // В служебном режиме подсказка ЗАМЕЩАЕТ общую фразу «не принял логин
+    // или пароль»: она точнее (речь о служебном пользователе), а рядом
+    // общая фраза сбивала бы на пароль ящика.
+    const generic = RESPONSE_CODE_HINTS.AUTHENTICATIONFAILED as string;
+    const trimmed =
+      endpoint.masterUser && hint.length > 0 && detail.includes(generic)
+        ? detail.replace(`${generic}; `, '').replace(generic, '')
+        : detail;
+    const reason = hint && !trimmed.includes(hint) ? `${hint}; ${trimmed}` : trimmed;
     throw new Error(`Не удалось подключиться к ${role} серверу (${where}): ${reason}`);
   }
 }
@@ -246,6 +281,18 @@ export class PermanentFolderError extends Error {
   }
 }
 
+/**
+ * Перенос прерван человеком (options.signal). Не ошибка сервера:
+ * повторять попытку бессмысленно, отчёт должен сказать «остановлено»,
+ * а не «не удалось».
+ */
+export class MigrationStoppedError extends Error {
+  constructor(message = 'перенос остановлен') {
+    super(message);
+    this.name = 'MigrationStoppedError';
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /*  Курсор папки                                                       */
 /* ------------------------------------------------------------------ */
@@ -355,6 +402,26 @@ export class MailboxMigrator extends EventEmitter {
     this.options.onProgress?.(event);
   }
 
+  /**
+   * Задание остановлено человеком.
+   *
+   * Именно геттер, а не чтение options.signal.aborted по месту: сигнал
+   * меняется асинхронно, а компилятор, увидев одну проверку, считает
+   * значение известным до конца блока и объявляет вторую проверку лишней.
+   */
+  private get stopRequested(): boolean {
+    return this.options.signal?.aborted === true;
+  }
+
+  /**
+   * Бросить, если задание остановили. Вызывается ТОЛЬКО на границах, где
+   * состояние уже согласовано: между письмами и между папками. Обрывать
+   * посреди APPEND нельзя — приёмник получил бы половину письма.
+   */
+  private checkStopped(): void {
+    if (this.stopRequested) throw new MigrationStoppedError();
+  }
+
   /** Идентификатор ящика для хранилища состояния. */
   private get accountKey(): string {
     const { source, dest } = this.options;
@@ -450,6 +517,10 @@ export class MailboxMigrator extends EventEmitter {
     };
 
     try {
+      // Задание могли остановить, пока ящик стоял в очереди. Тогда к чужому
+      // серверу не идём вовсе: лишний вход в чужую почту — это след в его
+      // журналах и в его системе обнаружения вторжений, взятый ни за чем.
+      this.checkStopped();
       const mappings = await this.planFolders();
       this.progress({ type: 'folders', mappings });
 
@@ -471,21 +542,41 @@ export class MailboxMigrator extends EventEmitter {
         messages: totalMessages,
       });
 
+      let stopped = false;
       for (const mapping of mappings) {
+        // Остановка между папками: то, что уже переехало, остаётся в отчёте
+        // и в состоянии — продолжение начнётся ровно с этой папки.
+        if (this.stopRequested) {
+          stopped = true;
+          break;
+        }
         const folderReport = await this.migrateFolderWithRetry(mapping);
         report.folders.push(folderReport);
         report.totalMessages += folderReport.total;
         report.copied += folderReport.copied;
         report.skipped += folderReport.skipped;
         report.failed += folderReport.failed;
+        if (this.stopRequested) stopped = true;
       }
 
-      if (report.failed > 0 || report.folders.some((f) => f.errors.length > 0)) {
+      if (stopped) {
+        report.status = 'stopped';
+        report.error = 'перенос остановлен: продолжить можно тем же заданием, ' +
+          'уже перенесённые письма повторно не поедут';
+      } else if (report.failed > 0 || report.folders.some((f) => f.errors.length > 0)) {
         report.status = 'partial';
       }
     } catch (err) {
-      report.status = 'failed';
-      report.error = err instanceof Error ? err.message : String(err);
+      // Остановка — не отказ: отчёт должен показать сделанное, а не ошибку.
+      if (err instanceof MigrationStoppedError) {
+        report.status = 'stopped';
+        report.error =
+          'перенос остановлен: продолжить можно тем же заданием, ' +
+          'уже перенесённые письма повторно не поедут';
+      } else {
+        report.status = 'failed';
+        report.error = err instanceof Error ? err.message : String(err);
+      }
     } finally {
       await this.closeAll();
       const finishedAt = new Date();
@@ -520,6 +611,14 @@ export class MailboxMigrator extends EventEmitter {
         await this.migrateFolder(mapping, folderReport);
         return folderReport;
       } catch (err) {
+        // Остановку человеком не «повторяем»: пять попыток с нарастающей
+        // паузой после нажатия «Остановить» выглядели бы как зависание.
+        // И не превращаем в ошибку папки: отдаём то, что успели, — числа
+        // из этого отчёта человек и увидит на месте остановки.
+        if (err instanceof MigrationStoppedError) {
+          await this.closeAll();
+          return folderReport;
+        }
         const message = err instanceof PermanentFolderError ? err.message : describeImapError(err);
         // Свежие клиенты на следующую попытку
         await this.closeAll();
@@ -712,6 +811,11 @@ export class MailboxMigrator extends EventEmitter {
     }
     metas.sort((a, b) => a.uid - b.uid);
 
+    // Чтение метаданных большой папки (десятки тысяч писем) занимает
+    // минуты, и всё это время нажатая кнопка «Остановить» выглядела бы
+    // непрожатой. Здесь ничего ещё не записано — выходить безопасно.
+    this.checkStopped();
+
     // 2. Папка-приёмник. Имя может измениться (Maildir++ не принимает точку
     //    внутри имени папки) — тогда дальше работаем с фактическим именем.
     let destPath = mapping.destPath;
@@ -805,6 +909,10 @@ export class MailboxMigrator extends EventEmitter {
 
     let sinceLastCursor = 0;
     for (const meta of toCopy) {
+      // Остановка проверяется ПЕРЕД письмом, а не после: письмо либо
+      // переехало целиком и отмечено в состоянии, либо не начиналось.
+      // Оборвать APPEND на середине означало бы половину письма в приёмнике.
+      if (this.stopRequested) break;
       try {
         // Скачиваем письмо потоком и собираем в Buffer (одно письмо за раз)
         const sourceLock2 = await source.getMailboxLock(sourcePath, { readOnly: true });
@@ -876,6 +984,10 @@ export class MailboxMigrator extends EventEmitter {
     // Курсор в конец непрерывного разобранного префикса. Если по дороге
     // была неудача, курсор остановится ПЕРЕД первым непереехавшим письмом,
     // и повторный запуск начнёт именно с него.
+    //
+    // При остановке это тоже верно и без особого случая: письма, до которых
+    // мы не дошли, остались в pending, а advance() перед первым же таким
+    // письмом останавливается. Продолжение задания начнёт именно с него.
     cursor.finish();
     if (state) await writeCursor();
 

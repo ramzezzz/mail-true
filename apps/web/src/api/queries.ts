@@ -9,7 +9,8 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import type { Account, Folder, MessageListQuery, MessageSummary } from '@mail-true/shared';
-import { api } from './index';
+import { api, useMocks } from './index';
+import { apiFetch } from './http';
 import { MESSAGES_PAGE_SIZE } from './client';
 import type {
   FlagsRequest,
@@ -42,6 +43,8 @@ export const queryKeys = {
   aiState: ['ai', 'state'] as const,
   aiUsage: ['ai', 'usage'] as const,
   aiOutbound: (messageId: string) => ['ai', 'outbound', messageId] as const,
+  /** Версия работающего сервера — для нижней строки состояния. */
+  version: ['version'] as const,
 };
 
 export function useAccount(): UseQueryResult<Account> {
@@ -84,6 +87,44 @@ export function useMessages(query: MessageListQuery): UseQueryResult<MessagesPag
     placeholderData: (previous, previousQuery) =>
       sameMessageList(previousQuery?.queryKey, key) ? previous : undefined,
   });
+}
+
+/**
+ * Версия сервера приложения (`GET /api/version`) — для строки состояния.
+ *
+ * Запрашивается один раз за жизнь вкладки: версия не меняется, пока
+ * работает тот же процесс, а перезапуск сервера всё равно перезагружает
+ * страницу через отвалившийся WebSocket. Отсюда `staleTime: Infinity`
+ * и отсутствие повторов: строчка мелким шрифтом внизу не стоит того,
+ * чтобы ради неё стучаться в лежащий сервер трижды.
+ *
+ * На заглушках запрос не идёт вовсе: своей версии у них нет, а подставить
+ * чужую значило бы показать поддержке выдуманное число.
+ */
+export function useServerVersion(): UseQueryResult<{ version: string | null }> {
+  return useQuery({
+    queryKey: queryKeys.version,
+    queryFn: () => apiFetch<{ version: string | null }>('/api/version'),
+    enabled: !useMocks,
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Перечитать почту по просьбе человека (кнопка «Обновить» в строке
+ * состояния). Ровно то же, что делается после изменения писем, — списки
+ * и счётчики папок; отдельного «обновить всё» в клиенте не было.
+ */
+export function useRefreshMail(): () => Promise<void> {
+  const client = useQueryClient();
+  return async () => {
+    await Promise.all([
+      client.invalidateQueries({ queryKey: ['messages'] }),
+      client.invalidateQueries({ queryKey: queryKeys.folders }),
+    ]);
+  };
 }
 
 /** Результат постраничной загрузки списка папки. */
@@ -228,6 +269,26 @@ export function useSendMessage() {
   return useMutation({
     mutationFn: (request: SendRequest) => api.sendMessage(request),
     onSuccess: invalidate,
+  });
+}
+
+/**
+ * Ответ на просьбу уведомить о прочтении.
+ *
+ * После ответа письмо перечитывается: сервер ставит на нём ключевое слово
+ * `$MDNSent`, и без обновления плашка с вопросом осталась бы на экране —
+ * то есть выглядела бы так, будто нажатие ничего не сделало.
+ */
+export function useSendReadReceipt(messageId: string | undefined) {
+  const client = useQueryClient();
+  const onError = useNotifyFailure('Не удалось отправить уведомление о прочтении');
+  return useMutation({
+    mutationFn: (send: boolean) => api.sendReadReceipt(messageId ?? '', send),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['message', messageId] });
+      void client.invalidateQueries({ queryKey: ['messages'] });
+    },
+    onError,
   });
 }
 

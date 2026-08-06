@@ -16,8 +16,10 @@
  */
 import { ImapFlow } from 'imapflow';
 import type { Logger } from 'pino';
+import type { Folder } from '@mail-true/shared';
 import { AuthFailedError, UpstreamUnavailableError } from '../errors.js';
 import { AdminUnavailableError } from './errors.js';
+import { listFolders as listMailFoldersOf } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 
 export interface MasterAccessOptions {
@@ -152,6 +154,22 @@ export class MailboxMasterAccess {
       }
       return out;
     });
+  }
+
+  /**
+   * Папки в той же модели, что видит сам пользователь (роль папки,
+   * вложенность, публичный идентификатор `f-<base64url(путь)>`).
+   *
+   * Отдельно от listFolders(): та отдаёт плоский список для чтения писем
+   * администратором, а здесь нужен ровно тот справочник, по которому
+   * настройки переводят идентификатор папки в путь IMAP и обратно
+   * (см. settings/webdto.ts). Собирать второй такой перевод для админки
+   * нельзя: правило «письма от директора — в папку Х», заведённое
+   * администратором, обязано указывать на ту же папку, что и правило,
+   * заведённое владельцем ящика.
+   */
+  async listMailFolders(email: string): Promise<Folder[]> {
+    return this.withClient(email, (client) => listMailFoldersOf(client));
   }
 
   async listMessages(

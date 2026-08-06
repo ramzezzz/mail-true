@@ -1,0 +1,163 @@
+/*
+ * Раскладка графиков. Цвета рядов сюда не попадают — они в
+ * styles/charts.css, единым набором на все графики панели.
+ */
+
+.box {
+  /*
+   * Ширину график меряет сам (ResizeObserver) и рисуется ровно в неё.
+   * Поэтому здесь min-width: 0 — без него элемент сетки не даёт себя
+   * сузить ниже содержимого, и на узком экране график вылезал бы за
+   * правый край страницы вместе со всей карточкой.
+   */
+  min-width: 0;
+  width: 100%;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Курсор-перекрестье намекает, что по графику можно вести мышью. */
+  touch-action: pan-y;
+}
+
+.gridLine {
+  stroke: var(--mt-chart-grid);
+  stroke-width: 1;
+}
+
+.axisLine {
+  stroke: var(--mt-chart-axis);
+  stroke-width: 1;
+}
+
+.axisText {
+  fill: var(--mt-color-text-secondary);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+.axisTextRight {
+  text-anchor: end;
+}
+
+.axisTextMiddle {
+  text-anchor: middle;
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.dot {
+  stroke: none;
+}
+
+/* Наведённая точка: вертикальная нить через весь график. */
+.cursorLine {
+  stroke: var(--mt-chart-axis);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/*
+ * Метка ряда в легенде — не просто квадратик цвета.
+ *
+ * Внутри неё рисуется тот же штрих, что у линии на графике, поэтому
+ * различать ряды можно и не различая цветов. Квадрат цвета в отрыве от
+ * штриха обманывал бы: в легенде ряды выглядели бы разными, а на графике
+ * сливались.
+ */
+.legendMark {
+  flex: none;
+  width: 22px;
+  height: 10px;
+}
+
+.legendValue {
+  color: var(--mt-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Подсказка над графиком: что за момент и какие значения. */
+.tip {
+  min-height: 18px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: var(--mt-color-text-secondary);
+  /*
+   * Подсказка НЕ всплывающая, а строкой над графиком. На узком экране
+   * всплывающая подсказка либо закрывает сам график, либо вылезает за
+   * край; строка не делает ни того, ни другого и одинаково работает
+   * с мышью и с пальцем.
+   */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tipValue {
+  color: var(--mt-color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Полосный указатель: доля от целого одной строкой. */
+.meter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.meterTrack {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--mt-chart-grid);
+}
+
+.meterFill {
+  height: 100%;
+  border-radius: 4px;
+}
+
+.meterValue {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--mt-color-text-secondary);
+  white-space: nowrap;
+}
+
+/* Пусто — так и говорим, а не показываем пустую рамку. */
+.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 80px;
+  padding: 12px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--mt-color-text-secondary);
+}

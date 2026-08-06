@@ -9,13 +9,14 @@
  * mail/deferred-send.ts) и уведомление о прочтении (mail/read-receipt.ts).
  */
 import { dirname, join } from 'node:path';
+import { Readable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
 import nodemailer from 'nodemailer';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type Mail from 'nodemailer/lib/mailer/index.js';
-import type { Folder, MailAddress } from '@mail-true/shared';
+import type { DraftContent, Folder, MailAddress } from '@mail-true/shared';
 import {
   BadRequestError,
   MessageTooLargeError,
@@ -26,6 +27,7 @@ import {
 } from '../errors.js';
 import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
 import { findFolderById } from '../mail/folders.js';
+import { parseDraftSource } from '../mail/draft-read.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
 import {
   checkSendAt,
@@ -133,12 +135,23 @@ export function forwardedAttachment(item: ForwardedMessage): Mail.Attachment {
   };
 }
 
-/** Собирает письмо в RFC822-байты. */
+/**
+ * Собирает письмо в RFC822-байты.
+ *
+ * `keepBcc` — для черновиков, и только для них. По умолчанию MailComposer
+ * НЕ пишет заголовок `Bcc` в собранное письмо: скрытые получатели должны
+ * попасть в конверт SMTP и остаться невидимыми для всех остальных. Но у
+ * черновика конверта нет — он просто лежит в ящике, и без этого заголовка
+ * скрытые получатели пропадали бесследно: человек указывал их, сохранял
+ * черновик, дописывал его на другой день и отправлял письмо, не заметив,
+ * что половина адресатов исчезла.
+ */
 async function composeRaw(
   payload: DraftBody,
   from: string,
   uploads: UploadStore,
-  forwarded: readonly ForwardedMessage[] = []
+  forwarded: readonly ForwardedMessage[] = [],
+  settings?: { keepBcc?: boolean }
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
   for (const id of payload.attachmentIds) {
@@ -181,7 +194,16 @@ async function composeRaw(
   }
 
   const composer = new MailComposer(options);
-  return composer.compile().build();
+  const node = composer.compile();
+  /**
+   * `keepBcc` живёт на узле MIME, а не в настройках письма: MailComposer
+   * заголовок `Bcc` в узел кладёт, а вот саму настройку «не выбрасывать его
+   * при сборке» дальше не передаёт (nodemailer/lib/mail-composer/index.js —
+   * список опций MimeNode её не содержит). Поэтому ставим прямо на узле;
+   * иначе черновик собирался бы вообще без скрытых получателей.
+   */
+  if (settings?.keepBcc) (node as unknown as { keepBcc: boolean }).keepBcc = true;
+  return node.build();
 }
 
 /** Имя файла для вложенного письма: тема + «.eml». */
@@ -304,11 +326,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Письмо не ушло и не уйдёт — сохраняем текст, чтобы он не пропал.
    * Раньше при постоянном отказе SMTP письмо терялось целиком.
+   *
+   * Письмо для черновика собирается ЗАНОВО, а не берётся готовым от отправки:
+   * у черновика должен остаться заголовок `Bcc` (см. composeRaw), иначе
+   * скрытые получатели пропадают, и человек отправляет спасённое письмо уже
+   * без них — молча и не заметив.
    */
   async function keepDraftAfterFailure(
     session: MailSession,
-    raw: Buffer,
     payload: DraftBody,
+    forwarded: readonly ForwardedMessage[],
     log: { warn: (obj: unknown, msg: string) => void }
   ): Promise<{ draftUid: number | null; draftId: string | null }> {
     if (payload.draftUid) {
@@ -316,6 +343,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       return { draftUid: payload.draftUid, draftId: `drafts:${payload.draftUid}` };
     }
     try {
+      const raw = await composeRaw(payload, session.email, uploads, forwarded, { keepBcc: true });
       const uid = await saveDraftVersion(session, raw, undefined, payload.draftKey);
       return { draftUid: uid, draftId: uid ? `drafts:${uid}` : null };
     } catch (err) {
@@ -511,7 +539,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
 
     // Предел письма известен заранее — незачем узнавать его от SMTP отказом
     if (raw.length > config.MESSAGE_MAX_BYTES) {
-      const kept = await keepDraftAfterFailure(session, raw, payload, request.log);
+      const kept = await keepDraftAfterFailure(session, payload, forwarded, request.log);
       throw new MessageTooLargeError(
         `Письмо ${megabytes(raw.length)} МБ, а почтовый сервер принимает не больше ` +
           `${megabytes(config.MESSAGE_MAX_BYTES)} МБ. Письмо сохранено в черновиках.`,
@@ -577,7 +605,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         // Сервер доступен и ответил отказом: повторять бессмысленно,
         // 503 «почтовый сервер недоступен» здесь был неправдой дважды
         request.log.warn(errorInfo(err, { smtpCode: failure.code }), 'Почтовый сервер отклонил письмо');
-        const kept = await keepDraftAfterFailure(session, raw, payload, request.log);
+        const kept = await keepDraftAfterFailure(session, payload, forwarded, request.log);
         const details = {
           ...kept,
           smtpCode: failure.code,
@@ -602,7 +630,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
        * идентификаторы загрузок. Их подчистит уборщик (см. uploads.sweep).
        */
       request.log.warn(errorInfo(err), 'Ошибка отправки через SMTP submission');
-      const kept = await keepDraftAfterFailure(session, raw, payload, request.log);
+      const kept = await keepDraftAfterFailure(session, payload, forwarded, request.log);
       throw new UpstreamUnavailableError(
         kept.draftId
           ? 'Почтовый сервер сейчас недоступен, письмо не отправлено. ' +
@@ -687,7 +715,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     // Пересылаемые вложением письма попадают и в черновик: иначе сохранение
     // черновика молча выбрасывало бы их, а отправить потом было бы нечего.
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
-    const raw = await composeRaw(payload, session.email, uploads, forwarded);
+    // keepBcc — чтобы «Скрытая копия» дожила до дописывания черновика,
+    // см. composeRaw. У отправляемого письма этого заголовка быть не должно.
+    const raw = await composeRaw(payload, session.email, uploads, forwarded, { keepBcc: true });
     const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
 
     return {
@@ -695,6 +725,67 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       draftId: uid ? `drafts:${uid}` : null,
       draftUid: uid,
     };
+  });
+
+  /**
+   * Чтение черновика обратно в окно написания.
+   *
+   * Этого маршрута не было, и из-за этого сохранённый черновик нельзя было
+   * дописать вообще ничем: он сохранялся, показывался в папке — и на этом
+   * всё. Щелчок по нему открывал просмотр письма, а окно написания не
+   * открывалось никак.
+   *
+   * Вложения. В ящике они лежат частями MIME, а окну написания нужны
+   * идентификаторы загрузок — только с ними письмо потом соберётся заново.
+   * Поэтому вложения черновика кладутся во временное хранилище ЗАНОВО, и
+   * наружу уходят новые идентификаторы. Обратная сторона — открытый и
+   * брошенный черновик оставляет копии файлов в хранилище; их убирает тот же
+   * уборщик, что и брошенные загрузки окна написания (uploads.sweep), и это
+   * дешевле, чем потерять вложение при первом же дописывании.
+   */
+  app.get('/drafts/:uid', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    const { uid } = z
+      .object({ uid: z.coerce.number().int().positive() })
+      .parse(request.params);
+
+    const source = await pool.withClient(session.email, session.password, async (client) => {
+      const folder = await requireDraftsFolder(client);
+      const lock = await client.getMailboxLock(folder.path);
+      try {
+        const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+        return msg && msg.source ? msg.source : null;
+      } finally {
+        lock.release();
+      }
+    });
+    if (!source) throw new NotFoundError('Черновик не найден');
+
+    const parsed = await parseDraftSource(source);
+    const attachments: DraftContent['attachments'] = [];
+    for (const part of parsed.attachments) {
+      const meta = await uploads.save(
+        part.filename,
+        part.mimeType,
+        Readable.from(part.content)
+      );
+      attachments.push({ id: meta.id, filename: meta.filename, size: meta.size });
+    }
+
+    const content: DraftContent = {
+      draftUid: uid,
+      to: parsed.to,
+      cc: parsed.cc,
+      bcc: parsed.bcc,
+      subject: parsed.subject,
+      bodyHtml: parsed.bodyHtml,
+      attachments,
+      inReplyTo: parsed.inReplyTo,
+      references: parsed.references,
+      requestReadReceipt: parsed.requestReadReceipt,
+    };
+    return content;
   });
 
   /**

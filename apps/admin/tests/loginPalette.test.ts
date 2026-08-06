@@ -10,6 +10,7 @@ import {
   DOT_ALPHA,
   LOGIN_PALETTE as P,
   NODE_SURFACE_ALPHA,
+  constellationLook,
   dotRgbChannels,
   paletteVars,
 } from '../src/pages/login/loginPalette';
@@ -21,9 +22,11 @@ const LARGE = 3;
 
 describe('контраст текста', () => {
   it('подвал читается поверх тёмного фона в любой его точке', () => {
-    expect(contrastRatio(P.footer, P.bgCenter)).toBeGreaterThanOrEqual(TEXT);
-    expect(contrastRatio(P.footer, P.bgMiddle)).toBeGreaterThanOrEqual(TEXT);
-    expect(contrastRatio(P.footer, P.bgEdge)).toBeGreaterThanOrEqual(TEXT);
+    // Все четыре остановки перехода, включая самую глубокую у края:
+    // фон стал темнее, и проверять надо именно его крайние значения.
+    for (const stop of [P.bgCenter, P.bgMiddle, P.bgEdge, P.bgDeep]) {
+      expect(contrastRatio(P.footer, stop)).toBeGreaterThanOrEqual(TEXT);
+    }
   });
 
   it('белая надпись на кнопке входа читается во всех её состояниях', () => {
@@ -52,6 +55,22 @@ describe('контраст значков и графики', () => {
   it('точки созвездия видны на фоне даже с их прозрачностью', () => {
     const dot = composite(P.dot, DOT_ALPHA, P.bgMiddle);
     expect(contrastRatio(dot, P.bgMiddle)).toBeGreaterThanOrEqual(LARGE);
+  });
+
+  it('звёзды видны у самого края фона, где он темнее всего', () => {
+    /*
+     * Звезда разгорается и гаснет — требовать от неё контраста в НИЖНЕЙ
+     * точке значило бы запретить мерцание вовсе. Считаем самый неудачный
+     * случай из тех, что важны: тусклейшая из звёзд в свой ЯРЧАЙШИЙ миг.
+     * Нижняя граница яркости в constellation.ts — 0.55 (`random*0.45+0.55`),
+     * значит каждая звезда хотя бы раз за круг обязана быть видна.
+     */
+    const peak = composite(P.star, 0.55, P.bgDeep);
+    expect(contrastRatio(peak, P.bgDeep)).toBeGreaterThanOrEqual(LARGE);
+  });
+
+  it('светящийся шар виден на проволоке сферы', () => {
+    expect(contrastRatio(P.ball, P.bgCenter)).toBeGreaterThanOrEqual(LARGE);
   });
 
   it('обводка фокуса заметна на белой карточке', () => {
@@ -91,5 +110,26 @@ describe('палитра доезжает до разметки', () => {
 
   it('отдаёт цвет точек каналами — холст рисует не по hex', () => {
     expect(dotRgbChannels()).toBe('143,179,189');
+  });
+
+  it('гамма фона уходит на холст целиком: паутина, звёзды и волна', () => {
+    const look = constellationLook();
+    expect(look.web).toBe(dotRgbChannels());
+    // Ни одного пустого канала: пустая строка дала бы rgba(,0.5) — и слой
+    // молча пропал бы с холста.
+    for (const channels of [look.web, look.star, look.mesh]) {
+      expect(channels).toMatch(/^\d{1,3},\d{1,3},\d{1,3}$/u);
+    }
+    // Слои различимы между собой, а не один цвет в трёх местах.
+    expect(new Set([look.web, look.star, look.mesh]).size).toBe(3);
+  });
+
+  it('фон сцены задан переменными общей сцены, а не цветами почты', () => {
+    const vars = paletteVars();
+    expect(vars['--mt-login-ring']).toContain(dotRgbChannels());
+    // Синий почты на входе в панель не появляется ни в одной переменной.
+    for (const value of Object.values(vars)) {
+      expect(value.toLowerCase()).not.toContain('006ec6');
+    }
   });
 });

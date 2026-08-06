@@ -19,6 +19,13 @@ import { IMAP_FAREWELL, probeTcpPort, SMTP_FAREWELL } from '../../health.js';
 import { actionLabel } from '../audit.js';
 import { requireAdmin } from '../guard.js';
 import { checkAntispam, checkResolver } from '../services.js';
+import {
+  bucketSeconds,
+  isUserTrafficSort,
+  MetricsStore,
+  type UserTrafficSort,
+} from '../metrics-store.js';
+import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
 
 type ServiceState = 'ok' | 'fail' | 'unknown';
 
@@ -186,6 +193,268 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
         actionLabel: actionLabel(r.action),
         targetLabel: r.target_label,
         createdAt: r.created_at.toISOString(),
+      })),
+    };
+  });
+
+  /* ================================================================== */
+  /* Дашборд наблюдения                                                  */
+  /*                                                                     */
+  /* ПОЧЕМУ РАЗДЕЛОВ ПЯТЬ, А НЕ ОДИН БОЛЬШОЙ ОТВЕТ.                      */
+  /* Они стоят разного. Ресурсы отдаются из памяти сборщика мгновенно;   */
+  /* агрегаты по сотням тысяч строк истории — десятки миллисекунд;       */
+  /* занятость ящиков — обход хранилища; сертификаты — четыре сетевых    */
+  /* соединения с таймаутом в четыре секунды. Слепив их в один ответ, мы */
+  /* заставили бы весь экран ждать самого медленного: недоступный порт   */
+  /* TLS задерживал бы показ загрузки процессора. Раздельные запросы     */
+  /* рисуют каждый раздел, как только он готов.                          */
+  /* ================================================================== */
+
+  const store = new MetricsStore(ctx.db);
+
+  /**
+   * Снимок ресурсов или честное «сборщика нет».
+   *
+   * Сборщик может отсутствовать (см. AdminContext.metrics): тогда показывать
+   * нечего, и притворяться нулями нельзя — ноль занятой памяти выглядит как
+   * исправный сервер, а на деле означает, что мы ничего не мерили.
+   */
+  const NO_COLLECTOR =
+    'Сборщик показателей не запущен: раздел ресурсов недоступен. ' +
+    'Проверьте MAIL_METRICS_INTERVAL_SECONDS — ноль означает «не снимать вовсе»';
+  const resourceSnapshot = async () => {
+    const collector = ctx.metrics;
+    if (!collector) return null;
+    return collector.latest ?? (await collector.runOnce());
+  };
+
+  /** Окно времени из запроса: часы, с потолком и разумным умолчанием. */
+  const windowOf = (raw: unknown, fallback = 24): { from: Date; to: Date; hours: number } => {
+    const parsed = Number(raw);
+    // Потолок в 30 суток не выдуман: дольше история и не живёт (см.
+    // MAIL_FLOW_RETENTION_DAYS и MAIL_METRICS_RETENTION_DAYS), а запрос
+    // «за год» просто прочесал бы всю таблицу ради пустого графика.
+    const hours = Number.isFinite(parsed) && parsed >= 1 ? Math.min(720, Math.floor(parsed)) : fallback;
+    const to = new Date();
+    return { from: new Date(to.getTime() - hours * 3600_000), to, hours };
+  };
+
+  /* --- Ресурсы «прямо сейчас» ---------------------------------------- */
+  app.get('/overview/resources', { preHandler: requireAdmin(app, 'overview.read') }, async () => {
+    // Снимок берётся у сборщика, а не снимается здесь: см. пояснение
+    // в metrics-collector.ts (загрузка процессора — это разность двух
+    // замеров, одним обращением её не получить).
+    const snapshot = await resourceSnapshot();
+    if (!snapshot) {
+      return {
+        takenAt: null,
+        intervalSeconds: ctx.config.MAIL_METRICS_INTERVAL_SECONDS,
+        cpu: null,
+        memory: null,
+        volumes: [],
+        singleDevice: false,
+        slices: [],
+        queue: null,
+        unavailable: [NO_COLLECTOR],
+      };
+    }
+    return {
+      takenAt: snapshot.takenAt,
+      intervalSeconds: ctx.config.MAIL_METRICS_INTERVAL_SECONDS,
+      cpu: {
+        nodePercent: snapshot.host.cpuNodePercent,
+        apiPercent: snapshot.host.cpuApiPercent,
+        cores: snapshot.host.cpuCount,
+        apiLimit: snapshot.host.cpuApiLimit,
+        load1: snapshot.host.load1,
+      },
+      memory: {
+        total: snapshot.host.memNodeTotal,
+        used: snapshot.host.memNodeUsed,
+        api: snapshot.host.memApiBytes,
+        apiLimit: snapshot.host.memApiLimit,
+      },
+      volumes: snapshot.volumes,
+      singleDevice: snapshot.singleDevice,
+      slices: snapshot.slices,
+      queue: snapshot.queue,
+      unavailable: snapshot.unavailable,
+    };
+  });
+
+  /* --- История показателей ------------------------------------------- */
+  app.get('/overview/history', { preHandler: requireAdmin(app, 'overview.read') }, async (req) => {
+    const { from, to, hours } = windowOf((req.query as Record<string, unknown>).hours);
+    const step = bucketSeconds(
+      hours * 3600,
+      Math.max(60, ctx.config.MAIL_METRICS_INTERVAL_SECONDS),
+    );
+    const ready = await store.schemaReady();
+    if (!ready) {
+      return {
+        available: false,
+        note:
+          'История показателей недоступна: не применена миграция 0010_metrics.sql. ' +
+          'Состояние «прямо сейчас» показывается и без неё, графика за прошедшие часы — нет',
+        hours,
+        stepSeconds: step,
+        points: [],
+      };
+    }
+    return {
+      available: true,
+      note: `Снимки раз в ${ctx.config.MAIL_METRICS_INTERVAL_SECONDS} с, усреднены по ${step} с`,
+      hours,
+      stepSeconds: step,
+      points: await store.history(from, to, step),
+    };
+  });
+
+  /* --- Почтовый поток ------------------------------------------------ */
+  app.get('/overview/mail', { preHandler: requireAdmin(app, 'overview.read') }, async (req) => {
+    const { from, to, hours } = windowOf((req.query as Record<string, unknown>).hours);
+    const step = bucketSeconds(hours * 3600, 300);
+    // Пять сводок разом: они читают один и тот же индекс по одному и тому
+    // же окну, и последовательное выполнение просто складывало бы задержки.
+    const [buckets, totals, rejectReasons, deferReasons, sizes, hourly, edges, activity] =
+      await Promise.all([
+        store.flowByBucket(from, to, step),
+        store.flowTotals(from, to),
+        store.topReasons(from, to, ['rejected', 'bounced', 'expired']),
+        store.topReasons(from, to, ['deferred']),
+        store.sizeSummary(from, to),
+        store.hourlyProfile(from, to),
+        store.flowEdges(),
+        store.activityCounts(from, to),
+      ]);
+    return {
+      hours,
+      stepSeconds: step,
+      buckets,
+      totals: totals.byStatus,
+      byDirection: totals.byDirection,
+      spamRejected: totals.spamRejected,
+      spamNote:
+        'Отдельного поля «спам» в журнале Postfix нет: rspamd отвечает обычным отказом ' +
+        'SMTP. Здесь считаются отказы, в тексте которых виден след антиспама',
+      rejectReasons,
+      deferReasons,
+      sizes,
+      hourly,
+      historyStartsAt: edges.oldest,
+      historyEndsAt: edges.newest,
+      mailboxesTotal: activity.total,
+      mailboxesActive: activity.active,
+      activityNote:
+        '«Активен» значит «за окно был хотя бы один принятый или отправленный конверт». ' +
+        'Про входы в почту журнал Postfix ничего не знает',
+    };
+  });
+
+  /* --- Кто сколько отправил и получил -------------------------------- */
+  app.get('/overview/users', { preHandler: requireAdmin(app, 'overview.read') }, async (req) => {
+    const query = req.query as Record<string, unknown>;
+    const { from, to, hours } = windowOf(query.hours);
+    const sort: UserTrafficSort = isUserTrafficSort(query.sort) ? query.sort : 'totalMessages';
+    const limitRaw = Number(query.limit);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 25;
+    const offsetRaw = Number(query.offset);
+    const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
+    const page = await store.userTraffic(from, to, sort, limit, offset);
+    return { hours, sort, limit, offset, total: page.total, items: page.rows };
+  });
+
+  /* --- Занятость ящиков и близость к квоте --------------------------- */
+  app.get(
+    '/overview/mailboxes',
+    { preHandler: requireAdmin(app, 'overview.read') },
+    async (req) => {
+      const limitRaw = Number((req.query as Record<string, unknown>).limit);
+      const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 20;
+      // Занятость берём из снимка сборщика: обходить хранилище на каждый
+      // запрос значит платить обходом за каждое обновление страницы.
+      const snapshot = await resourceSnapshot();
+      if (!snapshot) {
+        return {
+          available: false,
+          note: NO_COLLECTOR,
+          takenAt: null,
+          totalBytes: 0,
+          withoutAccounting: 0,
+          total: 0,
+          items: [],
+        };
+      }
+      // Квоты — одним запросом по всем ящикам: по одному это N обращений
+      // к базе ради таблицы, которую и так показывают целиком.
+      const users = await ctx.db.query<{ email: string; quota_bytes: string; active: boolean }>(
+        `SELECT email, quota_bytes::text, active FROM virtual_users`,
+      );
+      const quotas = new Map<string, { quota: number; active: boolean }>();
+      for (const user of users) {
+        quotas.set(user.email.toLowerCase(), {
+          quota: Number(user.quota_bytes),
+          active: user.active,
+        });
+      }
+      const items = snapshot.mailboxes.items.map((box) => {
+        const known = quotas.get(box.email.toLowerCase());
+        // Квота из базы важнее записанной в maildirsize: в базе лежит то,
+        // что администратор задал СЕЙЧАС, а в файле — то, что Dovecot
+        // записал в момент последнего пересчёта. Расходятся они как раз
+        // после изменения квоты, то есть ровно тогда, когда на это смотрят.
+        const quota = known?.quota ?? box.limitBytes ?? 0;
+        return {
+          email: box.email,
+          bytes: box.bytes,
+          messages: box.messages,
+          quotaBytes: quota,
+          usedPercent: quota > 0 ? Math.round((box.bytes / quota) * 1000) / 10 : null,
+          active: known?.active ?? true,
+          known: known !== undefined,
+        };
+      });
+      // Сортируем по близости к квоте, а не по размеру: ящик на 900 МБ из
+      // гигабайта важнее ящика на 5 ГБ без ограничения — первый завтра
+      // перестанет принимать почту, а второй просто большой.
+      items.sort((a, b) => (b.usedPercent ?? -1) - (a.usedPercent ?? -1));
+      return {
+        available: snapshot.mailboxes.available,
+        note: snapshot.mailboxes.note,
+        takenAt: snapshot.takenAt,
+        totalBytes: snapshot.mailboxes.totalBytes,
+        withoutAccounting: snapshot.mailboxes.withoutAccounting,
+        total: items.length,
+        items: items.slice(0, limit),
+      };
+    },
+  );
+
+  /* --- Сроки сертификатов и состояние DNS ---------------------------- */
+  app.get('/overview/security', { preHandler: requireAdmin(app, 'overview.read') }, async () => {
+    const host = apiConfig.SMTP_HOST;
+    const targets: TlsTarget[] = [
+      { title: 'Отправка почты (SMTPS 465)', host, port: 465, implicitTls: true },
+      { title: 'Чтение почты (IMAPS 993)', host: apiConfig.IMAP_HOST, port: 993, implicitTls: true },
+      { title: 'Чтение почты (POP3S 995)', host: apiConfig.IMAP_HOST, port: 995, implicitTls: true },
+    ];
+    const [certificates, domains] = await Promise.all([
+      readCertificates(targets),
+      ctx.db.listDomains().catch(() => []),
+    ]);
+    return {
+      warnDays: TLS_WARN_DAYS,
+      certificateNote:
+        'Сертификат читается из живого соединения со службой, а не из файла: после ' +
+        'обновления файла служба продолжает отдавать старый, пока её не перезапустят',
+      certificates,
+      domains: domains.map((d) => ({
+        id: d.id,
+        name: d.name,
+        dnsOverall: d.dns_overall ?? 'unknown',
+        dnsCheckedAt: d.dns_checked_at?.toISOString() ?? null,
+        dkimSelector: d.dkim_selector ?? null,
+        dkimConfigured: Boolean(d.dkim_public_key),
       })),
     };
   });

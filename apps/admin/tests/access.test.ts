@@ -12,6 +12,12 @@ const READONLY: Permission[] = [
   'aliases.read',
   'domains.read',
   'audit.read',
+  // Логотип страницы входа и так виден всему интернету, поэтому
+  // посмотреть настройку оформления может любая роль.
+  'branding.read',
+  // Вопрос «доехала ли почта Иванова» задают дежурному — ход переноса
+  // он видеть должен, а запускать перенос не может (migration.run).
+  'migration.read',
 ];
 
 const USER_MANAGER: Permission[] = [
@@ -23,7 +29,17 @@ const USER_MANAGER: Permission[] = [
   'mailbox.impersonate',
 ];
 
-const OWNER: Permission[] = [...USER_MANAGER, 'users.delete', 'domains.write', 'admins.manage'];
+const OWNER: Permission[] = [
+  ...USER_MANAGER,
+  'users.delete',
+  'domains.write',
+  'branding.write',
+  // Выгрузка копии настроек — действие с секретами: внутри файла хэши
+  // паролей. Восстановление перезаписывает учётные записи.
+  'backup.export',
+  'backup.restore',
+  'admins.manage',
+];
 
 describe('can', () => {
   it('проверяет наличие права', () => {
@@ -77,8 +93,12 @@ describe('меню', () => {
     // «Почтового потока» здесь больше нет: раздел работает — очередь
     // читается у Postfix, история обработанных берётся из разобранного
     // журнала. Помечать его «скоро» значит врать про готовое.
+    //
+    // «Резервных копий» здесь тоже больше нет: раздел создаёт и
+    // восстанавливает копии настроек (см. BackupPage), и подпись «скоро»
+    // рядом с работающей кнопкой — это враньё в интерфейсе.
     const stubs = NAV_ITEMS.filter((i) => i.stub).map((i) => i.to);
-    expect(stubs).toEqual(['/spam', '/monitoring', '/backups']);
+    expect(stubs).toEqual(['/spam', '/monitoring']);
   });
 
   it('очередь и журналы — готовые разделы, а не «скоро»', () => {

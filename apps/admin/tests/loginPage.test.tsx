@@ -3,14 +3,14 @@
  * Страница входа в панель управления: подписи, значки глобуса и те два
  * правила в стилях, без которых страница уже ломалась.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SessionProvider } from '../src/app/session';
 import { LoginPage } from '../src/pages/LoginPage';
-import { LoginGlobe } from '../src/pages/login/LoginGlobe';
 import { ADMIN_ORBIT_ICONS, AdminIconSprite, ICON_PREFIX } from '../src/pages/login/adminIcons';
+import { paletteVars } from '../src/pages/login/loginPalette';
 
 /**
  * Таблицу стилей читаем текстом с диска: правила ниже — про сам CSS, а
@@ -21,6 +21,10 @@ const css = (name: string): string =>
     // Концы строк приводим к одному виду: на Windows файл может лежать с CRLF,
     // и поиск по тексту иначе зависел бы от машины.
     .replace(/\r\n/gu, '\n');
+
+/** Файл из веб-интерфейса — там живёт общая сцена входа. */
+const webFile = (name: string): string =>
+  fileURLToPath(new URL(`../../web/src/pages/login/${name}`, import.meta.url));
 
 function page(): string {
   return renderToStaticMarkup(
@@ -76,10 +80,11 @@ describe('глобус: значки про администрирование',
     }
   });
 
-  it('каждый значок орбиты действительно выведен на глобусе', () => {
-    const html = renderToStaticMarkup(<LoginGlobe />);
+  it('каждый значок орбиты действительно выведен на сфере', () => {
+    const html = page();
     for (const icon of ADMIN_ORBIT_ICONS) {
-      expect(html).toContain(`#${ICON_PREFIX}${icon.id}`);
+      // Символ и объявлен в наборе, и взят на сцене — два вхождения.
+      expect(html.split(`${ICON_PREFIX}${icon.id}`).length - 1).toBeGreaterThanOrEqual(2);
     }
   });
 
@@ -124,18 +129,57 @@ describe('правила стилей, без которых страница у
     expect(btn).toContain('height: 2.75rem');
   });
 
-  it('движение гасится, но картинка остаётся', () => {
-    const backdrop = css('login/LoginBackdrop.module.css');
-    const start = backdrop.indexOf('@media (prefers-reduced-motion: reduce)');
-    expect(start).toBeGreaterThan(-1);
-    // Блок тянется до следующего @media — дальше идут правила узкого экрана.
-    const rest = backdrop.slice(start);
-    const next = rest.indexOf('@media', 1);
-    const quiet = next === -1 ? rest : rest.slice(0, next);
-    expect(quiet).toContain('animation: none');
-    // Именно animation, а не display: скрывать глобус при выключенном
-    // движении значило бы оставить человека с пустым фоном.
-    expect(quiet).not.toContain('display: none');
+});
+
+/*
+ * Сцена входа (холст и вращающаяся сфера) — ОДИН компонент на почту и на
+ * панель, он живёт в apps/web/src/pages/login. Её собственные проверки —
+ * там же (apps/web/tests/loginPage.test.tsx, loginConstellation.test.ts).
+ * Здесь проверяется только стык: панель берёт общую сцену и красит её
+ * своей гаммой, а не заводит вторую копию.
+ */
+describe('сцена входа общая с почтой', () => {
+  it('у панели нет своей копии сцены — иначе они разъедутся', () => {
+    for (const own of [
+      'LoginGlobe.tsx',
+      'LoginConstellation.tsx',
+      'LoginBackdrop.module.css',
+      'constellation.ts',
+    ]) {
+      const path = fileURLToPath(new URL(`../src/pages/login/${own}`, import.meta.url));
+      expect(existsSync(path), `${own} — вторая копия общей сцены`).toBe(false);
+    }
+  });
+
+  it('страница входа в панель берёт сцену из веб-интерфейса', () => {
+    const source = css('LoginPage.tsx');
+    expect(source).toContain("from '@web/pages/login/LoginGlobe'");
+    expect(source).toContain("from '@web/pages/login/LoginConstellation'");
+  });
+
+  it('на спрятанной вкладке замирают и свои украшения панели', () => {
+    // Сцена гасит себя сама, а размытые пятна рисует страница панели —
+    // без своего правила они продолжали бы двигаться в никуда.
+    const source = css('LoginPage.tsx');
+    expect(source).toContain('usePageVisible');
+    expect(source).toContain('pausedAttr');
+    const style = css('LoginPage.module.css');
+    const pause = style.slice(style.indexOf("[data-paused='true']"));
+    expect(pause).toContain('animation-play-state: paused');
+    expect(pause.slice(0, pause.indexOf('}'))).toContain('.haze');
+  });
+
+  it('гамма панели доезжает до общей сцены переменными, а не правкой её CSS', () => {
+    const vars = paletteVars();
+    // Общая сцена читает --mt-login-*; синие значения по умолчанию должны
+    // быть перекрыты, иначе на входе в панель окажется сфера цвета почты.
+    for (const name of ['--mt-login-ring', '--mt-login-node-bg', '--mt-login-ball-mid']) {
+      expect(vars[name], `${name} не подменён`).toBeTruthy();
+    }
+    const shared = readFileSync(webFile('LoginBackdrop.module.css'), 'utf8');
+    expect(shared).toContain('--mt-login-ring');
+    // В общей сцене нет ни одного цвета панели, вписанного числом.
+    expect(shared).not.toContain('#0f6a72');
   });
 });
 

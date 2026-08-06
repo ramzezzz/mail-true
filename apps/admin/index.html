@@ -1,5 +1,13 @@
 <!doctype html>
-<html lang="ru" data-theme="light">
+<!--
+  Тема по умолчанию проставлена прямо в разметке и обязана совпадать с
+  DEFAULT_ADMIN_THEME (src/appearance/themeStore.ts): пока грузится модуль,
+  страница уже покрашена, и панель не мигает белым перед тем, как стать
+  графитовой. Сохранённый выбор применяет initAdminTheme при запуске —
+  скриптом в разметке это не сделать, инлайновые скрипты запрещены
+  политикой безопасности (script-src 'self').
+-->
+<html lang="ru" data-theme="graphite" data-theme-kind="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

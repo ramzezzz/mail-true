@@ -56,6 +56,22 @@ export const PERMISSIONS = [
    */
   'backup.export',
   'backup.restore',
+  /**
+   * Перенос почты с чужого сервера.
+   *
+   * Права два, и делятся они там же, где у остальных разделов: смотреть
+   * ход и отчёты — одно, запускать — другое. Смотреть полезно и дежурному
+   * «только чтение»: вопрос «доехала ли почта Иванова» задают ему, и
+   * ответ есть на этом экране.
+   *
+   * Запуск отнесён к управлению пользователями, а не к владельцу. Перенос
+   * пишет в ЯЩИКИ — это то же самое действие по существу, что заведение
+   * ящика и смена его пароля, и делает его тот же человек. Требовать ради
+   * переезда учётную запись владельца значило бы раздать полный доступ
+   * тем, кому он не нужен, — а это хуже, чем кажется на первый взгляд.
+   */
+  'migration.read',
+  'migration.run',
   'admins.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -69,6 +85,7 @@ const READ_ONLY: readonly Permission[] = [
   'audit.read',
   'usersettings.read',
   'branding.read',
+  'migration.read',
 ];
 
 const USER_MANAGER: readonly Permission[] = [
@@ -79,6 +96,7 @@ const USER_MANAGER: readonly Permission[] = [
   'domains.dnscheck',
   'mailbox.impersonate',
   'usersettings.write',
+  'migration.run',
 ];
 
 const OWNER: readonly Permission[] = [

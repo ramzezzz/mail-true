@@ -10,6 +10,7 @@ import type {
 import { repairHeader } from './header-charset.js';
 import type { MailAddress, MessageFlags, MessageSummary } from '@mail-true/shared';
 import { collectAttachments } from './structure.js';
+import { senderLogoDomain } from './sender-auth.js';
 
 /** Системные IMAP-флаги, которые не считаются пользовательскими метками. */
 const SYSTEM_KEYWORDS = new Set(['$Forwarded', '$MDNSent', '$Junk', '$NotJunk', '$Pinned']);
@@ -39,6 +40,11 @@ export function flagsFromSet(set: Set<string> | undefined): MessageFlags {
     forwarded: has('$Forwarded'),
     draft: has('\\Draft'),
     deleted: has('\\Deleted'),
+    // Уведомление о прочтении уже отправлено или от него отказались
+    // (RFC 3503). В пользовательские метки это слово не попадает — оно
+    // в SYSTEM_KEYWORDS, — поэтому без отдельного поля интерфейс не смог бы
+    // отличить «ещё не спрашивали» от «уже ответили» и спрашивал бы снова.
+    mdnSent: has('$MDNSent'),
   };
 }
 
@@ -140,5 +146,14 @@ export function buildSummary({
     labels: labelsFromSet(msg.flags),
     pinned: msg.flags?.has('$Pinned') ?? false,
     sizeBytes: msg.size ?? 0,
+    /*
+     * Домен, которому в ЭТОМ письме разрешено показать логотип в кружке.
+     * null — подлинность отправителя не подтверждена, значит рисуется
+     * буква. Решение принимается ЗДЕСЬ, на сервере, а не в интерфейсе:
+     * логотип читается человеком как знак подлинности, и право на него
+     * не должно зависеть от того, что подставит клиент. Подробности и
+     * защита от подделанного заголовка — в mail/sender-auth.ts.
+     */
+    senderLogoDomain: senderLogoDomain(envelope?.from?.[0]?.address, rawHeaders),
   };
 }
