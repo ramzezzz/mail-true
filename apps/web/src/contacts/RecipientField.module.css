@@ -1,0 +1,167 @@
+/*
+ * Подсказка адреса под полем «Кому».
+ *
+ * Метрики взяты с выпадающих списков mail.ru: радиус 12px, тень третьего
+ * уровня, строка 36px — те же, что у контекстного меню списка писем
+ * (mail/ContextMenu.module.css). Свои числа здесь были бы заметны сразу:
+ * два выпадающих списка в одном продукте не могут выглядеть по-разному.
+ */
+
+.wrap {
+  /* Поле разворачивается на всю свободную ширину строки — ровно так же,
+     как разворачивалась обычная строка ввода, которую оно заменило. */
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
+.wrap > input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.list {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -8px;
+  z-index: var(--mt-z-index-popout, 100);
+  margin: 0;
+  padding: 6px 0;
+  /* Не уже поля и не шире окна: адрес с именем занимает много места,
+     но вылезать за край окна написания подсказка не должна. */
+  min-width: min(360px, 100%);
+  max-width: min(560px, calc(100vw - 48px));
+  max-height: 320px;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: 12px;
+  background: var(--mt-color-background-modal);
+  box-shadow: var(--mt-elevation-3);
+  animation: suggestShow var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
+}
+
+@keyframes suggestShow {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 4px 16px;
+  cursor: pointer;
+  color: var(--mt-color-text-primary);
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+}
+
+/*
+ * Выделение — одно и то же для клавиатуры и мыши.
+ *
+ * Здесь нет отдельного :hover: наведение мышью двигает то же самое
+ * выделение, что и стрелки (см. onMouseEnter). Иначе подсвеченных строк
+ * оказывалось бы две — та, на которую наведена мышь, и та, которую
+ * выберет Enter, — и человек нажимал бы Enter, глядя на другую.
+ */
+.active {
+  background: var(--mt-ph-color-transparent-hover);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.address {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}
+
+.own {
+  flex-shrink: 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+}
+
+.remove {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  padding: 0;
+  background: transparent;
+  color: var(--mt-color-icon-secondary);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  /* Кнопка видна только на выделенной строке: восемь крестиков подряд
+     превращают подсказку в панель управления, а нужна она редко. */
+  opacity: 0;
+}
+
+.active .remove,
+.remove:focus-visible {
+  opacity: 1;
+}
+
+/*
+ * Отклик на наведение — только там, где есть мышь. На сенсорном экране
+ * наведение залипает: коснулся кнопки — она осталась «под курсором».
+ * Касание отвечает нажатием (:active), и этого достаточно.
+ */
+@media (hover: hover) {
+  .remove:hover {
+    background: var(--mt-ph-color-transparent-press);
+    color: var(--mt-color-text-primary);
+  }
+}
+
+.remove:active {
+  background: var(--mt-ph-color-transparent-press);
+  color: var(--mt-color-text-primary);
+}
+
+.hint {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: -8px;
+  z-index: var(--mt-z-index-popout, 100);
+  padding: 8px 16px;
+  border-radius: 12px;
+  background: var(--mt-color-background-modal);
+  box-shadow: var(--mt-elevation-3);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .remove {
+    /* Палец не попадает в 24px */
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+  }
+}
