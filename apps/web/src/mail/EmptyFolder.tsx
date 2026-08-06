@@ -30,6 +30,11 @@ export function emptyFolderCopy(role: string): FolderCopy {
       return { title: 'Отправленных писем нет', hint: 'Здесь будут копии всего, что вы отправите' };
     case 'archive':
       return { title: 'В архиве пусто', hint: 'Сюда можно убирать письма, которые не нужны в списке' };
+    case 'snoozed':
+      return {
+        title: 'Отложенных писем нет',
+        hint: 'Письмо, отложенное до срока, ждёт здесь и само вернётся во «Входящие»',
+      };
     case 'inbox':
       return { title: 'Писем нет', hint: 'Новые письма появятся здесь' };
     default:

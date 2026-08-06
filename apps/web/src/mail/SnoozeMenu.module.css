@@ -1,0 +1,52 @@
+/* Меню «Отложить до». Ширина как у контекстного меню списка — 301px:
+   готовые сроки и поле произвольной даты должны стоять в одной колонке. */
+
+.menu {
+  width: 301px;
+}
+
+.title {
+  padding: 4px 16px 8px;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}
+
+/* Поле произвольной даты. Не MenuItem: у него внутри поле ввода и своя
+   кнопка, а MenuItem закрывает меню при первом же нажатии — набрать дату
+   в таком пункте было бы нельзя. */
+.custom {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 4px;
+}
+
+.customInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--mt-color-stroke-primary, rgba(0, 16, 61, 0.12));
+  border-radius: 8px;
+  background: var(--mt-color-background-content, #fff);
+  color: var(--mt-color-text-primary);
+  font-family: inherit;
+  font-size: var(--mt-font-paragraph-size, 15px);
+}
+
+.customInput:focus-visible {
+  outline: 2px solid var(--mt-color-stroke-accent, #005ff9);
+  outline-offset: -1px;
+}
+
+/* Предупреждение о том, что возврат по расписанию не работает.
+   Стоит в самом меню, а не в подсказке при наведении: человек должен
+   узнать об этом ДО того, как понадеется на возврат. */
+.warning {
+  margin: 4px 0 0;
+  padding: 8px 16px 0;
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: var(--mt-font-caption-line-height, 16px);
+}

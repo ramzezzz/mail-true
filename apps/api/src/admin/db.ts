@@ -557,6 +557,22 @@ export class AdminDb {
       // Состояние переноса и сборщика: ключи дедупликации и точки докачки.
       { sql: `DELETE FROM migrate_messages WHERE lower(account) = lower($1)`, values: [email] },
       { sql: `DELETE FROM migrate_cursors WHERE lower(account) = lower($1)`, values: [email] },
+      /*
+       * Указатель переписки для подсказки адреса (миграция 0017).
+       *
+       * Здесь он не «ещё одна таблица заодно»: это список тех, с кем
+       * человек переписывался, — по нему видно круг общения, работодателя,
+       * врача, банк. Пережить своего владельца он не должен ни на минуту.
+       *
+       * И это не только про приватность вообще, но и про уже разобранный
+       * на этом стенде дефект: ящик, заведённый заново с тем же адресом,
+       * доставался новому владельцу с чужой перепиской (см. пояснение в
+       * mailbox-cleanup.ts). Каталог почты с тех пор уводится в карантин,
+       * а вот указатель без этой строки достался бы новому владельцу
+       * целиком — и тот увидел бы чужие адреса в подсказке «Кому».
+       */
+      { sql: `DELETE FROM mail_contacts WHERE account_email = lower($1)`, values: [email] },
+      { sql: `DELETE FROM mail_contact_cursors WHERE account_email = lower($1)`, values: [email] },
     ];
     let removed = 0;
     for (const statement of statements) {

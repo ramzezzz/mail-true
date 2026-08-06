@@ -66,6 +66,12 @@ export interface WebGeneralSettings {
    * и произошло бы с обязательным полем, приходящим как `undefined`.
    */
   showSenderLogos?: boolean;
+  /**
+   * Секунды на отмену отправки. Необязательное по той же причине, что и
+   * поле выше: этот контракт правит и админка, а форма, которая о поле не
+   * знает, не должна молча возвращать человеку отправку без отмены.
+   */
+  undoSendSeconds?: number;
 }
 
 /** Внутренние настройки + подписи -> DTO интерфейса. */
@@ -96,6 +102,7 @@ export function toWebGeneral(
     afterDelete: settings.afterDelete === 'next' ? 'next-message' : 'list',
     autoCollectContacts: settings.collectContacts,
     showSenderLogos: settings.senderLogos,
+    undoSendSeconds: settings.undoSendSeconds,
   };
 }
 
@@ -111,6 +118,7 @@ export function fromWebGeneral(dto: WebGeneralSettings): MailSettingsPatch {
     // Поля нет в запросе — значит его прислал тот, кто о нём не знает
     // (админка, старый интерфейс). Настройку человека это трогать не должно.
     ...(dto.showSenderLogos === undefined ? {} : { senderLogos: dto.showSenderLogos }),
+    ...(dto.undoSendSeconds === undefined ? {} : { undoSendSeconds: dto.undoSendSeconds }),
     autoReply: {
       enabled: dto.autoReply.enabled,
       text: dto.autoReply.text,

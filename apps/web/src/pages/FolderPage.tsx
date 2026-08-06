@@ -32,6 +32,7 @@ import { EmptyFolder } from '../mail/EmptyFolder';
 import {
   IconArchive,
   IconCheckAll,
+  IconClock,
   IconFilter,
   IconFlag,
   IconFolder,
@@ -43,6 +44,9 @@ import {
 } from '../mail/icons';
 import { ListToolbar } from '../mail/ListToolbar';
 import { MessageList } from '../mail/MessageList';
+import { SnoozeMenu } from '../mail/SnoozeMenu';
+import { PRESET_TITLES, formatWakeAt, type SnoozePreset } from '../mail/snoozeApi';
+import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
 import styles from './FolderPage.module.css';
 import { folderTitle } from '../lib/folderNames';
 
@@ -50,8 +54,8 @@ interface ContextMenuState {
   message: MessageSummary;
   x: number;
   y: number;
-  /** «Переместить в папку» раскрывает список папок внутри меню. */
-  view: 'main' | 'folders';
+  /** «Переместить в папку» и «Отложить» раскрываются внутри меню. */
+  view: 'main' | 'folders' | 'snooze';
 }
 
 export function FolderPage() {
@@ -360,6 +364,63 @@ export function FolderPage() {
 
   const otherFolders = (folders ?? []).filter((f) => f.id !== folderId);
   const allIds = useMemo(() => messages.map((m) => m.id), [messages]);
+
+  /* --- Отложить письмо до срока ---------------------------------------
+   *
+   * Состояние возможности приходит с сервера, и пока он не сказал
+   * `available`, кнопки «Отложить» здесь нет вовсе: за ней стоит база и
+   * работник возврата, и без них она была бы мёртвой.
+   */
+  const snoozeState = useSnoozeState();
+  const snoozeMessages = useSnoozeMessages();
+  const unsnooze = useUnsnoozeMessages();
+  /** Мы в самой папке «Отложенные»: здесь действия обратные. */
+  const snoozedFolder = (currentFolder?.role ?? folderId) === 'snoozed';
+
+  const snoozeTo = useCallback(
+    (ids: string[], choice: { preset: SnoozePreset; until?: string }) => {
+      if (ids.length === 0) return;
+      // Строки гаснут сразу, как при переносе в другую папку: письмо и
+      // правда уезжает — ждать ответа сервера, чтобы показать отклик,
+      // значило бы на секунду делать вид, что нажатие не сработало.
+      setLeavingIds(ids);
+      snoozeMessages.mutate(
+        { ids, preset: choice.preset, ...(choice.until ? { until: choice.until } : {}) },
+        { onError: () => setLeavingIds([]) },
+      );
+      clearSelection();
+      setFocusedId(null);
+    },
+    [snoozeMessages, clearSelection],
+  );
+
+  const returnNow = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return;
+      setLeavingIds(ids);
+      unsnooze.mutate(ids, { onError: () => setLeavingIds([]) });
+      clearSelection();
+      setFocusedId(null);
+    },
+    [unsnooze, clearSelection],
+  );
+
+  /**
+   * Сроки для строк папки «Отложенные».
+   *
+   * Список сроков приходит отдельным запросом (он живёт в базе, а не в
+   * самом письме), поэтому здесь только сводим его со строками списка по
+   * идентификатору письма. Письмо без срока подписи не получает — и это
+   * правильно: срока у него действительно нет, и придумывать его нельзя.
+   */
+  const snoozeLabels = useMemo(() => {
+    if (!snoozedFolder) return undefined;
+    const map = new Map<string, string>();
+    for (const item of snoozeState.items) {
+      if (!item.orphan && item.wakeAt) map.set(item.id, formatWakeAt(item.wakeAt));
+    }
+    return map;
+  }, [snoozedFolder, snoozeState.items]);
   /** Список загружен и в нём нет ни одного письма. */
   const emptyFolder = !page.isPending && !page.isError && messages.length === 0;
 
@@ -399,6 +460,16 @@ export function FolderPage() {
         onPrint={() => window.print()}
         onCreateFilter={() => createFilter()}
         onForwardAsAttachment={forwardAsAttachment}
+        /* «Отложить» — только там, где это имеет смысл: не в самих
+           «Отложенных» (там письмо уже отложено) и не тогда, когда
+           возможности нет на сервере. */
+        onSnooze={
+          snoozeState.available && !snoozedFolder
+            ? (choice) => snoozeTo(targetIds(), choice)
+            : undefined
+        }
+        snoozeScheduledReturn={snoozeState.scheduledReturn}
+        onReturnNow={snoozedFolder ? () => returnNow(targetIds()) : undefined}
       />
 
       {/* Скелетоны вместо пустого экрана: строки встают на те же места,
@@ -450,6 +521,9 @@ export function FolderPage() {
              каждого. */
           scrollKey={scrollKey}
           highlightId={highlightId}
+          /* Срок возврата в строке — только в папке «Отложенные»: в
+             остальных его нет и показывать нечего. */
+          snoozeLabels={snoozeLabels}
           /*
             Подвал уходит ВНУТРЬ списка, в его область прокрутки. Рядом со
             списком он висел под ним всегда: человек ещё не долистал, а
@@ -519,6 +593,23 @@ export function FolderPage() {
               >
                 Переместить в папку…
               </ContextMenuItem>
+              {snoozeState.available && !snoozedFolder && (
+                <ContextMenuItem
+                  before={<IconClock />}
+                  keepOpen
+                  onClick={() => setContextMenu({ ...contextMenu, view: 'snooze' })}
+                >
+                  Отложить до…
+                </ContextMenuItem>
+              )}
+              {snoozedFolder && (
+                <ContextMenuItem
+                  before={<IconClock />}
+                  onClick={() => returnNow([contextMenu.message.id])}
+                >
+                  Вернуть сейчас
+                </ContextMenuItem>
+              )}
               <ContextMenuSeparator />
               {/* Группа 3 */}
               <ContextMenuItem
@@ -552,6 +643,30 @@ export function FolderPage() {
               >
                 Найти все письма отправителя
               </ContextMenuItem>
+            </>
+          ) : contextMenu.view === 'snooze' ? (
+            <>
+              <ContextMenuItem
+                keepOpen
+                onClick={() => setContextMenu({ ...contextMenu, view: 'main' })}
+              >
+                ← Назад
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              {/* Готовые сроки. Произвольная дата живёт в панели действий:
+                  поле ввода внутри контекстного меню закрывалось бы от
+                  первого же щелчка по календарю. */}
+              {(Object.keys(PRESET_TITLES) as Array<Exclude<SnoozePreset, 'custom'>>).map(
+                (preset) => (
+                  <ContextMenuItem
+                    key={preset}
+                    before={<IconClock />}
+                    onClick={() => snoozeTo([contextMenu.message.id], { preset })}
+                  >
+                    {PRESET_TITLES[preset]}
+                  </ContextMenuItem>
+                ),
+              )}
             </>
           ) : (
             <>

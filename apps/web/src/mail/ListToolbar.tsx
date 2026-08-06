@@ -9,9 +9,12 @@ import type { Folder, MessageFilter } from '@mail-true/shared';
 import { useUiStore } from '../app/store';
 import { folderTitle } from '../lib/folderNames';
 import { Button, Dropdown, IconButton, MenuItem, MenuSeparator } from '../components';
+import { SnoozeMenu } from './SnoozeMenu';
+import type { SnoozePreset } from './snoozeApi';
 import {
   IconArchive,
   IconCheckAll,
+  IconClock,
   IconClose,
   IconFilter,
   IconFlag,
@@ -74,6 +77,21 @@ export interface ListToolbarProps {
   onPrint(): void;
   onCreateFilter(): void;
   onForwardAsAttachment(): void;
+  /**
+   * Отложить выделенные письма до срока.
+   *
+   * Проп необязательный, и кнопки без него нет вовсе: пока сервер не
+   * сказал, что возможность у него есть, показывать её нельзя (общее
+   * правило продукта — кнопка появляется вместе с поведением).
+   */
+  onSnooze?: ((choice: { preset: SnoozePreset; until?: string }) => void) | undefined;
+  /** Возврат по расписанию работает; иначе меню честно предупреждает. */
+  snoozeScheduledReturn?: boolean | undefined;
+  /**
+   * Вернуть выделенные письма прямо сейчас. Есть только в папке
+   * «Отложенные»: в остальных возвращать нечего.
+   */
+  onReturnNow?: (() => void) | undefined;
 }
 
 export function ListToolbar(props: ListToolbarProps) {
@@ -158,6 +176,23 @@ export function ListToolbar(props: ListToolbarProps) {
       <Button mode="tertiary" before={<IconArchive />} onClick={props.onArchive}>
         В архив
       </Button>
+
+      {/* «Отложить» стоит рядом с «В архив» намеренно: это соседние по
+          смыслу действия — «убрать с глаз сейчас» и «убрать с глаз до
+          срока», — и человек ищет их в одном месте. */}
+      {props.onSnooze && (
+        <SnoozeMenu
+          onSnooze={props.onSnooze}
+          scheduledReturn={props.snoozeScheduledReturn ?? true}
+        />
+      )}
+
+      {/* А в самой папке «Отложенные» на том же месте — обратное действие. */}
+      {props.onReturnNow && (
+        <Button mode="tertiary" before={<IconClock />} onClick={props.onReturnNow}>
+          Вернуть сейчас
+        </Button>
+      )}
 
       <Dropdown
         trigger={({ toggle }) => (

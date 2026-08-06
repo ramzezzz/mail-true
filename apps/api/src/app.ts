@@ -31,6 +31,7 @@ import { adminRoutes } from './admin/index.js';
 import { aiRoutes } from './ai/index.js';
 import { settingsRoutes } from './settings/index.js';
 import { accountsRoutes } from './accounts/index.js';
+import { contactsRoutes } from './contacts/index.js';
 import { senderLogosRoutes } from './logos/index.js';
 import { pushNotificationRoutes } from './push/index.js';
 
@@ -231,6 +232,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   app.get('/health', { config: { rateLimit: false } }, async () => app.health.report());
 
   const notifier = new MailNotifier(config, logger);
+  /**
+   * Наблюдатель виден маршрутам: через него написание писем сообщает
+   * в открытую вкладку, что письмо из очереди отправить не удалось
+   * (см. routes/compose.ts, onGiveUp). Декорируется ДО регистрации
+   * маршрутов, хотя сам маршрут /ws подключается позже: событие может
+   * понадобиться раньше, чем кто-нибудь откроет сокет.
+   */
+  app.decorate('mailNotifier', notifier);
 
   await app.register(
     async (api) => {
@@ -257,6 +266,14 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
   // подключение своих и чужих ящиков (см. src/accounts/)
   await settingsRoutes(app);
   await accountsRoutes(app);
+
+  /*
+   * Подсказка адреса в поле «Кому» (см. src/contacts/). Регистрируется
+   * ПОСЛЕ настроек: переключателем «автоматически пополнять контакты»
+   * человек разрешает или запрещает собирать адреса из ВХОДЯЩИХ писем, и
+   * сборщик спрашивает об этом готовый сервис настроек из декорации.
+   */
+  await contactsRoutes(app);
 
   // Логотипы доменов отправителей (см. src/logos/). Регистрируются ПОСЛЕ
   // настроек: маршрут спрашивает у них, разрешил ли человек эту возможность,

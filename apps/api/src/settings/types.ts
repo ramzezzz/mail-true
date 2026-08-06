@@ -10,6 +10,7 @@ import {
   DEFAULT_WALLPAPER_CHOICE,
   type ThemeSetting,
 } from '@mail-true/shared';
+import { DEFAULT_UNDO_SEND_SECONDS } from '../mail/deferred-send.js';
 
 export type { ThemeSetting };
 
@@ -65,6 +66,15 @@ export interface MailSettings {
    * никуда — см. apps/api/src/logos/.
    */
   senderLogos: boolean;
+  /**
+   * Сколько секунд после нажатия «Отправить» письмо ещё можно вернуть.
+   *
+   * Ноль — возможность выключена, письмо уходит сразу. Ненулевое значение
+   * означает, что письмо эти секунды лежит в серверной очереди
+   * (apps/api/src/mail/deferred-send.ts), а не у получателя. Разрешённые
+   * значения перечислены в UNDO_SEND_CHOICES.
+   */
+  undoSendSeconds: number;
   autoReply: AutoReplySettings;
   updatedAt: string | null;
 }
@@ -85,6 +95,7 @@ export interface MailSettingsPatch {
   notifyTab?: boolean | undefined;
   collectContacts?: boolean | undefined;
   senderLogos?: boolean | undefined;
+  undoSendSeconds?: number | undefined;
   autoReply?: AutoReplyPatch | undefined;
 }
 
@@ -198,6 +209,8 @@ export function defaultMailSettings(email: string): MailSettings {
     collectContacts: true,
     // Выключено намеренно: см. пояснение у поля в MailSettings.
     senderLogos: false,
+    // Включена намеренно: см. DEFAULT_UNDO_SEND_SECONDS в mail/deferred-send.ts
+    undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
     autoReply: {
       enabled: false,
       subject: null,

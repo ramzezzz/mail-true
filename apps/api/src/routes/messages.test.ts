@@ -435,3 +435,90 @@ test('исходника несуществующего письма нет, а 
     await app.close();
   }
 });
+
+/* --- Отложенные письма ------------------------------------------------
+ *
+ * Здесь проверяется то, что живёт именно в маршрутах: снятие пометки
+ * «вернулось» при прочтении и честный отказ, когда возможности нет.
+ * Сам перенос писем и работник проверяются отдельно и подробно —
+ * см. mail/snooze-service.test.ts.
+ */
+
+/**
+ * Прочитанное письмо перестаёт быть «вернувшимся».
+ *
+ * Пометка нужна ровно для того, чтобы вернувшееся письмо нашлось: оно
+ * приезжает на своё старое место по дате, то есть в середину списка.
+ * Как только человек его открыл, задача выполнена — держать письмо
+ * приклеенным к верху дальше значит мешать. Снимать её обязан сервер:
+ * ключевые слова живут в ящике, и иначе письмо оставалось бы закреплённым
+ * в телефоне и во второй вкладке.
+ */
+test('прочтение письма снимает пометку возврата из «Отложенных»', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/flags',
+      payload: { ids: ['inbox:1'], seen: true },
+    });
+    assert.equal(res.statusCode, 200);
+    const removed = client.calls.find((c) => c.startsWith('flagsRemove '));
+    assert.ok(removed, `пометку не снимали: ${client.calls.join(' | ')}`);
+    assert.match(removed, /\$Snoozed/);
+    assert.match(removed, /\$Pinned/);
+  } finally {
+    await app.close();
+  }
+});
+
+/** А снятие прочтения — не снимает: письмо снова ждёт, чтобы его заметили. */
+test('пометка непрочитанным не трогает пометку возврата', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/flags',
+      payload: { ids: ['inbox:1'], seen: false },
+    });
+    const removed = client.calls.find((c) => c.startsWith('flagsRemove '));
+    assert.ok(removed);
+    assert.doesNotMatch(removed, /\$Snoozed/);
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * Без базы возможности нет — и об этом сказано прямо.
+ *
+ * Общее правило продукта: кнопка появляется вместе с поведением. Пока
+ * `available` ложно, интерфейс не показывает «Отложить» вовсе, а не
+ * показывает и отказывает (так же сделано с помощником ИИ).
+ */
+test('без базы «Отложить» недоступно, и интерфейс узнаёт об этом заранее', async () => {
+  const client = mailbox();
+  const app = await buildTestApp(client);
+  try {
+    const res = await app.inject({ method: 'GET', url: '/api/messages/snoozed' });
+    assert.equal(res.statusCode, 200);
+    const body = res.json();
+    assert.equal(body.available, false);
+    assert.ok(String(body.reason).length > 0, 'причина отказа не названа');
+    assert.deepEqual(body.items, []);
+
+    const attempt = await app.inject({
+      method: 'POST',
+      url: '/api/messages/snooze',
+      payload: { ids: ['inbox:1'], preset: 'tomorrow-morning' },
+    });
+    assert.equal(attempt.statusCode, 503);
+    assert.equal(attempt.json().error, 'SNOOZE_UNAVAILABLE');
+    // И ящик при этом не тронут ни на команду.
+    assert.deepEqual(client.calls, [], `ящик тронули: ${client.calls.join(' | ')}`);
+  } finally {
+    await app.close();
+  }
+});

@@ -45,7 +45,7 @@ import { formatListDate, groupMessagesByPeriod } from '../lib/listDates';
 import { restoreScrollTop, rowIndexOf } from '../lib/listPosition';
 import { rowSelectionStates, type RowSelectionState } from '../lib/selection';
 import { usePhone } from '../lib/useMediaQuery';
-import { IconArchive, IconAttach, IconFlagFilled, IconShield, IconTrash } from './icons';
+import { IconArchive, IconAttach, IconClock, IconFlagFilled, IconShield, IconTrash } from './icons';
 import styles from './MessageList.module.css';
 import { SenderAvatar } from './SenderAvatar';
 
@@ -53,10 +53,31 @@ export type ListRow =
   | { type: 'header'; label: string }
   | { type: 'message'; message: MessageSummary };
 
-/** Плоский список строк: заголовки периодов + письма. */
+/** Заголовок группы вернувшихся писем — над всеми периодами. */
+export const RETURNED_GROUP_LABEL = 'Вернулись к вам';
+
+/**
+ * Плоский список строк: заголовки периодов + письма.
+ *
+ * Письма, вернувшиеся из «Отложенных», выносятся ОТДЕЛЬНОЙ группой в самый
+ * верх, и это не украшение. Письмо возвращается на своё место по дате —
+ * то есть в середину списка, туда, откуда человек его неделю назад и убрал.
+ * Без закрепления вверху возможность не работала бы вовсе: письмо честно
+ * вернулось, а найти его нельзя. Ровно так же поступает Яндекс.
+ *
+ * Группа исчезает сама: пометку возврата снимает сервер, как только письмо
+ * прочитано (apps/api/src/routes/messages.ts).
+ */
 export function flattenRows(messages: readonly MessageSummary[], now?: Date): ListRow[] {
   const rows: ListRow[] = [];
-  for (const group of groupMessagesByPeriod(messages, now)) {
+  const returned = messages.filter((m) => m.returnedFromSnooze);
+  const rest = returned.length > 0 ? messages.filter((m) => !m.returnedFromSnooze) : messages;
+
+  if (returned.length > 0) {
+    rows.push({ type: 'header', label: RETURNED_GROUP_LABEL });
+    for (const message of returned) rows.push({ type: 'message', message });
+  }
+  for (const group of groupMessagesByPeriod(rest, now)) {
     rows.push({ type: 'header', label: group.label });
     for (const message of group.items) rows.push({ type: 'message', message });
   }
@@ -145,6 +166,14 @@ export interface MessageListProps {
    * долистал до конца.
    */
   footer?: ReactNode;
+  /**
+   * Сроки возврата отложенных писем: идентификатор письма -> «завтра в 08:00».
+   *
+   * Нужны только папке «Отложенные». Строка без срока там читается как
+   * обычное письмо, и понять, чем эта папка отличается от «Архива», нельзя
+   * ничем: срок — единственное, что в ней есть содержательного.
+   */
+  snoozeLabels?: ReadonlyMap<string, string> | undefined;
 }
 
 function senderName(m: MessageSummary): string {
@@ -170,6 +199,8 @@ interface RowProps {
   /** Единственная строка списка, попадающая в обход по Tab (roving tabindex). */
   tabbable: boolean;
   threadCount: number;
+  /** Срок возврата («завтра в 08:00») — только в папке «Отложенные». */
+  snoozeLabel?: string | undefined;
   onContextMenu?: MessageListProps['onContextMenu'];
   onSwipe?: MessageListProps['onSwipe'];
   onOpen?: MessageListProps['onOpen'];
@@ -188,6 +219,7 @@ function Row({
   leaving,
   tabbable,
   threadCount,
+  snoozeLabel,
   onContextMenu,
   onSwipe,
   onOpen,
@@ -391,8 +423,23 @@ function Row({
         <span className={styles.snippet}>{message.snippet}</span>
       </span>
 
-      {/* Значки: категория, вложение */}
+      {/* Значки: срок возврата, «вернулось», категория, вложение */}
       <span className={styles.secondaryData}>
+        {/* Срок в папке «Отложенные»: ради него туда и заходят */}
+        {snoozeLabel && (
+          <span className={styles.snoozeUntil} title={`Вернётся ${snoozeLabel}`}>
+            <IconClock size={12} />
+            {snoozeLabel}
+          </span>
+        )}
+        {/* Письмо вернулось и его ещё не открывали. Значок времени рядом
+            со строкой объясняет, почему старое письмо оказалось наверху, —
+            без него человек решил бы, что список сломался. */}
+        {message.returnedFromSnooze && !snoozeLabel && (
+          <span className={styles.returnedBadge} title="Письмо вернулось из «Отложенных»">
+            <IconClock size={14} />
+          </span>
+        )}
         {category && (
           <span
             className={styles.categoryDot}
@@ -458,6 +505,7 @@ export function MessageList({
   scrollKey,
   highlightId,
   footer,
+  snoozeLabels,
 }: MessageListProps) {
   const compact = useUiStore((s) => s.compactList);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -704,6 +752,7 @@ export function MessageList({
                     tabbable={row.message.id === tabbableId}
                     rowRef={row.message.id === focusedId ? focusedRowRef : undefined}
                     threadCount={threadCounts.get(row.message.threadId) ?? 1}
+                    snoozeLabel={snoozeLabels?.get(row.message.id)}
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}
                     onOpen={onOpen}

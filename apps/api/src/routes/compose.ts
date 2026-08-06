@@ -33,8 +33,12 @@ import {
   checkSendAt,
   DeferredSender,
   DeferredSpool,
+  normalizeUndoSeconds,
+  readFailureFromRaw,
+  withFailureHeader,
   type DeferredEntry,
   type DeliveryOutcome,
+  type SendFailureReason,
 } from '../mail/deferred-send.js';
 import { parseMessageHeaders } from '../mail/parse.js';
 import { buildReadReceipt, readReceiptRequest } from '../mail/read-receipt.js';
@@ -45,7 +49,15 @@ import type { MailSession } from '../types.js';
 import type { UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
 
-/** Как часто работник очереди смотрит, не пора ли кому-то уходить. */
+/**
+ * Как часто работник очереди смотрит, не пора ли кому-то уходить.
+ *
+ * Полминуты — это запасной ход для писем, назначенных на завтра, и для
+ * тех, что пережили перезапуск сервера. Письмо, ждущее пять секунд отмены,
+ * столько не ждёт: на его срок ставится отдельный будильник
+ * (DeferredSender.wakeAt), иначе «уйдёт через 5 секунд» на деле означало бы
+ * «когда-нибудь в ближайшие полминуты».
+ */
 const DEFERRED_TICK_MS = 30_000;
 
 /**
@@ -462,6 +474,93 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
    * очередь целиком принадлежит написанию письма, и разносить её по двум
    * файлам значило бы, что остановка одного не останавливает второй. */
 
+  /**
+   * Убирает загрузки, которые письмо держало ради возможной отмены.
+   *
+   * Их не удалили при постановке в очередь нарочно: пока отмена возможна,
+   * письмо может вернуться в окно написания с теми же идентификаторами
+   * вложений (см. DeferredEntry.attachmentIds). Здесь письмо своё отжило —
+   * либо ушло, либо не уйдёт никогда, — и держать файлы больше незачем.
+   */
+  async function dropHeldUploads(entry: DeferredEntry): Promise<void> {
+    await Promise.all((entry.attachmentIds ?? []).map((id) => uploads.delete(id)));
+  }
+
+  /**
+   * Чем кончилась последняя попытка отправки каждого письма в очереди.
+   *
+   * Работник очереди знает только «получилось / не получилось / повторить»,
+   * а человеку нужно ЧТО ИМЕННО ответил почтовый сервер и КОМУ отказали.
+   * Единственное место, где это известно, — сама попытка, поэтому причина
+   * запоминается там и достаётся, когда попытки исчерпаны.
+   *
+   * В памяти, а не в конверте на диске: перезапуск сервера обнуляет
+   * счётчик попыток не полностью (он в конверте), но потерянная причина —
+   * не потеря письма. Пустая причина заменяется общей формулировкой,
+   * и молчания всё равно не выходит.
+   */
+  const lastFailure = new Map<string, SendFailureReason>();
+
+  /**
+   * Извещает человека, что письмо не отправлено.
+   *
+   * Два пути, и они не взаимозаменяемы.
+   *
+   * ЗАПИСЬ на постоянном томе — основной. Она дожидается человека:
+   * вкладка закрыта, браузер выключен, сервер перезапускался — извещение
+   * никуда не делось, и почта покажет его при следующем открытии. Ровно
+   * этого не хватало: письмо тихо ложилось в черновики, и человек узнавал
+   * о нём от адресата.
+   *
+   * СОБЫТИЕ по сокету — добавка для того случая, когда вкладка открыта
+   * прямо сейчас. Оно приходит в ту же секунду и показывается заметно,
+   * а не строкой внизу. Само по себе оно ничего не гарантирует (некому
+   * доставить — и не доставится), поэтому пишется всегда после записи,
+   * а не вместо неё.
+   *
+   * Уведомлений при закрытой вкладке (src/push) здесь СОЗНАТЕЛЬНО нет.
+   * Они выключены по умолчанию и требуют разрешения браузера, то есть
+   * у большинства ящиков молчали бы; строить на них извещение об отказе
+   * значило бы сделать заметность отказа необязательной. Запись работает
+   * у всех и без разрешений.
+   */
+  async function noticeSendFailure(
+    entry: DeferredEntry,
+    reason: SendFailureReason,
+    draftUid: number | null,
+  ): Promise<void> {
+    let notice;
+    try {
+      notice = await spool.addFailure({
+        owner: entry.owner,
+        subject: entry.subject,
+        envelopeTo: entry.envelopeTo,
+        reason: reason.reason,
+        rejected: reason.rejected,
+        attempts: reason.attempts,
+        lastAttemptAt: reason.lastAttemptAt,
+        draftUid,
+      });
+    } catch (err) {
+      app.log.error(
+        errorInfo(err, { deferredId: entry.id }),
+        'Письмо не отправлено, и записать извещение об этом не удалось',
+      );
+      return;
+    }
+    const told = app.mailNotifier?.notify(entry.owner, {
+      type: 'send-failed',
+      id: notice.id,
+      subject: notice.subject,
+      reason: notice.reason,
+      draftUid: notice.draftUid,
+    });
+    app.log.warn(
+      { deferredId: entry.id, owner: entry.owner, noticeId: notice.id, draftUid, told: Boolean(told) },
+      'Письмо не отправлено — сохранено в черновиках, человеку выписано извещение',
+    );
+  }
+
   const deferred = new DeferredSender({
     spool,
     deliver: async (entry: DeferredEntry, raw: Buffer): Promise<DeliveryOutcome> => {
@@ -478,6 +577,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           errorInfo(err, { deferredId: entry.id }),
           'Отложенное письмо не ушло с этой попытки'
         );
+        // Причину запоминаем на каждой попытке: если попытки кончатся,
+        // человеку надо сказать не «не отправилось», а что именно ответил
+        // сервер и кому он отказал
+        lastFailure.set(entry.id, {
+          reason: failure.message,
+          rejected: failure.rejected.map((r) => ({ address: r.address, message: r.message })),
+          attempts: entry.attempts + 1,
+          lastAttemptAt: new Date().toISOString(),
+          envelopeTo: entry.envelopeTo,
+        });
         return failure.permanent ? 'failed' : 'retry';
       } finally {
         transport.close();
@@ -488,16 +597,59 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       await appendToSent(entry.owner, password, raw).catch((err: unknown) => {
         app.log.warn(errorInfo(err), 'Отложенное письмо ушло, копия в «Отправленные» не легла');
       });
+      // Теперь письмо у получателя, и возвращать его в окно написания
+      // больше не придётся — вложения можно убирать (см. attachmentIds)
+      await dropHeldUploads(entry);
       return 'sent';
     },
     onGiveUp: async (entry, raw) => {
-      // Письмо не ушло и не уйдёт — кладём в черновики. Молча потерять
-      // написанное нельзя: человек его уже отдал почте и ушёл.
+      /**
+       * Письмо не ушло и не уйдёт.
+       *
+       * Три вещи, и все три обязательны. Первая — сохранить написанное
+       * в черновики: молча потерять его нельзя, человек уже отдал письмо
+       * почте и ушёл. Вторая — сохранить его С ПРИЧИНОЙ: черновик,
+       * о происхождении которого приходится догадываться, немногим лучше
+       * потери. Третья — СКАЗАТЬ: до появления отмены отправки отказ
+       * прилетал человеку прямо в ответ на «Отправить», и обменять это
+       * на молчание было бы плохой сделкой.
+       */
       const password = secretBox.decrypt(entry.passwordEnc);
-      await pool.withClient(entry.owner, password, async (client) => {
-        const folder = await requireDraftsFolder(client);
-        await client.append(folder.path, raw, ['\\Draft']);
-      });
+      const reason: SendFailureReason = lastFailure.get(entry.id) ?? {
+        // Причины нет только если сервер перезапустился между попытками.
+        // Общая формулировка честнее молчания: письмо действительно
+        // не ушло, а подробности человек увидит в журнале сервера.
+        reason: 'Почтовый сервер не принял письмо',
+        rejected: [],
+        attempts: entry.attempts,
+        lastAttemptAt: new Date().toISOString(),
+        envelopeTo: entry.envelopeTo,
+      };
+      lastFailure.delete(entry.id);
+
+      let draftUid: number | null = null;
+      try {
+        draftUid = await pool.withClient(entry.owner, password, async (client) => {
+          const folder = await requireDraftsFolder(client);
+          // Черновик несёт причину заголовком — окно написания покажет её
+          // полосой, как только человек этот черновик откроет
+          const appended = await client.append(folder.path, withFailureHeader(raw, reason), [
+            '\\Draft',
+          ]);
+          return appended && appended.uid ? appended.uid : null;
+        });
+      } catch (err) {
+        // Черновик не лёг — тем более надо сказать. Извещение ниже
+        // пишется в любом случае: без него человек не узнает вообще ничего.
+        app.log.error(
+          errorInfo(err, { deferredId: entry.id }),
+          'Письмо не отправлено и не сохранилось в черновиках',
+        );
+      }
+
+      await noticeSendFailure(entry, reason, draftUid);
+      // Вложения уже внутри черновика — держать их копии незачем
+      await dropHeldUploads(entry);
     },
     log: {
       info: (obj, msg) => app.log.info(obj, msg),
@@ -517,6 +669,34 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onClose', () => {
     deferred.stop();
   });
+
+  /**
+   * Сколько секунд у этого ящика на отмену отправки.
+   *
+   * Настройка спрашивается у сервиса настроек ПРИ ЗАПРОСЕ, а не при
+   * подключении маршрутов: раздел настроек регистрируется в app.ts позже
+   * написания писем, и на момент сборки этого набора маршрутов декорации
+   * ещё нет.
+   *
+   * Нет настроек (не задана база, отвалился Postgres, старая схема) — ноль,
+   * то есть письмо уходит сразу, ровно как до появления возможности.
+   * Задерживать чужую почту, не зная, просил ли об этом человек, нельзя:
+   * «письмо ушло позже, чем я думал» — это отказ, а «отмены не было» —
+   * всего лишь отсутствие удобства.
+   */
+  async function undoSendSeconds(email: string): Promise<number> {
+    const settings = app.settingsService as typeof app.settingsService | undefined;
+    if (!settings?.available) return 0;
+    try {
+      return normalizeUndoSeconds((await settings.requireDb().getSettings(email)).undoSendSeconds);
+    } catch (err) {
+      app.log.warn(
+        errorInfo(err),
+        'Не удалось прочитать срок отмены отправки — письмо уйдёт сразу',
+      );
+      return 0;
+    }
+  }
 
   // Отправка письма
   app.post('/messages/send', composeRoute, async (request) => {
@@ -575,6 +755,56 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         ok: true,
         scheduled: true,
         sendAt: entry.sendAt,
+        sentMessageId: null,
+        accepted: [],
+        rejected: [],
+        savedToSent: false,
+        warning: null,
+      };
+    }
+
+    /**
+     * Отмена отправки: письмо уходит в ту же очередь, только на секунды.
+     *
+     * Держим его НА СЕРВЕРЕ, а не таймером в браузере, и это главное
+     * отличие: закрытая вкладка (случайно закрытая, упавшая, уснувший
+     * телефон) отменяет только возможность передумать, а письмо всё равно
+     * уходит. Таймер в браузере в этом месте молча терял бы письма.
+     *
+     * Загрузки вложений здесь НЕ удаляются — в отличие от отправки
+     * «завтра в девять» ниже. Пока отмена возможна, письмо может вернуться
+     * в окно написания с теми же идентификаторами вложений, а удалённые
+     * файлы превратили бы возвращённое письмо в письмо без вложений.
+     * Их уберёт работник очереди, когда письмо действительно уйдёт.
+     */
+    const undoSeconds = schedule.kind === 'now' ? await undoSendSeconds(session.email) : 0;
+    if (undoSeconds > 0) {
+      const sendAt = new Date(Date.now() + undoSeconds * 1000);
+      const entry = await spool.add(
+        {
+          owner: session.email,
+          passwordEnc: secretBox.encrypt(session.password),
+          sendAt: sendAt.toISOString(),
+          envelopeTo: allRecipients(payload),
+          subject: payload.subject,
+          attachmentIds: payload.attachmentIds,
+        },
+        raw,
+      );
+      await dropDraftAfterSend(session, payload, request.log);
+      // Будильник ровно на срок: постоянный обход очереди ходит раз
+      // в полминуты и «через пять секунд» превратил бы в «когда-нибудь»
+      deferred.wakeAt(sendAt);
+      request.log.info(
+        { pendingId: entry.id, undoUntil: entry.sendAt },
+        'Письмо принято к отправке с возможностью отмены',
+      );
+      return {
+        ok: true,
+        /** По нему письмо и отзывают — POST /api/messages/send/undo. */
+        pendingId: entry.id,
+        /** До какого момента отмена ещё сработает (ISO). */
+        undoUntil: entry.sendAt,
         sentMessageId: null,
         accepted: [],
         rejected: [],
@@ -706,6 +936,78 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  /**
+   * Отзыв письма, ещё лежащего в очереди отмены.
+   *
+   * Отвечает 200 и в том случае, когда отменить не вышло: опоздание — это
+   * не поломка сервера, а обычный исход гонки, и человеку про него надо
+   * сказать отдельными словами («письмо уже ушло»), а не общим текстом
+   * ошибки. Молчание же или ложное «отменено» здесь хуже всего: человек
+   * уверен, что письма нет, а оно у получателя.
+   *
+   * Замок берётся ДО чтения записи и держится до её удаления. Без него
+   * работник очереди успевал бы отдать письмо SMTP между нашей проверкой
+   * и удалением файлов — и мы отвечали бы «отменено» об ушедшем письме.
+   * Захват синхронный, поэтому в одном процессе Node это настоящее
+   * взаимное исключение (см. DeferredSender.claim).
+   */
+  app.post('/messages/send/undo', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    const { pendingId } = z
+      .object({ pendingId: z.string().min(1).max(100) })
+      .parse(request.body ?? {});
+
+    const gone = { ok: true, cancelled: false as const };
+    if (!deferred.claim(pendingId)) return gone;
+    try {
+      const entry = await spool.get(pendingId);
+      // Чужое письмо для нас неотличимо от несуществующего — и отвечаем
+      // одинаково: сказать «это письмо не ваше» значило бы подтвердить,
+      // что такое письмо есть.
+      if (!entry || entry.owner !== session.email) return gone;
+      await spool.remove(pendingId);
+      request.log.info({ pendingId }, 'Отправка отменена, письмо снято с очереди');
+      /**
+       * Следов не остаётся никаких: копия в «Отправленные» кладётся только
+       * после успешной отправки (см. deliver), черновик человеку возвращает
+       * не ящик, а само окно написания — оно его и не теряло.
+       */
+      return { ok: true, cancelled: true as const };
+    } finally {
+      deferred.release(pendingId);
+    }
+  });
+
+  /**
+   * Письма, которые отправить не удалось, — те, о которых человеку ещё
+   * не сказали.
+   *
+   * Почта спрашивает этот список при каждом открытии, а не только по
+   * событию сокета: событие увидит лишь та вкладка, что была открыта
+   * в момент отказа. Человек, закрывший вкладку и вернувшийся наутро,
+   * обязан узнать то же самое.
+   */
+  app.get('/messages/send/failures', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    return { items: await spool.failures(session.email) };
+  });
+
+  /**
+   * «Понятно» — человек прочитал извещение.
+   *
+   * Убирается только по явному действию человека, а не по показу: плашку
+   * легко не заметить (переключил вкладку, отвлёкся), и извещение,
+   * пропавшее само, вернуло бы нас ровно к молчаливой потере.
+   */
+  app.post('/messages/send/failures/ack', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    const { id } = z.object({ id: z.string().min(1).max(100) }).parse(request.body ?? {});
+    return { ok: true, removed: await spool.removeFailure(session.email, id) };
+  });
+
   // Сохранение черновика
   app.post('/drafts', composeRoute, async (request) => {
     const session = request.mailSession;
@@ -762,7 +1064,14 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!source) throw new NotFoundError('Черновик не найден');
 
+    /**
+     * Черновик, вернувшийся из очереди отправки, несёт причину заголовком
+     * (см. SEND_FAILURE_HEADER). Читаем её здесь и отдаём отдельным полем:
+     * человек, открывший такой черновик, не должен гадать, откуда взялось
+     * письмо, которого он не сохранял, и почему оно не ушло.
+     */
     const parsed = await parseDraftSource(source);
+    const sendFailure = readFailureFromRaw(source);
     const attachments: DraftContent['attachments'] = [];
     for (const part of parsed.attachments) {
       const meta = await uploads.save(
@@ -784,6 +1093,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       inReplyTo: parsed.inReplyTo,
       references: parsed.references,
       requestReadReceipt: parsed.requestReadReceipt,
+      // Пусто у обычного черновика; заполнено — значит письмо уже пробовали
+      // отправить и не смогли, и окно написания скажет об этом полосой
+      sendFailure,
     };
     return content;
   });

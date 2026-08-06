@@ -19,6 +19,7 @@ import type {
   MessagesPage,
   MoveRequest,
   MoveResponse,
+  SendFailureNotice,
   SendRequest,
 } from './types';
 import { useUiStore } from '../app/store';
@@ -268,6 +269,47 @@ export function useSendMessage() {
   const invalidate = useInvalidateMail();
   return useMutation({
     mutationFn: (request: SendRequest) => api.sendMessage(request),
+    onSuccess: invalidate,
+  });
+}
+
+/**
+ * Отзыв письма, которое ещё лежит в очереди отмены на сервере.
+ *
+ * Списки перечитываются в любом случае — и когда отменить удалось, и когда
+ * письмо успело уйти: во втором случае оно только что появилось
+ * в «Отправленных», и список обязан это показать.
+ */
+/**
+ * Письма, которые отправить не удалось.
+ *
+ * Спрашивается при открытии почты — этим и держится обещание «человек
+ * узнает, даже если закрыл вкладку». Событие по сокету поверх этого
+ * только ускоряет показ (см. SendFailureBanner).
+ *
+ * `staleTime: 0` намеренно: список коротких и почти всегда пустой, а
+ * пропустить извещение об отказе дороже любого лишнего запроса.
+ */
+export function useSendFailures(): UseQueryResult<SendFailureNotice[]> {
+  return useQuery({
+    queryKey: ['send-failures'],
+    queryFn: () => api.getSendFailures(),
+    staleTime: 0,
+  });
+}
+
+export function useAckSendFailure() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.ackSendFailure(id),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ['send-failures'] }),
+  });
+}
+
+export function useUndoSend() {
+  const invalidate = useInvalidateMail();
+  return useMutation({
+    mutationFn: (pendingId: string) => api.undoSend(pendingId),
     onSuccess: invalidate,
   });
 }

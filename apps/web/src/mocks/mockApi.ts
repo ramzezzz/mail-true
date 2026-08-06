@@ -13,7 +13,8 @@
 import type { MessageListQuery, MessageSummary } from '@mail-true/shared';
 import type { GetMessageOptions, MailApi } from '../api/client';
 import { ApiError } from '../api/http';
-import type { MessageFull, MessagesPage } from '../api/types';
+import type { MessageFull, MessagesPage, SendFailureNotice } from '../api/types';
+import { DEFAULT_UNDO_SEND_SECONDS } from '../api/settingsTypes';
 import { blockRemoteImages } from '../lib/externalImages';
 import { expandMessage, mockAccount, mockFolders, mockMessages } from './mockData';
 import {
@@ -83,6 +84,36 @@ export function clearFolderMessages(folderId: string): number {
   messages = messages.filter((m) => m.folderId !== folderId);
   recountFolders();
   return before - messages.length;
+}
+
+/* --- Отмена отправки -------------------------------------------------
+ * Письмо, отданное «на отправку», несколько секунд лежит НА СЕРВЕРЕ.
+ * Заглушке приходится это повторять: без очереди на её стороне плашка
+ * «Письмо отправлено · Отменить» либо не появлялась бы вовсе, либо врала бы
+ * (браузерный таймер отменяет не то же самое, что серверная очередь). */
+
+/** Идентификаторы писем, которые «лежат в очереди» прямо сейчас. */
+const pending = new Set<string>();
+let pendingSeq = 0;
+
+/**
+ * Срок отмены из настроек. Живёт здесь, а не в mockSettings, чтобы не
+ * заводить круговую зависимость между заглушками: настройки и так берут
+ * у этого модуля список папок.
+ */
+let undoSeconds = DEFAULT_UNDO_SEND_SECONDS;
+
+/** Настройки сохранили — заглушка отправки обязана об этом узнать. */
+export function setMockUndoSeconds(value: number): void {
+  undoSeconds = value;
+}
+
+/** Извещения о неудавшейся отправке (см. getSendFailures). */
+let sendFailures: SendFailureNotice[] = [];
+
+/** Позволяет проверкам и ручному осмотру завести такое извещение. */
+export function addMockSendFailure(notice: SendFailureNotice): void {
+  sendFailures = [...sendFailures, notice];
 }
 
 export const mockApi: MailApi = {
@@ -178,8 +209,49 @@ export const mockApi: MailApi = {
     if (request.sendAt && Date.parse(request.sendAt) > Date.now() + 60_000) {
       return { ok: true, scheduled: true, sendAt: request.sendAt, sentMessageId: null };
     }
+    // Отмена отправки: письмо принято, но несколько секунд ещё лежит
+    // в очереди НА СЕРВЕРЕ. Заглушка отвечает так же, как настоящий API,
+    // иначе плашку «Письмо отправлено · Отменить» негде было бы увидеть.
+    if (undoSeconds > 0) {
+      const pendingId = `pending-${String(++pendingSeq)}`;
+      pending.add(pendingId);
+      return {
+        ok: true,
+        pendingId,
+        undoUntil: new Date(Date.now() + undoSeconds * 1000).toISOString(),
+        sentMessageId: null,
+      };
+    }
     // Форма ответа сервера: { ok, sentMessageId }
     return { ok: true, sentMessageId: `sent:${Math.floor(Math.random() * 10_000)}` };
+  },
+
+  /**
+   * Отзыв письма из очереди отмены.
+   *
+   * `cancelled: false` — не поломка, а обычный исход гонки: письмо успело
+   * уйти. Заглушка обязана уметь отвечать и так, иначе этот случай
+   * (самый неприятный из всех) в интерфейсе не увидит никто.
+   */
+  async undoSend(pendingId) {
+    await delay(120);
+    return { ok: true, cancelled: pending.delete(pendingId) };
+  },
+
+  /*
+   * Извещения о письмах, которые отправить не удалось. Заглушка держит
+   * свой список, чтобы плашку «письмо не отправлено» можно было увидеть
+   * и без сломанного SMTP: до этого её нельзя было ни посмотреть, ни
+   * проверить, не ломая стенд.
+   */
+  async getSendFailures() {
+    await delay(80);
+    return [...sendFailures];
+  },
+
+  async ackSendFailure(id) {
+    await delay(80);
+    sendFailures = sendFailures.filter((n) => n.id !== id);
   },
 
   async saveDraft(request) {

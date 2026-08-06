@@ -516,3 +516,21 @@
     min-width: 44px;
   }
 }
+
+/*
+ * Полоса «письмо не отправлено» в окне написания.
+ *
+ * Появляется у черновика, вернувшегося из очереди отправки. Не всплывающая
+ * плашка, а часть окна: причина должна быть перед глазами всё время, пока
+ * человек правит адрес, а не исчезнуть через несколько секунд.
+ */
+.sendFailure {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+  background: var(--mt-color-background-negative-tint, rgba(252, 44, 56, 0.1));
+  color: var(--mt-color-text-primary);
+  font-size: 13px;
+  line-height: 17px;
+  /* Адреса и ответ чужого сервера бывают длинными и без пробелов */
+  overflow-wrap: anywhere;
+}

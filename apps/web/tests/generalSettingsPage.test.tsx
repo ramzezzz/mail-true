@@ -207,15 +207,46 @@ describe('идентификатор подписи', () => {
 });
 
 describe('адресная книга', () => {
-  it('переключателя, за которым ничего нет, на странице больше нет', async () => {
+  it('переключатель вернулся вместе с самой подсказкой адреса', async () => {
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings());
     render();
     await waitFor(() => host.textContent!.includes('Автоответчик'), 'страницу настроек');
 
-    // Адресной книги в продукте нет вовсе: ни экрана, ни маршрута в API
-    // (GET /api/contacts → 404). Обещать пополнение контактов нечем.
-    expect(host.textContent).not.toContain('Адресная книга');
-    expect(host.textContent).not.toContain('Пополнять контакты');
+    // Раньше раздела здесь не было намеренно: адресной книги в продукте не
+    // существовало, и переключатель не менял ровно ничего. Теперь за ним
+    // стоит GET /api/contacts/suggest и указатель переписки в Postgres.
+    expect(host.textContent).toContain('Адресная книга');
+    expect(host.textContent).toContain('Пополнять контакты из полученных писем');
+    // Цена сказана рядом с выключателем, а не спрятана: речь о списке тех,
+    // кто пишет человеку.
+    expect(host.textContent).toContain('удаляется вместе с ним');
+  });
+
+  it('переключатель меняет своё поле, а не соседние', async () => {
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
+      serverSettings({ autoCollectContacts: true }),
+    );
+    const saveGeneral = vi
+      .spyOn(settingsApi, 'saveGeneral')
+      .mockImplementation(async (settings) => structuredClone(settings));
+    render();
+    await waitFor(() => host.textContent!.includes('Адресная книга'), 'раздел адресной книги');
+
+    const toggle = [...host.querySelectorAll('input[type="checkbox"]')].find(
+      (node) =>
+        node.closest('label')?.textContent?.includes('Пополнять контакты') === true,
+    ) as HTMLInputElement | undefined;
+    expect(toggle, 'переключателя пополнения контактов нет').toBeTruthy();
+    expect(toggle!.checked).toBe(true);
+    act(() => toggle!.click());
+
+    act(() => button('Сохранить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await waitFor(() => saveGeneral.mock.calls.length === 1, 'сохранение');
+    expect(saveGeneral.mock.calls[0]?.[0]?.autoCollectContacts).toBe(false);
+    // Обратный ход: соседние настройки переключатель не задел
+    expect(saveGeneral.mock.calls[0]?.[0]?.quoteOriginalOnReply).toBe(
+      serverSettings().quoteOriginalOnReply,
+    );
   });
 
   it('значение всё равно уходит на сервер нетронутым', async () => {
@@ -233,5 +264,83 @@ describe('адресная книга', () => {
 
     // Убрали переключатель, а не поле: чужое значение затирать нельзя
     expect(saveGeneral.mock.calls[0]?.[0]?.autoCollectContacts).toBe(false);
+  });
+});
+
+describe('отмена отправки', () => {
+  const undoSelect = (): HTMLSelectElement | undefined =>
+    [...host.querySelectorAll('select')].find((s) =>
+      s.closest('label,div')?.textContent?.includes('Отменить отправку'),
+    );
+
+  it('предлагает выключить и три срока — ровно то, что понимает сервер', async () => {
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
+      serverSettings({ undoSendSeconds: 5 }),
+    );
+    render();
+    await waitFor(() => Boolean(undoSelect()), 'выбор срока отмены');
+
+    const options = [...(undoSelect()?.options ?? [])].map((o) => o.value);
+    expect(options).toEqual(['0', '5', '10', '30']);
+    // Ноль подписан по-человечески: «0 секунд» никому ничего не говорит
+    expect(undoSelect()?.options[0]?.textContent).toContain('сразу');
+    expect(undoSelect()?.value).toBe('5');
+  });
+
+  it('выбранный срок уходит на сервер числом, а не строкой', async () => {
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
+      serverSettings({ undoSendSeconds: 5 }),
+    );
+    const saveGeneral = vi
+      .spyOn(settingsApi, 'saveGeneral')
+      .mockImplementation(async (settings) => structuredClone(settings));
+
+    render();
+    await waitFor(() => Boolean(undoSelect()), 'выбор срока отмены');
+
+    const select = undoSelect()!;
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        'value',
+      )?.set;
+      setter?.call(select, '30');
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    act(() => button('Сохранить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await waitFor(() => saveGeneral.mock.calls.length === 1, 'сохранение');
+
+    // Схема сервера принимает 0, 5, 10 и 30 числами; строка «30» была бы
+    // отвергнута целиком — вместе со всей формой настроек
+    expect(saveGeneral.mock.calls[0]?.[0]?.undoSendSeconds).toBe(30);
+  });
+
+  it('«выключено» сохраняется как ноль, а не пропадает из запроса', async () => {
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
+      serverSettings({ undoSendSeconds: 0 }),
+    );
+    const saveGeneral = vi
+      .spyOn(settingsApi, 'saveGeneral')
+      .mockImplementation(async (settings) => structuredClone(settings));
+
+    render();
+    await waitFor(() => Boolean(undoSelect()), 'выбор срока отмены');
+    expect(undoSelect()?.value).toBe('0');
+
+    act(() => button('Сохранить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await waitFor(() => saveGeneral.mock.calls.length === 1, 'сохранение');
+    // Обратный ход: поле, пропавшее из запроса, сервер понимает как
+    // «не трогать» — и выключить отмену было бы нечем
+    expect(saveGeneral.mock.calls[0]?.[0]?.undoSendSeconds).toBe(0);
+  });
+
+  it('честно предупреждает, что письмо эти секунды ждёт на сервере', async () => {
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings());
+    render();
+    await waitFor(() => Boolean(undoSelect()), 'выбор срока отмены');
+    // Умолчать о цене нельзя: «отправил и ушёл» иначе однажды окажется
+    // неправдой, а человек об этом узнает от адресата
+    expect(host.textContent).toContain('уходит');
+    expect(host.textContent).toContain('закрыть вкладку');
   });
 });

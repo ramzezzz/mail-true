@@ -64,6 +64,11 @@ export function IconFolderRole({
   role,
   size = 16,
 }: IconProps & { role: string }) {
+  // «Отложенные» — единственная роль, которой в фирменном спрайте нет:
+  // папка появилась позже него. Рисуем часы — тот же значок, что стоит
+  // на кнопке «Отложить» и на вернувшемся письме, чтобы человек связал
+  // одно с другим с первого взгляда.
+  if (role === 'snoozed') return <IconClock size={size} />;
   const known = ['inbox', 'sent', 'drafts', 'spam', 'trash', 'archive'];
   const name = known.includes(role) ? `folder-${role}` : 'move-to-folder';
   return <BrandIcon name={name} size={size} />;
@@ -338,3 +343,13 @@ export const IconCheck = (p: IconProps = {}) => stroke(['M5 12.5l4.5 4.5L19 7'],
 /** Угловые скобки — «показать исходный текст письма». */
 export const IconCode = (p: IconProps = {}) =>
   stroke(['M9 7.5 4.5 12 9 16.5', 'M15 7.5 19.5 12 15 16.5'], p);
+
+/**
+ * Часы — «Отложить письмо до срока».
+ *
+ * Именно часы, а не будильник и не конверт со стрелкой: часы читаются
+ * одинаково у Gmail, Outlook и Яндекса, и человек узнаёт действие, не
+ * наводя мышь. Тот же значок стоит и на вернувшемся письме в списке.
+ */
+export const IconClock = (p: IconProps = {}) =>
+  stroke(['M12 4.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Z', 'M12 8v4.4l3 1.8'], p);

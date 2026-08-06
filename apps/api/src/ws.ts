@@ -110,6 +110,25 @@ export class MailNotifier {
     this.push = push;
   }
 
+  /**
+   * Событие в открытые вкладки одного ящика. `false` — вкладок нет.
+   *
+   * Единственный способ сказать человеку что-то СРАЗУ, пока он смотрит
+   * на почту. Пользуется этим отправка писем: когда письмо из очереди
+   * окончательно не уходит, об этом нельзя молчать до следующего захода
+   * в «Черновики» (см. routes/compose.ts, onGiveUp).
+   *
+   * Ответ важен: `false` значит, что сказать было некому, и полагаться
+   * на это событие как на единственный способ известить нельзя — рядом
+   * с ним обязана лежать запись, которая дождётся человека.
+   */
+  notify(email: string, payload: unknown): boolean {
+    const watcher = this.watchers.get(email);
+    if (!watcher || watcher.closed || watcher.sockets.size === 0) return false;
+    this.broadcast(watcher, payload);
+    return true;
+  }
+
   private broadcast(watcher: Watcher, payload: unknown): void {
     const data = JSON.stringify(payload);
     for (const socket of watcher.sockets) {

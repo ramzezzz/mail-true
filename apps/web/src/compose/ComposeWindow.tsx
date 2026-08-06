@@ -9,9 +9,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { api } from '../api';
-import { useAccount, useSaveDraft, useSendMessage } from '../api/queries';
+import { useAccount, useSaveDraft, useSendMessage, useUndoSend } from '../api/queries';
 import { useUiStore, type ComposeDraft, type ComposeWindowState } from '../app/store';
 import { Button, Dropdown, IconButton, MenuItem, Tooltip, useDropdownClose } from '../components';
+import { RecipientField } from '../contacts/RecipientField';
 import { parseAddresses } from '../lib/addresses';
 import { cx } from '../lib/cx';
 import { actionErrorText } from '../lib/errorText';
@@ -41,6 +42,8 @@ import {
 } from '../settings/generalSettings';
 import { ComposeAiPanel } from './ComposeAiPanel';
 import { MailAttachmentPicker } from './MailAttachmentPicker';
+import { failureSummary } from './SendFailureBanner';
+import { UndoSendBar } from './UndoSendBar';
 import styles from './ComposeWindow.module.css';
 
 /**
@@ -57,6 +60,12 @@ interface ComposeWindowProps {
   offset: number;
   /** Сдвиг свёрнутой плашки от левого края, px. */
   minimizedLeft?: number;
+  /**
+   * Порядковый номер плашки «Письмо отправлено · Отменить» снизу вверх.
+   * Когда писем отправили несколько подряд, плашки встают друг над другом,
+   * а не одна поверх другой.
+   */
+  undoIndex?: number;
 }
 
 const FONT_FAMILIES = ['Golos Text', 'Arial', 'Georgia', 'JetBrains Mono'];
@@ -201,7 +210,12 @@ function EmojiGrid({ onPick }: { onPick: (symbol: string) => void }) {
   );
 }
 
-export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindowProps) {
+export function ComposeWindow({
+  win,
+  offset,
+  minimizedLeft = 16,
+  undoIndex = 0,
+}: ComposeWindowProps) {
   const { data: account } = useAccount();
   // Подписи живут в общих настройках ящика. Раньше сюда подставлялось
   // `account.signature`, а его /api/account отдаёт пустой строкой — в письмо
@@ -214,6 +228,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
   const updateDraft = useUiStore((s) => s.updateComposeDraft);
   const sendMessage = useSendMessage();
   const saveDraft = useSaveDraft();
+  const undoSend = useUndoSend();
 
   /**
    * Всё введённое живёт в общем состоянии окна, а не в локальном useState:
@@ -241,11 +256,16 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
    * Начальное содержимое редактора.
    *
    * Пересчитывается только когда редактор действительно создаётся заново —
-   * при открытии окна и при возврате из свёрнутого вида. В свёрнутом виде
-   * редактора в DOM нет, поэтому его содержимое берётся из черновика:
-   * так набранный текст возвращается на место вместе с окном. Внутри одного
-   * показа значение неизменно — иначе React переписывал бы innerHTML на
-   * каждое нажатие клавиши и курсор прыгал бы в начало.
+   * при открытии окна, при возврате из свёрнутого вида и при отмене
+   * отправки. Во всех трёх случаях редактора в DOM нет, поэтому его
+   * содержимое берётся из черновика: так набранный текст возвращается
+   * на место вместе с окном. Внутри одного показа значение неизменно —
+   * иначе React переписывал бы innerHTML на каждое нажатие клавиши и
+   * курсор прыгал бы в начало.
+   *
+   * `draft.pending !== null` в зависимостях — не украшение: без него
+   * вернувшееся из отмены письмо показало бы тело, каким оно было в момент
+   * ОТКРЫТИЯ окна, то есть без единой набранной буквы.
    */
   const initialHtml = useMemo(() => {
     if (draft.bodyInitialized) return draft.bodyHtml;
@@ -255,7 +275,7 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     // над цитатой, а не в конец письма.
     return `<div><br></div><div ${SIGNATURE_MARK} class="${styles.signature}"></div>${win.init.bodyHtml ?? ''}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [win.id, win.minimized]);
+  }, [win.id, win.minimized, draft.pending !== null]);
 
   // Собранное тело сразу кладём в черновик: дальше оно живёт там и потому
   // возвращается на место после сворачивания окна.
@@ -400,6 +420,19 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
         // было бы неправдой — у получателя его ещё нет.
         if (result.scheduled && result.sendAt) {
           showNotice(`Письмо уйдёт ${formatSendAt(result.sendAt)}`);
+          closeCompose(win.id);
+          return;
+        }
+        /**
+         * Отмена отправки включена: письмо принято, но несколько секунд
+         * лежит в очереди НА СЕРВЕРЕ. Окно не закрываем — оно всё это время
+         * держит письмо целиком, и отмена вернёт его на место, со всеми
+         * получателями и вложениями, а не «куда-то в черновики». Видно
+         * при этом только плашку с отсчётом (см. ниже, ветка draft.pending).
+         */
+        if (result.pendingId && result.undoUntil) {
+          patch({ pending: { id: result.pendingId, until: result.undoUntil } });
+          return;
         }
         closeCompose(win.id);
       },
@@ -498,6 +531,56 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
     }
   };
 
+  /**
+   * Письмо отдано на отправку и ждёт своих секунд.
+   *
+   * Окно всё это время живо, но не показано: в нём лежит письмо целиком,
+   * и отмена возвращает именно его — с тем же телом, теми же получателями
+   * и теми же вложениями. Пересобирать письмо из ящика (как это делает
+   * «дописать черновик») здесь незачем и нечестно: разметка тела, скрытые
+   * получатели и имена файлов пережили бы такой оборот не полностью.
+   */
+  if (draft.pending) {
+    const pending = draft.pending;
+    return (
+      <UndoSendBar
+        until={pending.until}
+        index={undoIndex}
+        busy={undoSend.isPending}
+        onUndo={() => {
+          undoSend.mutate(pending.id, {
+            onSuccess: (result) => {
+              if (result.cancelled) {
+                // Письмо снято с очереди. Возвращаем окно как было; UID
+                // черновика сбрасываем — тот черновик сервер удалил, когда
+                // принял письмо, и ссылаться на него больше нельзя.
+                patch({ pending: null, draftUid: null, savedAt: null });
+                return;
+              }
+              /*
+               * Опоздали. Молчание и ложное «отменено» здесь — худшее из
+               * возможного: человек будет уверен, что письма нет, а оно
+               * у получателя. Поэтому говорим прямо и закрываем окно:
+               * держать письмо, которое уже ушло, не за чем.
+               */
+              showNotice('Письмо уже ушло — отменить не получилось');
+              closeCompose(win.id);
+            },
+            onError: (err) => {
+              // Сеть отвалилась на самой отмене. Обещать, что письмо
+              // осталось, нельзя — сервер о нашем нажатии не узнал.
+              showNotice(
+                actionErrorText('Не удалось отменить отправку, письмо уйдёт', err),
+              );
+              closeCompose(win.id);
+            },
+          });
+        }}
+        onDismiss={() => closeCompose(win.id)}
+      />
+    );
+  }
+
   if (win.minimized) {
     return (
       <div className={styles.minimizedBar} style={{ left: minimizedLeft }}>
@@ -568,15 +651,36 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
           </div>
         </div>
 
+        {/*
+          Письмо вернулось из очереди отправки: его пробовали отправить,
+          почтовый сервер отказал, и попытки кончились. Такой черновик
+          человек не создавал — без этой полосы он гадал бы, откуда взялось
+          письмо и почему оно лежит в «Черновиках».
+
+          Полоса стоит ПЕРВОЙ, над получателями: чинить обычно надо именно
+          адрес, и причина должна быть перед глазами, когда его правят.
+        */}
+        {win.init.sendFailure && (
+          <div className={styles.sendFailure} role="status">
+            <b>Письмо не отправлено.</b>{' '}
+            {failureSummary({ ...win.init.sendFailure })}
+          </div>
+        )}
+
         {/* Кому */}
         <div className={styles.fieldRow}>
           <span className={styles.fieldLabel}>Кому</span>
-          <input
+          {/* Поле осталось строкой: подсказка только предлагает адрес, а
+              разбор получателей, сохранение и восстановление черновика
+              работают ровно с тем же текстом, что и раньше. Ничего за
+              человека поле не дописывает — ни по Tab, ни по уходу фокуса
+              (см. contacts/RecipientField.tsx). */}
+          <RecipientField
             className={styles.fieldInput}
             value={to}
-            onChange={(e) => patch({ to: e.target.value })}
+            onChange={(next) => patch({ to: next })}
             placeholder="Введите адрес"
-            aria-label="Кому"
+            label="Кому"
             autoFocus
           />
           <span className={styles.fieldLinks}>
@@ -596,22 +700,22 @@ export function ComposeWindow({ win, offset, minimizedLeft = 16 }: ComposeWindow
         {showCc && (
           <div className={styles.fieldRow}>
             <span className={styles.fieldLabel}>Копия</span>
-            <input
+            <RecipientField
               className={styles.fieldInput}
               value={cc}
-              onChange={(e) => patch({ cc: e.target.value })}
-              aria-label="Копия"
+              onChange={(next) => patch({ cc: next })}
+              label="Копия"
             />
           </div>
         )}
         {showBcc && (
           <div className={styles.fieldRow}>
             <span className={styles.fieldLabel}>Скрытая</span>
-            <input
+            <RecipientField
               className={styles.fieldInput}
               value={bcc}
-              onChange={(e) => patch({ bcc: e.target.value })}
-              aria-label="Скрытая"
+              onChange={(next) => patch({ bcc: next })}
+              label="Скрытая"
             />
           </div>
         )}

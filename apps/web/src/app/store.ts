@@ -4,6 +4,7 @@
  * Данные писем живут в react-query, не здесь.
  */
 
+import type { DraftContent } from '@mail-true/shared';
 import { create } from 'zustand';
 import { readCachedTheme, writeCachedTheme } from '../appearance/cache';
 import { persistAppearance } from '../appearance/persist';
@@ -74,6 +75,12 @@ export interface ComposeInit {
   /** Вложения черновика — уже лежащие во временном хранилище сервера. */
   attachments?: readonly ComposeAttachment[] | undefined;
   requestReadReceipt?: boolean | undefined;
+  /**
+   * Почему это письмо не ушло — у черновика, вернувшегося из очереди
+   * отправки. Живёт в `init`, а не в черновике окна: это неизменный факт
+   * о прошлом письма, а не то, что человек сейчас правит.
+   */
+  sendFailure?: DraftContent['sendFailure'] | undefined;
 }
 
 /** Письмо, вложенное в другое письмо целиком (message/rfc822). */
@@ -124,6 +131,19 @@ export interface ComposeDraft {
    * закрыт (см. apps/api/src/mail/deferred-send.ts).
    */
   sendAt: string | null;
+  /**
+   * Письмо отдано на отправку и несколько секунд лежит в очереди НА
+   * СЕРВЕРЕ — его ещё можно вернуть («Письмо отправлено · Отменить»).
+   *
+   * Живёт в черновике, а не в состоянии компонента, ровно по той же
+   * причине, что и всё остальное здесь: пока идёт отсчёт, окно написания
+   * держит письмо целиком — со всеми получателями, вложениями и телом.
+   * Отмена возвращает его на место, а не в «Черновики» куда-то.
+   *
+   * Закрытая вкладка это состояние теряет — и это правильно: пропадает
+   * только возможность передумать, письмо всё равно уходит.
+   */
+  pending: { id: string; until: string } | null;
   /** UID черновика на сервере — чтобы повторное сохранение не плодило копии. */
   draftUid: number | null;
   /** Когда последний раз сохранился (ISO) — подпись «Сохранено в …». */
@@ -180,6 +200,7 @@ export function emptyDraft(init: ComposeInit): ComposeDraft {
     showBcc: bcc !== '',
     requestReadReceipt: init.requestReadReceipt ?? false,
     sendAt: null,
+    pending: null,
     draftUid: init.draftUid ?? null,
     savedAt: null,
     bodyInitialized: continuing,

@@ -274,3 +274,45 @@ test('логотипы отправителей: маршрут не выбра�
   // А тело без поля остаётся телом без поля — значения по умолчанию нет.
   assert.equal(generalSchema.parse({ senderName: 'x' }).showSenderLogos, undefined);
 });
+
+/* ------------------------------------------------------------------ */
+/* Отмена отправки                                                     */
+/* ------------------------------------------------------------------ */
+
+test('срок отмены отправки доходит до заплатки в обе стороны', () => {
+  const settings = { ...defaultMailSettings('a@mail.local'), undoSendSeconds: 30 };
+  const dto = toWebGeneral(settings, []);
+  assert.equal(dto.undoSendSeconds, 30);
+  assert.equal(fromWebGeneral(dto).undoSendSeconds, 30);
+  // Ноль — это «выключено», а не «поле не заполнено»: его обязано доносить
+  // так же честно, иначе выключить отмену было бы нечем
+  assert.equal(fromWebGeneral({ ...dto, undoSendSeconds: 0 }).undoSendSeconds, 0);
+});
+
+test('срок отмены отправки: тело БЕЗ поля не гасит настройку молча', () => {
+  // Та же беда, что и с логотипами: этот контракт правит админка, которая
+  // о поле не знает. Без этого сохранение оттуда молча возвращало бы
+  // человеку отправку без отмены.
+  const dto = toWebGeneral(defaultMailSettings('a@mail.local'), []);
+  delete dto.undoSendSeconds;
+  assert.equal('undoSendSeconds' in fromWebGeneral(dto), false);
+});
+
+test('срок отмены отправки: схема принимает только разрешённые значения', async () => {
+  const { generalSchema } = await import('./routes.js');
+  for (const seconds of [0, 5, 10, 30]) {
+    assert.equal(generalSchema.parse({ undoSendSeconds: seconds }).undoSendSeconds, seconds);
+  }
+  // Обратный ход: чужое значение не принимается вовсе. Сервер держит письмо
+  // ровно столько, сколько сказано, и «3600» превратило бы настройку
+  // в способ задержать почту на час.
+  assert.throws(() => generalSchema.parse({ undoSendSeconds: 3600 }));
+  assert.throws(() => generalSchema.parse({ undoSendSeconds: 7 }));
+  assert.equal(generalSchema.parse({ senderName: 'x' }).undoSendSeconds, undefined);
+});
+
+test('по умолчанию отмена включена и равна пяти секундам', () => {
+  // Возможность, которую надо сперва найти в настройках, не спасёт никого:
+  // ошибку, от которой она спасает, иначе не исправить ничем.
+  assert.equal(defaultMailSettings('a@mail.local').undoSendSeconds, 5);
+});

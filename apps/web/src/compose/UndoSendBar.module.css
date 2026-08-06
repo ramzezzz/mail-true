@@ -1,0 +1,168 @@
+/*
+ * Плашка «Письмо отправлено · Отменить».
+ *
+ * Снизу по центру, поверх списка. Три требования к раскладке, и все три —
+ * из-за того, что плашка появляется САМА, без просьбы человека:
+ *
+ *  1. Не перекрывать список писем. Плашка невысокая (44px) и прижата к низу,
+ *     а не висит посередине; список за ней остаётся виден и остаётся живым —
+ *     нажатия сквозь неё проходят везде, кроме самой плашки.
+ *  2. Не прыгать. Ширина не зависит от содержимого: обратный отсчёт меняет
+ *     цифру каждую секунду, и «плавающая» ширина дёргала бы всю плашку —
+ *     а под курсором в этот момент кнопка «Отменить». Поэтому у счётчика
+ *     свои постоянные размеры, а сама плашка — фиксированной ширины.
+ *  3. На телефоне не конфликтовать с нижней полосой навигации: она 56px
+ *     плюс безопасная область, и плашка встаёт НАД ней, а не поверх.
+ */
+
+.bar {
+  position: fixed;
+  left: 50%;
+  /* Смещение по вертикали приходит встроенным стилем: когда отправляют
+     несколько писем подряд, плашки встают друг над другом */
+  bottom: calc(24px + var(--mt-undo-offset, 0px));
+  transform: translateX(-50%);
+  z-index: var(--mt-z-index-modal, 99);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  /* Ширина постоянная: см. пункт 2 в шапке файла */
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  height: 44px;
+  padding: 0 8px 0 16px;
+  border-radius: 10px;
+  background: var(--mt-color-background-accent, #0070f0);
+  color: var(--mt-color-text-contrast, #fff);
+  box-shadow: var(--mt-elevation-2, 0 4px 24px rgba(0, 16, 61, 0.24));
+  animation: undoShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
+}
+
+/* Плашка выезжает снизу. Сдвиг по X тот же, что в .bar: без него
+   центрирование сбилось бы на время хода. */
+@keyframes undoShow {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%);
+  }
+}
+
+/* Уважение к системной настройке «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+  }
+}
+
+.text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 18px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Обратный отсчёт. Место под него отведено заранее и не меняется: цифра
+ * скачет каждую секунду, и без этого вся плашка дёргалась бы вместе с ней.
+ * Цифры табличные — тогда «10» и «08» одинаковой ширины.
+ */
+.countdown {
+  flex: 0 0 auto;
+  min-width: 22px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  opacity: 0.85;
+}
+
+.undo {
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.18);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+/* Подсветка наведением — только там, где есть чем наводить. На телефоне
+   :hover «залипает» после касания, и кнопка выглядит нажатой всё время */
+@media (hover: hover) {
+  .undo:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+
+  .dismiss:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+}
+
+.undo:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Отдельная кнопка «закрыть»: человек может не захотеть смотреть на отсчёт.
+   Она закрывает плашку, а не отменяет письмо, — и подписана именно так. */
+.dismiss {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+/*
+ * Телефон. Внизу экрана уже стоят две чужие вещи (layout/BottomNav.module.css):
+ * полоса навигации — 56px плюс безопасная область, и над ней круглая кнопка
+ * «Написать письмо» — 56px с отступом 16. Плашка встаёт НАД обеими.
+ *
+ * Проверено на стенде при 390×780: при отступе в 68px плашка ложилась
+ * поверх круглой кнопки — та переставала нажиматься, потому что плашка
+ * лежит выше по слою. Перекрыть навигацию ради собственного отсчёта
+ * плашка не вправе, поэтому здесь именно 56 + 16 + 56 + 12.
+ */
+@media (max-width: 600px) {
+  .bar {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-width: none;
+    transform: none;
+    bottom: calc(
+      56px + 16px + 56px + 12px + env(safe-area-inset-bottom, 0px) +
+        var(--mt-undo-offset, 0px)
+    );
+    /* Ход другой: на телефоне плашка во всю ширину и по X не сдвинута,
+       поэтому сдвиг центрирования из undoShow здесь только помешал бы */
+    animation-name: undoShowWide;
+  }
+}
+
+@keyframes undoShowWide {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

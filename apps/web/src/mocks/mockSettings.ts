@@ -13,8 +13,9 @@ import type {
   FolderDraft,
   GeneralSettings,
 } from '../api/settingsTypes';
+import { DEFAULT_UNDO_SEND_SECONDS } from '../api/settingsTypes';
 import type { SettingsApi } from '../api/settingsApi';
-import { clearFolderMessages, folders } from './mockApi';
+import { clearFolderMessages, folders, setMockUndoSeconds } from './mockApi';
 
 const delay = (ms = 200) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -32,6 +33,8 @@ let general: GeneralSettings = {
   afterDelete: 'list',
   autoCollectContacts: true,
   showSenderLogos: false,
+  // Как и на сервере: отмена отправки включена, пять секунд
+  undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
 };
 
 let signatureSeq = 30;
@@ -167,6 +170,10 @@ export const mockSettingsApi: SettingsApi = {
   async saveGeneral(next) {
     await delay();
     general = asServerWould(next);
+    // Отправка на заглушках обязана слушаться этой настройки: иначе
+    // «выключено» в форме ничего не выключало бы, и проверить поведение
+    // было бы негде
+    setMockUndoSeconds(general.undoSendSeconds);
     return structuredClone(general);
   },
 

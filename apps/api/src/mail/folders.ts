@@ -39,9 +39,24 @@ const NAME_HINTS: Array<[RegExp, FolderRole]> = [
   [/^(junk|junk e-?mail|spam|спам)$/i, 'spam'],
   [/^(trash|deleted|deleted items|deleted messages|корзина|удал[её]нные)$/i, 'trash'],
   [/^(archives?|архив)$/i, 'archive'],
+  // «Отложенные». SPECIAL-USE для неё в RFC 6154 нет — ни у кого: ни Gmail,
+  // ни Fastmail не смогли договориться о ключевом слове. Значит, узнаётся
+  // только по имени, и русское имя здесь не для красоты: ящик мог приехать
+  // с чужого сервера, где папку уже назвали по-русски.
+  [/^(snoozed|отложенные)$/i, 'snoozed'],
 ];
 
-const ROLE_ORDER: FolderRole[] = ['inbox', 'sent', 'drafts', 'spam', 'trash', 'archive'];
+const ROLE_ORDER: FolderRole[] = [
+  'inbox',
+  'sent',
+  'drafts',
+  // «Отложенные» стоят сразу после черновиков и ДО спама с корзиной:
+  // это папка, в которую человек заглядывает, а не свалка.
+  'snoozed',
+  'spam',
+  'trash',
+  'archive',
+];
 
 /**
  * Корневые каталоги, которые Dovecot заводит себе сам.

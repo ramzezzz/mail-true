@@ -47,6 +47,7 @@ import {
   IconArchive,
   IconArrowLeft,
   IconArrowRight,
+  IconClock,
   IconCode,
   IconFilter,
   IconFlag,
@@ -64,6 +65,9 @@ import {
   IconUnsubscribe,
 } from '../mail/icons';
 import { MessageSource } from '../mail/MessageSource';
+import { SnoozeMenu } from '../mail/SnoozeMenu';
+import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
+import type { SnoozePreset } from '../mail/snoozeApi';
 import { MessageThread } from '../mail/MessageThread';
 import { SenderAuth } from '../mail/SenderAuth';
 import { SenderAvatar } from '../mail/SenderAvatar';
@@ -145,6 +149,14 @@ export function MessagePage() {
   const setVisitedMessage = useUiStore((s) => s.setVisitedMessage);
   const readReceipt = useSendReadReceipt(id);
   const preferences = useGeneralPreferences();
+  /*
+   * «Отложить» в панели письма. Состояние спрашивается у сервера: пока он
+   * не сказал `available`, кнопки нет вовсе — за ней стоят база и работник
+   * возврата, и без них она была бы мёртвой.
+   */
+  const snoozeState = useSnoozeState();
+  const snoozeMessages = useSnoozeMessages();
+  const unsnooze = useUnsnoozeMessages();
 
   const [showDetails, setShowDetails] = useState(false);
   /** Открыто окно «Исходный текст письма». */
@@ -277,6 +289,33 @@ export function MessagePage() {
       { ids: [message.id], targetFolderId: target },
       { onSuccess: goAfterRemoved },
     );
+  };
+
+  /**
+   * Отложить открытое письмо.
+   *
+   * После откладывания письмо уходит из папки — значит, и со страницы
+   * уходим туда же, куда после удаления и переноса: это ровно тот же
+   * случай «письма здесь больше нет», и вести себя иначе он не должен.
+   * Уходим только ПОСЛЕ ответа сервера: неудавшееся откладывание не должно
+   * выглядеть удавшимся.
+   */
+  const snoozeTo = (choice: { preset: SnoozePreset; until?: string }) => {
+    if (!message) return;
+    snoozeMessages.mutate(
+      {
+        ids: [message.id],
+        preset: choice.preset,
+        ...(choice.until ? { until: choice.until } : {}),
+      },
+      { onSuccess: goAfterRemoved },
+    );
+  };
+
+  /** «Вернуть сейчас» — из открытого письма в папке «Отложенные». */
+  const returnNow = () => {
+    if (!message) return;
+    unsnooze.mutate([message.id], { onSuccess: goAfterRemoved });
   };
 
   // Ответ и пересылка объявлены до горячих клавиш: обработчик клавиатуры
@@ -478,6 +517,16 @@ export function MessagePage() {
         <Button mode="tertiary" before={<IconArchive />} onClick={() => moveTo('archive')}>
           В архив
         </Button>
+        {/* «Отложить» стоит между «В архив» и «В папку»: три соседних
+            действия одного рода — убрать письмо с глаз. */}
+        {snoozeState.available && folderId !== 'snoozed' && (
+          <SnoozeMenu onSnooze={snoozeTo} scheduledReturn={snoozeState.scheduledReturn} />
+        )}
+        {folderId === 'snoozed' && (
+          <Button mode="tertiary" before={<IconClock />} onClick={returnNow}>
+            Вернуть сейчас
+          </Button>
+        )}
         <Dropdown
           trigger={({ toggle }) => (
             <Button mode="tertiary" before={<IconFolder />} onClick={toggle}>

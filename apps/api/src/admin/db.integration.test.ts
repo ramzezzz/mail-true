@@ -136,18 +136,36 @@ void test('удаление ящика убирает его строки из �
         [MAILBOX, `key-${String(i)}`],
       );
     }
+    /*
+     * Указатель переписки (миграция 0017). Это список тех, с кем человек
+     * переписывался; ящик, заведённый заново с тем же адресом, не должен
+     * получить его в наследство — иначе новый владелец увидит чужие
+     * адреса в подсказке поля «Кому».
+     */
+    await admin.query(
+      `INSERT INTO mail_contacts (account_email, address, display_name, tokens)
+       VALUES ($1, 'someone@example.com', 'Некто', 'некто someone@example.com someone')`,
+      [MAILBOX],
+    );
+    await admin.query(
+      `INSERT INTO mail_contact_cursors (account_email, folder_role, uid_validity, top_uid)
+       VALUES ($1, 'sent', 1, 100)`,
+      [MAILBOX],
+    );
 
     const removed = await admin.purgeMailboxData(MAILBOX);
     await admin.deleteMailUser(user.id);
 
-    assert.ok(removed >= 9, `должно уйти не меньше девяти строк, ушло ${String(removed)}`);
+    assert.ok(removed >= 11, `должно уйти не меньше одиннадцати строк, ушло ${String(removed)}`);
     const left = await admin.one<{ count: string }>(
       `SELECT (
          (SELECT count(*) FROM mail_user_settings WHERE lower(account_email) = lower($1)) +
          (SELECT count(*) FROM mail_signatures    WHERE lower(account_email) = lower($1)) +
          (SELECT count(*) FROM mail_filters       WHERE lower(account_email) = lower($1)) +
          (SELECT count(*) FROM migrate_messages   WHERE lower(account) = lower($1)) +
-         (SELECT count(*) FROM migrate_cursors    WHERE lower(account) = lower($1))
+         (SELECT count(*) FROM migrate_cursors    WHERE lower(account) = lower($1)) +
+         (SELECT count(*) FROM mail_contacts        WHERE account_email = lower($1)) +
+         (SELECT count(*) FROM mail_contact_cursors WHERE account_email = lower($1))
        )::text AS count`,
       [MAILBOX],
     );

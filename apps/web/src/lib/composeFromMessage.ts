@@ -57,6 +57,10 @@ export function draftInit(draft: DraftContent): ComposeInit {
     // отдельной веткой вместо продолжения разговора.
     inReplyTo: draft.inReplyTo ?? undefined,
     references: draft.references.length > 0 ? draft.references : undefined,
+    // Черновик, который человек не создавал: письмо вернулось из очереди
+    // отправки, потому что почтовый сервер его не принял. Окно написания
+    // скажет об этом полосой — иначе открывший гадал бы, откуда это письмо.
+    sendFailure: draft.sendFailure ?? undefined,
   };
 }
 

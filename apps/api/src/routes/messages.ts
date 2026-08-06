@@ -1,6 +1,6 @@
 /**
  * Маршруты работы с письмами: список, чтение, части/вложения,
- * массовые флаги, перемещение между папками.
+ * массовые флаги, перемещение между папками, откладывание до срока.
  */
 import { lookup } from 'node:dns/promises';
 import type { FastifyInstance } from 'fastify';
@@ -27,6 +27,13 @@ import {
 import { errorInfo } from '../log.js';
 import { parseFullMessage, parseMessageHeaders } from '../mail/parse.js';
 import { decidePartDelivery } from '../mail/part-delivery.js';
+import { loadAccountsConfig } from '../accounts/config.js';
+import { SnoozeDb } from '../mail/snooze-db.js';
+import {
+  SNOOZE_PINNED_KEYWORD,
+  SNOOZE_RETURNED_KEYWORD,
+} from '../mail/snooze-mailbox.js';
+import { SnoozeService } from '../mail/snooze-service.js';
 import {
   isPrivateAddress,
   isSafeUnsubscribeUrl,
@@ -73,6 +80,25 @@ const flagsBodySchema = z.object({
 const moveBodySchema = z.object({
   ids: z.array(messageIdSchema).min(1).max(500),
   targetFolderId: z.string().min(1),
+});
+
+/**
+ * Отложить письмо до срока.
+ *
+ * Срок задаётся ЛИБО готовым названием, ЛИБО датой — но считает его в
+ * любом случае сервер (см. mail/snooze-schedule.ts, там же объяснено
+ * почему). Пояс присылает браузер именем IANA: «завтра утром» — это утро
+ * человека, а сервер стоит в UTC.
+ */
+const snoozeBodySchema = z.object({
+  ids: z.array(messageIdSchema).min(1).max(500),
+  preset: z.enum(['tomorrow-morning', 'monday', 'next-week', 'custom']).optional(),
+  until: z.string().min(1).max(64).optional(),
+  timeZone: z.string().max(64).optional(),
+});
+
+const unsnoozeBodySchema = z.object({
+  ids: z.array(messageIdSchema).min(1).max(500),
 });
 
 function requireMailSession(session: MailSession | null): MailSession {
@@ -176,7 +202,7 @@ async function resolveTargets(
 }
 
 export async function messageRoutes(app: FastifyInstance): Promise<void> {
-  const { pool } = app.deps;
+  const { pool, config, logger } = app.deps;
 
   // Список писем в папке
   app.get('/messages', { preHandler: app.requireSession }, async (request) => {
@@ -382,6 +408,20 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     collect(body.flagged, '\\Flagged');
     collect(body.deleted, '\\Deleted');
 
+    /*
+     * Прочитанное письмо перестаёт быть «вернувшимся».
+     *
+     * Пометка возврата (`$Snoozed` + `$Pinned`) существует ради одного:
+     * найти письмо, которое приехало на своё старое место по дате.
+     * Как только человек его открыл, задача выполнена — и держать письмо
+     * приклеенным к верху списка дальше значит мешать. Снимаем здесь, а не
+     * в интерфейсе, потому что ключевые слова живут в ящике: иначе письмо
+     * оставалось бы закреплённым в телефоне и во второй вкладке.
+     */
+    if (body.seen === true) {
+      toRemove.push(SNOOZE_RETURNED_KEYWORD, SNOOZE_PINNED_KEYWORD);
+    }
+
     const byFolder = groupIdsByFolder(body.ids);
     let updated = 0;
 
@@ -441,4 +481,141 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     });
     return { moved };
   });
+
+  /* ------------------------------------------------------------------ */
+  /* Отложить письмо до срока                                            */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * Служба живёт при этом наборе маршрутов, а не в server.ts, — по той же
+   * причине, по какой очередь отложенной ОТПРАВКИ живёт при маршрутах
+   * написания (routes/compose.ts): она целиком принадлежит работе с
+   * письмами, и разносить её по двум файлам значило бы, что остановка
+   * одного не останавливает второй.
+   *
+   * Своих переменных окружения модуль не заводит: подключение к базе и
+   * служебный пользователь Dovecot берутся оттуда же, откуда их берёт
+   * сборщик почты с чужих ящиков (accounts/config.ts). Второй набор
+   * переменных для того же самого — прямая дорога к «настроил, а не
+   * работает».
+   */
+  const accountsConfig = loadAccountsConfig();
+  const snooze = new SnoozeService({
+    config,
+    logger,
+    master: accountsConfig.masterConfigured
+      ? {
+          user: accountsConfig.DOVECOT_MASTER_USER,
+          password: accountsConfig.DOVECOT_MASTER_PASSWORD,
+          separator: accountsConfig.DOVECOT_MASTER_SEPARATOR,
+        }
+      : null,
+  });
+
+  let snoozeDb: SnoozeDb | null = null;
+  if (accountsConfig.databaseUrl) {
+    snoozeDb = new SnoozeDb({ connectionString: accountsConfig.databaseUrl, logger });
+    const db = snoozeDb;
+    // Проверка схемы асинхронная и НЕ задерживает сборку маршрутов: почта
+    // обязана подняться и с лежащей базой. До ответа возможность выключена.
+    db.schemaReady()
+      .then((ready) => {
+        if (!ready) {
+          snooze.disable(
+            'Таблицы отложенных писем нет. Примените ' +
+              'infra/postgres/migrations/0015_snoozed_messages.sql к работающей базе.',
+          );
+          app.log.error(snooze.unavailableReason);
+          return;
+        }
+        snooze.attachStore(db);
+        snooze.start();
+      })
+      .catch((err: unknown) => {
+        snooze.disable('Не удалось проверить схему отложенных писем');
+        app.log.error(errorInfo(err), 'Не удалось проверить схему отложенных писем');
+      });
+  } else {
+    snooze.disable(
+      'Отложить письмо нельзя: не настроена база данных (DATABASE_URL). ' +
+        'Почта при этом работает как обычно.',
+    );
+    app.log.warn(snooze.unavailableReason);
+  }
+
+  app.addHook('onClose', async () => {
+    snooze.stop();
+    if (snoozeDb) await snoozeDb.shutdown().catch(() => undefined);
+  });
+
+  /**
+   * Работник виден на этом наборе маршрутов: иначе проверить возврат можно
+   * было бы только ожиданием получаса — то есть на деле никак. Декорация
+   * живёт в области видимости плагина, ровно как у отложенной отправки.
+   */
+  app.decorate('snoozeService', snooze);
+
+  /**
+   * Что лежит в «Отложенных» и работает ли возможность вообще.
+   *
+   * Один маршрут на оба вопроса намеренно: интерфейс обязан УБРАТЬ кнопку,
+   * когда возможности нет, а не показывать её и потом отказывать. Пока
+   * `available` ложно, кнопки «Отложить» в почте просто не появляется —
+   * то же правило, что у помощника ИИ.
+   */
+  app.get('/messages/snoozed', { preHandler: app.requireSession }, async (request) => {
+    const session = requireMailSession(request.mailSession);
+    if (!snooze.available) {
+      return {
+        available: false,
+        scheduledReturn: false,
+        reason: snooze.unavailableReason,
+        items: [],
+      };
+    }
+    const items = await pool.withClient(session.email, session.password, (client) =>
+      snooze.listSnoozed(client, session.email),
+    );
+    return {
+      available: true,
+      scheduledReturn: snooze.scheduledReturnAvailable,
+      reason: snooze.scheduledReturnAvailable
+        ? null
+        : 'Служебный доступ Dovecot не настроен: письма придётся возвращать вручную',
+      items,
+    };
+  });
+
+  // Отложить письма до срока
+  app.post('/messages/snooze', { preHandler: app.requireSession }, async (request) => {
+    const session = requireMailSession(request.mailSession);
+    const body = snoozeBodySchema.parse(request.body);
+    return pool.withClient(session.email, session.password, (client) =>
+      snooze.snooze(client, session.email, body.ids, {
+        preset: body.preset,
+        until: body.until,
+        timeZone: body.timeZone,
+      }),
+    );
+  });
+
+  // Вернуть отложенное письмо прямо сейчас, не дожидаясь срока
+  app.delete('/messages/snooze', { preHandler: app.requireSession }, async (request) => {
+    const session = requireMailSession(request.mailSession);
+    const body = unsnoozeBodySchema.parse(request.body);
+    return pool.withClient(session.email, session.password, (client) =>
+      snooze.returnNow(client, session.email, body.ids),
+    );
+  });
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /**
+     * Служба отложенных писем. Обычно работник просыпается сам; наружу
+     * выведена, чтобы проверки могли позвать один проход, не дожидаясь
+     * таймера.
+     */
+    snoozeService: SnoozeService;
+  }
 }

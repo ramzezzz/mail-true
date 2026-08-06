@@ -39,6 +39,8 @@ import type {
   ReadReceiptResponse,
   SendRequest,
   SendResponse,
+  SendFailureNotice,
+  UndoSendResponse,
   SessionInfo,
   UploadResponse,
   UploadsResponse,
@@ -66,6 +68,25 @@ export interface MailApi {
   setFlags(request: FlagsRequest): Promise<FlagsResponse>;
   moveMessages(request: MoveRequest): Promise<MoveResponse>;
   sendMessage(request: SendRequest): Promise<SendResponse>;
+  /**
+   * Вернуть письмо, которое ещё лежит в очереди отмены на сервере.
+   *
+   * Именно запрос к серверу, а не таймер в браузере: письмо ждёт ТАМ,
+   * поэтому закрытая вкладка отменяет отмену, а не отправку.
+   */
+  undoSend(pendingId: string): Promise<UndoSendResponse>;
+  /**
+   * Письма, которые отправить не удалось и о которых человеку ещё
+   * не сказали.
+   *
+   * Спрашивается при каждом открытии почты, а не только по событию сокета:
+   * событие увидит лишь та вкладка, что была открыта в момент отказа,
+   * а человек, закрывший вкладку и вернувшийся наутро, обязан узнать
+   * то же самое.
+   */
+  getSendFailures(): Promise<SendFailureNotice[]>;
+  /** «Понятно»: человек прочитал извещение, убрать его. */
+  ackSendFailure(id: string): Promise<void>;
   saveDraft(request: SendRequest): Promise<DraftSaveResponse>;
   /**
    * Сохранённый черновик обратно в окно написания. Без этого дописать своё
@@ -184,6 +205,22 @@ export const httpApi: MailApi = {
 
   sendMessage: (request) =>
     apiFetch('/api/messages/send', { method: 'POST', body: JSON.stringify(request) }),
+
+  undoSend: (pendingId) =>
+    apiFetch('/api/messages/send/undo', {
+      method: 'POST',
+      body: JSON.stringify({ pendingId }),
+    }),
+
+  getSendFailures: async () =>
+    (await apiFetch<{ items: SendFailureNotice[] }>('/api/messages/send/failures')).items,
+
+  ackSendFailure: async (id) => {
+    await apiFetch('/api/messages/send/failures/ack', {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    });
+  },
 
   // Времени сохранения сервер не присылает — ставим своё, чтобы в окне
   // написания не появлялось «Сохранено в Invalid Date».

@@ -81,6 +81,27 @@ export interface SendResponse {
   scheduled?: boolean;
   /** Когда письмо уйдёт (ISO) — только у отложенного. */
   sendAt?: string;
+  /**
+   * Письмо принято, но несколько секунд ещё лежит в очереди на сервере —
+   * его можно вернуть. Этим же идентификатором его и отзывают.
+   * Отсутствует, если отмена отправки выключена в настройках.
+   */
+  pendingId?: string;
+  /** До какого момента (ISO) отмена ещё сработает. */
+  undoUntil?: string;
+}
+
+/**
+ * POST /api/messages/send/undo — вернуть письмо, ещё лежащее в очереди.
+ *
+ * `cancelled: false` — не отказ сервера, а обычный исход гонки: письмо
+ * успело уйти. Отдельным полем, а не ошибкой, потому что человеку про это
+ * надо сказать своими словами («письмо уже ушло»), а не общим текстом
+ * отказа: молчание или ложное «отменено» здесь хуже всего.
+ */
+export interface UndoSendResponse {
+  ok: boolean;
+  cancelled: boolean;
 }
 
 /**
@@ -153,7 +174,34 @@ export type WsEvent =
     }
   /** IDLE-соединение потеряно — сервер переустанавливает наблюдение. */
   | { type: 'idle-lost' }
+  /**
+   * Письмо из очереди отправки окончательно не ушло.
+   *
+   * Приходит в ту же секунду, когда сервер сдался, и нужно ровно для
+   * одного: если вкладка открыта, человек узнаёт об этом сразу, а не
+   * при следующем заходе в почту. Событие — не гарантия (закрытая вкладка
+   * его не увидит), поэтому то же самое лежит записью на сервере
+   * и приходит через `GET /api/messages/send/failures`.
+   */
+  | { type: 'send-failed'; id: string; subject: string; reason: string; draftUid: number | null }
   | { type: 'error'; error: string };
+
+/**
+ * Извещение о письме, которое отправить не удалось
+ * (`GET /api/messages/send/failures`).
+ */
+export interface SendFailureNotice {
+  id: string;
+  subject: string;
+  envelopeTo: string[];
+  reason: string;
+  rejected: Array<{ address: string; message: string }>;
+  attempts: number;
+  lastAttemptAt: string;
+  /** UID черновика, в котором лежит письмо; null — сохранить не удалось. */
+  draftUid: number | null;
+  createdAt: string;
+}
 
 /** Параметры GET /api/messages (сериализуются в query string). */
 export type { MessageListQuery, MessageListPage } from '@mail-true/shared';

@@ -13,7 +13,17 @@ import { collectAttachments } from './structure.js';
 import { senderLogoDomain } from './sender-auth.js';
 
 /** Системные IMAP-флаги, которые не считаются пользовательскими метками. */
-const SYSTEM_KEYWORDS = new Set(['$Forwarded', '$MDNSent', '$Junk', '$NotJunk', '$Pinned']);
+const SYSTEM_KEYWORDS = new Set([
+  '$Forwarded',
+  '$MDNSent',
+  '$Junk',
+  '$NotJunk',
+  '$Pinned',
+  // Ставится письму, вернувшемуся из «Отложенных» (mail/snooze-mailbox.ts).
+  // В пользовательские метки не попадает: человек его не заводил и снять
+  // не может, а в ряду с «Работа» и «Счета» оно выглядело бы как ярлык.
+  '$Snoozed',
+]);
 
 export function mapAddress(addr: MessageAddressObject | undefined): MailAddress {
   // По контракту (packages/shared) отсутствующее имя — это null, а не пустая
@@ -145,6 +155,14 @@ export function buildSummary({
     attachmentNames: realAttachments.map((a) => a.filename),
     labels: labelsFromSet(msg.flags),
     pinned: msg.flags?.has('$Pinned') ?? false,
+    /*
+     * Письмо вернулось из «Отложенных» и его ещё не открывали. Решение
+     * принимает СЕРВЕР по ключевому слову в ящике, а не интерфейс по
+     * догадке: пометка должна одинаково работать во всех открытых вкладках
+     * и переживать перезагрузку страницы — она живёт в письме, а не в
+     * браузере. Снимается вместе с прочтением (routes/messages.ts).
+     */
+    returnedFromSnooze: msg.flags?.has('$Snoozed') ?? false,
     sizeBytes: msg.size ?? 0,
     /*
      * Домен, которому в ЭТОМ письме разрешено показать логотип в кружке.

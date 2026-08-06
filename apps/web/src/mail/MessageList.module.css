@@ -550,6 +550,38 @@
 }
 
 /*
+ * Срок возврата в папке «Отложенные»: «завтра в 08:00».
+ *
+ * Пилюлей, а не серым текстом: срок — единственное содержательное, что
+ * отличает эту папку от «Архива», и терять его среди значков нельзя.
+ * Не сжимается: обрезанное «завтра в 0…» не сообщает ничего.
+ */
+.snoozeUntil {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--mt-ph-color-transparent-hover, rgba(0, 16, 61, 0.06));
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+/* Значок времени у письма, которое вернулось из «Отложенных» и которое
+   ещё не открывали. Акцентный цвет: строка стоит наверху списка, и надо
+   объяснить, почему старое письмо оказалось выше свежих. */
+.returnedBadge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--mt-color-icon-accent, #005ff9);
+}
+
+/*
  * Дата: 13px, вправо, не переносится и не сжимается.
  *
  * Ширина — по содержимому, не меньше 44px. Ровно так это и сделано у mail.ru:

@@ -14,6 +14,7 @@ import { Pool, type QueryResultRow } from 'pg';
 import type { Logger } from 'pino';
 import { normalizeThemeSetting, normalizeWallpaperChoice } from '@mail-true/shared';
 import { errorInfo } from '../log.js';
+import { normalizeUndoSeconds } from '../mail/deferred-send.js';
 import {
   DEFAULT_ACTIONS,
   defaultMailSettings,
@@ -62,6 +63,13 @@ interface SettingsRow extends QueryResultRow {
    * без логотипов, то есть ровно как до появления возможности.
    */
   sender_logos?: boolean | null;
+  /**
+   * Добавлена миграцией 0016 и тоже необязательная. Отсутствие колонки
+   * (миграцию не применили) означает НОЛЬ, а не пять: пока настройки нельзя
+   * ни прочитать, ни сохранить, задерживать чужие письма мы не вправе —
+   * почта обязана вести себя ровно как до появления возможности.
+   */
+  undo_send_seconds?: number | null;
   autoreply_enabled: boolean;
   autoreply_subject: string | null;
   autoreply_text: string;
@@ -174,6 +182,9 @@ function toSettings(row: SettingsRow): MailSettings {
     collectContacts: row.collect_contacts,
     // `?? false` — это и значение по умолчанию, и поведение до миграции 0010.
     senderLogos: row.sender_logos ?? false,
+    // `?? 0` — поведение до миграции 0016: письмо уходит сразу. Само же
+    // умолчание возможности (пять секунд) проставляет колонке миграция.
+    undoSendSeconds: normalizeUndoSeconds(row.undo_send_seconds ?? 0),
     autoReply: {
       enabled: row.autoreply_enabled,
       subject: row.autoreply_subject,
@@ -310,6 +321,11 @@ export class SettingsDb {
     if (patch.notifyTab !== undefined) put('notify_tab', patch.notifyTab);
     if (patch.collectContacts !== undefined) put('collect_contacts', patch.collectContacts);
     if (patch.senderLogos !== undefined) put('sender_logos', patch.senderLogos);
+    if (patch.undoSendSeconds !== undefined) {
+      // Приводим к разрешённому и здесь: в базу должно попадать только то,
+      // что интерфейс умеет показать обратно
+      put('undo_send_seconds', normalizeUndoSeconds(patch.undoSendSeconds));
+    }
     if (patch.autoReply) {
       const ar = patch.autoReply;
       if (ar.enabled !== undefined) put('autoreply_enabled', ar.enabled);

@@ -14,7 +14,11 @@
 
 import { useEffect, useState } from 'react';
 import { useGeneralSettings, useSaveGeneralSettings } from '../../api/settingsQueries';
-import type { GeneralSettings, Signature } from '../../api/settingsTypes';
+import {
+  UNDO_SEND_CHOICES,
+  type GeneralSettings,
+  type Signature,
+} from '../../api/settingsTypes';
 import { Button, SelectField, Switch, TextAreaField, TextField } from '../../components';
 import { dateInputValue } from '../../settings/generalSettings';
 import { IconPlus, IconTrash } from '../../mail/icons';
@@ -239,6 +243,29 @@ export function GeneralSettingsPage() {
           checked={draft.quoteOriginalOnReply}
           onChange={(e) => patch({ quoteOriginalOnReply: e.target.checked })}
         />
+        {/*
+          Отмена отправки. Список, а не переключатель со сроком: выбирать
+          приходится ровно одно из четырёх, и «выключено» — такой же выбор,
+          как остальные три.
+        */}
+        <SelectField
+          label="Отменить отправку в течение"
+          value={String(draft.undoSendSeconds)}
+          onChange={(e) => patch({ undoSendSeconds: Number(e.target.value) })}
+        >
+          {UNDO_SEND_CHOICES.map((seconds) => (
+            <option key={seconds} value={seconds}>
+              {seconds === 0 ? 'не отменять — отправлять сразу' : `${seconds} секунд`}
+            </option>
+          ))}
+        </SelectField>
+        {/* Подсказка говорит и о выгоде, и о цене: письмо эти секунды
+            действительно НЕ у получателя, и человек должен это знать —
+            иначе «отправил и ушёл» однажды окажется неправдой */}
+        <SettingsHint>
+          Письмо ждёт эти секунды на сервере, а не у получателя, — и уходит,
+          даже если закрыть вкладку. Отменить можно только пока идёт отсчёт.
+        </SettingsHint>
       </SettingsSection>
 
       <SettingsSection title="После удаления письма">
@@ -254,12 +281,33 @@ export function GeneralSettingsPage() {
         </SelectField>
       </SettingsSection>
 
-      {/* Раздела «Адресная книга» здесь нет намеренно: самой адресной книги
-          в продукте не существует — ни экрана, ни маршрута в API, — и
-          переключатель «пополнять контакты» не менял ровно ничего. Поле
-          `autoCollectContacts` остаётся в черновике и уходит на сервер как
-          есть, чтобы сохранение не затирало чужое значение. Вернуть раздел
-          нужно вместе с самой адресной книгой. */}
+      {/* Раздел вернулся вместе с самой подсказкой адреса. До неё
+          переключатель «пополнять контакты» жил в контракте настроек, но
+          не менял ровно ничего, и показывать его было нельзя: обещание без
+          обеспечения хуже отсутствия обещания. Теперь он управляет тем, что
+          написано на нём, — см. apps/api/src/contacts/. */}
+      <SettingsSection
+        title="Адресная книга"
+        description="Откуда берутся подсказки в поле «Кому»."
+      >
+        <Switch
+          label="Пополнять контакты из полученных писем"
+          /* Описание говорит и о выгоде, и о цене — как у логотипов
+             отправителей. Речь о списке тех, кто пишет человеку, и
+             умалчивать об этом в переключателе, который это включает,
+             нельзя. Про отправленные сказано отдельно: они собираются
+             всегда, и человек должен понимать, что выключение не сделает
+             подсказку пустой. */
+          description={
+            'Адреса отправителей входящих писем попадают в подсказки поля «Кому». ' +
+            'Список хранится на сервере, привязан к вашему ящику и удаляется вместе с ним. ' +
+            'Адреса, которым вы писали сами, собираются в любом случае — их вы выбрали сами. ' +
+            'Лишний адрес можно убрать из подсказок прямо в списке, крестиком.'
+          }
+          checked={draft.autoCollectContacts}
+          onChange={(e) => patch({ autoCollectContacts: e.target.checked })}
+        />
+      </SettingsSection>
 
       <SettingsActions>
         <Button disabled={save.isPending} onClick={saveDraft}>

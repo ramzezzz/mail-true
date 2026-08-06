@@ -10,7 +10,7 @@
  */
 
 import { useGeneralSettings } from '../api/settingsQueries';
-import type { GeneralSettings, Signature } from '../api/settingsTypes';
+import { DEFAULT_UNDO_SEND_SECONDS, type GeneralSettings, type Signature } from '../api/settingsTypes';
 
 /**
  * Чем пользуемся, пока настройки не загрузились или не загрузились вовсе.
@@ -29,6 +29,8 @@ export const DEFAULT_GENERAL_SETTINGS: GeneralSettings = {
   // Выключено, как и на сервере: включение означает, что сервер пойдёт
   // в интернет за картинками, и это решение человека.
   showSenderLogos: false,
+  // Включено, как и на сервере: см. DEFAULT_UNDO_SEND_SECONDS
+  undoSendSeconds: DEFAULT_UNDO_SEND_SECONDS,
 };
 
 /** Настройки для любого экрана: пока их нет — значения по умолчанию. */

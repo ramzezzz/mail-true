@@ -42,6 +42,12 @@ declare module 'fastify' {
      * позвать один проход, не дожидаясь таймера.
      */
     deferredSender: DeferredSender;
+    /**
+     * Наблюдатель за ящиками (см. ws.ts). Нужен написанию писем, чтобы
+     * сказать в открытую вкладку об отказе отправки из очереди.
+     * Необязателен: в проверках маршруты поднимают без него.
+     */
+    mailNotifier?: { notify(email: string, payload: unknown): boolean };
   }
   interface FastifyRequest {
     mailSession: MailSession | null;
