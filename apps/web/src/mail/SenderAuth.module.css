@@ -1,0 +1,112 @@
+/*
+ * Значки подлинности. Цвета — из палитры тем, чтобы блок читался во всех
+ * восьми и поверх фоновой картинки. Цвет НЕ единственный признак: у каждого
+ * состояния своя форма значка и своё слово.
+ */
+
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Общий вывод — то, ради чего эти сведения и открывают */
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: var(--mt-font-paragraph-line-height, 20px);
+  font-weight: var(--mt-font-weight-accent2, 500);
+}
+
+.checks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/*
+ * Значок: круг с символом. Размер и начертание фиксированные, чтобы три
+ * строки выстроились в столбик и глаз сразу видел, где ровно, а где нет.
+ */
+.sign {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  background: var(--mt-color-icon-secondary);
+}
+
+.ok .sign {
+  background: var(--mt-color-accent-green, #0a7b44);
+}
+
+.warn .sign {
+  background: var(--mt-color-accent-orange, #8a5200);
+}
+
+.bad .sign {
+  background: var(--mt-color-accent-red, #c42500);
+}
+
+.skip .sign {
+  background: var(--mt-color-icon-secondary);
+}
+
+.checkBody {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.checkTitle {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 18px;
+  color: var(--mt-color-text-primary);
+}
+
+.checkDetail {
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 18px;
+  color: var(--mt-color-text-secondary);
+}
+
+/* Техническое название — для того, кто будет разбираться дальше */
+.checkTech {
+  font-family: var(--mt-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--mt-color-text-tertiary);
+}
+
+/* Видно только экранному диктору: слово состояния рядом со значком */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

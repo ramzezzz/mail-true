@@ -10,6 +10,7 @@ import { sanitizeEmailHtml } from './sanitize.js';
 import { cidToPartMap, collectAttachments } from './structure.js';
 import { buildSummary } from './summary.js';
 import { htmlToText, makeSnippet } from './text.js';
+import { parseAuthenticationResults, trustedAuthservId } from './sender-auth.js';
 
 function mailparserAddresses(obj: AddressObject | AddressObject[] | undefined): MailAddress[] {
   if (!obj) return [];
@@ -35,20 +36,46 @@ const AUTH_VALUES: ReadonlySet<string> = new Set([
   'permerror',
 ]);
 
-/** Разбирает заголовок Authentication-Results (spf/dkim/dmarc). */
-export function parseAuthResults(header: string | undefined): Message['authentication'] {
+/**
+ * Разбирает заголовок Authentication-Results — но ТОЛЬКО НАШ.
+ *
+ * Заголовок с результатами проверки вписывает принимающий сервер. Точно
+ * такой же заголовок может прийти и снаружи, внутри самого письма: писать
+ * его волен кто угодно, это обычная строка текста. Раньше разбиралось
+ * первое попавшееся значение, и письмо с самодельной строкой
+ *
+ *   Authentication-Results: mail.local; dkim=pass; dmarc=pass
+ *
+ * показывалось человеку как «Отправитель подтверждён». То есть подделка
+ * получала ровно тот знак доверия, ради которого проверка и существует.
+ * Поймано на стенде: в списке такое письмо честно оставалось с буквой
+ * вместо логотипа (там проверка уже была строгой), а сведения о письме
+ * говорили обратное — два места расходились в оценке одного письма.
+ *
+ * Теперь берётся первый заголовок, чей authserv-id совпадает с именем
+ * нашего узла, а всё остальное игнорируется: чужим утверждениям о
+ * подлинности верить нельзя. Если нашего заголовка нет вовсе — значит
+ * проверок не было, и так и говорим («none»), а не выдаём чужие за свои.
+ */
+export function parseAuthResults(
+  headers: string | readonly string[] | undefined,
+  authservId: string = trustedAuthservId(),
+): Message['authentication'] {
   const result: { spf: AuthResult; dkim: AuthResult; dmarc: AuthResult } = {
     spf: 'none',
     dkim: 'none',
     dmarc: 'none',
   };
-  if (!header) return result;
-  for (const match of header.matchAll(/\b(spf|dkim|dmarc)\s*=\s*([a-z]+)/gi)) {
-    const key = match[1]?.toLowerCase() as 'spf' | 'dkim' | 'dmarc' | undefined;
-    const value = match[2]?.toLowerCase();
-    if (key && value && AUTH_VALUES.has(value)) {
-      result[key] = value as AuthResult;
-    }
+  if (!headers) return result;
+  const list = typeof headers === 'string' ? [headers] : headers;
+  const ours = list
+    .map((value) => parseAuthenticationResults(value))
+    .find((parsed) => parsed !== null && parsed.authservId === authservId.toLowerCase());
+  if (!ours) return result;
+
+  for (const { method, result: value } of ours.methods) {
+    if (method !== 'spf' && method !== 'dkim' && method !== 'dmarc') continue;
+    if (AUTH_VALUES.has(value)) result[method] = value as AuthResult;
   }
   return result;
 }
@@ -74,6 +101,10 @@ const HEADER_WHITELIST = new Set([
   'x-priority',
   'precedence',
   'auto-submitted',
+  // Отправитель просит уведомить о прочтении (RFC 8098). Интерфейс по нему
+  // рисует плашку с вопросом: молча отвечать за человека, кому и когда он
+  // читал письмо, нельзя.
+  'disposition-notification-to',
 ]);
 
 /** Длиннее этого заголовок интерфейсу всё равно не нужен. */
@@ -109,6 +140,24 @@ function pickHeaders(parsed: ParsedMail): Record<string, string> {
     if (!value) continue;
     // Заголовок мог встретиться дважды — сохраняем оба значения
     out[name] = out[name] ? `${out[name]}, ${value}` : value;
+  }
+  return out;
+}
+
+/**
+ * Все значения заголовка Authentication-Results из письма.
+ *
+ * Письмо проходит через несколько серверов, и каждый вправе добавить свой
+ * заголовок; наш — среди них, и выбрать его можно только перебрав все.
+ * Читаются `headerLines`, а не `headers`: последние схлопывают повторы.
+ */
+function authResultHeaders(parsed: ParsedMail): string[] {
+  const out: string[] = [];
+  for (const item of parsed.headerLines ?? []) {
+    if (item.key.toLowerCase() !== 'authentication-results') continue;
+    const colon = item.line.indexOf(':');
+    if (colon < 0) continue;
+    out.push(unfold(item.line.slice(colon + 1)));
   }
   return out;
 }
@@ -246,7 +295,10 @@ export async function parseFullMessage(args: ParseMessageArgs): Promise<ParsedMe
     bodyText,
     attachments,
     headers: pickHeaders(parsed),
-    authentication: parseAuthResults(typeof authHeader === 'string' ? authHeader : undefined),
+    // Все значения заголовка, а не одно: письмо проходит через несколько
+    // серверов, у каждого свой Authentication-Results, и наш надо выбрать
+    // среди них по имени узла.
+    authentication: parseAuthResults(authResultHeaders(parsed)),
     // Признак ставим ТОЛЬКО когда текст действительно взят из исходника:
     // лишнее поле в обычном письме заставило бы интерфейс объяснять то,
     // чего не было.

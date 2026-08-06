@@ -47,12 +47,14 @@ import {
   IconArchive,
   IconArrowLeft,
   IconArrowRight,
+  IconCode,
   IconFilter,
   IconFlag,
   IconFolder,
   IconForward,
   IconMailUnread,
   IconMore,
+  IconPencil,
   IconPrint,
   IconReply,
   IconSearch,
@@ -61,18 +63,20 @@ import {
   IconTrash,
   IconUnsubscribe,
 } from '../mail/icons';
+import { MessageSource } from '../mail/MessageSource';
 import { MessageThread } from '../mail/MessageThread';
+import { SenderAuth } from '../mail/SenderAuth';
+import { SenderAvatar } from '../mail/SenderAvatar';
+import { useOpenDraft } from '../compose/useOpenDraft';
 import { searchUrlFor } from '../search/searchParams';
 import { useGeneralPreferences } from '../settings/generalSettings';
 import styles from './MessagePage.module.css';
 import { folderTitle } from '../lib/folderNames';
 
-/** Детерминированный цвет аватара из адреса отправителя. */
-function avatarHue(address: string): number {
-  let h = 0;
-  for (const ch of address) h = (h * 31 + ch.charCodeAt(0)) % 360;
-  return h;
-}
+/* Цвет кружка и буква в нём переехали в SenderAvatar: тот же кружок теперь
+   умеет показывать логотип домена, и три копии этого кода (список, цепочка,
+   открытое письмо) разошлись бы при первой же правке — в одном месте
+   логотип, в двух других буква. */
 
 /** «Имя <адрес>» либо просто адрес, если имени нет. */
 function formatAddress(a: { name: string | null; address: string }): string {
@@ -142,6 +146,14 @@ export function MessagePage() {
   const preferences = useGeneralPreferences();
 
   const [showDetails, setShowDetails] = useState(false);
+  /** Открыто окно «Исходный текст письма». */
+  const [showSource, setShowSource] = useState(false);
+  /**
+   * Дописывание черновика. Сюда попадают по прямой ссылке, из поиска или
+   * из «открыть в новой вкладке»: щелчок по строке в папке «Черновики»
+   * открывает окно написания сразу, минуя просмотр.
+   */
+  const { openDraft, loading: draftOpening } = useOpenDraft();
   /** Тело письма в DOM — по нему размечаются ссылки для печати. */
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -384,6 +396,15 @@ export function MessagePage() {
 
   const reliable = isReliable(message.labels);
   const category = messageCategory(message.labels);
+  /**
+   * Это неотправленный черновик. Смотрим и на флаг письма, и на папку:
+   * флаг `\Draft` ставит тот, кто письмо сохранил, и у писем, положенных
+   * в папку черновиков со стороны (отказ отложенной отправки, другая
+   * почтовая программа), его может не быть.
+   */
+  const isDraft = message.flags.draft || message.folderId === 'drafts';
+  /** Продолжить набор письма — то же окно, что и по щелчку в «Черновиках». */
+  const continueDraft = () => openDraft(message.uid);
   // Заголовки сервер отдаёт в нижнем регистре, поэтому ищем без учёта
   // регистра и понимаем сводный `list` от mailparser (см. lib/unsubscribe.ts)
   const unsubscribe = unsubscribeLinks(message.headers);
@@ -425,6 +446,18 @@ export function MessagePage() {
         <IconButton label="К списку" onClick={goBack}>
           <IconArrowLeft size={20} />
         </IconButton>
+        {/* У черновика главное действие — не «удалить» и не «ответить»,
+            а дописать его. Поэтому кнопка стоит первой и она главная. */}
+        {isDraft && (
+          <Button
+            mode="primary"
+            before={<IconPencil />}
+            onClick={continueDraft}
+            disabled={draftOpening}
+          >
+            {draftOpening ? 'Открываем…' : 'Продолжить'}
+          </Button>
+        )}
         <Button mode="tertiary" before={<IconTrash />} onClick={() => moveTo('trash')}>
           Удалить
         </Button>
@@ -507,6 +540,15 @@ export function MessagePage() {
           <MenuItem before={<IconForward />} onClick={forwardAsAttachment}>
             Переслать как вложение
           </MenuItem>
+          {/*
+            «Исходный текст письма», а не «Показать оригинал»: слово
+            «оригинал» ничего не обещает — из него не понять, откроется
+            перевод, картинки или что-то ещё. Здесь же сказано ровно то,
+            что откроется: текст письма как он есть, со всеми заголовками.
+          */}
+          <MenuItem before={<IconCode />} onClick={() => setShowSource(true)}>
+            Исходный текст письма
+          </MenuItem>
           <AiTranslateMenuItem controller={ai} />
         </Dropdown>
 
@@ -580,6 +622,32 @@ export function MessagePage() {
             )}
           </dl>
         </header>
+
+        {/*
+          Плашка черновика.
+
+          Сюда попадают по прямой ссылке, из поиска или открыв черновик в
+          новой вкладке — то есть человек видит просмотр письма и должен
+          сразу понимать две вещи: письмо НЕ отправлено и его можно дописать.
+          Раньше не было ни того, ни другого: черновик выглядел как обычное
+          полученное письмо, и продолжить его было нечем.
+        */}
+        {isDraft && (
+          <div className={styles.draftBanner}>
+            <span className={styles.draftText}>
+              Это черновик — письмо ещё не отправлено.
+            </span>
+            <Button
+              mode="primary"
+              size="s"
+              before={<IconPencil />}
+              onClick={continueDraft}
+              disabled={draftOpening}
+            >
+              {draftOpening ? 'Открываем…' : 'Продолжить'}
+            </Button>
+          </div>
+        )}
 
         {/* Плашка надёжного отправителя */}
         {reliable && (
@@ -661,13 +729,18 @@ export function MessagePage() {
 
         {/* Блок отправителя */}
         <div className={styles.senderBlock}>
-          <span
+          {/* Тот же кружок, что и в списке писем, — один компонент на оба
+              места. Здесь это особенно важно: именно на открытом письме
+              человек решает, доверять ли ему, и кружок обязан показывать
+              то же самое, что он видел в списке. Логотип ставится ТОЛЬКО
+              отправителю, прошедшему проверку подлинности; решение принял
+              сервер (apps/api/src/mail/sender-auth.ts). */}
+          <SenderAvatar
             className={styles.senderAvatar}
-            style={{ backgroundColor: `hsl(${avatarHue(message.from.address)} 60% 55%)` }}
-            aria-hidden="true"
-          >
-            {((message.from.name ?? message.from.address)[0] ?? '?').toUpperCase()}
-          </span>
+            name={message.from.name ?? message.from.address}
+            address={message.from.address}
+            logoDomain={message.senderLogoDomain}
+          />
           <div className={styles.senderInfo}>
             <div className={styles.senderLine}>
               <span className={styles.senderName}>{message.from.name ?? message.from.address}</span>
@@ -717,8 +790,11 @@ export function MessagePage() {
                 <dd>{new Date(message.date).toLocaleString('ru-RU')}</dd>
                 <dt>Подлинность</dt>
                 <dd>
-                  SPF: {message.authentication.spf} · DKIM: {message.authentication.dkim} · DMARC:{' '}
-                  {message.authentication.dmarc}
+                  {/* Было «SPF: none · DKIM: pass · DMARC: pass» — набор слов
+                      для того, кто в этом не разбирается, а спрашивают об
+                      этом как раз тогда, когда письмо выглядит подозрительно.
+                      Значки и человеческие пояснения — в SenderAuth. */}
+                  <SenderAuth authentication={message.authentication} />
                 </dd>
                 {message.messageId && (
                   <>
@@ -834,6 +910,16 @@ export function MessagePage() {
         {/* Остальные письма переписки — свёрнутыми строками по 48px */}
         <MessageThread messages={threadRest} totalCount={threadRest.length + 1} />
       </div>
+
+      {/* Исходник письма. Окно стоит рядом с листом, а не внутри тела:
+          иначе правила печати унесли бы его на бумагу вместе с письмом. */}
+      {showSource && (
+        <MessageSource
+          messageId={message.id}
+          subject={message.subject}
+          onClose={() => setShowSource(false)}
+        />
+      )}
     </article>
   );
 }

@@ -199,3 +199,43 @@ test('обычное письмо признаком «не разобралос
   assert.match(message.bodyText ?? '', /Vsyo v poryadke/);
   assert.equal(message.bodyRecovered, undefined, 'лишний признак заставил бы объяснять то, чего не было');
 });
+
+test('чужому заголовку Authentication-Results не верим', async () => {
+  // Заголовок с результатами проверки вписывает принимающий сервер, но
+  // точно такой же может прийти снаружи, внутри самого письма: это обычная
+  // строка текста, писать её волен кто угодно. Раньше разбиралось первое
+  // попавшееся значение — и подделка показывалась как «Отправитель
+  // подтверждён», то есть получала ровно тот знак доверия, ради которого
+  // проверка и существует. Поймано на стенде.
+  const forged = parseAuthResults(
+    ['chuzhoy-server.example; dkim=pass; dmarc=pass; spf=pass'],
+    'mail.local',
+  );
+  assert.deepEqual(forged, { spf: 'none', dkim: 'none', dmarc: 'none' });
+});
+
+test('свой заголовок разбирается, чужой рядом — игнорируется', async () => {
+  // Обычный случай: письмо прошло через несколько серверов, у каждого свой
+  // заголовок. Наш надо выбрать среди них по имени узла, а не брать первый.
+  const mixed = parseAuthResults(
+    [
+      'zloumyshlennik.example; dkim=pass; dmarc=pass',
+      'mail.local; spf=none; dkim=fail; dmarc=fail',
+    ],
+    'mail.local',
+  );
+  assert.deepEqual(mixed, { spf: 'none', dkim: 'fail', dmarc: 'fail' });
+});
+
+test('нашего заголовка нет вовсе — значит проверок не было', async () => {
+  assert.deepEqual(parseAuthResults(undefined, 'mail.local'), {
+    spf: 'none',
+    dkim: 'none',
+    dmarc: 'none',
+  });
+});
+
+test('имя узла сравнивается без учёта регистра', async () => {
+  const same = parseAuthResults(['MAIL.LOCAL; dkim=pass'], 'mail.local');
+  assert.equal(same.dkim, 'pass');
+});
