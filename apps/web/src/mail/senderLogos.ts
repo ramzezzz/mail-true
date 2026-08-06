@@ -25,6 +25,7 @@
  * сервер из-за домена без логотипа незачем.
  */
 import { useEffect, useSyncExternalStore } from 'react';
+import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
 
 export type SenderLogoState =
@@ -117,6 +118,21 @@ class SenderLogoRegistry {
     const domains = [...this.#pendingRequest].slice(0, BATCH_LIMIT);
     if (domains.length === 0) return;
     for (const domain of domains) this.#pendingRequest.delete(domain);
+
+    /*
+     * На заглушках логотипов нет: их ищет и кэширует сервер. Запрос
+     * уходил бы в никуда, а по отказу все домены помечались бы «логотипа
+     * нет» — то есть заглушки показывали бы буквы в кружках и без всякого
+     * запроса. Выключаем сборщик целиком, чтобы он не будил сеть на
+     * каждый показ списка.
+     */
+    if (useMocks) {
+      this.#off = true;
+      for (const domain of domains) this.#state.set(domain, { status: 'none' });
+      this.#pendingRequest.clear();
+      this.#bump();
+      return;
+    }
 
     let response: LogosResponse;
     try {

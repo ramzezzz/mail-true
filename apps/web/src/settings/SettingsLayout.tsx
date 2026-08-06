@@ -15,6 +15,7 @@ import { useAiState } from '../api/aiQueries';
 import { AI_SETTINGS_PATH, aiVisible } from '../ai/aiVisibility';
 import { cx } from '../lib/cx';
 import { IconArrowLeft } from '../mail/icons';
+import { useLabelsState } from '../mail/useLabels';
 import styles from './SettingsLayout.module.css';
 
 export interface NavItem {
@@ -34,11 +35,15 @@ const NAV: NavItem[] = [
   { to: '/settings/appearance', title: 'Оформление' },
   { to: '/settings/filters', title: 'Фильтры' },
   { to: '/settings/folders', title: 'Папки' },
-  // Метки стоят рядом с папками намеренно: это второй способ разложить
-  // почту, и человек ищет их там же, где искал бы папку.
-  { to: '/settings/labels', title: 'Метки' },
   { to: '/settings/collector', title: 'Почта с других ящиков' },
 ];
+
+/**
+ * Метки стоят рядом с папками намеренно: это второй способ разложить почту,
+ * и человек ищет их там же, где искал бы папку. Пункт условный — см. ниже.
+ */
+const LABELS_ITEM: NavItem = { to: '/settings/labels', title: 'Метки' };
+const LABELS_AFTER = '/settings/folders';
 
 /**
  * Адрес без хвостовых косых: `/settings/` и `/settings` — одно и то же место.
@@ -64,11 +69,25 @@ export function SettingsLayout() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { data: aiState } = useAiState();
+  const labels = useLabelsState();
 
-  // Помощника нет в списке разделов, пока администратор его не разрешил
-  const nav = aiVisible(aiState)
-    ? [...NAV, { to: AI_SETTINGS_PATH, title: 'Помощник на основе ИИ' }]
+  /*
+   * Разделы, которых может не быть.
+   *
+   * Помощника нет в списке, пока администратор его не разрешил, — это
+   * работало и раньше. Метки жили в списке всегда, хотя своё правило у них
+   * записано там же, где хук: «пока сервер не сказал available, ни раздела
+   * настроек, ни пункта „Метки“ в меню не появляется». Правило не
+   * выполнялось: на сервере без применённой миграции (и на заглушечных
+   * данных) пункт вёл на страницу, которая умеет сказать только «метки
+   * недоступны».
+   */
+  const withLabels = labels.available
+    ? NAV.flatMap((item) => (item.to === LABELS_AFTER ? [item, LABELS_ITEM] : [item]))
     : NAV;
+  const nav = aiVisible(aiState)
+    ? [...withLabels, { to: AI_SETTINGS_PATH, title: 'Помощник на основе ИИ' }]
+    : withLabels;
 
   return (
     <div className={styles.root}>

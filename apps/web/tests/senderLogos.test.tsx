@@ -26,6 +26,14 @@ vi.mock('../src/api/http', () => ({
 import { SenderAvatar } from '../src/mail/SenderAvatar';
 import { resetSenderLogos } from '../src/mail/senderLogos';
 
+/*
+ * Заглушки здесь выключены явно: проверка подделывает fetch и смотрит,
+ * что уходит на сервер. На заглушечных данных этот путь не работает
+ * вовсе — и правильно, ходить там некуда, — но проверять надо именно его.
+ */
+vi.mock('../src/api/mockFlag', () => ({ useMocks: false }));
+
+
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
 const avatarCss = readFileSync(join(SRC, 'mail/SenderAvatar.module.css'), 'utf8');
 

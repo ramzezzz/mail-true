@@ -23,6 +23,7 @@
  */
 
 import { normalizeThemeSetting, type AppearanceSettings } from '@mail-true/shared';
+import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
 import {
   cachedAccount,
@@ -38,6 +39,14 @@ const ROUTE = '/api/settings/appearance';
 
 /** Оформление ящика с сервера; null — сервер не ответил. */
 async function fetchAppearance(): Promise<AppearanceSettings | null> {
+  /*
+   * На заглушках сервера нет, и хранить оформление негде — остаётся кэш
+   * браузера, который к этому времени уже применён (main.tsx). Раньше
+   * запрос всё-таки уходил, получал 404 и молча отбрасывался: работе это
+   * не мешало, но каждая загрузка почты писала в консоль две ошибки —
+   * ровно те, среди которых потом ищут настоящую.
+   */
+  if (useMocks) return null;
   try {
     return await apiFetch<AppearanceSettings>(ROUTE);
   } catch {
@@ -131,5 +140,7 @@ export function forgetAppearance(): void {
  * при следующем входе просто приедет прежнее значение.
  */
 setAppearanceSink((patch: AppearancePatch) => {
+  // На заглушках отправлять некуда: выбор уже применён и лежит в кэше.
+  if (useMocks) return;
   void apiFetch(ROUTE, { method: 'PUT', body: JSON.stringify(patch) }).catch(() => undefined);
 });

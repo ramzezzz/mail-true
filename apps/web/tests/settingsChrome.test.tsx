@@ -26,6 +26,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { api } from '../src/api';
+import { labelsApi } from '../src/mail/labelsApi';
 import { SettingsLayout, isNavItemActive, normalizePath } from '../src/settings/SettingsLayout';
 import { SettingsHomePage } from '../src/pages/settings/SettingsHomePage';
 
@@ -77,6 +78,15 @@ function render(path: string) {
   });
 }
 
+/** Дать react-query разрешить запросы: одного тика ему не хватает. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
 beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
@@ -87,6 +97,12 @@ beforeEach(() => {
     consent: false,
     features: [],
   } as never);
+  // Справочник меток по умолчанию есть — пункт «Метки» в меню ожидается
+  vi.spyOn(labelsApi, 'getLabels').mockResolvedValue({
+    available: true,
+    reason: null,
+    items: [],
+  });
 });
 
 afterEach(() => {
@@ -107,6 +123,36 @@ describe('левое меню настроек', () => {
       expect(active[0]!.className).toMatch(/navItemActive/u);
     });
   }
+
+  /*
+   * Правило записано там же, где хук меток: «пока сервер не сказал
+   * available, ни раздела настроек, ни пункта „Метки“ в меню не
+   * появляется». Оно не выполнялось — пункт стоял в меню всегда и на
+   * сервере без применённой миграции вёл на страницу, которая умеет
+   * сказать только «метки недоступны».
+   */
+  it('пункт «Метки» есть, пока справочник доступен', async () => {
+    render('/settings');
+    await settle();
+    const titles = [...host.querySelectorAll('nav a')].map((a) => a.textContent);
+    expect(titles).toContain('Метки');
+    // и стоит сразу за «Папками», а не в конце списка
+    expect(titles.indexOf('Метки')).toBe(titles.indexOf('Папки') + 1);
+  });
+
+  it('справочника нет — пункта в меню тоже нет', async () => {
+    vi.spyOn(labelsApi, 'getLabels').mockResolvedValue({
+      available: false,
+      reason: 'Справочник меток недоступен',
+      items: [],
+    });
+    render('/settings');
+    await settle();
+    const titles = [...host.querySelectorAll('nav a')].map((a) => a.textContent);
+    expect(titles).not.toContain('Метки');
+    // остальные разделы на месте — убрали один пункт, а не меню целиком
+    expect(titles).toContain('Папки');
+  });
 
   it('серая пилюля активного пункта отличается от фона страницы', () => {
     // Раньше обе переменные были --mt-color-background-secondary

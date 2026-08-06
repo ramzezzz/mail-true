@@ -14,8 +14,8 @@ import { mockAccountsApi } from '../mocks/mockAccounts';
 import { mockApi } from '../mocks/mockApi';
 import { mockSettingsApi } from '../mocks/mockSettings';
 
-const flag = import.meta.env.VITE_API_MOCK as string | undefined;
-export const useMocks = flag === '1' || (import.meta.env.DEV && flag !== '0');
+export { useMocks } from './mockFlag';
+import { useMocks } from './mockFlag';
 
 export const api: MailApi = useMocks ? mockApi : httpApi;
 

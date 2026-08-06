@@ -19,6 +19,14 @@ import { WALLPAPER_PRESETS } from '../src/appearance/wallpapers';
 import { useUiStore } from '../src/app/store';
 import { forgetAppearance, syncAppearance } from '../src/appearance/sync';
 
+/*
+ * Заглушки здесь выключены явно: проверка подделывает fetch и смотрит,
+ * что уходит на сервер. На заглушечных данных этот путь не работает
+ * вовсе — и правильно, ходить там некуда, — но проверять надо именно его.
+ */
+vi.mock('../src/api/mockFlag', () => ({ useMocks: false }));
+
+
 /** Запросы к /api/settings/appearance, перехваченные подделкой fetch. */
 interface Call {
   method: string;

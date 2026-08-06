@@ -13,7 +13,7 @@
  * в телефоне и во второй вкладке — см. apps/api/src/mail/snooze-schedule.ts.
  */
 
-import { useMocks } from '../api';
+import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
 
 /** Готовые сроки из меню. */

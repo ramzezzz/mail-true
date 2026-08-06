@@ -9,6 +9,7 @@
  * подпиской; узнать по ней что-либо о человеке нельзя.
  */
 
+import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
 import type { NotificationPrefs, NotificationPrefsPatch, NotificationView, PushState } from './types';
 
@@ -51,9 +52,37 @@ const json = (method: string, body?: unknown): RequestInit => ({
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 
+/**
+ * Уведомлений на заглушках нет.
+ *
+ * Не потому, что лень: push — это подписка настоящего браузера у
+ * настоящего сервера с ключом VAPID, и подделать её нечем. Раздел
+ * настроек при `pushAvailable: false` показывает причину и не предлагает
+ * подписаться — как и при выключенном push на сервере.
+ */
+const PUSH_ON_MOCKS: PushState = {
+  pushAvailable: false,
+  pushUnavailableReason: 'На заглушечных данных уведомления не работают',
+  vapidPublicKey: null,
+  prefs: {
+    enabled: false,
+    level: 'sender-subject',
+    push: false,
+    pushPayload: false,
+    skipFiltered: true,
+    quietHours: { enabled: false, fromMinutes: 22 * 60, toMinutes: 8 * 60 },
+    timeZone: null,
+    updatedAt: null,
+  },
+  devices: [],
+  ai: { available: false, reason: 'На заглушечных данных помощник недоступен' },
+};
+
 export const notificationsApi = {
   getState: (clientId: string): Promise<PushState> =>
-    apiFetch(`/api/push/state?clientId=${encodeURIComponent(clientId)}`),
+    useMocks
+      ? Promise.resolve(PUSH_ON_MOCKS)
+      : apiFetch(`/api/push/state?clientId=${encodeURIComponent(clientId)}`),
 
   savePrefs: (patch: NotificationPrefsPatch): Promise<NotificationPrefs> =>
     apiFetch('/api/push/prefs', json('PUT', patch)),

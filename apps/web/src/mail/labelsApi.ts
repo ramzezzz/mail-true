@@ -7,6 +7,7 @@
  * цвета, а придумывать их интерфейс не вправе.
  */
 
+import { useMocks } from '../api/mockFlag';
 import { apiFetch, buildQuery } from '../api/http';
 
 /**
@@ -94,8 +95,37 @@ export interface ApplyLabelsResult {
   removed: string[];
 }
 
+/**
+ * Справочника нет — с причиной, которую можно показать человеку.
+ *
+ * Отдельная константа, а не «пустой список»: пустой список значит «меток
+ * пока не завели», и раздел настроек при нём открывается и работает.
+ */
+export const LABELS_UNAVAILABLE: LabelsState = { available: false, reason: null, items: [] };
+
+const LABELS_ON_MOCKS: LabelsState = {
+  available: false,
+  reason: 'На заглушечных данных справочник меток не ведётся',
+  items: [],
+};
+
 export const labelsApi = {
-  getLabels: (): Promise<LabelsState> => apiFetch('/api/labels'),
+  getLabels: (): Promise<LabelsState> => {
+    /*
+     * На заглушках интерфейса запроса нет вовсе — то же правило, что у
+     * отложенных писем (snoozeApi.ts). Своего справочника у заглушек нет,
+     * а сходить на настоящий адрес нельзя: без сессии он отвечает 401,
+     * и общий обработчик уводит на экран входа из режима, где входа не
+     * предполагается.
+     *
+     * Раньше запрос всё-таки уходил и получал 404: метки в этом режиме не
+     * работали, а консоль обещала, что «API работает на заглушечных
+     * данных». Показывать раздел, за которым ничего нет, мы не будем —
+     * кнопка появляется вместе с поведением.
+     */
+    if (useMocks) return Promise.resolve(LABELS_ON_MOCKS);
+    return apiFetch('/api/labels');
+  },
 
   createLabel: (draft: LabelDraft): Promise<MailLabel> =>
     apiFetch('/api/labels', { method: 'POST', body: JSON.stringify(draft) }),

@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '../app/store';
 import { actionErrorText } from '../lib/errorText';
 import {
+  LABELS_UNAVAILABLE,
   labelsApi,
   type ApplyLabelsRequest,
   type ApplyLabelsResult,
@@ -22,9 +23,6 @@ import {
 } from './labelsApi';
 
 export const labelsQueryKey = ['labels'] as const;
-
-/** Возможности нет, пока сервер не сказал обратного. */
-const LABELS_UNAVAILABLE: LabelsState = { available: false, reason: null, items: [] };
 
 /**
  * Состояние возможности и справочник ящика.
