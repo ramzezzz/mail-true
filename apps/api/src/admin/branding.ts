@@ -263,7 +263,7 @@ function isLogo(value: unknown): value is BrandingLogo {
  */
 function normalizeName(value: string | null, what: string): string | null {
   if (value === null) return null;
-  const clean = value.replace(/[ -]/gu, '').trim();
+  const clean = value.replace(/[\u0000-\u001f\u007f]/gu, '').trim();
   if (clean === '') return null;
   if (clean.length > BRANDING_NAME_MAX) {
     throw new BadRequestError(

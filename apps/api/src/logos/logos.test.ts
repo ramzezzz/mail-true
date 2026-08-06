@@ -211,7 +211,7 @@ test('картинка: безобидный SVG принимается', () => 
 });
 
 test('картинка: исполняемый файл под видом значка отвергается', () => {
-  assert.equal(inspectSenderLogo(Buffer.from('MZ ...', 'latin1')), null);
+  assert.equal(inspectSenderLogo(Buffer.from('MZ�\u0090\u0000...', 'latin1')), null);
   assert.equal(inspectSenderLogo(Buffer.from('<?php system($_GET[0]); ?>', 'latin1')), null);
 });
 

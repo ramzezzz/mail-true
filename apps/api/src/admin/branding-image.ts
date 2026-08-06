@@ -105,7 +105,7 @@ const EXECUTABLE_SIGNATURES: ReadonlyArray<{ head: Buffer; title: string }> = [
   { head: Buffer.from([0x7f, 0x45, 0x4c, 0x46]), title: 'исполняемый файл Linux (ELF)' },
   { head: Buffer.from('#!', 'latin1'), title: 'сценарий оболочки' },
   { head: Buffer.from('<?php', 'latin1'), title: 'сценарий PHP' },
-  { head: Buffer.from('PK', 'latin1'), title: 'архив ZIP (или документ office)' },
+  { head: Buffer.from('PK\u0003\u0004', 'latin1'), title: 'архив ZIP (или документ office)' },
   { head: Buffer.from('%PDF', 'latin1'), title: 'документ PDF' },
   { head: Buffer.from([0xca, 0xfe, 0xba, 0xbe]), title: 'класс Java' },
   { head: Buffer.from([0x1f, 0x8b]), title: 'архив gzip' },
