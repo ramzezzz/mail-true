@@ -113,7 +113,9 @@ async function main(): Promise<number> {
   );
 
   const totals = await assistant.auditTotals();
-  console.log(`Журнал: обращений ${String(totals.requests)}, символов наружу ${String(totals.outboundChars)}`);
+  console.log(
+    `Журнал: обращений ${String(totals.requests)}, символов наружу ${String(totals.outboundChars)}`,
+  );
   return 0;
 }
 

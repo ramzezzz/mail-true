@@ -41,14 +41,15 @@ import { LabelPills } from '../src/mail/LabelPill';
 import { MessageList, ROW_HEIGHT } from '../src/mail/MessageList';
 import { FolderPage } from '../src/pages/FolderPage';
 import { LabelsPage } from '../src/pages/settings/LabelsPage';
-import {
-  buildSearchParams,
-  parseSearchParams,
-  toggleLabelFacet,
-} from '../src/search/searchParams';
+import { buildSearchParams, parseSearchParams, toggleLabelFacet } from '../src/search/searchParams';
 
 const OPLATIT: MailLabel = { key: 'mt-oplatit', name: 'Оплатить', color: 'red', position: 0 };
-const YURIST: MailLabel = { key: 'mt-yurist', name: 'Спросить у юриста', color: 'blue', position: 1 };
+const YURIST: MailLabel = {
+  key: 'mt-yurist',
+  name: 'Спросить у юриста',
+  color: 'blue',
+  position: 1,
+};
 
 function summary(id: string, labels: string[]): MessageSummary {
   return {
@@ -296,10 +297,7 @@ describe('метка на строке-переписке', () => {
     // Разговор из трёх писем. Метку поставили на весь разговор, потом
     // пришёл ответ — у него ключевого слова нет. По последнему письму
     // пометка исчезла бы из списка ровно тогда, когда разговор ожил.
-    expect(rowLabelKeys(row([], ['mt-oplatit', 'mt-yurist']))).toEqual([
-      'mt-oplatit',
-      'mt-yurist',
-    ]);
+    expect(rowLabelKeys(row([], ['mt-oplatit', 'mt-yurist']))).toEqual(['mt-oplatit', 'mt-yurist']);
   });
 
   it('служебные слова продукта в метки строки не попадают', () => {
@@ -331,8 +329,14 @@ function stubLayout() {
       disconnect() {}
     };
   }
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 800 });
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get: () => 1200,
+  });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get: () => 800,
+  });
 }
 
 describe('пилюля в строке не растит строку', () => {
@@ -515,9 +519,7 @@ describe('отбор списка по метке', () => {
      */
     return vi.spyOn(api, 'getMessages').mockImplementation(async (query) => {
       const all = [summary('1', ['mt-oplatit']), summary('2', [])];
-      const items = query.label
-        ? all.filter((m) => m.labels.includes(query.label as string))
-        : all;
+      const items = query.label ? all.filter((m) => m.labels.includes(query.label as string)) : all;
       return { items, total: items.length, offset: query.offset, limit: query.limit };
     });
   }

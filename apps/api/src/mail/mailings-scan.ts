@@ -263,7 +263,9 @@ export async function scanMailbox(client: ImapFlow, opts: ScanOptions = {}): Pro
  * должно опираться на то же число, что человек видит в профиле, —
  * поэтому берём его тем же способом, что и routes/account.ts.
  */
-async function readQuota(client: ImapFlow): Promise<{ usedBytes: number; limitBytes: number } | null> {
+async function readQuota(
+  client: ImapFlow,
+): Promise<{ usedBytes: number; limitBytes: number } | null> {
   try {
     const quota = await client.getQuota('INBOX');
     const storage = quota && quota.storage ? quota.storage : null;

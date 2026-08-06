@@ -11,7 +11,12 @@
 
 import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
-import type { NotificationPrefs, NotificationPrefsPatch, NotificationView, PushState } from './types';
+import type {
+  NotificationPrefs,
+  NotificationPrefsPatch,
+  NotificationView,
+  PushState,
+} from './types';
 
 const CLIENT_ID_KEY = 'mt-notification-client';
 

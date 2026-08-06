@@ -120,9 +120,7 @@ export class AccountsService {
   /** База или понятный отказ. */
   requireDb(): AccountsDb {
     if (!this.#db) {
-      throw new AccountsUnavailableError(
-        'Подключение ящиков недоступно: не настроена база данных',
-      );
+      throw new AccountsUnavailableError('Подключение ящиков недоступно: не настроена база данных');
     }
     if (!this.#config.EXTERNAL_ACCOUNTS_ENABLED) {
       throw new AccountsUnavailableError(
@@ -278,19 +276,21 @@ export class AccountsService {
 
     // Запись итога — тоже под защитой: если база отвалилась именно сейчас,
     // подключение останется 'running' до перезапуска, и об этом надо знать.
-    await db.markCollectorDone(account.id, {
-      status: result.status,
-      copied: result.copied,
-      skipped: result.skipped,
-      failed: result.failed,
-      durationMs: result.durationMs,
-      error: result.error,
-    }).catch((err: unknown) => {
-      this.#logger.error(
-        errorInfo(err, { account: account.address }),
-        'Не удалось записать итог сбора почты: подключение останется в состоянии «идёт сбор»',
-      );
-    });
+    await db
+      .markCollectorDone(account.id, {
+        status: result.status,
+        copied: result.copied,
+        skipped: result.skipped,
+        failed: result.failed,
+        durationMs: result.durationMs,
+        error: result.error,
+      })
+      .catch((err: unknown) => {
+        this.#logger.error(
+          errorInfo(err, { account: account.address }),
+          'Не удалось записать итог сбора почты: подключение останется в состоянии «идёт сбор»',
+        );
+      });
     return result;
   }
 

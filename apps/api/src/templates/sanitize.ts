@@ -79,8 +79,7 @@ const FORBID_ATTR = ['srcset', 'ping', 'formaction', 'action', 'xlink:href', 'po
  * частей письма, на которые такая ссылка могла бы указывать, и оставленная
  * она превратилась бы в битую картинку в каждом отправленном письме.
  */
-const ALLOWED_URI =
-  /^(?:(?:https?|mailto|tel|callto):|data:image\/(?:png|gif|jpe?g|webp|bmp);)/i;
+const ALLOWED_URI = /^(?:(?:https?|mailto|tel|callto):|data:image\/(?:png|gif|jpe?g|webp|bmp);)/i;
 
 /** Вычищенная разметка тела шаблона. */
 export function sanitizeTemplateHtml(html: string): string {

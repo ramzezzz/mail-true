@@ -24,7 +24,12 @@ import type { AiService } from './service.js';
 
 const settingsSchema = z.object({
   enabled: z.boolean().optional(),
-  baseUrl: z.string().url('Адрес сервиса должен быть корректным URL').max(512).nullable().optional(),
+  baseUrl: z
+    .string()
+    .url('Адрес сервиса должен быть корректным URL')
+    .max(512)
+    .nullable()
+    .optional(),
   chatPath: z.string().trim().min(1).max(255).optional(),
   /**
    * Ключ доступа в открытом виде — принимаем, шифруем, забываем.

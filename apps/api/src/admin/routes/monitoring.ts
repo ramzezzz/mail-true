@@ -376,14 +376,18 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
     const dnsChecks: HealthCheck[] = domains.map((domain) => {
       const overall = domain.dns_overall ?? 'unknown';
       const state: CheckState =
-        overall === 'ok' ? 'ok' : overall === 'warn' ? 'warn' : overall === 'fail' ? 'fail' : 'unknown';
+        overall === 'ok'
+          ? 'ok'
+          : overall === 'warn'
+            ? 'warn'
+            : overall === 'fail'
+              ? 'fail'
+              : 'unknown';
       const checkedAt = domain.dns_checked_at;
       // Проверка недельной давности — это не «проверено»: записи меняют у
       // регистратора, и панель об этом не узнаёт, пока не спросит заново.
       const staleDays =
-        checkedAt === null
-          ? null
-          : Math.floor((Date.now() - checkedAt.getTime()) / 86_400_000);
+        checkedAt === null ? null : Math.floor((Date.now() - checkedAt.getTime()) / 86_400_000);
       return {
         id: `dns:${String(domain.id)}`,
         group: 'DNS',
@@ -429,60 +433,69 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
    * Право audit.read, а не overview.read: здесь адреса отправителей и
    * получателей, то есть та же чувствительность, что у журналов почты.
    */
-  app.get('/monitoring/failures', { preHandler: requireAdmin(app, 'audit.read') }, async (request) => {
-    const q = z
-      .object({
-        hours: z.coerce.number().int().min(1).max(24 * 7).default(24),
-        limit: z.coerce.number().int().min(1).max(100).default(30),
-      })
-      .parse(request.query);
-    const to = new Date();
-    const from = new Date(to.getTime() - q.hours * 3600_000);
+  app.get(
+    '/monitoring/failures',
+    { preHandler: requireAdmin(app, 'audit.read') },
+    async (request) => {
+      const q = z
+        .object({
+          hours: z.coerce
+            .number()
+            .int()
+            .min(1)
+            .max(24 * 7)
+            .default(24),
+          limit: z.coerce.number().int().min(1).max(100).default(30),
+        })
+        .parse(request.query);
+      const to = new Date();
+      const from = new Date(to.getTime() - q.hours * 3600_000);
 
-    if (!(await flow.schemaReady())) {
+      if (!(await flow.schemaReady())) {
+        return {
+          available: false,
+          note:
+            'История доставки недоступна: не применена миграция 0007_mail_flow.sql. ' +
+            'Остальные проверки раздела работают и без неё',
+          hours: q.hours,
+          items: [],
+          counts: {},
+          rspamdErrors: [],
+        };
+      }
+
+      const [events, stats, rspamdErrors] = await Promise.all([
+        flow.listEvents({
+          from,
+          to,
+          statuses: ['rejected', 'bounced', 'expired'],
+          limit: q.limit,
+        }),
+        flow.stats(from, to),
+        // Ошибки самого антиспама: они не видны ни в журнале Postfix, ни в
+        // истории доставки — письмо при этом проходит «успешно», просто без
+        // части проверок.
+        rspamd.errors(10).catch(() => []),
+      ]);
+
       return {
-        available: false,
+        available: true,
         note:
-          'История доставки недоступна: не применена миграция 0007_mail_flow.sql. ' +
-          'Остальные проверки раздела работают и без неё',
+          'Отказы и возвраты за выбранное окно по разобранному журналу Postfix. Отложенные ' +
+          '(deferred) сюда не попадают: они ещё не потеряны и видны в очереди',
         hours: q.hours,
-        items: [],
-        counts: {},
-        rspamdErrors: [],
+        counts: stats.counts,
+        items: events.map((row) => ({
+          id: row.id,
+          at: row.occurred_at.toISOString(),
+          status: row.status,
+          sender: row.sender,
+          recipient: row.recipient,
+          dsn: row.dsn,
+          reason: row.reason,
+        })),
+        rspamdErrors,
       };
-    }
-
-    const [events, stats, rspamdErrors] = await Promise.all([
-      flow.listEvents({
-        from,
-        to,
-        statuses: ['rejected', 'bounced', 'expired'],
-        limit: q.limit,
-      }),
-      flow.stats(from, to),
-      // Ошибки самого антиспама: они не видны ни в журнале Postfix, ни в
-      // истории доставки — письмо при этом проходит «успешно», просто без
-      // части проверок.
-      rspamd.errors(10).catch(() => []),
-    ]);
-
-    return {
-      available: true,
-      note:
-        'Отказы и возвраты за выбранное окно по разобранному журналу Postfix. Отложенные ' +
-        '(deferred) сюда не попадают: они ещё не потеряны и видны в очереди',
-      hours: q.hours,
-      counts: stats.counts,
-      items: events.map((row) => ({
-        id: row.id,
-        at: row.occurred_at.toISOString(),
-        status: row.status,
-        sender: row.sender,
-        recipient: row.recipient,
-        dsn: row.dsn,
-        reason: row.reason,
-      })),
-      rspamdErrors,
-    };
-  });
+    },
+  );
 }

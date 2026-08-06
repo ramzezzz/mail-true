@@ -117,7 +117,10 @@ export class LabelsDb implements LabelStore {
     // Ключ подбирается по УЖЕ занятым: две метки «Счета» получат
     // `mt-scheta` и `mt-scheta-2`, а не откажут человеку в имени.
     const existing = await this.list(accountEmail);
-    const key = buildLabelKey(draft.name, existing.map((l) => l.key));
+    const key = buildLabelKey(
+      draft.name,
+      existing.map((l) => l.key),
+    );
     const rows = await this.#query<LabelRow>(
       `INSERT INTO mail_labels (account_email, label_key, name, color, position)
        VALUES (lower($1), $2, $3, $4,
@@ -202,7 +205,10 @@ export class MemoryLabelStore implements LabelStore {
 
   async create(accountEmail: string, draft: LabelDraft): Promise<UserLabel> {
     const bucket = this.#bucket(accountEmail);
-    const key = buildLabelKey(draft.name, bucket.map((l) => l.key));
+    const key = buildLabelKey(
+      draft.name,
+      bucket.map((l) => l.key),
+    );
     const position = bucket.reduce((max, l) => Math.max(max, l.position + 1), 0);
     const label: UserLabel = { key, name: draft.name, color: draft.color, position };
     bucket.push(label);

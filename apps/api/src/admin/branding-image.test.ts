@@ -174,12 +174,18 @@ test('SVG со скриптом отбивается', () => {
 });
 
 test('SVG с обработчиком события отбивается — скрипт бывает и без тега', () => {
-  assert.match(refusal(svg('<rect width="10" height="10" onload="alert(1)"/>')), /обработчик события/u);
+  assert.match(
+    refusal(svg('<rect width="10" height="10" onload="alert(1)"/>')),
+    /обработчик события/u,
+  );
   assert.match(refusal(svg('<a href="javascript:alert(1)"><rect/></a>')), /javascript:/u);
 });
 
 test('SVG со встроенным HTML (foreignObject) отбивается', () => {
-  assert.match(refusal(svg('<foreignObject><body>привет</body></foreignObject>')), /foreignObject/u);
+  assert.match(
+    refusal(svg('<foreignObject><body>привет</body></foreignObject>')),
+    /foreignObject/u,
+  );
 });
 
 test('SVG с внешней сущностью отбивается: это чтение файлов сервера', () => {
@@ -192,7 +198,9 @@ test('SVG с внешней сущностью отбивается: это чт
 });
 
 test('SVG, тянущий картинку с чужого сервера, отбивается', () => {
-  const message = refusal(svg('<image href="https://example.org/logo.png" width="100" height="40"/>'));
+  const message = refusal(
+    svg('<image href="https://example.org/logo.png" width="100" height="40"/>'),
+  );
   assert.match(message, /сторонний сервер/u);
 });
 

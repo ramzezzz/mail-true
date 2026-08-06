@@ -28,7 +28,5 @@ export function parseAddresses(value: string): MailAddress[] {
  * меняли бы адреса сами по себе.
  */
 export function formatAddresses(list: readonly MailAddress[]): string {
-  return list
-    .map((a) => (a.name ? `${a.name} <${a.address}>` : a.address))
-    .join(', ');
+  return list.map((a) => (a.name ? `${a.name} <${a.address}>` : a.address)).join(', ');
 }

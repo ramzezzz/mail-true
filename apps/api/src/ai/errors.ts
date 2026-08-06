@@ -13,9 +13,7 @@ import type { AiError } from '@mail-true/ai';
 
 /** Администратор домена запретил ИИ. Интерфейс не должен показывать кнопки. */
 export class AiDisabledError extends ApiError {
-  constructor(
-    message = 'Помощник на основе ИИ выключен администратором домена',
-  ) {
+  constructor(message = 'Помощник на основе ИИ выключен администратором домена') {
     super(403, 'AI_DISABLED', message);
   }
 }

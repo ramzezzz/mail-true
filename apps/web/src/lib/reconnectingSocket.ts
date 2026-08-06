@@ -12,7 +12,10 @@
 
 /** То немногое, что нам нужно от сокета. */
 export interface SocketLike {
-  addEventListener(type: 'message' | 'close' | 'error' | 'open', handler: (event: unknown) => void): void;
+  addEventListener(
+    type: 'message' | 'close' | 'error' | 'open',
+    handler: (event: unknown) => void,
+  ): void;
   close(): void;
 }
 

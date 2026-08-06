@@ -156,7 +156,8 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
 
   const requireExport = (): OwnerStore => {
     const state = exportState();
-    if (!state.available || !ctx.store) throw new BadRequestError(state.reason ?? 'Выгрузка недоступна');
+    if (!state.available || !ctx.store)
+      throw new BadRequestError(state.reason ?? 'Выгрузка недоступна');
     return ctx.store;
   };
 

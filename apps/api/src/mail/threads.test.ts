@@ -50,19 +50,11 @@ test('пустой или неожиданный ответ THREAD — пуст�
 /* ------------------------------------------------------------------ */
 
 test('переписка из трёх писем — одна строка, новые переписки первыми', () => {
-  const groups = [
-    [1, 4, 9],
-    [2],
-    [3, 5],
-  ];
+  const groups = [[1, 4, 9], [2], [3, 5]];
   const rows = buildThreadRows(groups, [1, 2, 3, 4, 5, 9]);
 
   // Внутри строки — по возрастанию номера, то есть по времени
-  assert.deepEqual(rows, [
-    [1, 4, 9],
-    [3, 5],
-    [2],
-  ]);
+  assert.deepEqual(rows, [[1, 4, 9], [3, 5], [2]]);
   // Порядок строк — по САМОМУ СВЕЖЕМУ письму переписки: 9, потом 5, потом 2
   assert.deepEqual(
     rows.map((row) => row[row.length - 1]),
@@ -72,17 +64,15 @@ test('переписка из трёх писем — одна строка, н�
 
 test('ни одно найденное письмо не пропадает и не задваивается', () => {
   const matched = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-  const groups = [
-    [1, 5, 10],
-    [2, 3],
-    [4],
-    [6, 7, 8, 9],
-  ];
+  const groups = [[1, 5, 10], [2, 3], [4], [6, 7, 8, 9]];
   const rows = buildThreadRows(groups, matched);
   const flat = rows.flat();
 
   // Прямой ход: все письма разложены
-  assert.deepEqual([...flat].sort((a, b) => a - b), matched);
+  assert.deepEqual(
+    [...flat].sort((a, b) => a - b),
+    matched,
+  );
   // Обратный ход: ни одно письмо не попало в две строки
   assert.equal(new Set(flat).size, flat.length);
 });
@@ -110,7 +100,10 @@ test('письмо, которого нет ни в одной ветви отв
   // ответах сервера: иначе его не видно ни строкой, ни внутри переписки.
   const rows = buildThreadRows([[1, 2]], [1, 2, 77]);
   assert.deepEqual(rows, [[77], [1, 2]]);
-  assert.deepEqual([...rows.flat()].sort((a, b) => a - b), [1, 2, 77]);
+  assert.deepEqual(
+    [...rows.flat()].sort((a, b) => a - b),
+    [1, 2, 77],
+  );
 });
 
 test('пустая выборка — пустой список строк', () => {

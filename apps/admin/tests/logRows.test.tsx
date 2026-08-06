@@ -78,7 +78,14 @@ const SOURCES: LogSourcesResponse = {
       modifiedAt: null,
       rotatedFiles: 0,
     },
-    { source: 'api', fileName: 'api.log', present: false, sizeBytes: 0, modifiedAt: null, rotatedFiles: 0 },
+    {
+      source: 'api',
+      fileName: 'api.log',
+      present: false,
+      sizeBytes: 0,
+      modifiedAt: null,
+      rotatedFiles: 0,
+    },
   ],
 };
 

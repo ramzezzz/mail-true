@@ -36,9 +36,13 @@ const subscribeSchema = z.object({
    * схему: `http://` и тем более `file://` тут быть не может — это
    * означало бы, что сервер уговорили постучаться куда-то ещё.
    */
-  endpoint: z.string().url().max(2000).refine((v) => v.startsWith('https://'), {
-    message: 'Адрес службы доставки должен быть https',
-  }),
+  endpoint: z
+    .string()
+    .url()
+    .max(2000)
+    .refine((v) => v.startsWith('https://'), {
+      message: 'Адрес службы доставки должен быть https',
+    }),
   keys: z.object({
     p256dh: z.string().min(1).max(200),
     auth: z.string().min(1).max(100),

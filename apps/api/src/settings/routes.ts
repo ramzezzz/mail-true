@@ -89,9 +89,7 @@ export const generalSchema = z.object({
    * столько, сколько сказано, и принимать «3600» от кого угодно значило бы
    * заводить способ задержать чужую почту на час.
    */
-  undoSendSeconds: z
-    .union([z.literal(0), z.literal(5), z.literal(10), z.literal(30)])
-    .optional(),
+  undoSendSeconds: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(30)]).optional(),
   /*
    * Группировка писем в переписки. Без `.default()` — по той же причине,
    * что у двух полей выше: этот же контракт правит админка, и с умолчанием
@@ -276,9 +274,7 @@ export async function settingsUserRoutes(
 
   app.put('/appearance', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
-    return appearanceGuard(() =>
-      saveAppearance(service.requireDb(), session.email, request.body),
-    );
+    return appearanceGuard(() => saveAppearance(service.requireDb(), session.email, request.body));
   });
 
   /* -------------------------------------------------------------- */
@@ -347,7 +343,9 @@ export async function settingsUserRoutes(
   app.delete('/filters/:id', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
-    const removed = await guard(() => service.requireDb().deleteFilter(session.email, numericId(id)));
+    const removed = await guard(() =>
+      service.requireDb().deleteFilter(session.email, numericId(id)),
+    );
     if (!removed) throw new NotFoundError('Правило не найдено');
     await service.syncSieve(session.email);
     return { ok: true };

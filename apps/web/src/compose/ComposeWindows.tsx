@@ -43,9 +43,7 @@ export interface ComposeWindowPlace {
  * в ряду свёрнутых: на экране от него видна только плашка внизу. Иначе
  * отправленное письмо продолжало бы сдвигать соседние окна вправо.
  */
-export function composeWindowPlaces(
-  windows: readonly ComposeWindowState[],
-): ComposeWindowPlace[] {
+export function composeWindowPlaces(windows: readonly ComposeWindowState[]): ComposeWindowPlace[] {
   let expanded = 0;
   let minimized = 0;
   let pending = 0;

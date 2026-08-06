@@ -251,138 +251,152 @@ export function ImportPage() {
         <ErrorNotice error={doPreview.error} />
       </Panel>
 
-      {preview && jobId === null && (() => {
-        /*
-         * Таблицу на пять тысяч строк браузер рисует несколько секунд, и всё
-         * это время страница не отвечает. Строки с ошибками важнее всего —
-         * их показываем все, годные добираем до предела.
-         */
-        const failed = preview.rows.filter((r) => r.errors.length > 0);
-        const rest = preview.rows.filter((r) => r.errors.length === 0);
-        const shownRows = [
-          ...failed,
-          ...rest.slice(0, Math.max(0, TABLE_LIMIT - failed.length)),
-        ].sort((a, b) => a.line - b.line);
-        const hiddenRows = preview.rows.length - shownRows.length;
-        return (
-        <div style={{ marginTop: 12 }}>
-          <Panel title="Что будет создано">
-            {preview.truncated && (
-              <Notice tone="error">
-                <strong>
-                  В файле {pluralize(preview.totalDataRows, 'строка', 'строки', 'строк')}, а за
-                  один раз создаётся не больше {preview.maxRows}. Остальные{' '}
-                  {pluralize(preview.totalDataRows - preview.maxRows, 'строка', 'строки', 'строк')}{' '}
-                  сейчас НЕ будут созданы.
-                </strong>
-                <br />
-                Разбейте файл на части и импортируйте их по очереди — иначе часть людей
-                останется без почты, и заметить это будет нечем.
-              </Notice>
-            )}
-            {preview.newDomainsDenied && (
-              <Notice tone="error">
-                Создавать домены вашей роли нельзя — этот флажок будет пропущен, и строки
-                с незаведёнными доменами создать не удастся. Попросите добавить домены
-                администратора с полным доступом.
-              </Notice>
-            )}
-            {preview.validCount === 0 ? (
-              <Notice tone="error">
-                Создавать нечего: годных строк нет. Исправьте файл и проверьте ещё раз.
-              </Notice>
-            ) : (
-              <Notice tone={preview.invalidCount > 0 ? 'info' : 'success'}>
-                Будет создано {pluralize(preview.validCount, 'ящик', 'ящика', 'ящиков')}
-                {preview.invalidCount > 0 &&
-                  `, отброшено ${pluralize(preview.invalidCount, 'строка', 'строки', 'строк')}`}
-                . Домены в файле: {preview.domains.join(', ') || '—'}. Строкам без своей
-                квоты досталось {formatBytes(preview.defaultQuotaBytes)}.
-              </Notice>
-            )}
+      {preview &&
+        jobId === null &&
+        (() => {
+          /*
+           * Таблицу на пять тысяч строк браузер рисует несколько секунд, и всё
+           * это время страница не отвечает. Строки с ошибками важнее всего —
+           * их показываем все, годные добираем до предела.
+           */
+          const failed = preview.rows.filter((r) => r.errors.length > 0);
+          const rest = preview.rows.filter((r) => r.errors.length === 0);
+          const shownRows = [
+            ...failed,
+            ...rest.slice(0, Math.max(0, TABLE_LIMIT - failed.length)),
+          ].sort((a, b) => a.line - b.line);
+          const hiddenRows = preview.rows.length - shownRows.length;
+          return (
+            <div style={{ marginTop: 12 }}>
+              <Panel title="Что будет создано">
+                {preview.truncated && (
+                  <Notice tone="error">
+                    <strong>
+                      В файле {pluralize(preview.totalDataRows, 'строка', 'строки', 'строк')}, а за
+                      один раз создаётся не больше {preview.maxRows}. Остальные{' '}
+                      {pluralize(
+                        preview.totalDataRows - preview.maxRows,
+                        'строка',
+                        'строки',
+                        'строк',
+                      )}{' '}
+                      сейчас НЕ будут созданы.
+                    </strong>
+                    <br />
+                    Разбейте файл на части и импортируйте их по очереди — иначе часть людей
+                    останется без почты, и заметить это будет нечем.
+                  </Notice>
+                )}
+                {preview.newDomainsDenied && (
+                  <Notice tone="error">
+                    Создавать домены вашей роли нельзя — этот флажок будет пропущен, и строки с
+                    незаведёнными доменами создать не удастся. Попросите добавить домены
+                    администратора с полным доступом.
+                  </Notice>
+                )}
+                {preview.validCount === 0 ? (
+                  <Notice tone="error">
+                    Создавать нечего: годных строк нет. Исправьте файл и проверьте ещё раз.
+                  </Notice>
+                ) : (
+                  <Notice tone={preview.invalidCount > 0 ? 'info' : 'success'}>
+                    Будет создано {pluralize(preview.validCount, 'ящик', 'ящика', 'ящиков')}
+                    {preview.invalidCount > 0 &&
+                      `, отброшено ${pluralize(preview.invalidCount, 'строка', 'строки', 'строк')}`}
+                    . Домены в файле: {preview.domains.join(', ') || '—'}. Строкам без своей квоты
+                    досталось {formatBytes(preview.defaultQuotaBytes)}.
+                  </Notice>
+                )}
 
-            <TableWrap>
-              <Table>
-                <thead>
-                  <tr>
-                    <th className={tableStyles.numeric}>Строка</th>
-                    <th>Адрес</th>
-                    <th>Имя</th>
-                    <th className={tableStyles.numeric}>Квота</th>
-                    <th>Пароль</th>
-                    <th>Итог</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shownRows.map((row) => (
-                    <tr key={row.line}>
-                      <td className={tableStyles.numeric}>{row.line}</td>
-                      <td className="mt-mono">{row.email || '—'}</td>
-                      <td>{row.displayName ?? '—'}</td>
-                      <td className={tableStyles.numeric}>
-                        {row.quotaBytes === null ? '—' : formatBytes(row.quotaBytes)}
-                      </td>
-                      <td>{row.hasPassword ? 'из файла' : 'будет сгенерирован'}</td>
-                      <td>
-                        {row.errors.length > 0 ? (
-                          <span>
-                            <Badge tone="fail">не будет создан</Badge>{' '}
-                            {row.errors.join('; ')}
-                          </span>
-                        ) : row.warnings.length > 0 ? (
-                          <span>
-                            <Badge tone="warn">будет создан</Badge> {row.warnings.join('; ')}
-                          </span>
-                        ) : (
-                          <Badge tone="ok">будет создан</Badge>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {preview.rows.length === 0 && <EmptyRow colSpan={6}>Файл пуст</EmptyRow>}
-                  {hiddenRows > 0 && (
-                    <EmptyRow colSpan={6}>
-                      …и ещё {pluralize(hiddenRows, 'строка', 'строки', 'строк')}. Таблица
-                      показывает первые {TABLE_LIMIT}: рисовать тысячи строк долго, а прочесть
-                      их всё равно нельзя. Строки с ошибками показаны все.
-                    </EmptyRow>
-                  )}
-                </tbody>
-              </Table>
-            </TableWrap>
+                <TableWrap>
+                  <Table>
+                    <thead>
+                      <tr>
+                        <th className={tableStyles.numeric}>Строка</th>
+                        <th>Адрес</th>
+                        <th>Имя</th>
+                        <th className={tableStyles.numeric}>Квота</th>
+                        <th>Пароль</th>
+                        <th>Итог</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {shownRows.map((row) => (
+                        <tr key={row.line}>
+                          <td className={tableStyles.numeric}>{row.line}</td>
+                          <td className="mt-mono">{row.email || '—'}</td>
+                          <td>{row.displayName ?? '—'}</td>
+                          <td className={tableStyles.numeric}>
+                            {row.quotaBytes === null ? '—' : formatBytes(row.quotaBytes)}
+                          </td>
+                          <td>{row.hasPassword ? 'из файла' : 'будет сгенерирован'}</td>
+                          <td>
+                            {row.errors.length > 0 ? (
+                              <span>
+                                <Badge tone="fail">не будет создан</Badge> {row.errors.join('; ')}
+                              </span>
+                            ) : row.warnings.length > 0 ? (
+                              <span>
+                                <Badge tone="warn">будет создан</Badge> {row.warnings.join('; ')}
+                              </span>
+                            ) : (
+                              <Badge tone="ok">будет создан</Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {preview.rows.length === 0 && <EmptyRow colSpan={6}>Файл пуст</EmptyRow>}
+                      {hiddenRows > 0 && (
+                        <EmptyRow colSpan={6}>
+                          …и ещё {pluralize(hiddenRows, 'строка', 'строки', 'строк')}. Таблица
+                          показывает первые {TABLE_LIMIT}: рисовать тысячи строк долго, а прочесть
+                          их всё равно нельзя. Строки с ошибками показаны все.
+                        </EmptyRow>
+                      )}
+                    </tbody>
+                  </Table>
+                </TableWrap>
 
-            <Toolbar>
-              <ToolbarSpacer />
-              <Button
-                disabled={preview.validCount === 0 || doImport.isPending}
-                onClick={() => doImport.mutate()}
-              >
-                {doImport.isPending
-                  ? 'Создаём…'
-                  : `Создать ${pluralize(preview.validCount, 'ящик', 'ящика', 'ящиков')}`}
-              </Button>
-            </Toolbar>
-            <ErrorNotice error={doImport.error} />
-          </Panel>
-        </div>
-        );
-      })()}
+                <Toolbar>
+                  <ToolbarSpacer />
+                  <Button
+                    disabled={preview.validCount === 0 || doImport.isPending}
+                    onClick={() => doImport.mutate()}
+                  >
+                    {doImport.isPending
+                      ? 'Создаём…'
+                      : `Создать ${pluralize(preview.validCount, 'ящик', 'ящика', 'ящиков')}`}
+                  </Button>
+                </Toolbar>
+                <ErrorNotice error={doImport.error} />
+              </Panel>
+            </div>
+          );
+        })()}
 
       {result && (
         <div style={{ marginTop: 12 }}>
           <Panel title={`Результат импорта (задание №${result.id})`}>
             {result.state === 'running' ? (
               <Notice tone="info">
-                Создаём: {result.processed} из {result.total}. Страницу можно закрыть —
-                импорт идёт на сервере, а результат сохраняется по мере работы.
-                Вернуться к нему можно по адресу{' '}
+                Создаём: {result.processed} из {result.total}. Страницу можно закрыть — импорт идёт
+                на сервере, а результат сохраняется по мере работы. Вернуться к нему можно по адресу{' '}
                 <span className="mt-mono">/api/admin/users/import/jobs/{result.id}</span>.
               </Notice>
             ) : (
-              <Notice tone={result.state === 'failed' ? 'error' : result.failedCount === 0 ? 'success' : 'info'}>
+              <Notice
+                tone={
+                  result.state === 'failed'
+                    ? 'error'
+                    : result.failedCount === 0
+                      ? 'success'
+                      : 'info'
+                }
+              >
                 Создано {pluralize(result.createdCount, 'ящик', 'ящика', 'ящиков')}
                 {result.failedCount > 0 && `, не создано ${result.failedCount}`}.
-                {result.state === 'failed' && ` Импорт прерван: ${result.error ?? 'неизвестная ошибка'}.`}
+                {result.state === 'failed' &&
+                  ` Импорт прерван: ${result.error ?? 'неизвестная ошибка'}.`}
                 {result.passwordsStored
                   ? ' Пароли сохранены на сервере и доступны до ' +
                     new Date(result.expiresAt).toLocaleDateString('ru-RU') +
@@ -406,7 +420,9 @@ export function ImportPage() {
                       <td className="mt-mono">{row.generatedPassword ?? 'задан в файле'}</td>
                     </tr>
                   ))}
-                  {result.created.length === 0 && <EmptyRow colSpan={2}>Ничего не создано</EmptyRow>}
+                  {result.created.length === 0 && (
+                    <EmptyRow colSpan={2}>Ничего не создано</EmptyRow>
+                  )}
                 </tbody>
               </Table>
             </TableWrap>

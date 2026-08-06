@@ -14,11 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import { useGeneralSettings, useSaveGeneralSettings } from '../../api/settingsQueries';
-import {
-  UNDO_SEND_CHOICES,
-  type GeneralSettings,
-  type Signature,
-} from '../../api/settingsTypes';
+import { UNDO_SEND_CHOICES, type GeneralSettings, type Signature } from '../../api/settingsTypes';
 import { Button, SelectField, Switch, TextAreaField, TextField } from '../../components';
 import { dateInputValue } from '../../settings/generalSettings';
 import { IconPlus, IconTrash } from '../../mail/icons';
@@ -192,7 +188,9 @@ export function GeneralSettingsPage() {
             wrapperClassName={styles.dateField}
             disabled={!draft.autoReply.enabled}
             value={dateInputValue(draft.autoReply.to)}
-            onChange={(e) => patch({ autoReply: { ...draft.autoReply, to: e.target.value || null } })}
+            onChange={(e) =>
+              patch({ autoReply: { ...draft.autoReply, to: e.target.value || null } })
+            }
           />
         </SettingsRow>
         <SettingsHint>Пустые даты — автоответчик работает бессрочно.</SettingsHint>
@@ -217,10 +215,7 @@ export function GeneralSettingsPage() {
         />
       </SettingsSection>
 
-      <SettingsSection
-        title="Список писем"
-        description="Как выглядят строки в списке."
-      >
+      <SettingsSection title="Список писем" description="Как выглядят строки в списке.">
         <Switch
           label="Логотипы отправителей в кружках"
           /* Описание говорит и о выгоде, и о цене. Настройка означает, что
@@ -281,8 +276,8 @@ export function GeneralSettingsPage() {
             действительно НЕ у получателя, и человек должен это знать —
             иначе «отправил и ушёл» однажды окажется неправдой */}
         <SettingsHint>
-          Письмо ждёт эти секунды на сервере, а не у получателя, — и уходит,
-          даже если закрыть вкладку. Отменить можно только пока идёт отсчёт.
+          Письмо ждёт эти секунды на сервере, а не у получателя, — и уходит, даже если закрыть
+          вкладку. Отменить можно только пока идёт отсчёт.
         </SettingsHint>
       </SettingsSection>
 
@@ -290,9 +285,7 @@ export function GeneralSettingsPage() {
         <SelectField
           label="Переходить"
           value={draft.afterDelete}
-          onChange={(e) =>
-            patch({ afterDelete: e.target.value as GeneralSettings['afterDelete'] })
-          }
+          onChange={(e) => patch({ afterDelete: e.target.value as GeneralSettings['afterDelete'] })}
         >
           <option value="next-message">к следующему письму</option>
           <option value="list">к списку писем</option>
@@ -304,10 +297,7 @@ export function GeneralSettingsPage() {
           не менял ровно ничего, и показывать его было нельзя: обещание без
           обеспечения хуже отсутствия обещания. Теперь он управляет тем, что
           написано на нём, — см. apps/api/src/contacts/. */}
-      <SettingsSection
-        title="Адресная книга"
-        description="Откуда берутся подсказки в поле «Кому»."
-      >
+      <SettingsSection title="Адресная книга" description="Откуда берутся подсказки в поле «Кому».">
         <Switch
           label="Пополнять контакты из полученных писем"
           /* Описание говорит и о выгоде, и о цене — как у логотипов

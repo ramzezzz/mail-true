@@ -220,11 +220,16 @@ export function checkEntry(kind: SpamListValue, raw: string): EntryCheck {
       return {
         ok: false,
         value,
-        problem: 'Это адрес, а не домен. Уберите часть до собаки или воспользуйтесь списком адресов',
+        problem:
+          'Это адрес, а не домен. Уберите часть до собаки или воспользуйтесь списком адресов',
       };
     }
     if (!DOMAIN_RE.test(value)) {
-      return { ok: false, value, problem: 'Не похоже на доменное имя (нужен хотя бы один разделитель-точка)' };
+      return {
+        ok: false,
+        value,
+        problem: 'Не похоже на доменное имя (нужен хотя бы один разделитель-точка)',
+      };
     }
     return { ok: true, value, problem: '' };
   }
@@ -234,7 +239,8 @@ export function checkEntry(kind: SpamListValue, raw: string): EntryCheck {
   if (rest.length > 0) return { ok: false, value, problem: 'Лишняя косая черта в записи подсети' };
   const v4 = isIpv4(address);
   const v6 = isIpv6(address);
-  if (!v4 && !v6) return { ok: false, value, problem: 'Не похоже на адрес сервера (IPv4 или IPv6)' };
+  if (!v4 && !v6)
+    return { ok: false, value, problem: 'Не похоже на адрес сервера (IPv4 или IPv6)' };
   if (maskRaw !== undefined) {
     if (!/^\d{1,3}$/u.test(maskRaw)) {
       return { ok: false, value, problem: 'Длина префикса подсети должна быть числом' };

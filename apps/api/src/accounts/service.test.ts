@@ -110,7 +110,11 @@ test('чужой ключ шифрования: отказ доезжает в �
   const { db, started, done } = fakeDb([]);
   const svc = service(db, KEY);
 
-  const result = await svc.collect('owner@mail.local', account(1, 'ext@other.example'), passwordEnc);
+  const result = await svc.collect(
+    'owner@mail.local',
+    account(1, 'ext@other.example'),
+    passwordEnc,
+  );
 
   assert.deepEqual(started, [1], 'начало сбора должно быть отмечено');
   assert.equal(result?.status, 'error');
@@ -166,7 +170,11 @@ test('без служебного доступа Dovecot причина видн
   });
 
   // Планировщик пароля владельца не знает — без служебного входа сбор невозможен.
-  const result = await svc.collect('owner@mail.local', account(3, 'ext@other.example'), passwordEnc);
+  const result = await svc.collect(
+    'owner@mail.local',
+    account(3, 'ext@other.example'),
+    passwordEnc,
+  );
 
   assert.equal(result?.status, 'error');
   assert.match(String(done[0]?.error), /DOVECOT_MASTER_USER/);

@@ -239,12 +239,30 @@ function defaultFolders(): FakeFolder[] {
           listId: 'Скидки <news.shop.example>',
         },
         // Живая переписка — рассылкой не считается и уборкой не трогается
-        { uid: 4, size: 500, date: daysAgo(300), seen: true, flagged: true, from: 'kolya@example.com' },
-        { uid: 5, size: 900_000, date: daysAgo(400), seen: true, from: 'kolya@example.com', subject: 'Отчёт' },
+        {
+          uid: 4,
+          size: 500,
+          date: daysAgo(300),
+          seen: true,
+          flagged: true,
+          from: 'kolya@example.com',
+        },
+        {
+          uid: 5,
+          size: 900_000,
+          date: daysAgo(400),
+          seen: true,
+          from: 'kolya@example.com',
+          subject: 'Отчёт',
+        },
       ],
     },
     { path: 'Trash', specialUse: '\\Trash', messages: [{ uid: 9, size: 10, date: daysAgo(500) }] },
-    { path: 'Drafts', specialUse: '\\Drafts', messages: [{ uid: 7, size: 20, date: daysAgo(500) }] },
+    {
+      path: 'Drafts',
+      specialUse: '\\Drafts',
+      messages: [{ uid: 7, size: 20, date: daysAgo(500) }],
+    },
     { path: 'Archive', specialUse: '\\Archive', messages: [] },
   ];
 }
@@ -475,7 +493,12 @@ test('после уборки снимок пересобирается: чис�
   const sweep = await app.inject({
     method: 'POST',
     url: '/api/cleanup/sweep',
-    payload: { groupKey: 'list:news.shop.example', olderThanDays: 30, dryRun: false, scanAt: seen.at },
+    payload: {
+      groupKey: 'list:news.shop.example',
+      olderThanDays: 30,
+      dryRun: false,
+      scanAt: seen.at,
+    },
   });
   assert.equal(sweep.statusCode, 200, sweep.body);
   const after = await mailings(app);
@@ -500,7 +523,10 @@ test('«оставить последнее» доезжает до ящика: 
   assert.equal(response.statusCode, 200);
   assert.equal(response.json<{ moved: number }>().moved, 2);
   const inbox = client.folders.find((f) => f.path === 'INBOX');
-  assert.ok(inbox?.messages.some((m) => m.uid === 3), 'последнее письмо рассылки на месте');
+  assert.ok(
+    inbox?.messages.some((m) => m.uid === 3),
+    'последнее письмо рассылки на месте',
+  );
   await app.close();
 });
 

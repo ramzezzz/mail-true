@@ -144,7 +144,9 @@ class FakeMailbox {
       .filter((l) => wanted.has(l.uid))
       .map((l) => ({
         uid: l.uid,
-        bodyStructure: l.attachment ? withAttachment() : { part: '1', type: 'text/plain', size: 10 },
+        bodyStructure: l.attachment
+          ? withAttachment()
+          : { part: '1', type: 'text/plain', size: 10 },
         ...(query['envelope']
           ? {
               envelope: {
@@ -240,7 +242,10 @@ test('обратный ход: без группировки те же пись�
   assert.equal(flat.items.length, 4);
   assert.equal(flat.total, 4);
   // И ни у одной строки нет сводки переписки — список остался плоским
-  assert.equal(flat.items.every((m) => m.thread === undefined), true);
+  assert.equal(
+    flat.items.every((m) => m.thread === undefined),
+    true,
+  );
 });
 
 test('строка-переписка называет ВСЕ свои письма — иначе действие тронет не все', async () => {
@@ -420,7 +425,10 @@ test('в черновиках группировки нет, даже когда
   const page = await list(mailbox, { folder: DRAFTS, threaded: true });
 
   assert.equal(page.items.length, 4, 'каждый черновик — своя строка');
-  assert.equal(page.items.every((m) => m.thread === undefined), true);
+  assert.equal(
+    page.items.every((m) => m.thread === undefined),
+    true,
+  );
   // И сервер об этом даже не спрашивали: лишняя команда IMAP на каждое
   // открытие папки — это плата ни за что
   assert.deepEqual(mailbox.threadCommands, []);

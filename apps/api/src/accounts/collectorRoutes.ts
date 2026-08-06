@@ -24,7 +24,12 @@ import { z } from 'zod';
 import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
-import { folderIdOfPath, pathOfFolderId, toWebStatus, type WebCollector } from '../settings/webdto.js';
+import {
+  folderIdOfPath,
+  pathOfFolderId,
+  toWebStatus,
+  type WebCollector,
+} from '../settings/webdto.js';
 import type { MailSession } from '../types.js';
 import { isUndefinedTable, isUniqueViolation } from './db.js';
 import { AccountsUnavailableError, MIGRATION_HINT, type AccountsService } from './service.js';

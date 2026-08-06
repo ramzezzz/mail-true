@@ -116,7 +116,12 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
 /** Домен из адреса в нижнем регистре. */
 export function domainOf(email: string): string {
   const at = email.lastIndexOf('@');
-  return at > 0 ? email.slice(at + 1).trim().toLowerCase() : '';
+  return at > 0
+    ? email
+        .slice(at + 1)
+        .trim()
+        .toLowerCase()
+    : '';
 }
 
 /** Ищет сервис в списке известных. */

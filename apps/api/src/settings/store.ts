@@ -200,7 +200,18 @@ export class SieveStore {
     if (this.#opts.transport === 'docker') {
       const res = await run(
         'docker',
-        ['exec', '-i', this.#opts.container, 'sh', '-c', WRITE_SCRIPT, 'sh', dir, this.#opts.scriptName, this.#opts.owner],
+        [
+          'exec',
+          '-i',
+          this.#opts.container,
+          'sh',
+          '-c',
+          WRITE_SCRIPT,
+          'sh',
+          dir,
+          this.#opts.scriptName,
+          this.#opts.owner,
+        ],
         script,
       );
       if (res.code !== 0) {
@@ -220,13 +231,11 @@ export class SieveStore {
     const tmpSieve = join(sieveDir, '.mt-new.sieve');
     const tmpBin = join(sieveDir, '.mt-new.svbin');
     await writeFile(tmpSieve, script, 'utf8');
-    const res = await run('sievec', [tmpSieve]).catch(
-      (err: unknown): RunResult => ({
-        code: -1,
-        stdout: '',
-        stderr: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    const res = await run('sievec', [tmpSieve]).catch((err: unknown): RunResult => ({
+      code: -1,
+      stdout: '',
+      stderr: err instanceof Error ? err.message : String(err),
+    }));
     // code === -1 — самого sievec нет (spawn не нашёл файл). Это не ошибка
     // скрипта, и правила из-за этого терять нельзя.
     const compilerMissing = res.code === -1;

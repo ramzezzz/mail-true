@@ -309,9 +309,7 @@ export function senderFromMessage(message: string): string | null {
   if (!line) return null;
   const angled = /<([^>]+)>/u.exec(line)?.[1];
   const candidate = (angled ?? line).trim().replace(/^"|"$/gu, '');
-  return /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/u.test(candidate)
-    ? candidate.toLowerCase()
-    : null;
+  return /^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/u.test(candidate) ? candidate.toLowerCase() : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,9 +343,7 @@ export function addMapEntry(text: string, entry: string): string {
 /** Убирает запись. Комментарии и прочие строки не трогаются. */
 export function removeMapEntry(text: string, entry: string): string {
   const target = entry.trim().toLowerCase();
-  const kept = text
-    .split(/\r?\n/u)
-    .filter((line) => line.trim().toLowerCase() !== target);
+  const kept = text.split(/\r?\n/u).filter((line) => line.trim().toLowerCase() !== target);
   return `${kept.join('\n').replace(/\s+$/u, '')}\n`;
 }
 

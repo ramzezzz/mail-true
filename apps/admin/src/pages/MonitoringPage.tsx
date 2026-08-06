@@ -59,9 +59,9 @@ const STATE_TONE: Readonly<Record<CheckState, 'ok' | 'warn' | 'fail' | 'muted'>>
 const ORDER: Readonly<Record<CheckState, number>> = { fail: 0, warn: 1, unknown: 2, ok: 3 };
 
 export function problemsFirst(checks: readonly HealthCheck[]): HealthCheck[] {
-  return [...checks].filter((check) => check.state !== 'ok').sort(
-    (a, b) => ORDER[a.state] - ORDER[b.state],
-  );
+  return [...checks]
+    .filter((check) => check.state !== 'ok')
+    .sort((a, b) => ORDER[a.state] - ORDER[b.state]);
 }
 
 /** Проверки по группам, в том порядке, в котором группы впервые встретились. */
@@ -135,10 +135,7 @@ export function MonitoringPage() {
     void failures.refetch();
   };
 
-  const allChecks: HealthCheck[] = [
-    ...(health.data?.checks ?? []),
-    ...(expiry.data?.checks ?? []),
-  ];
+  const allChecks: HealthCheck[] = [...(health.data?.checks ?? []), ...(expiry.data?.checks ?? [])];
   const problems = problemsFirst(allChecks);
   const loaded = health.data !== undefined && expiry.data !== undefined;
 
@@ -151,9 +148,7 @@ export function MonitoringPage() {
 
       <Toolbar>
         <span className={styles.taken}>
-          {health.data
-            ? `Проверено ${formatRelative(health.data.takenAt)}`
-            : 'Проверяем службы…'}
+          {health.data ? `Проверено ${formatRelative(health.data.takenAt)}` : 'Проверяем службы…'}
         </span>
         <ToolbarSpacer />
         <Button mode="secondary" size="s" disabled={refreshing} onClick={refresh}>

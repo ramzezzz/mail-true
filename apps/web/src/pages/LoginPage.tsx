@@ -199,7 +199,9 @@ export function LoginPage() {
             {busy ? 'Проверяем…' : 'Войти'}
           </Button>
 
-          <p className={styles.hint}>Пароль забыт или не подходит — обратитесь к администратору почты.</p>
+          <p className={styles.hint}>
+            Пароль забыт или не подходит — обратитесь к администратору почты.
+          </p>
         </form>
       </section>
 

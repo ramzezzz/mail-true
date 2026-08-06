@@ -29,7 +29,10 @@ export function emptyFolderCopy(role: string): FolderCopy {
     case 'sent':
       return { title: 'Отправленных писем нет', hint: 'Здесь будут копии всего, что вы отправите' };
     case 'archive':
-      return { title: 'В архиве пусто', hint: 'Сюда можно убирать письма, которые не нужны в списке' };
+      return {
+        title: 'В архиве пусто',
+        hint: 'Сюда можно убирать письма, которые не нужны в списке',
+      };
     case 'snoozed':
       return {
         title: 'Отложенных писем нет',

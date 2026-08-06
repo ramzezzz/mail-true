@@ -102,7 +102,7 @@ export class MailNotifier {
 
   constructor(
     private readonly config: AppConfig,
-    private readonly logger: Logger
+    private readonly logger: Logger,
   ) {}
 
   /** Подключает рассылку уведомлений при закрытой вкладке. */
@@ -186,7 +186,10 @@ export class MailNotifier {
     });
     client.on('exists', (event: { path: string; count: number; prevCount: number }) => {
       void this.onNewMessages(watcher, event).catch((err) => {
-        this.logger.warn(errorInfo(err, { email }), 'Не удалось прочитать новые письма для уведомления');
+        this.logger.warn(
+          errorInfo(err, { email }),
+          'Не удалось прочитать новые письма для уведомления',
+        );
       });
     });
 
@@ -209,11 +212,15 @@ export class MailNotifier {
 
   private async onNewMessages(
     watcher: Watcher,
-    event: { count: number; prevCount: number }
+    event: { count: number; prevCount: number },
   ): Promise<void> {
     if (event.count <= event.prevCount) return;
     const range = `${event.prevCount + 1}:${event.count}`;
-    const fetched = await watcher.client.fetchAll(range, { uid: true, envelope: true, flags: true });
+    const fetched = await watcher.client.fetchAll(range, {
+      uid: true,
+      envelope: true,
+      flags: true,
+    });
     for (const msg of fetched) {
       const id = `inbox:${msg.uid}`;
       const from = mapAddress(msg.envelope?.from?.[0]);

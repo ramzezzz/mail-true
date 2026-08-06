@@ -22,8 +22,10 @@ import {
 function wallClock(at: Date, zone: string): string {
   const p = zonedParts(at, zone);
   assert.ok(p, `пояс ${zone} не разобран`);
-  return `${String(p.year)}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')} ` +
-    `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+  return (
+    `${String(p.year)}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')} ` +
+    `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`
+  );
 }
 
 test('«завтра утром» — это восемь утра в поясе человека, а не сервера', () => {

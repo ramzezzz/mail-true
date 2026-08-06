@@ -53,19 +53,15 @@ export async function contactsRoutes(
    * адрес, — и мешал бы работать сильнее, чем отсутствие подсказки.
    * О недоступности говорится в журнале сервера при старте.
    */
-  app.get(
-    '/suggest',
-    { preHandler: app.requireSession },
-    async (request) => {
-      const session = requireSession(request);
-      const query = suggestQuerySchema.parse(request.query);
-      const exclude = (query.exclude ?? '')
-        .split(',')
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0);
-      return service.suggest(session, query.q, exclude);
-    },
-  );
+  app.get('/suggest', { preHandler: app.requireSession }, async (request) => {
+    const session = requireSession(request);
+    const query = suggestQuerySchema.parse(request.query);
+    const exclude = (query.exclude ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    return service.suggest(session, query.q, exclude);
+  });
 
   /**
    * Убрать адрес из подсказок.

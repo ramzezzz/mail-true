@@ -302,7 +302,10 @@
   margin: 0 8px 24px;
   padding: 16px;
   border-radius: var(--mt-size-border-radius, 8px);
-  background: var(--mt-mail-color-letter-attach-list-background, var(--mt-color-background-tertiary));
+  background: var(
+    --mt-mail-color-letter-attach-list-background,
+    var(--mt-color-background-tertiary)
+  );
 }
 
 .attachmentsTitle {

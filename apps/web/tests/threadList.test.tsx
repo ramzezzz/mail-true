@@ -198,9 +198,7 @@ describe('строка списка представляет переписку 
     // участника отдельным путём незачем: он и есть отправитель последнего
     // письма, потому что все письма переписки написал он.
     expect(
-      correspondentLabel(
-        summary(9, { thread: thread({ participants: [summary(9).from] }) }),
-      ),
+      correspondentLabel(summary(9, { thread: thread({ participants: [summary(9).from] }) })),
     ).toBe('Пётр Смирнов');
     expect(correspondentLabel(summary(9))).toBe('Пётр Смирнов');
   });
@@ -427,12 +425,7 @@ describe('действия страницы папки над строкой-п�
     await waitFor(() => setFlags.mock.calls.length > 0, 'запрос пометок');
     // Две строки — но четыре письма. Раньше сюда ушли бы два
     // идентификатора, и половина папки осталась бы непрочитанной.
-    expect(setFlags.mock.calls[0]?.[0].ids).toEqual([
-      'inbox:1',
-      'inbox:4',
-      'inbox:9',
-      'inbox:2',
-    ]);
+    expect(setFlags.mock.calls[0]?.[0].ids).toEqual(['inbox:1', 'inbox:4', 'inbox:9', 'inbox:2']);
   });
 
   it('смахивание строки уносит в архив всю переписку', async () => {

@@ -41,7 +41,7 @@ async function main(): Promise<void> {
         effective: config.ATTACHMENT_MAX_BYTES,
       },
       'UPLOAD_MAX_BYTES больше того, что пролезет в письмо после кодирования: ' +
-        'действует уменьшенный предел вложения'
+        'действует уменьшенный предел вложения',
     );
   }
 

@@ -321,7 +321,12 @@ export const mockApi: MailApi = {
     await delay(200);
     const message = messages.find((m) => m.id === messageId);
     if (!message) {
-      throw new ApiError(404, `/api/messages/${messageId}/source`, 'Письмо не найдено', 'NOT_FOUND');
+      throw new ApiError(
+        404,
+        `/api/messages/${messageId}/source`,
+        'Письмо не найдено',
+        'NOT_FOUND',
+      );
     }
     const full = expandMessage(message);
     const headers = [
@@ -339,7 +344,12 @@ export const mockApi: MailApi = {
 
   async uploadAttachment(file) {
     await delay(300);
-    return { id: `upload-${Date.now()}`, filename: file.name, size: file.size, mimeType: file.type };
+    return {
+      id: `upload-${Date.now()}`,
+      filename: file.name,
+      size: file.size,
+      mimeType: file.type,
+    };
   },
 
   /*
@@ -359,11 +369,21 @@ export const mockApi: MailApi = {
     await delay(200);
     const message = messages.find((m) => m.id === messageId);
     if (!message) {
-      throw new ApiError(404, `/api/messages/${messageId}/parts/${partId}`, 'Письмо не найдено', 'NOT_FOUND');
+      throw new ApiError(
+        404,
+        `/api/messages/${messageId}/parts/${partId}`,
+        'Письмо не найдено',
+        'NOT_FOUND',
+      );
     }
     const part = expandMessage(message).attachments.find((a) => a.partId === partId);
     if (!part) {
-      throw new ApiError(404, `/api/messages/${messageId}/parts/${partId}`, 'Часть письма не найдена', 'NOT_FOUND');
+      throw new ApiError(
+        404,
+        `/api/messages/${messageId}/parts/${partId}`,
+        'Часть письма не найдена',
+        'NOT_FOUND',
+      );
     }
     const sample = mockPartBytes(part.filename, part.mimeType);
     return new Blob([sample ?? new Uint8Array(Math.min(part.size, 4096))], { type: part.mimeType });

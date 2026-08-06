@@ -181,7 +181,11 @@ export function answerTime(iso: string | null | undefined): string {
   if (!iso) return '';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return date.toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 /**
@@ -195,7 +199,9 @@ export function answerStamp(check: DnsCheck): string {
     return time === '' ? 'ответа нет' : `спросить не удалось в ${time}`;
   }
   if (time === '') return '';
-  return check.askedVia ? `ответ получен в ${time} от ${check.askedVia}` : `ответ получен в ${time}`;
+  return check.askedVia
+    ? `ответ получен в ${time} от ${check.askedVia}`
+    : `ответ получен в ${time}`;
 }
 
 /** Что показать в строке «Что опубликовано». */

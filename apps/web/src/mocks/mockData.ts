@@ -68,7 +68,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Команда Mail.True', 'team@mail.true'],
     subject: 'Добро пожаловать в Mail.True!',
-    snippet: 'Ваш ящик готов к работе. Настройте подпись, темы оформления и сборщики почты — всё в разделе «Настройки».',
+    snippet:
+      'Ваш ящик готов к работе. Настройте подпись, темы оформления и сборщики почты — всё в разделе «Настройки».',
     hoursAgo: 1,
     unread: true,
     labels: ['reliable'],
@@ -76,7 +77,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Анна Смирнова', 'a.smirnova@example.com'],
     subject: 'Отчёт за июль',
-    snippet: 'Привет! Отправляю финальную версию отчёта, посмотри вкладку «Сводка» — там основные цифры по кварталу.',
+    snippet:
+      'Привет! Отправляю финальную версию отчёта, посмотри вкладку «Сводка» — там основные цифры по кварталу.',
     hoursAgo: 3,
     unread: true,
     // Таблица и текстовый файл рядом — на этом письме видно оба исхода
@@ -86,7 +88,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['GitHub', 'noreply@github.com'],
     subject: '[mail-true] Pull request #42: Слой дизайн-токенов',
-    snippet: 'Merged: build-tokens генерирует tokens.css из выгрузки живого интерфейса. 12 files changed, 1450 insertions.',
+    snippet:
+      'Merged: build-tokens генерирует tokens.css из выгрузки живого интерфейса. 12 files changed, 1450 insertions.',
     hoursAgo: 5,
     unread: true,
     labels: ['registration'],
@@ -110,7 +113,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Марина Лебедева', 'm.lebedeva@example.com'],
     subject: 'Фотографии с выходных',
-    snippet: 'Наконец-то разобрала фотографии! Самые удачные приложила, остальные скину ссылкой на облако.',
+    snippet:
+      'Наконец-то разобрала фотографии! Самые удачные приложила, остальные скину ссылкой на облако.',
     hoursAgo: 30,
     unread: true,
     attachments: ['IMG_2041.jpg', 'IMG_2054.jpg', 'IMG_2060.jpg'],
@@ -125,7 +129,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Дмитрий Волков', 'd.volkov@example.com'],
     subject: 'Черновик статьи — нужен твой взгляд',
-    snippet: 'Дописал раздел про виртуализацию списков. Глянь, пожалуйста, не слишком ли занудно получилось?',
+    snippet:
+      'Дописал раздел про виртуализацию списков. Глянь, пожалуйста, не слишком ли занудно получилось?',
     hoursAgo: 55,
     unread: true,
   },
@@ -139,7 +144,8 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Банк «Пример»', 'notify@example-bank.ru'],
     subject: 'Выписка по счёту за июль',
-    snippet: 'Сформирована ежемесячная выписка по вашему счёту. Документ во вложении, защищён паролем.',
+    snippet:
+      'Сформирована ежемесячная выписка по вашему счёту. Документ во вложении, защищён паролем.',
     hoursAgo: 96,
     unread: true,
     attachments: ['Выписка_2026-07.pdf'],
@@ -148,21 +154,24 @@ const inboxSeeds: Seed[] = [
   {
     from: ['Ольга Романова', 'o.romanova@example.com'],
     subject: 'День рождения Кати — скидываемся на подарок',
-    snippet: 'Всем привет! Собираем по 1500 до пятницы, идеи подарка пишите в чат, пока лидирует керамическая мастерская.',
+    snippet:
+      'Всем привет! Собираем по 1500 до пятницы, идеи подарка пишите в чат, пока лидирует керамическая мастерская.',
     hoursAgo: 120,
     flagged: true,
   },
   {
     from: ['habr', 'noreply@habr.com'],
     subject: 'Еженедельный дайджест: 15 лучших публикаций',
-    snippet: 'React Server Components в проде, разбор IMAP-протокола, и почему CSS-переменные — это новая типизация.',
+    snippet:
+      'React Server Components в проде, разбор IMAP-протокола, и почему CSS-переменные — это новая типизация.',
     hoursAgo: 168,
     labels: ['mailings'],
   },
   {
     from: ['Сергей Ковалёв', 's.kovalev@example.com'],
     subject: 'Встреча по проекту',
-    snippet: 'Коллеги, предлагаю собраться на этой неделе и обсудить план на квартал. Кому какое время удобно?',
+    snippet:
+      'Коллеги, предлагаю собраться на этой неделе и обсудить план на квартал. Кому какое время удобно?',
     hoursAgo: 176,
     thread: 'meeting',
   },
@@ -285,9 +294,10 @@ export const mockMessages: MessageSummary[] = [
 /** Разворачивает сводку в полное письмо (для GET /api/messages/:id). */
 export function expandMessage(summary: MessageSummary): Message {
   // У рассылок в теле — внешняя картинка, чтобы проверить её блокировку
-  const externalImage = summary.labels.includes('travel') || summary.labels.includes('mailings')
-    ? '<p><img src="https://static.example.com/promo/banner.jpg" alt="Промо-баннер" width="560" height="180"></p>'
-    : '';
+  const externalImage =
+    summary.labels.includes('travel') || summary.labels.includes('mailings')
+      ? '<p><img src="https://static.example.com/promo/banner.jpg" alt="Промо-баннер" width="560" height="180"></p>'
+      : '';
   return {
     ...summary,
     messageId: `<${summary.uid}@mock.mail.true>`,

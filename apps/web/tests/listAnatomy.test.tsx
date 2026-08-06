@@ -172,8 +172,6 @@ describe('счётчик писем в цепочке', () => {
 
     // И идёт ПЕРЕД темой: у mail.ru пилюля слева от неё
     const subject = host.querySelector('[class*="subject"]')!;
-    expect(
-      badge!.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(badge!.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -116,8 +116,7 @@ export function parseKerioUsersCsv(text: string): KerioUser[] {
   // Колонка логина должна существовать в заголовке (значения могут быть пустыми)
   const firstRow = rows[0];
   const hasLoginColumn =
-    firstRow !== undefined &&
-    Object.keys(firstRow).some((key) => COLUMN_ALIASES[key] === 'login');
+    firstRow !== undefined && Object.keys(firstRow).some((key) => COLUMN_ALIASES[key] === 'login');
   if (!hasLoginColumn) {
     throw new Error(
       'в CSV не найдена колонка логина (Name/Login/Username) — это не выгрузка пользователей Kerio?',

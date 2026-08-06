@@ -103,15 +103,13 @@ export function BrandingPage() {
       {flash && <Notice tone="success">{flash}</Notice>}
       {/* Текст отказа приходит с сервера и объясняет, что именно не так.
           Свой обобщённый текст здесь был бы враньём. */}
-      <ErrorNotice
-        error={branding.error ?? upload.error ?? reset.error ?? saveTexts.error}
-      />
+      <ErrorNotice error={branding.error ?? upload.error ?? reset.error ?? saveTexts.error} />
 
       <Panel title="Логотип">
         <p style={MUTED}>
-          Логотип показывается на странице входа в почту и на странице входа в эту панель.
-          Он хранится на сервере отдельным файлом и переживает перезапуск и обновление
-          продукта, а также попадает в резервную копию настроек.
+          Логотип показывается на странице входа в почту и на странице входа в эту панель. Он
+          хранится на сервере отдельным файлом и переживает перезапуск и обновление продукта, а
+          также попадает в резервную копию настроек.
         </p>
 
         {/* Предпросмотр ровно на том фоне, что и на входе: карточка входа
@@ -136,8 +134,7 @@ export function BrandingPage() {
           <div style={{ ...MUTED, fontSize: '0.85rem' }}>
             {logo ? (
               <>
-                Свой логотип: {logo.width}×{logo.height} точек, {humanSize(logo.size)},{' '}
-                {logo.mime}
+                Свой логотип: {logo.width}×{logo.height} точек, {humanSize(logo.size)}, {logo.mime}
                 <br />
                 Загружен {formatDateTime(logo.updatedAt)}
               </>
@@ -150,15 +147,17 @@ export function BrandingPage() {
         {limits && (
           <p style={{ ...MUTED, fontSize: '0.85rem' }}>
             Принимаются {limits.formats.join(', ')} размером до {limits.maxBytesText}, от{' '}
-            {limits.minWidth}×{limits.minHeight} до {limits.maxWidth}×{limits.maxHeight} точек.
-            Файл проверяется по содержимому: расширение и тип, присланные браузером, значения
-            не имеют. SVG со скриптами и внешними ссылками не принимается — такой файл
-            выполнялся бы в браузере у всех, кто открывает страницу входа.
+            {limits.minWidth}×{limits.minHeight} до {limits.maxWidth}×{limits.maxHeight} точек. Файл
+            проверяется по содержимому: расширение и тип, присланные браузером, значения не имеют.
+            SVG со скриптами и внешними ссылками не принимается — такой файл выполнялся бы в
+            браузере у всех, кто открывает страницу входа.
           </p>
         )}
 
         {writable ? (
-          <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', marginTop: '0.9rem' }}>
+          <div
+            style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', marginTop: '0.9rem' }}
+          >
             <input
               ref={fileRef}
               type="file"

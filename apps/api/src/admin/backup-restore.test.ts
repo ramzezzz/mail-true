@@ -180,12 +180,9 @@ void test('незнакомое ограничение тоже объясняе
   const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
 
   await assert.rejects(
-    applyRestore(
-      checkViolatingDb('nekoe_novoe_ogranichenie'),
-      branding,
-      backupWithAdmin('owner'),
-      ['admins'],
-    ),
+    applyRestore(checkViolatingDb('nekoe_novoe_ogranichenie'), branding, backupWithAdmin('owner'), [
+      'admins',
+    ]),
     (err: unknown) => {
       assert.ok(err instanceof BadRequestError);
       // Названия ограничения хватает, чтобы найти правило в схеме; главное

@@ -19,7 +19,12 @@
  */
 
 import { connectWithReason, createClient, describeImapError } from './migrator.js';
-import { loginNameOf, type ImapEndpoint, type MigrateMailboxOptions, type ProbeResult } from './types.js';
+import {
+  loginNameOf,
+  type ImapEndpoint,
+  type MigrateMailboxOptions,
+  type ProbeResult,
+} from './types.js';
 
 /** Сколько папок опрашивать по STATUS: полный обход большого ящика — это минуты. */
 const STATUS_LIMIT = 200;

@@ -45,18 +45,54 @@ export function buildClientConfigXml(settings: MailSettings, emailAddress?: stri
 
   const servers: ServerBlock[] = [
     // Порядок = приоритет для клиента: сначала IMAP по SSL.
-    { kind: 'incomingServer', type: 'imap', hostname: host, port: settings.imap.sslPort, socketType: 'SSL' },
-    { kind: 'incomingServer', type: 'imap', hostname: host, port: settings.imap.startTlsPort, socketType: 'STARTTLS' },
-    { kind: 'incomingServer', type: 'pop3', hostname: host, port: settings.pop3.sslPort, socketType: 'SSL' },
-    { kind: 'incomingServer', type: 'pop3', hostname: host, port: settings.pop3.startTlsPort, socketType: 'STARTTLS' },
+    {
+      kind: 'incomingServer',
+      type: 'imap',
+      hostname: host,
+      port: settings.imap.sslPort,
+      socketType: 'SSL',
+    },
+    {
+      kind: 'incomingServer',
+      type: 'imap',
+      hostname: host,
+      port: settings.imap.startTlsPort,
+      socketType: 'STARTTLS',
+    },
+    {
+      kind: 'incomingServer',
+      type: 'pop3',
+      hostname: host,
+      port: settings.pop3.sslPort,
+      socketType: 'SSL',
+    },
+    {
+      kind: 'incomingServer',
+      type: 'pop3',
+      hostname: host,
+      port: settings.pop3.startTlsPort,
+      socketType: 'STARTTLS',
+    },
     // Исходящая почта. Первый outgoingServer клиент берёт как основной,
     // поэтому порядок менять нельзя: 587 + STARTTLS работает везде и
     // остаётся выбором по умолчанию. Порт 465 идёт вторым — он нужен тем
     // клиентам, которые «TLS сразу» предпочитают или умеют только его.
     // Раньше 465 не назывался вовсе, хотя Postfix его слушает
     // (infra/postfix/conf/master.cf).
-    { kind: 'outgoingServer', type: 'smtp', hostname: host, port: settings.smtp.startTlsPort, socketType: 'STARTTLS' },
-    { kind: 'outgoingServer', type: 'smtp', hostname: host, port: settings.smtp.sslPort, socketType: 'SSL' },
+    {
+      kind: 'outgoingServer',
+      type: 'smtp',
+      hostname: host,
+      port: settings.smtp.startTlsPort,
+      socketType: 'STARTTLS',
+    },
+    {
+      kind: 'outgoingServer',
+      type: 'smtp',
+      hostname: host,
+      port: settings.smtp.sslPort,
+      socketType: 'SSL',
+    },
   ];
 
   return [

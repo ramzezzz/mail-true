@@ -142,10 +142,9 @@ export const labelsApi = {
    * Значения по умолчанию нет намеренно — вопрос обязан быть задан.
    */
   deleteLabel: (key: string, purge: boolean): Promise<LabelDeleteResult> =>
-    apiFetch(
-      `/api/labels/${encodeURIComponent(key)}${buildQuery({ purge: purge ? '1' : '0' })}`,
-      { method: 'DELETE' },
-    ),
+    apiFetch(`/api/labels/${encodeURIComponent(key)}${buildQuery({ purge: purge ? '1' : '0' })}`, {
+      method: 'DELETE',
+    }),
 
   applyLabels: (request: ApplyLabelsRequest): Promise<ApplyLabelsResult> =>
     apiFetch('/api/messages/labels', { method: 'POST', body: JSON.stringify(request) }),

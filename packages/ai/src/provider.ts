@@ -10,7 +10,14 @@
 
 import { chatEndpoint, type ProviderConfig } from './config.js';
 import { estimateMessagesTokens, estimateTokens } from './tokens.js';
-import { aiFail, aiOk, type AiError, type AiFailureResult, type AiOutcome, type TokenUsage } from './types.js';
+import {
+  aiFail,
+  aiOk,
+  type AiError,
+  type AiFailureResult,
+  type AiOutcome,
+  type TokenUsage,
+} from './types.js';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 
@@ -191,7 +198,10 @@ export class CompatibleChatProvider implements ChatProvider {
 
       const body = response.body;
       if (!body) {
-        yield { type: 'error', error: aiFail('bad-response', 'Сервис ИИ вернул пустой поток').error };
+        yield {
+          type: 'error',
+          error: aiFail('bad-response', 'Сервис ИИ вернул пустой поток').error,
+        };
         return;
       }
 
@@ -566,7 +576,12 @@ export function parseSseBlock(block: string): SseDelta | 'done' | null {
     if (prompt !== null || completion !== null || total !== null) {
       const p = prompt ?? 0;
       const c = completion ?? 0;
-      usage = { promptTokens: p, completionTokens: c, totalTokens: total ?? p + c, estimated: false };
+      usage = {
+        promptTokens: p,
+        completionTokens: c,
+        totalTokens: total ?? p + c,
+        estimated: false,
+      };
     }
   }
 

@@ -134,7 +134,10 @@ export async function listRotatedFiles(dir: string, source: LogSource): Promise<
   const base = LOG_FILE_NAMES[source];
   try {
     const names = await readdir(dir);
-    return names.filter((name) => name.startsWith(`${base}.`)).sort().reverse();
+    return names
+      .filter((name) => name.startsWith(`${base}.`))
+      .sort()
+      .reverse();
   } catch {
     return [];
   }
@@ -289,7 +292,6 @@ export async function readNewLines(
   };
 }
 
-
 /**
  * Место сразу за последней целой строкой файла.
  *
@@ -390,7 +392,8 @@ export async function readLogTail(
 
   // Если предел упёрся, следующий запрос должен продолжить с той строки,
   // на которой мы остановились, а не с конца порции.
-  const stopped = more && items.length > 0 ? lineAfter(lines, items[items.length - 1]!.offset) : nextOffset;
+  const stopped =
+    more && items.length > 0 ? lineAfter(lines, items[items.length - 1]!.offset) : nextOffset;
 
   return {
     items,

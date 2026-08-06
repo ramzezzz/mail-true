@@ -72,7 +72,13 @@ export function rawHeaderValue(block: Buffer, name: string): Buffer | null {
    * добавлять к нему ещё один пробел нельзя, иначе в теме появляются двойные
    * пробелы. Ошибку поймала собственная проверка на переносе темы.
    */
-  return Buffer.from(parts.join('').replace(/^[ \t]+/, '').replace(/[ \t]+$/, ''), 'latin1');
+  return Buffer.from(
+    parts
+      .join('')
+      .replace(/^[ \t]+/, '')
+      .replace(/[ \t]+$/, ''),
+    'latin1',
+  );
 }
 
 /** Есть ли в значении байты вне ASCII — то есть то, что могло испортиться. */
@@ -88,7 +94,10 @@ function isValidUtf8(raw: Buffer): boolean {
 
 /** Приводит название кодировки к тому, что понимает iconv-lite. */
 function normalizeCharset(charset: string | undefined | null): string | null {
-  const name = (charset ?? '').trim().toLowerCase().replace(/^["']|["']$/g, '');
+  const name = (charset ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/^["']|["']$/g, '');
   if (!name) return null;
   // us-ascii в заголовке с восьмибитными байтами — заведомая неправда:
   // объявили ASCII, а прислали не ASCII. Кодировка неизвестна.

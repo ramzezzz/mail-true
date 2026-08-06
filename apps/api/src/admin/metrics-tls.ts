@@ -101,7 +101,10 @@ export function describeCertificate(
   const issuer = cn(cert.issuer?.CN);
   if (subject) names.add(subject);
   for (const item of (cert.subjectaltname ?? '').split(',')) {
-    const value = item.trim().replace(/^DNS:/u, '').replace(/^IP Address:/u, '');
+    const value = item
+      .trim()
+      .replace(/^DNS:/u, '')
+      .replace(/^IP Address:/u, '');
     if (value !== '') names.add(value);
   }
   return {

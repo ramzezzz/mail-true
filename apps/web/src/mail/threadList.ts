@@ -72,10 +72,7 @@ export function expandThreadIds(
 export const MAX_IDS_PER_REQUEST = 500;
 
 /** Режет список писем на запросы допустимой длины. */
-export function chunkIds(
-  ids: readonly string[],
-  size = MAX_IDS_PER_REQUEST,
-): string[][] {
+export function chunkIds(ids: readonly string[], size = MAX_IDS_PER_REQUEST): string[][] {
   if (ids.length === 0) return [];
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += size) chunks.push([...ids.slice(i, i + size)]);

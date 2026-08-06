@@ -102,7 +102,9 @@ interface Harness {
   cookie: string;
 }
 
-async function harness(options: { role?: string; secret?: boolean; master?: boolean } = {}): Promise<Harness> {
+async function harness(
+  options: { role?: string; secret?: boolean; master?: boolean } = {},
+): Promise<Harness> {
   const app = Fastify({ loggerInstance: logger }) as unknown as FastifyInstance;
   await app.register(cookiePlugin, { secret: SECRET });
   registerErrorHandling(app);
@@ -428,7 +430,11 @@ test('подробности задания не содержат столбца
     started_at: new Date(),
     finished_at: null,
   };
-  const response = await app.inject({ method: 'GET', url: '/migrate/jobs/42', headers: { cookie } });
+  const response = await app.inject({
+    method: 'GET',
+    url: '/migrate/jobs/42',
+    headers: { cookie },
+  });
   assert.equal(response.statusCode, 200);
   assert.doesNotMatch(response.body, /SHIFROTEKST/);
   assert.match(response.body, /"copied":500/, 'числа хода работы показывать надо');

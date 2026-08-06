@@ -72,9 +72,7 @@ export function failureSummary(notice: {
     // Число попыток говорит, что мы не сдались с первого раза, — иначе
     // «не отправилось» читается как «а вы пробовали ещё раз?»
     parts.push(
-      notice.attempts > 1
-        ? `Попыток: ${notice.attempts}, последняя ${when}`
-        : `Пробовали ${when}`,
+      notice.attempts > 1 ? `Попыток: ${notice.attempts}, последняя ${when}` : `Пробовали ${when}`,
     );
   }
   return `${parts.join('. ')}.`;
@@ -130,9 +128,7 @@ export function SendFailureBanner() {
           >
             Понятно
           </button>
-          {notices.length > 1 && (
-            <span className={styles.more}>и ещё {notices.length - 1}</span>
-          )}
+          {notices.length > 1 && <span className={styles.more}>и ещё {notices.length - 1}</span>}
         </div>
       </div>
     </div>

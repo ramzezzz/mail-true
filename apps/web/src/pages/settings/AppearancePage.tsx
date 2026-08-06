@@ -33,12 +33,7 @@ import { THEMES, type ThemeMeta } from '../../appearance/themes';
 import { useUiStore, type ThemeSetting } from '../../app/store';
 import { Button } from '../../components';
 import { cx } from '../../lib/cx';
-import {
-  SettingsError,
-  SettingsHint,
-  SettingsSection,
-  SettingsTitle,
-} from '../../settings/ui';
+import { SettingsError, SettingsHint, SettingsSection, SettingsTitle } from '../../settings/ui';
 import styles from './AppearancePage.module.css';
 
 /** Мини-окно почты в цветах темы: шапка, левое меню, карточка с текстом. */
@@ -74,8 +69,14 @@ function ThemePreview({ meta }: { meta: ThemeMeta | 'system' }) {
         </span>
         <span className={styles.previewCard} style={{ background: meta.contentBg }}>
           <span className={styles.previewLine} style={{ background: meta.accent, width: '52%' }} />
-          <span className={styles.previewLine} style={{ background: meta.textPrimary, width: '80%' }} />
-          <span className={styles.previewLine} style={{ background: meta.textPrimary, width: '64%' }} />
+          <span
+            className={styles.previewLine}
+            style={{ background: meta.textPrimary, width: '80%' }}
+          />
+          <span
+            className={styles.previewLine}
+            style={{ background: meta.textPrimary, width: '64%' }}
+          />
         </span>
       </span>
     </span>
@@ -114,11 +115,14 @@ export function AppearancePage() {
     };
   }, []);
 
-  const themeOptions: readonly { value: ThemeSetting; title: string; meta: ThemeMeta | 'system' }[] =
-    [
-      { value: 'system', title: 'Как в системе', meta: 'system' },
-      ...THEMES.map((meta) => ({ value: meta.id, title: meta.title, meta })),
-    ];
+  const themeOptions: readonly {
+    value: ThemeSetting;
+    title: string;
+    meta: ThemeMeta | 'system';
+  }[] = [
+    { value: 'system', title: 'Как в системе', meta: 'system' },
+    ...THEMES.map((meta) => ({ value: meta.id, title: meta.title, meta })),
+  ];
 
   const pickPreset = (id: string): void => {
     setWallpaper({ kind: 'preset', id });

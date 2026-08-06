@@ -188,7 +188,10 @@ describe('ошибки загрузки письма', () => {
       .mockResolvedValue(serverMessage());
 
     render();
-    await waitFor(() => host.textContent!.includes('Не удалось загрузить письмо'), 'сообщение о сбое');
+    await waitFor(
+      () => host.textContent!.includes('Не удалось загрузить письмо'),
+      'сообщение о сбое',
+    );
     // Раньше здесь было «Письмо не найдено» — и повторить попытку было нечем
     expect(host.textContent).not.toContain('Письмо не найдено');
 

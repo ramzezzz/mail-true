@@ -296,9 +296,15 @@ export interface DecodedText {
 export function decodeTextPart(bytes: ArrayBuffer | Uint8Array): DecodedText {
   const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   try {
-    return { text: stripBom(new TextDecoder('utf-8', { fatal: true }).decode(view)), charset: 'UTF-8' };
+    return {
+      text: stripBom(new TextDecoder('utf-8', { fatal: true }).decode(view)),
+      charset: 'UTF-8',
+    };
   } catch {
-    return { text: stripBom(new TextDecoder('windows-1251').decode(view)), charset: 'windows-1251' };
+    return {
+      text: stripBom(new TextDecoder('windows-1251').decode(view)),
+      charset: 'windows-1251',
+    };
   }
 }
 

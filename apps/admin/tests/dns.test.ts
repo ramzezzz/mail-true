@@ -151,7 +151,9 @@ describe('итог наверху диалога', () => {
   it('склоняет число записей по-русски', () => {
     const broken = (n: number): string =>
       summarize(
-        report(Array.from({ length: n }, (_, i) => check({ id: `x${String(i)}`, verdict: 'missing' }))),
+        report(
+          Array.from({ length: n }, (_, i) => check({ id: `x${String(i)}`, verdict: 'missing' })),
+        ),
       ).headline;
     expect(broken(1)).toContain('1 запись требует');
     expect(broken(3)).toContain('3 записи требуют');
@@ -160,9 +162,7 @@ describe('итог наверху диалога', () => {
   });
 
   it('молчащий резольвер — отдельный итог, а не «всё сломано»', () => {
-    const summary = summarize(
-      report([check({ id: 'mx', verdict: 'unreachable' })], false),
-    );
+    const summary = summarize(report([check({ id: 'mx', verdict: 'unreachable' })], false));
     expect(summary.tone).toBe('muted');
     expect(summary.headline).toContain('не удалось');
     expect(summary.broken).toBe(0);
@@ -171,7 +171,11 @@ describe('итог наверху диалога', () => {
 
 describe('у кого спрашивали', () => {
   it('называет ответивший резольвер и объясняет, почему не свой', () => {
-    const note = resolverNote({ servers: ['8.8.8.8', '9.9.9.9'], answeredBy: ['9.9.9.9'], reachable: true });
+    const note = resolverNote({
+      servers: ['8.8.8.8', '9.9.9.9'],
+      answeredBy: ['9.9.9.9'],
+      reachable: true,
+    });
     expect(note.tone).toBe('ok');
     expect(note.text).toContain('9.9.9.9');
     // Иначе проверка показывала бы то, что мы сами себе прописали.

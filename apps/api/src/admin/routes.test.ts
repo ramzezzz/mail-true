@@ -340,7 +340,13 @@ async function harness(options?: {
 
 void test('удаление домена с алиасами отклоняется, а не сносит их молча', async () => {
   const h = await harness();
-  h.db.domains.set(5, { id: 5, name: 'x.local', user_count: '0', alias_count: '2', created_at: new Date() });
+  h.db.domains.set(5, {
+    id: 5,
+    name: 'x.local',
+    user_count: '0',
+    alias_count: '2',
+    created_at: new Date(),
+  });
   h.db.aliases = [
     { id: 1, domain_id: 5, source: 'a@x.local', destination: 'b@x.local', active: true },
     { id: 2, domain_id: 5, source: 'c@x.local', destination: 'd@x.local', active: true },
@@ -362,7 +368,13 @@ void test('удаление домена с алиасами отклоняет�
 
 void test('удаление домена с force сносит алиасы, но записывает их в журнал аудита', async () => {
   const h = await harness();
-  h.db.domains.set(5, { id: 5, name: 'x.local', user_count: '0', alias_count: '1', created_at: new Date() });
+  h.db.domains.set(5, {
+    id: 5,
+    name: 'x.local',
+    user_count: '0',
+    alias_count: '1',
+    created_at: new Date(),
+  });
   h.db.aliases = [
     { id: 1, domain_id: 5, source: 'a@x.local', destination: 'b@x.local', active: true },
   ];
@@ -384,7 +396,13 @@ void test('удаление домена с force сносит алиасы, н�
 
 void test('домен без алиасов удаляется как раньше', async () => {
   const h = await harness();
-  h.db.domains.set(6, { id: 6, name: 'y.local', user_count: '0', alias_count: '0', created_at: new Date() });
+  h.db.domains.set(6, {
+    id: 6,
+    name: 'y.local',
+    user_count: '0',
+    alias_count: '0',
+    created_at: new Date(),
+  });
   const response = await h.app.inject({
     method: 'DELETE',
     url: '/domains/6',
@@ -430,7 +448,11 @@ void test('удаление ящика уводит Maildir из-под ново
   });
 
   assert.equal(response.statusCode, 200);
-  const body = response.json<{ mailDirQuarantined: boolean; dbRowsRemoved: number; imapPurged: boolean }>();
+  const body = response.json<{
+    mailDirQuarantined: boolean;
+    dbRowsRemoved: number;
+    imapPurged: boolean;
+  }>();
   assert.equal(body.mailDirQuarantined, true);
   assert.equal(body.imapPurged, true, 'ящик должен быть очищен средствами Dovecot');
   assert.equal(body.dbRowsRemoved, 7, 'служебные строки должны быть убраны');
@@ -485,7 +507,13 @@ const IMPORT_CSV = 'email,name\nnew@fresh.local,Новый\n';
 
 void test('предпросмотр импорта не обещает создать домен роли, которой это запрещено', async () => {
   const h = await harness({ role: 'user_manager' });
-  h.db.domains.set(1, { id: 1, name: 'x.local', user_count: '0', alias_count: '0', created_at: new Date() });
+  h.db.domains.set(1, {
+    id: 1,
+    name: 'x.local',
+    user_count: '0',
+    alias_count: '0',
+    created_at: new Date(),
+  });
 
   const response = await h.app.inject({
     method: 'POST',
@@ -512,7 +540,13 @@ void test('предпросмотр импорта не обещает созд�
 
 void test('владельцу предпросмотр по-прежнему обещает создание домена', async () => {
   const h = await harness({ role: 'owner' });
-  h.db.domains.set(1, { id: 1, name: 'x.local', user_count: '0', alias_count: '0', created_at: new Date() });
+  h.db.domains.set(1, {
+    id: 1,
+    name: 'x.local',
+    user_count: '0',
+    alias_count: '0',
+    created_at: new Date(),
+  });
 
   const response = await h.app.inject({
     method: 'POST',
@@ -520,7 +554,11 @@ void test('владельцу предпросмотр по-прежнему о�
     headers: { cookie: h.cookie },
     payload: { csv: IMPORT_CSV, allowNewDomains: true },
   });
-  const body = response.json<{ validCount: number; allowNewDomains: boolean; newDomainsDenied: boolean }>();
+  const body = response.json<{
+    validCount: number;
+    allowNewDomains: boolean;
+    newDomainsDenied: boolean;
+  }>();
   assert.equal(body.allowNewDomains, true);
   assert.equal(body.newDomainsDenied, false);
   assert.equal(body.validCount, 1);
@@ -533,7 +571,13 @@ void test('владельцу предпросмотр по-прежнему о�
 
 void test('импорт отдаёт номер задания, а результат с паролями лежит на сервере', async () => {
   const h = await harness();
-  h.db.domains.set(1, { id: 1, name: 'x.local', user_count: '0', alias_count: '0', created_at: new Date() });
+  h.db.domains.set(1, {
+    id: 1,
+    name: 'x.local',
+    user_count: '0',
+    alias_count: '0',
+    created_at: new Date(),
+  });
 
   const started = await h.app.inject({
     method: 'POST',
@@ -547,8 +591,10 @@ void test('импорт отдаёт номер задания, а резуль�
   assert.equal(passwordsStored, true);
 
   // Ждём завершения — как это делает интерфейс после обрыва связи.
-  let job: { state: string; created: Array<{ email: string; generatedPassword: string | null }> } | null =
-    null;
+  let job: {
+    state: string;
+    created: Array<{ email: string; generatedPassword: string | null }>;
+  } | null = null;
   for (let i = 0; i < 50; i += 1) {
     const response = await h.app.inject({
       method: 'GET',
@@ -593,7 +639,10 @@ void test('пароли задания импорта лежат в базе т�
 /* 5. Сеанс входа в чужой ящик закрывается не только кнопкой «выйти»    */
 /* ------------------------------------------------------------------ */
 
-function mailboxCookie(app: FastifyInstance, response: { cookies: Array<{ name: string; value: string }> }): string {
+function mailboxCookie(
+  app: FastifyInstance,
+  response: { cookies: Array<{ name: string; value: string }> },
+): string {
   const raw = response.cookies.find((c) => c.name === 'mt_admin_mailbox');
   assert.ok(raw, 'вход должен выдать cookie сеанса');
   return `mt_admin_mailbox=${raw.value}`;

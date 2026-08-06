@@ -627,9 +627,12 @@ test('автообновление отдаёт только дописанно�
   assert.equal(idle.items.length, 0);
   assert.equal(idle.nextAfter, first.tailOffset);
 
-  await appendFile(join(dir, 'postfix.log'), `${logLine(3, 'sent')}
+  await appendFile(
+    join(dir, 'postfix.log'),
+    `${logLine(3, 'sent')}
 ${logLine(4, 'bounced')}
-`);
+`,
+  );
   const tail = await readLogTail(dir, 'postfix', { after: first.tailOffset, limit: 50 });
   assert.equal(tail.items.length, 2, 'пришли обе дописанные строки');
   assert.ok(tail.items[0]?.text.includes('user3@'), 'порядок от старого к новому');
@@ -663,9 +666,12 @@ ${logLine(4, 'deferred')}
 test('поиск действует и на новые строки', async () => {
   const dir = await withLog([logLine(1, 'sent')]);
   const first = await readLogPage(dir, 'postfix', { limit: 10, search: 'user77@' });
-  await appendFile(join(dir, 'postfix.log'), `${logLine(2, 'sent')}
+  await appendFile(
+    join(dir, 'postfix.log'),
+    `${logLine(2, 'sent')}
 ${logLine(77, 'sent')}
-`);
+`,
+  );
   const tail = await readLogTail(dir, 'postfix', {
     after: first.tailOffset,
     limit: 50,
@@ -904,10 +910,11 @@ test('строка с действием HOLD не съедается разбо
 });
 
 test('придержанное руками письмо (postsuper -h) тоже попадает в историю', () => {
-  const event = toFlowEvent(
-    postfixEvent('postfix/postsuper[9012]: 3F2A1B4C: placed on hold'),
-    { sender: 'rassylka@mail.local', sizeBytes: 4096, direction: 'out' },
-  );
+  const event = toFlowEvent(postfixEvent('postfix/postsuper[9012]: 3F2A1B4C: placed on hold'), {
+    sender: 'rassylka@mail.local',
+    sizeBytes: 4096,
+    direction: 'out',
+  });
   assert.ok(event);
   assert.equal(event.status, 'held');
   assert.equal(event.queueId, '3F2A1B4C');
@@ -925,6 +932,10 @@ test('состояние «придержано» действительно б�
     'postfix/postsuper[9012]: AAAABBBB: placed on hold',
   ];
   for (const line of lines) {
-    assert.equal(toFlowEvent(postfixEvent(line), { sender: 'a@b.ru', sizeBytes: 1 })?.status, 'held', line);
+    assert.equal(
+      toFlowEvent(postfixEvent(line), { sender: 'a@b.ru', sizeBytes: 1 })?.status,
+      'held',
+      line,
+    );
   }
 });

@@ -124,11 +124,7 @@ class FakeClient {
       flags: new Set<string>(),
       status: { messages: 0, unseen: 0, uidValidity: 1n },
     });
-    return [
-      folder('INBOX', '\\Inbox'),
-      folder('Sent', '\\Sent'),
-      folder('Drafts', '\\Drafts'),
-    ];
+    return [folder('INBOX', '\\Inbox'), folder('Sent', '\\Sent'), folder('Drafts', '\\Drafts')];
   }
 
   async append(path: string): Promise<{ uid: number }> {
@@ -211,7 +207,10 @@ async function buildTestApp(client: FakeClient, config: AppConfig): Promise<Fast
     withClient: async <T>(_e: string, _p: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> =>
       fn(client as unknown as ImapFlow),
   };
-  const uploads = { get: async () => null, delete: async () => undefined } as unknown as UploadStore;
+  const uploads = {
+    get: async () => null,
+    delete: async () => undefined,
+  } as unknown as UploadStore;
   app.decorate('deps', { pool, uploads, config } as unknown as AppDeps);
   app.decorateRequest('mailSession', null);
   app.decorate('requireSession', async function (request) {
@@ -245,7 +244,11 @@ test('переполненный ящик не превращает отправ
   const client = new FakeClient({ sentAppendFails: true });
   const app = await buildTestApp(client, testConfig({ SMTP_PORT: smtp.port }));
   try {
-    const res = await app.inject({ method: 'POST', url: '/api/messages/send', payload: sendPayload() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload(),
+    });
     assert.equal(res.statusCode, 200, `тело ответа: ${res.body.slice(0, 300)}`);
     const body = res.json() as {
       ok: boolean;
@@ -271,7 +274,11 @@ test('обычная отправка кладёт копию в «Отправ�
   const client = new FakeClient();
   const app = await buildTestApp(client, testConfig({ SMTP_PORT: smtp.port }));
   try {
-    const res = await app.inject({ method: 'POST', url: '/api/messages/send', payload: sendPayload() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload(),
+    });
     assert.equal(res.statusCode, 200, `тело ответа: ${res.body.slice(0, 300)}`);
     const body = res.json() as { ok: boolean; savedToSent: boolean; sentMessageId: string | null };
     assert.equal(body.ok, true);
@@ -293,7 +300,11 @@ test('временный отказ отправки сохраняет пись
   const client = new FakeClient();
   const app = await buildTestApp(client, testConfig({ SMTP_PORT: port }));
   try {
-    const res = await app.inject({ method: 'POST', url: '/api/messages/send', payload: sendPayload() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload(),
+    });
     assert.equal(res.statusCode, 503);
     const body = res.json() as {
       error: string;
@@ -362,7 +373,11 @@ test('обычное письмо (не ответ) флагов никому н
   const client = new FakeClient({ answerable: [17] });
   const app = await buildTestApp(client, testConfig({ SMTP_PORT: smtp.port }));
   try {
-    const res = await app.inject({ method: 'POST', url: '/api/messages/send', payload: sendPayload() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload(),
+    });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(client.flagsAdded, []);
   } finally {

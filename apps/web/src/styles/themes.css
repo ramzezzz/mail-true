@@ -448,8 +448,8 @@
   /* Лёгкое затемнение всей картинки: не даёт светлому фото слиться
      с белым текстом и не глушит цвета (тёмно-синий, не чёрный) */
   --mt-wallpaper-dim: rgba(9, 16, 34, 0.3);
-  --mt-app-bg-image: linear-gradient(var(--mt-wallpaper-dim), var(--mt-wallpaper-dim)),
-    var(--mt-wallpaper-image);
+  --mt-app-bg-image:
+    linear-gradient(var(--mt-wallpaper-dim), var(--mt-wallpaper-dim)), var(--mt-wallpaper-image);
   /* Подложка карточки контента задана ниже, в блоке про прозрачность. */
 
   /* Подложка за левым меню (AppLayout .aside) — второй слой затемнения */

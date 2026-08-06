@@ -215,7 +215,8 @@ export interface Message extends MessageSummary {
   bodyRecovered?: boolean;
 }
 
-export type AuthResult = 'pass' | 'fail' | 'softfail' | 'neutral' | 'none' | 'temperror' | 'permerror';
+export type AuthResult =
+  'pass' | 'fail' | 'softfail' | 'neutral' | 'none' | 'temperror' | 'permerror';
 
 /**
  * Сводка переписки, приложенная к строке списка.

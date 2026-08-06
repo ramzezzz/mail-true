@@ -55,7 +55,10 @@ const PART_OPTIONS = {
 
 /** Имя файла выгрузки: по нему в папке «Загрузки» видно, что это и когда снято. */
 function backupFileName(hostname: string, now: Date): string {
-  const stamp = now.toISOString().replace(/[-:]/gu, '').replace(/\.\d+Z$/u, '');
+  const stamp = now
+    .toISOString()
+    .replace(/[-:]/gu, '')
+    .replace(/\.\d+Z$/u, '');
   const host = hostname.replace(/[^a-zA-Z0-9.-]/gu, '') || 'mailtrue';
   return `mailtrue-settings-${host}-${stamp}.json`;
 }
@@ -63,7 +66,9 @@ function backupFileName(hostname: string, now: Date): string {
 /** Достаёт файл копии из multipart-запроса. */
 async function readBackupFile(request: {
   isMultipart(): boolean;
-  file(options?: unknown): Promise<{ toBuffer(): Promise<Buffer>; file: { truncated: boolean } } | undefined>;
+  file(
+    options?: unknown,
+  ): Promise<{ toBuffer(): Promise<Buffer>; file: { truncated: boolean } } | undefined>;
 }): Promise<SettingsBackupFile> {
   if (!request.isMultipart()) {
     throw new BadRequestError(
@@ -371,7 +376,8 @@ export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
          * от нас, а не при следующем входе.
          */
         note:
-          sections.includes('admins') && plan.sections.some((s) => s.id === 'admins' && s.overwrite.length > 0)
+          sections.includes('admins') &&
+          plan.sections.some((s) => s.id === 'admins' && s.overwrite.length > 0)
             ? 'Учётные записи администраторов перезаписаны. Текущая сессия продолжает работать, ' +
               'но при следующем входе понадобится пароль из копии.'
             : null,

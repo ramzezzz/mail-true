@@ -35,18 +35,19 @@ import type { ImapFlow } from 'imapflow';
 import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
 import { ApiError, BadRequestError, UpstreamUnavailableError } from '../errors.js';
-import { existingUids, groupIdsByFolder, requireFolder, requireOrCreateFolder } from '../imap/service.js';
+import {
+  existingUids,
+  groupIdsByFolder,
+  requireFolder,
+  requireOrCreateFolder,
+} from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { rawHeaderValue } from './header-charset.js';
 import type { MuteStore, MutedRow } from './mute-db.js';
 import { groupThreads, threadIdentity, type ThreadHeaderSource } from './mute-thread.js';
 import type { SieveIncludeStore } from '../settings/sieve-include.js';
 import { MUTED_INCLUDE_NAME } from '../settings/sieve.js';
-import {
-  buildMutedSieveScript,
-  MUTED_FOLDER_ID,
-  MUTED_MAX_IDS,
-} from '../settings/sieve-muted.js';
+import { buildMutedSieveScript, MUTED_FOLDER_ID, MUTED_MAX_IDS } from '../settings/sieve-muted.js';
 
 /** Письмо из ящика в том виде, в каком его читает разбор переписок. */
 interface MuteSource extends ThreadHeaderSource {
@@ -312,10 +313,7 @@ export class MuteService {
   /* ---------------------------------------------------------------- */
 
   /** Читает у выделенных писем заголовки, по которым узнаётся переписка. */
-  async #readHeaders(
-    client: ImapFlow,
-    ids: string[],
-  ): Promise<MuteSource[]> {
+  async #readHeaders(client: ImapFlow, ids: string[]): Promise<MuteSource[]> {
     const out: MuteSource[] = [];
     for (const [folderId, uids] of groupIdsByFolder(ids)) {
       const folder = await requireFolder(client, folderId);

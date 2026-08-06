@@ -274,13 +274,11 @@ export class SieveIncludeStore {
     const tmp = join(sieveDir, '.mt-inc-new.sieve');
     const tmpBin = join(sieveDir, '.mt-inc-new.svbin');
     await writeFile(tmp, text, 'utf8');
-    const res = await run('sievec', [tmp]).catch(
-      (err: unknown): RunResult => ({
-        code: -1,
-        stdout: '',
-        stderr: err instanceof Error ? err.message : String(err),
-      }),
-    );
+    const res = await run('sievec', [tmp]).catch((err: unknown): RunResult => ({
+      code: -1,
+      stdout: '',
+      stderr: err instanceof Error ? err.message : String(err),
+    }));
     // code === -1 — самого sievec рядом нет. Это не ошибка файла, и терять
     // из-за неё заглушку нельзя: собирать всё равно будет Dovecot.
     const compilerMissing = res.code === -1;

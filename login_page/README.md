@@ -13,10 +13,12 @@ own. Colors, text, and behavior are driven by the `CONFIG` object in `app.js`.
 > "Signing in…" state and shows a demo message — nothing is sent anywhere.
 
 ## Run it
+
 Open `index.html` in any modern browser. No build step, no server, no
 network/CDN. (Uses a system font stack, so no font files are needed either.)
 
 ## Files
+
 - `index.html` — markup / structure
 - `styles.css` — all styling (commented by section)
 - `app.js` — the `CONFIG` object + behavior (constellation, globe, i18n, submit)
@@ -26,19 +28,19 @@ _(The `assets/` folder is intentionally empty/removed — all visuals are code.)
 
 ## Customize — `CONFIG` at the top of `app.js`
 
-| What | Key |
-| --- | --- |
-| Product name | `brandName` |
-| Optional tagline | `brandTagline` |
-| Accent / brand color | `accent`, `accentHover`, `accentPress` |
-| Particle count | `particleCount` |
-| Particle color (RGB) | `particleColor` (e.g. `"150,190,245"`) |
-| Link / mouse-link distances | `linkDistance`, `mouseDistance` |
-| Show the 3D globe | `showGlobe` (`true`/`false`) |
-| Show the captcha field | `showVerifyCode` (default `false`) |
-| Default language | `defaultLang` (`"en"`/`"zh"`) |
+| What                               | Key                                                  |
+| ---------------------------------- | ---------------------------------------------------- |
+| Product name                       | `brandName`                                          |
+| Optional tagline                   | `brandTagline`                                       |
+| Accent / brand color               | `accent`, `accentHover`, `accentPress`               |
+| Particle count                     | `particleCount`                                      |
+| Particle color (RGB)               | `particleColor` (e.g. `"150,190,245"`)               |
+| Link / mouse-link distances        | `linkDistance`, `mouseDistance`                      |
+| Show the 3D globe                  | `showGlobe` (`true`/`false`)                         |
+| Show the captcha field             | `showVerifyCode` (default `false`)                   |
+| Default language                   | `defaultLang` (`"en"`/`"zh"`)                        |
 | Footer lines (browser + copyright) | `footer.browser.{en,zh}`, `footer.copyright.{en,zh}` |
-| All UI labels | `i18n.en`, `i18n.zh` |
+| All UI labels                      | `i18n.en`, `i18n.zh`                                 |
 
 **Swap the logo:** edit the inline `<svg id="brandLogo">` in `index.html`
 (a few connected circles) — or drop in your own SVG/`<img>` there. It inherits
@@ -52,6 +54,7 @@ at the top of `styles.css`.
 footer text live.
 
 ## Behavior & accessibility
+
 - Globe slow-rotates; particles drift and draw lines toward the cursor.
 - Entrance fade/slide for the card + globe; input focus + button hover/press.
 - Respects `prefers-reduced-motion` (freezes the globe and particle animation;

@@ -30,12 +30,7 @@ import {
   type TokenUsage,
 } from '@mail-true/ai';
 import type { AiConfig } from './config.js';
-import type {
-  AiDomainSettings,
-  AiRedis,
-  AiSettingsStore,
-  AiUserSettings,
-} from './db.js';
+import type { AiDomainSettings, AiRedis, AiSettingsStore, AiUserSettings } from './db.js';
 import {
   AI_FEATURES,
   AI_FEATURE_INFO,

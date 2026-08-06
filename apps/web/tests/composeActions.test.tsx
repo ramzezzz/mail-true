@@ -17,11 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { ComposeWindows } from '../src/compose/ComposeWindows';
-import {
-  defaultSendAt,
-  formatSendAt,
-  toLocalInputValue,
-} from '../src/compose/ComposeWindow';
+import { defaultSendAt, formatSendAt, toLocalInputValue } from '../src/compose/ComposeWindow';
 import { useUiStore } from '../src/app/store';
 import { api } from '../src/api';
 import type { SendRequest } from '../src/api/types';
@@ -90,9 +86,7 @@ afterEach(() => {
 
 /** Подставная отправка, запоминающая то, что ушло на сервер. */
 function spySend() {
-  return vi
-    .spyOn(api, 'sendMessage')
-    .mockResolvedValue({ ok: true, sentMessageId: 'sent:1' });
+  return vi.spyOn(api, 'sendMessage').mockResolvedValue({ ok: true, sentMessageId: 'sent:1' });
 }
 
 describe('уведомить о прочтении', () => {
@@ -140,9 +134,12 @@ describe('отложенная отправка', () => {
   it('назначенное время уходит на сервер, а человеку говорят когда письмо уйдёт', async () => {
     const at = new Date(Date.now() + 3600_000);
     at.setSeconds(0, 0);
-    const send = vi
-      .spyOn(api, 'sendMessage')
-      .mockResolvedValue({ ok: true, sentMessageId: null, scheduled: true, sendAt: at.toISOString() });
+    const send = vi.spyOn(api, 'sendMessage').mockResolvedValue({
+      ok: true,
+      sentMessageId: null,
+      scheduled: true,
+      sendAt: at.toISOString(),
+    });
 
     render();
     act(() => useUiStore.getState().openCompose());
@@ -271,9 +268,7 @@ describe('Ctrl+Enter — отправить', () => {
    * означало бы ровно то же, что и раньше.
    */
   const press = (target: Element, init: KeyboardEventInit) => {
-    act(() =>
-      target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init })),
-    );
+    act(() => target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init })));
   };
 
   it('отправляет из любого поля окна, а не только из тела письма', async () => {

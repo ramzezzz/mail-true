@@ -68,13 +68,7 @@ export interface LabelPillsProps {
  * произвольном порядке, и без этого одна и та же пара меток на двух
  * письмах выстраивалась бы по-разному.
  */
-export function LabelPills({
-  keywords,
-  dictionary,
-  large,
-  onRemove,
-  className,
-}: LabelPillsProps) {
+export function LabelPills({ keywords, dictionary, large, onRemove, className }: LabelPillsProps) {
   const lower = new Set(keywords.map((k) => k.toLowerCase()));
   const shown = dictionary.filter((label) => lower.has(label.key.toLowerCase()));
   if (shown.length === 0) return null;

@@ -28,10 +28,7 @@ import {
 } from './backup-format.js';
 
 /** Запрос, для которого отсутствие таблицы — пустой ответ, а не ошибка. */
-async function optional<T extends Record<string, unknown>>(
-  db: AdminDb,
-  sql: string,
-): Promise<T[]> {
+async function optional<T extends Record<string, unknown>>(db: AdminDb, sql: string): Promise<T[]> {
   try {
     return (await db.query(sql)) as T[];
   } catch (err) {
@@ -300,7 +297,15 @@ export async function readCurrentSnapshot(
   }
 
   const state = await branding.read();
-  return { domains, mailboxes, aliases, admins, ai, userSettings, brandingLogo: state.logo !== null };
+  return {
+    domains,
+    mailboxes,
+    aliases,
+    admins,
+    ai,
+    userSettings,
+    brandingLogo: state.logo !== null,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -363,8 +368,7 @@ const CONSTRAINT_HINTS: Readonly<Record<string, string>> = {
     'у правила фильтрации недопустимый режим совпадения: допустимы all (все условия) и any (любое)',
   mail_user_settings_after_delete_check:
     'недопустимое поведение после удаления письма: допустимы list (вернуться к списку) и next (открыть следующее)',
-  mail_user_settings_autoreply_days_check:
-    'недопустимый срок автоответа: от 1 до 365 дней',
+  mail_user_settings_autoreply_days_check: 'недопустимый срок автоответа: от 1 до 365 дней',
   ai_domain_settings_body_chars_check:
     'недопустимый предел размера письма для помощника ИИ: от 200 до 200 000 символов',
   ai_domain_settings_timeout_check:
@@ -465,159 +469,140 @@ export async function applyRestore(
   // Перевод отказа базы навешивается на транзакцию целиком (а не
   // оборачивает каждый запрос): отказ откатывает её всю, и место, где
   // он случился, уже записано в `where`.
-  await db.transaction(async (client) => {
-    /* --- домены --- */
-    if (want.has('domains')) {
-      for (const domain of file.data.domains) {
-        where.section = 'Домены';
-        where.label = domain.name;
-        const created = await upsertDomain(client, domain);
-        note('domains', created ? 'created' : 'updated');
+  await db
+    .transaction(async (client) => {
+      /* --- домены --- */
+      if (want.has('domains')) {
+        for (const domain of file.data.domains) {
+          where.section = 'Домены';
+          where.label = domain.name;
+          const created = await upsertDomain(client, domain);
+          note('domains', created ? 'created' : 'updated');
+        }
       }
-    }
 
-    /* --- ящики --- */
-    if (want.has('mailboxes')) {
-      for (const box of file.data.mailboxes) {
-        where.section = 'Ящики';
-        where.label = box.email;
-        const domainName = box.email.split('@')[1] ?? '';
-        if (domainName === '') continue;
-        // Домен под ящик заводим молча только потому, что план уже
-        // предупредил об этом человека (см. buildRestorePlan).
-        const domainId = await ensureDomain(client, domainName);
-        const existing = await client.query<{ id: number }>(
-          `SELECT id FROM virtual_users WHERE lower(email) = lower($1)`,
-          [box.email],
-        );
-        if (existing.rows.length > 0) {
-          await client.query(
-            `UPDATE virtual_users
+      /* --- ящики --- */
+      if (want.has('mailboxes')) {
+        for (const box of file.data.mailboxes) {
+          where.section = 'Ящики';
+          where.label = box.email;
+          const domainName = box.email.split('@')[1] ?? '';
+          if (domainName === '') continue;
+          // Домен под ящик заводим молча только потому, что план уже
+          // предупредил об этом человека (см. buildRestorePlan).
+          const domainId = await ensureDomain(client, domainName);
+          const existing = await client.query<{ id: number }>(
+            `SELECT id FROM virtual_users WHERE lower(email) = lower($1)`,
+            [box.email],
+          );
+          if (existing.rows.length > 0) {
+            await client.query(
+              `UPDATE virtual_users
                 SET domain_id = $2, password = $3, display_name = $4,
                     quota_bytes = $5, active = $6, updated_at = now()
               WHERE id = $1`,
-            [
-              existing.rows[0]?.id,
-              domainId,
-              box.passwordHash,
-              box.displayName,
-              box.quotaBytes,
-              box.active,
-            ],
-          );
-          note('mailboxes', 'updated');
-        } else {
-          await client.query(
-            `INSERT INTO virtual_users (domain_id, email, password, display_name, quota_bytes, active)
+              [
+                existing.rows[0]?.id,
+                domainId,
+                box.passwordHash,
+                box.displayName,
+                box.quotaBytes,
+                box.active,
+              ],
+            );
+            note('mailboxes', 'updated');
+          } else {
+            await client.query(
+              `INSERT INTO virtual_users (domain_id, email, password, display_name, quota_bytes, active)
              VALUES ($1, $2, $3, $4, $5, $6)`,
-            [domainId, box.email, box.passwordHash, box.displayName, box.quotaBytes, box.active],
-          );
-          note('mailboxes', 'created');
+              [domainId, box.email, box.passwordHash, box.displayName, box.quotaBytes, box.active],
+            );
+            note('mailboxes', 'created');
+          }
         }
       }
-    }
 
-    /* --- алиасы --- */
-    if (want.has('aliases')) {
-      for (const alias of file.data.aliases) {
-        where.section = 'Алиасы';
-        where.label = `${alias.source} → ${alias.destination}`;
-        const domainName = alias.source.split('@')[1] ?? '';
-        if (domainName === '') continue;
-        const domainId = await ensureDomain(client, domainName);
-        const updated = await client.query(
-          `UPDATE virtual_aliases SET active = $3, domain_id = $4
+      /* --- алиасы --- */
+      if (want.has('aliases')) {
+        for (const alias of file.data.aliases) {
+          where.section = 'Алиасы';
+          where.label = `${alias.source} → ${alias.destination}`;
+          const domainName = alias.source.split('@')[1] ?? '';
+          if (domainName === '') continue;
+          const domainId = await ensureDomain(client, domainName);
+          const updated = await client.query(
+            `UPDATE virtual_aliases SET active = $3, domain_id = $4
             WHERE lower(source) = lower($1) AND lower(destination) = lower($2)`,
-          [alias.source, alias.destination, alias.active, domainId],
-        );
-        if ((updated.rowCount ?? 0) > 0) {
-          note('aliases', 'updated');
-        } else {
-          await client.query(
-            `INSERT INTO virtual_aliases (domain_id, source, destination, active)
-             VALUES ($1, $2, $3, $4) ON CONFLICT (source, destination) DO NOTHING`,
-            [domainId, alias.source, alias.destination, alias.active],
+            [alias.source, alias.destination, alias.active, domainId],
           );
-          note('aliases', 'created');
+          if ((updated.rowCount ?? 0) > 0) {
+            note('aliases', 'updated');
+          } else {
+            await client.query(
+              `INSERT INTO virtual_aliases (domain_id, source, destination, active)
+             VALUES ($1, $2, $3, $4) ON CONFLICT (source, destination) DO NOTHING`,
+              [domainId, alias.source, alias.destination, alias.active],
+            );
+            note('aliases', 'created');
+          }
         }
       }
-    }
 
-    /* --- администраторы --- */
-    if (want.has('admins')) {
-      for (const admin of file.data.admins) {
-        where.section = 'Администраторы';
-        where.label = admin.login;
-        const updated = await client.query(
-          `UPDATE admin_users
+      /* --- администраторы --- */
+      if (want.has('admins')) {
+        for (const admin of file.data.admins) {
+          where.section = 'Администраторы';
+          where.label = admin.login;
+          const updated = await client.query(
+            `UPDATE admin_users
               SET password_hash = $2, display_name = $3, role = $4, active = $5, updated_at = now()
             WHERE lower(login) = lower($1)`,
-          [admin.login, admin.passwordHash, admin.displayName, admin.role, admin.active],
-        );
-        if ((updated.rowCount ?? 0) > 0) {
-          note('admins', 'updated');
-        } else {
-          await client.query(
-            `INSERT INTO admin_users (login, password_hash, display_name, role, active)
-             VALUES ($1, $2, $3, $4, $5)`,
             [admin.login, admin.passwordHash, admin.displayName, admin.role, admin.active],
           );
-          note('admins', 'created');
+          if ((updated.rowCount ?? 0) > 0) {
+            note('admins', 'updated');
+          } else {
+            await client.query(
+              `INSERT INTO admin_users (login, password_hash, display_name, role, active)
+             VALUES ($1, $2, $3, $4, $5)`,
+              [admin.login, admin.passwordHash, admin.displayName, admin.role, admin.active],
+            );
+            note('admins', 'created');
+          }
         }
       }
-    }
 
-    /* --- настройки, подписи и правила пользователей --- */
-    if (want.has('userSettings')) {
-      for (const entry of file.data.userSettings) {
-        where.section = 'Настройки ящиков';
-        where.label = entry.accountEmail;
-        await restoreUserSettings(client, entry);
-        note('userSettings', 'updated');
-        resyncSieve.push(entry.accountEmail);
+      /* --- настройки, подписи и правила пользователей --- */
+      if (want.has('userSettings')) {
+        for (const entry of file.data.userSettings) {
+          where.section = 'Настройки ящиков';
+          where.label = entry.accountEmail;
+          await restoreUserSettings(client, entry);
+          note('userSettings', 'updated');
+          resyncSieve.push(entry.accountEmail);
+        }
       }
-    }
 
-    /* --- помощник ИИ --- */
-    if (want.has('ai')) {
-      for (const item of file.data.ai) {
-        where.section = 'Помощник ИИ';
-        where.label = item.domain;
-        const domain = await client.query<{ id: number }>(
-          `SELECT id FROM virtual_domains WHERE lower(name) = lower($1)`,
-          [item.domain],
-        );
-        const domainId = domain.rows[0]?.id;
-        if (domainId === undefined) continue;
-        // api_key_enc не трогаем ни при создании, ни при обновлении:
-        // в копии его нет, а затирать действующий ключ пустотой — значит
-        // выключить помощника у того, кто ключ уже ввёл.
-        const updated = await client.query(
-          `UPDATE ai_domain_settings
+      /* --- помощник ИИ --- */
+      if (want.has('ai')) {
+        for (const item of file.data.ai) {
+          where.section = 'Помощник ИИ';
+          where.label = item.domain;
+          const domain = await client.query<{ id: number }>(
+            `SELECT id FROM virtual_domains WHERE lower(name) = lower($1)`,
+            [item.domain],
+          );
+          const domainId = domain.rows[0]?.id;
+          if (domainId === undefined) continue;
+          // api_key_enc не трогаем ни при создании, ни при обновлении:
+          // в копии его нет, а затирать действующий ключ пустотой — значит
+          // выключить помощника у того, кто ключ уже ввёл.
+          const updated = await client.query(
+            `UPDATE ai_domain_settings
               SET enabled = $2, base_url = $3, chat_path = $4, model = $5,
                   provider_label = $6, is_local = $7, max_body_chars = $8,
                   timeout_ms = $9, max_output_tokens = $10
             WHERE domain_id = $1`,
-          [
-            domainId,
-            item.enabled,
-            item.baseUrl,
-            item.chatPath,
-            item.model,
-            item.providerLabel,
-            item.isLocal,
-            item.maxBodyChars,
-            item.timeoutMs,
-            item.maxOutputTokens,
-          ],
-        );
-        if ((updated.rowCount ?? 0) > 0) note('ai', 'updated');
-        else {
-          await client.query(
-            `INSERT INTO ai_domain_settings
-               (domain_id, enabled, base_url, chat_path, model, provider_label,
-                is_local, max_body_chars, timeout_ms, max_output_tokens)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
             [
               domainId,
               item.enabled,
@@ -631,13 +616,34 @@ export async function applyRestore(
               item.maxOutputTokens,
             ],
           );
-          note('ai', 'created');
+          if ((updated.rowCount ?? 0) > 0) note('ai', 'updated');
+          else {
+            await client.query(
+              `INSERT INTO ai_domain_settings
+               (domain_id, enabled, base_url, chat_path, model, provider_label,
+                is_local, max_body_chars, timeout_ms, max_output_tokens)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+              [
+                domainId,
+                item.enabled,
+                item.baseUrl,
+                item.chatPath,
+                item.model,
+                item.providerLabel,
+                item.isLocal,
+                item.maxBodyChars,
+                item.timeoutMs,
+                item.maxOutputTokens,
+              ],
+            );
+            note('ai', 'created');
+          }
         }
       }
-    }
-  }).catch((err: unknown) => {
-    throw restoreDbError(err, where);
-  });
+    })
+    .catch((err: unknown) => {
+      throw restoreDbError(err, where);
+    });
 
   /* --- оформление --- */
   // Вне транзакции: это файлы в томе, а не строки в базе. Порядок такой,
@@ -671,10 +677,9 @@ async function ensureDomain(client: PoolClient, name: string): Promise<number> {
   );
   const newId = created.rows[0]?.id;
   if (newId === undefined) throw new Error(`не удалось создать домен ${name}`);
-  await client.query(
-    `INSERT INTO domain_settings (domain_id) VALUES ($1) ON CONFLICT DO NOTHING`,
-    [newId],
-  );
+  await client.query(`INSERT INTO domain_settings (domain_id) VALUES ($1) ON CONFLICT DO NOTHING`, [
+    newId,
+  ]);
   return newId;
 }
 
@@ -721,7 +726,9 @@ async function restoreUserSettings(client: PoolClient, entry: UserSettingsEntry)
   const email = entry.accountEmail;
 
   if (entry.settings) {
-    const values = USER_SETTINGS_COLUMNS.map((col) => (entry.settings as Record<string, unknown>)[col] ?? null);
+    const values = USER_SETTINGS_COLUMNS.map(
+      (col) => (entry.settings as Record<string, unknown>)[col] ?? null,
+    );
     const placeholders = USER_SETTINGS_COLUMNS.map((_, i) => `$${i + 2}`).join(', ');
     const updates = USER_SETTINGS_COLUMNS.map((col) => `${col} = EXCLUDED.${col}`).join(', ');
     await client.query(

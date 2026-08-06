@@ -553,8 +553,7 @@ export class AwaitReplyService {
       uid = await this.#locateSent(client, row);
       if (uid === null) return false;
       copied = (await client.messageCopy([uid], inboxPath, { uid: true })) as
-        | { uidMap?: Map<number, number> }
-        | boolean;
+        { uidMap?: Map<number, number> } | boolean;
     } finally {
       lock.release();
     }
@@ -573,11 +572,9 @@ export class AwaitReplyService {
       }
       if (newUid === undefined) return true;
       await client.messageFlagsRemove([newUid], ['\\Seen'], { uid: true });
-      await client.messageFlagsAdd(
-        [newUid],
-        [AWAIT_OVERDUE_KEYWORD, AWAIT_PINNED_KEYWORD],
-        { uid: true },
-      );
+      await client.messageFlagsAdd([newUid], [AWAIT_OVERDUE_KEYWORD, AWAIT_PINNED_KEYWORD], {
+        uid: true,
+      });
     } catch {
       /* пометки — украшение поверх; письмо уже во «Входящих» */
     } finally {

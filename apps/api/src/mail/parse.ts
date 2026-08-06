@@ -112,7 +112,10 @@ const MAX_HEADER_LENGTH = 4096;
 
 /** Склеивает свёрнутый заголовок в одну строку. */
 function unfold(value: string): string {
-  return value.replace(/\r?\n[ \t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return value
+    .replace(/\r?\n[ \t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**

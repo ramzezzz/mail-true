@@ -192,26 +192,22 @@ export async function adminBrandingRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.patch(
-    '/branding',
-    { preHandler: requireAdmin(app, 'branding.write') },
-    async (request) => {
-      const body = textsSchema.parse(request.body);
-      const before = await branding.read();
-      // Поле, которого нет в запросе, означает «не менять», поэтому
-      // undefined до хранилища доходить не должен вовсе.
-      const state = await branding.saveTexts({
-        ...(body.companyName !== undefined ? { companyName: body.companyName } : {}),
-        ...(body.productName !== undefined ? { productName: body.productName } : {}),
-      });
-      await audit(ctx, request, {
-        action: 'branding.texts',
-        targetType: 'branding',
-        targetLabel: state.companyName ?? state.productName ?? 'подписи входа',
-        before: { companyName: before.companyName, productName: before.productName },
-        after: { companyName: state.companyName, productName: state.productName },
-      });
-      return toDto(state);
-    },
-  );
+  app.patch('/branding', { preHandler: requireAdmin(app, 'branding.write') }, async (request) => {
+    const body = textsSchema.parse(request.body);
+    const before = await branding.read();
+    // Поле, которого нет в запросе, означает «не менять», поэтому
+    // undefined до хранилища доходить не должен вовсе.
+    const state = await branding.saveTexts({
+      ...(body.companyName !== undefined ? { companyName: body.companyName } : {}),
+      ...(body.productName !== undefined ? { productName: body.productName } : {}),
+    });
+    await audit(ctx, request, {
+      action: 'branding.texts',
+      targetType: 'branding',
+      targetLabel: state.companyName ?? state.productName ?? 'подписи входа',
+      before: { companyName: before.companyName, productName: before.productName },
+      after: { companyName: state.companyName, productName: state.productName },
+    });
+    return toDto(state);
+  });
 }

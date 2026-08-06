@@ -177,11 +177,7 @@ export class ExportRunner {
       const total = folders.reduce((sum, f) => sum + f.totalCount, 0);
       await store.updateExportProgress(job.id, { totalMessages: total });
 
-      await zip.add(
-        'ЧИТАТЬ.txt',
-        Buffer.from(readmeText(job, folders), 'utf8'),
-        new Date(),
-      );
+      await zip.add('ЧИТАТЬ.txt', Buffer.from(readmeText(job, folders), 'utf8'), new Date());
 
       let done = 0;
       let bytes = 0;
@@ -256,10 +252,7 @@ export class ExportRunner {
         fileBytes: size,
         expiresAt,
       });
-      logger.info(
-        { job: job.id, messages: done, skipped, bytes: size },
-        'Выгрузка ящика готова',
-      );
+      logger.info({ job: job.id, messages: done, skipped, bytes: size }, 'Выгрузка ящика готова');
     } catch (err) {
       await zip?.abort().catch(() => undefined);
       await rm(file, { force: true }).catch(() => undefined);

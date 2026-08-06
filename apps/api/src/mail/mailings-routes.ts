@@ -169,7 +169,10 @@ export async function mailingsRoutes(app: FastifyInstance, deps: MailingsDeps): 
   };
 
   /** Осмотр, который человек уже видел. Разошлись отметки — отказ. */
-  const scanAsSeen = async (session: MailSession, scanAt: string | undefined): Promise<ScanResult> => {
+  const scanAsSeen = async (
+    session: MailSession,
+    scanAt: string | undefined,
+  ): Promise<ScanResult> => {
     const result = await scanFor(session, false);
     if (scanAt && scanAt !== result.at) {
       throw new BadRequestError(
@@ -224,9 +227,7 @@ export async function mailingsRoutes(app: FastifyInstance, deps: MailingsDeps): 
     const group = groupMailings(scan.messages).find((g) => g.key === body.key);
     if (!group) throw new NotFoundError('Такой рассылки в разборе нет');
     if (!group.unsubscribeMessageId) {
-      throw new NotFoundError(
-        `В письмах «${group.title}» нет адреса отписки — отписаться нечем`,
-      );
+      throw new NotFoundError(`В письмах «${group.title}» нет адреса отписки — отписаться нечем`);
     }
 
     const { folderId, uid } = splitMessageId(group.unsubscribeMessageId);
@@ -305,9 +306,7 @@ export async function mailingsRoutes(app: FastifyInstance, deps: MailingsDeps): 
        */
       staleMailings: withQuotaShare(
         groups.filter(
-          (g) =>
-            g.mailing &&
-            Date.now() - new Date(g.lastDate).getTime() > 30 * 86_400_000,
+          (g) => g.mailing && Date.now() - new Date(g.lastDate).getTime() > 30 * 86_400_000,
         ),
         scan.quota,
       ),

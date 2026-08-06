@@ -12,10 +12,37 @@ export const QUOTE_START = '\uE000';
 export const QUOTE_END = '\uE001';
 
 const BLOCK_TAGS = new Set([
-  'address', 'article', 'aside', 'div', 'dl', 'dd', 'dt',
-  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3',
-  'h4', 'h5', 'h6', 'header', 'hr', 'main', 'nav', 'ol', 'p', 'pre',
-  'section', 'table', 'tfoot', 'thead', 'tbody', 'ul',
+  'address',
+  'article',
+  'aside',
+  'div',
+  'dl',
+  'dd',
+  'dt',
+  'fieldset',
+  'figcaption',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'header',
+  'hr',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'table',
+  'tfoot',
+  'thead',
+  'tbody',
+  'ul',
 ]);
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -102,10 +129,7 @@ export function htmlToText(html: string): string {
  * убирает неразрывные пробелы и символы нулевой ширины, хвостовые
  * пробелы строк, серии пустых строк.
  */
-export function normalizeWhitespace(
-  input: string,
-  options?: { keepQuoteMarks?: boolean },
-): string {
+export function normalizeWhitespace(input: string, options?: { keepQuoteMarks?: boolean }): string {
   let out = input
     .replace(/\r\n?/g, '\n')
     // Неразрывные и типографские пробелы → обычный пробел.

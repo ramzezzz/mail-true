@@ -60,7 +60,9 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
 
       // Пароль сверяем даже для несуществующего логина — чтобы по времени
       // ответа нельзя было перебрать имена администраторов
-      const stored = row?.password_hash ?? 'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const stored =
+        row?.password_hash ??
+        'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
       const passwordOk = verifyAdminPassword(password, stored);
 
       if (row && row.locked_until && row.locked_until.getTime() > Date.now()) {
@@ -224,25 +226,21 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Список администраторов — только для роли с правом admins.manage
-  app.get(
-    '/admins',
-    { preHandler: requireAdmin(app, 'admins.manage') },
-    async () => {
-      const rows = await ctx.db.listAdmins();
-      return {
-        items: rows.map((r) => ({
-          id: r.id,
-          login: r.login,
-          displayName: r.display_name,
-          role: r.role,
-          roleLabel: isAdminRole(r.role) ? ROLE_LABELS[r.role] : r.role,
-          active: r.active,
-          lastLoginAt: r.last_login_at?.toISOString() ?? null,
-          lastLoginIp: r.last_login_ip,
-          lockedUntil: r.locked_until?.toISOString() ?? null,
-          createdAt: r.created_at.toISOString(),
-        })),
-      };
-    },
-  );
+  app.get('/admins', { preHandler: requireAdmin(app, 'admins.manage') }, async () => {
+    const rows = await ctx.db.listAdmins();
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        login: r.login,
+        displayName: r.display_name,
+        role: r.role,
+        roleLabel: isAdminRole(r.role) ? ROLE_LABELS[r.role] : r.role,
+        active: r.active,
+        lastLoginAt: r.last_login_at?.toISOString() ?? null,
+        lastLoginIp: r.last_login_ip,
+        lockedUntil: r.locked_until?.toISOString() ?? null,
+        createdAt: r.created_at.toISOString(),
+      })),
+    };
+  });
 }

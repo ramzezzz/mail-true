@@ -11,12 +11,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ApiError } from '../src/api/http';
 import type { AiOutboundDisclosure, AiState, AiSummary } from '../src/api/aiTypes';
 import { OutboundDetails } from '../src/ai/OutboundDetails';
-import {
-  aiErrorText,
-  aiFeatureVisible,
-  aiNeedsConsent,
-  aiVisible,
-} from '../src/ai/aiVisibility';
+import { aiErrorText, aiFeatureVisible, aiNeedsConsent, aiVisible } from '../src/ai/aiVisibility';
 import {
   AiMessageBanners,
   AiSummaryButton,
@@ -362,7 +357,9 @@ describe('опись отправленного', () => {
 
   it('внешний сервис назван прямо', () => {
     const html = renderToStaticMarkup(
-      <OutboundDetails disclosure={disclosure({ local: false, providerLabel: 'Внешний сервис' })} />,
+      <OutboundDetails
+        disclosure={disclosure({ local: false, providerLabel: 'Внешний сервис' })}
+      />,
     );
     expect(html).toContain('ушло за пределы вашего сервера');
     expect(html).toContain('Внешний сервис');
@@ -463,7 +460,12 @@ describe('экран согласия', () => {
 
 describe('ошибки API', () => {
   it('ApiError несёт и код, и человеческий текст', () => {
-    const error = new ApiError(429, '/api/ai/summarize', 'Израсходовано 200 000 токенов', 'AI_BUDGET_EXCEEDED');
+    const error = new ApiError(
+      429,
+      '/api/ai/summarize',
+      'Израсходовано 200 000 токенов',
+      'AI_BUDGET_EXCEEDED',
+    );
     expect(error.code).toBe('AI_BUDGET_EXCEEDED');
     expect(error.message).toBe('Израсходовано 200 000 токенов');
   });
@@ -475,7 +477,12 @@ describe('ошибки API', () => {
   });
 
   it('сообщение про лимит показывается дословно', () => {
-    const error = new ApiError(429, '/api/ai/summarize', 'Израсходовано 200 000 токенов', 'AI_BUDGET_EXCEEDED');
+    const error = new ApiError(
+      429,
+      '/api/ai/summarize',
+      'Израсходовано 200 000 токенов',
+      'AI_BUDGET_EXCEEDED',
+    );
     expect(aiErrorText(error)).toBe('Израсходовано 200 000 токенов');
   });
 

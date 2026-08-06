@@ -29,7 +29,9 @@ interface Harness {
   close(): Promise<void>;
 }
 
-async function buildHarness(store: MemoryTemplateStore | null = new MemoryTemplateStore()): Promise<Harness> {
+async function buildHarness(
+  store: MemoryTemplateStore | null = new MemoryTemplateStore(),
+): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-templates-'));
   const uploads = new UploadStore(dir);
   await uploads.init();
@@ -226,7 +228,11 @@ test('вложение шаблона переживает уборку врем
       url: `/api/templates/${String(id)}/attachments`,
     });
     assert.equal(materialized.statusCode, 200, materialized.body);
-    const files = materialized.json().attachments as Array<{ id: string; filename: string; size: number }>;
+    const files = materialized.json().attachments as Array<{
+      id: string;
+      filename: string;
+      size: number;
+    }>;
     assert.equal(files.length, 1);
     assert.equal(files[0]?.filename, 'прайс.pdf');
     // Идентификатор НОВЫЙ: это другая загрузка, а не воскресшая прежняя
@@ -251,12 +257,18 @@ test('вставка шаблона отдаёт КОПИЮ: убрав влож
       attachmentIds: [uploadId],
     });
 
-    const first = await h.app.inject({ method: 'POST', url: `/api/templates/${String(id)}/attachments` });
+    const first = await h.app.inject({
+      method: 'POST',
+      url: `/api/templates/${String(id)}/attachments`,
+    });
     const firstId = (first.json().attachments as Array<{ id: string }>)[0]?.id ?? '';
     // Человек передумал и убрал вложение из письма — удалилась КОПИЯ
     await h.uploads.delete(firstId);
 
-    const second = await h.app.inject({ method: 'POST', url: `/api/templates/${String(id)}/attachments` });
+    const second = await h.app.inject({
+      method: 'POST',
+      url: `/api/templates/${String(id)}/attachments`,
+    });
     assert.equal(second.statusCode, 200, second.body);
     const secondFiles = second.json().attachments as Array<{ id: string; filename: string }>;
     assert.equal(secondFiles.length, 1);

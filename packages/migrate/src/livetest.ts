@@ -352,7 +352,11 @@ async function snapshot(user: string): Promise<Map<string, DestMessage[]>> {
   return result;
 }
 
-function findMessage(snap: Map<string, DestMessage[]>, folder: string, subjectPrefix: string): DestMessage | undefined {
+function findMessage(
+  snap: Map<string, DestMessage[]>,
+  folder: string,
+  subjectPrefix: string,
+): DestMessage | undefined {
   return (snap.get(folder) ?? []).find((m) => m.subject.startsWith(subjectPrefix));
 }
 
@@ -408,7 +412,11 @@ async function main(): Promise<void> {
 
   process.stdout.write('\nШаг 2. Перенос source -> dest\n');
   const report1 = await runMigration(statePath);
-  check('статус ok', report1.status === 'ok', `status=${report1.status}, error=${report1.error ?? '-'}`);
+  check(
+    'статус ok',
+    report1.status === 'ok',
+    `status=${report1.status}, error=${report1.error ?? '-'}`,
+  );
   check(`скопировано ${report1.copied} из 9`, report1.copied === 9);
   check('ошибок нет', report1.failed === 0, `failed=${report1.failed}`);
 
@@ -452,13 +460,19 @@ async function main(): Promise<void> {
       `ожидалось ${s.internalDate.toISOString()}, фактически ${msg.internalDate?.toISOString() ?? 'нет'}`,
     );
     if (s.hasAttachment === true) {
-      check(`«${s.subject}»: размер с вложением совпадает`, msg.size === s.size, `ожидалось ${s.size}, фактически ${msg.size}`);
+      check(
+        `«${s.subject}»: размер с вложением совпадает`,
+        msg.size === s.size,
+        `ожидалось ${s.size}, фактически ${msg.size}`,
+      );
     }
   }
   const labeled = findMessage(snap, 'Projects/Alpha', 'LT-8');
   check('пользовательская метка MyLabel перенесена', labeled?.flags.has('MyLabel') === true);
 
-  process.stdout.write('\nШаг 4. Повторный запуск (докачка по состоянию) — дублей быть не должно\n');
+  process.stdout.write(
+    '\nШаг 4. Повторный запуск (докачка по состоянию) — дублей быть не должно\n',
+  );
   const before = totalMessages(snap);
   const report2 = await runMigration(statePath);
   check('повторно скопировано 0 писем', report2.copied === 0, `copied=${report2.copied}`);
@@ -472,7 +486,11 @@ async function main(): Promise<void> {
   process.stdout.write('\nШаг 5. Запуск с потерянным состоянием — дедупликация по приёмнику\n');
   await rm(statePath, { force: true });
   const report3 = await runMigration(statePath);
-  check('скопировано 0 писем (все распознаны как дубли)', report3.copied === 0, `copied=${report3.copied}`);
+  check(
+    'скопировано 0 писем (все распознаны как дубли)',
+    report3.copied === 0,
+    `copied=${report3.copied}`,
+  );
   check(`пропущено как дубли: ${report3.skipped} из 9`, report3.skipped === 9);
   const snapAfter3 = await snapshot(DST_USER);
   check(
@@ -487,11 +505,15 @@ async function main(): Promise<void> {
     process.stdout.write('\nШаг 6 пропущен: MIGRATE_PG_DSN не задан (smoke-тест Postgres)\n');
   }
 
-  process.stdout.write(`\n${failures === 0 ? 'ЖИВОЙ ТЕСТ ПРОЙДЕН' : `ЖИВОЙ ТЕСТ ПРОВАЛЕН: ${failures} ошибок`}\n`);
+  process.stdout.write(
+    `\n${failures === 0 ? 'ЖИВОЙ ТЕСТ ПРОЙДЕН' : `ЖИВОЙ ТЕСТ ПРОВАЛЕН: ${failures} ошибок`}\n`,
+  );
   process.exit(failures === 0 ? 0 : 1);
 }
 
 main().catch((err: unknown) => {
-  process.stderr.write(`Сбой живого теста: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+  process.stderr.write(
+    `Сбой живого теста: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+  );
   process.exit(1);
 });

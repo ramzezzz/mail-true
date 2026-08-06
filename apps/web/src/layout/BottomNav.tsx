@@ -78,9 +78,7 @@ export function BottomNav({ navOpen, onToggleNav, drawerId }: BottomNavProps) {
               </span>
             )}
           </span>
-          <span className={styles.label}>
-            {SHORT[folder.role] ?? folderTitle(folder)}
-          </span>
+          <span className={styles.label}>{SHORT[folder.role] ?? folderTitle(folder)}</span>
           {folder.role === 'inbox' && folder.unreadCount > 0 && (
             <span className={styles.srOnly}>непрочитанных: {folder.unreadCount}</span>
           )}

@@ -159,7 +159,12 @@ function timeoutFor(init: ApiRequestInit | undefined): number {
  * Своё прерывание вызывающего (отмена запроса) сюда не попадает: его
  * пробрасываем как есть, иначе отменённый поиск выглядел бы поломкой.
  */
-function asTimeout(err: unknown, path: string, ms: number, ownSignal: AbortSignal | undefined): never {
+function asTimeout(
+  err: unknown,
+  path: string,
+  ms: number,
+  ownSignal: AbortSignal | undefined,
+): never {
   const aborted = err instanceof DOMException && err.name === 'AbortError';
   const timedOut =
     (err instanceof DOMException && err.name === 'TimeoutError') ||

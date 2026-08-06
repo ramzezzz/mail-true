@@ -190,10 +190,7 @@ async function buildHarness(smtpPort = 25): Promise<Harness> {
 }
 
 /** Черновик как его кладёт окно написания. Возвращает UID. */
-async function saveDraft(
-  app: FastifyInstance,
-  body: Record<string, unknown>
-): Promise<number> {
+async function saveDraft(app: FastifyInstance, body: Record<string, unknown>): Promise<number> {
   const response = await app.inject({
     method: 'POST',
     url: '/api/drafts',
@@ -237,18 +234,18 @@ test('сохранённый черновик читается обратно в
     assert.equal(draft.draftUid, uid);
     assert.deepEqual(
       draft.to.map((a) => a.address),
-      ['irina@mail.local']
+      ['irina@mail.local'],
     );
     assert.equal(draft.to[0]?.name, 'Ирина');
     assert.deepEqual(
       draft.cc.map((a) => a.address),
-      ['copy@mail.local']
+      ['copy@mail.local'],
     );
     // «Скрытая копия» — самое опасное поле: потеряй её при дописывании,
     // и письмо уйдёт не всем, кому человек его адресовал, причём молча.
     assert.deepEqual(
       draft.bcc.map((a) => a.address),
-      ['hidden@mail.local']
+      ['hidden@mail.local'],
     );
     assert.equal(draft.subject, 'Договор на подпись');
     assert.match(draft.bodyHtml, /Отправляю договор/u);
@@ -266,7 +263,7 @@ test('вложение черновика возвращается ровно о
     const upload = await h.uploads.save(
       'договор.pdf',
       'application/pdf',
-      Readable.from(Buffer.from('%PDF-1.4 текст договора'))
+      Readable.from(Buffer.from('%PDF-1.4 текст договора')),
     );
     const uid = await saveDraft(h.app, {
       to: [{ name: null, address: 'irina@mail.local' }],
@@ -314,7 +311,11 @@ test('двойное сохранение дописанного чернови�
       subject: 'Черновик',
       bodyHtml: '<div>второй заход</div>',
     });
-    assert.equal(h.client.drafts.size, 1, 'после второго сохранения черновиков стало больше одного');
+    assert.equal(
+      h.client.drafts.size,
+      1,
+      'после второго сохранения черновиков стало больше одного',
+    );
 
     const third = await saveDraft(h.app, {
       draftUid: second,
@@ -322,7 +323,11 @@ test('двойное сохранение дописанного чернови�
       subject: 'Черновик',
       bodyHtml: '<div>третий заход</div>',
     });
-    assert.equal(h.client.drafts.size, 1, 'после третьего сохранения черновиков стало больше одного');
+    assert.equal(
+      h.client.drafts.size,
+      1,
+      'после третьего сохранения черновиков стало больше одного',
+    );
 
     // И в папке лежит именно последняя версия, а не первая: «один черновик»
     // ничего не стоит, если это застрявшая первая редакция.

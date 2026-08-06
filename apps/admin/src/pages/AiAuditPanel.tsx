@@ -140,13 +140,17 @@ export function AiAuditPanel({ features }: { features: AiFeatureInfo[] }) {
             </thead>
             <tbody>
               {items.map((entry) => (
-                <tr key={`${entry.at}:${entry.accountId}:${entry.feature}:${entry.messageId ?? ''}`}>
+                <tr
+                  key={`${entry.at}:${entry.accountId}:${entry.feature}:${entry.messageId ?? ''}`}
+                >
                   <td className={tableStyles.nowrap}>{formatDateTime(entry.at)}</td>
                   <td className="mt-mono">{entry.accountId}</td>
                   <td title={entry.feature}>{technicalTitle(features, entry.feature)}</td>
                   <td className="mt-mono">{entry.messageId ?? '—'}</td>
                   <td className="mt-mono">{entry.model}</td>
-                  <td className="mt-mono" style={{ wordBreak: 'break-all' }}>{entry.endpoint}</td>
+                  <td className="mt-mono" style={{ wordBreak: 'break-all' }}>
+                    {entry.endpoint}
+                  </td>
                   <td>
                     <Badge tone={entry.local ? 'ok' : 'warn'}>
                       {entry.local ? 'да' : 'нет, наружу'}
@@ -182,9 +186,8 @@ export function AiAuditPanel({ features }: { features: AiFeatureInfo[] }) {
         </TableWrap>
 
         <p className={styles.muted} style={{ marginBottom: 0 }}>
-          «≈» у числа токенов означает, что сервис не сообщил расход и он посчитан оценкой.
-          Столбец «Внутри периметра» показывает, покидали ли данные сервер: «нет, наружу» —
-          покидали.
+          «≈» у числа токенов означает, что сервис не сообщил расход и он посчитан оценкой. Столбец
+          «Внутри периметра» показывает, покидали ли данные сервер: «нет, наружу» — покидали.
         </p>
       </Panel>
     </div>

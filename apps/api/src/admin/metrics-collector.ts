@@ -140,7 +140,12 @@ export class MetricsCollector {
     void this.runOnce().catch(() => undefined);
     this.#timer = setInterval(() => {
       void this.runOnce().catch((err: unknown) => {
-        warnOnce(this.#passFailures, this.#opts.logger, err, 'Проход сборщика показателей не удался');
+        warnOnce(
+          this.#passFailures,
+          this.#opts.logger,
+          err,
+          'Проход сборщика показателей не удался',
+        );
       });
     }, seconds * 1000);
     this.#timer.unref?.();

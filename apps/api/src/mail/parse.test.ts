@@ -35,7 +35,7 @@ const rawSource = Buffer.from(
     `--${BOUNDARY}--`,
     '',
   ].join('\r\n'),
-  'utf8'
+  'utf8',
 );
 
 const structure: MessageStructureObject = {
@@ -89,7 +89,7 @@ test('parseFullMessage: тело, заголовки, cid и блокировк�
   // cid переписан на маршрут части
   assert.ok(
     message.bodyHtml.includes('/parts/2'),
-    `cid должен указывать на часть 2, получено: ${message.bodyHtml}`
+    `cid должен указывать на часть 2, получено: ${message.bodyHtml}`,
   );
   // внешняя картинка заблокирована: src заменён заглушкой, оригинал — в data-mt-src
   assert.ok(!/(?<!data-mt-)src="https:\/\/tracker\.example\/p\.png"/.test(message.bodyHtml));
@@ -172,7 +172,11 @@ test('текст письма с неверным разделителем бе�
     (message.bodyText ?? '').includes('Tekst vnutri nepravilnogo razdelitelya'),
     `текст должен быть виден, получено: ${JSON.stringify(message.bodyText)}`,
   );
-  assert.equal(message.bodyRecovered, true, 'и человеку должно быть сказано, что письмо не разобралось');
+  assert.equal(
+    message.bodyRecovered,
+    true,
+    'и человеку должно быть сказано, что письмо не разобралось',
+  );
 });
 
 test('обычное письмо признаком «не разобралось» не помечается', async () => {
@@ -197,7 +201,11 @@ test('обычное письмо признаком «не разобралос
   });
 
   assert.match(message.bodyText ?? '', /Vsyo v poryadke/);
-  assert.equal(message.bodyRecovered, undefined, 'лишний признак заставил бы объяснять то, чего не было');
+  assert.equal(
+    message.bodyRecovered,
+    undefined,
+    'лишний признак заставил бы объяснять то, чего не было',
+  );
 });
 
 test('чужому заголовку Authentication-Results не верим', async () => {

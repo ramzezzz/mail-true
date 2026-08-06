@@ -178,7 +178,13 @@ const MAIL = {
   spamNote: 'Отдельного поля «спам» в журнале Postfix нет',
   rejectReasons: [{ reason: 'Gtube pattern', count: 5 }],
   deferReasons: [{ reason: 'connect to IP:25: Connection refused', count: 2 }],
-  sizes: { messages: 40, totalBytes: 4_000_000, avgBytes: 100_000, medianBytes: 12_000, maxBytes: 2_000_000 },
+  sizes: {
+    messages: 40,
+    totalBytes: 4_000_000,
+    avgBytes: 100_000,
+    medianBytes: 12_000,
+    maxBytes: 2_000_000,
+  },
   hourly: Array.from({ length: 24 }, (_, hour) => ({ hour, count: hour === 14 ? 20 : 1 })),
   historyStartsAt: '2026-08-05T18:57:28.000Z',
   historyEndsAt: '2026-08-06T02:00:00.000Z',
@@ -357,7 +363,10 @@ describe('дашборд грузит разделы порознь', () => {
       '/overview/mailboxes',
       '/overview/security',
     ]) {
-      expect(requested.some((url) => url.includes(path)), `нет запроса ${path}`).toBe(true);
+      expect(
+        requested.some((url) => url.includes(path)),
+        `нет запроса ${path}`,
+      ).toBe(true);
     }
   });
 
@@ -517,8 +526,8 @@ describe('статистика по ящикам', () => {
     // Переставлять страницу на клиенте — значит сортировать 25 строк из
     // тысячи и показывать не тех, кто в самом деле в верхушке.
     await open();
-    const button = [...container.querySelectorAll('button')].find(
-      (b) => b.textContent?.includes('Объём отправленного'),
+    const button = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Объём отправленного'),
     );
     await act(async () => button?.click());
     await settle();

@@ -37,10 +37,27 @@ const SALT_MAX = 16;
  * тройки индексов итогового 64-байтового дайджеста.
  */
 const B64_ORDER: ReadonlyArray<readonly [number, number, number]> = [
-  [0, 21, 42], [22, 43, 1], [44, 2, 23], [3, 24, 45], [25, 46, 4], [47, 5, 26],
-  [6, 27, 48], [28, 49, 7], [50, 8, 29], [9, 30, 51], [31, 52, 10], [53, 11, 32],
-  [12, 33, 54], [34, 55, 13], [56, 14, 35], [15, 36, 57], [37, 58, 16], [59, 17, 38],
-  [18, 39, 60], [40, 61, 19], [62, 20, 41],
+  [0, 21, 42],
+  [22, 43, 1],
+  [44, 2, 23],
+  [3, 24, 45],
+  [25, 46, 4],
+  [47, 5, 26],
+  [6, 27, 48],
+  [28, 49, 7],
+  [50, 8, 29],
+  [9, 30, 51],
+  [31, 52, 10],
+  [53, 11, 32],
+  [12, 33, 54],
+  [34, 55, 13],
+  [56, 14, 35],
+  [15, 36, 57],
+  [37, 58, 16],
+  [59, 17, 38],
+  [18, 39, 60],
+  [40, 61, 19],
+  [62, 20, 41],
 ];
 
 function sha512(parts: readonly Buffer[]): Buffer {
@@ -176,9 +193,10 @@ export function verifyDovecotHash(password: string, hash: string): boolean {
   const parsed = parseCryptHash(hash);
   if (!parsed) return false;
   const expected = sha512Crypt(password, parsed.salt, parsed.rounds);
-  const actual = parsed.rounds === SHA512_CRYPT_DEFAULT_ROUNDS
-    ? `$6$${parsed.salt}$${parsed.digest}`
-    : `$6$rounds=${parsed.rounds}$${parsed.salt}$${parsed.digest}`;
+  const actual =
+    parsed.rounds === SHA512_CRYPT_DEFAULT_ROUNDS
+      ? `$6$${parsed.salt}$${parsed.digest}`
+      : `$6$rounds=${parsed.rounds}$${parsed.salt}$${parsed.digest}`;
   return constantTimeEquals(expected, actual);
 }
 

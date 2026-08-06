@@ -95,7 +95,7 @@ test('части внутри вложенного письма не счита�
   assert.deepEqual(
     list.map((a) => a.partId),
     ['2'],
-    'вложение внутри пересланного письма отдельной строкой не показывается'
+    'вложение внутри пересланного письма отдельной строкой не показывается',
   );
 });
 
@@ -263,9 +263,19 @@ test('размер вложения показывается как размер
 });
 
 test('размер части без base64 остаётся как есть', () => {
-  const node = { part: '1', type: 'text/plain', encoding: '7bit', size: 12_345 } as MessageStructureObject;
+  const node = {
+    part: '1',
+    type: 'text/plain',
+    encoding: '7bit',
+    size: 12_345,
+  } as MessageStructureObject;
   assert.equal(decodedPartSize(node), 12_345);
-  const qp = { part: '1', type: 'text/plain', encoding: 'quoted-printable', size: 900 } as MessageStructureObject;
+  const qp = {
+    part: '1',
+    type: 'text/plain',
+    encoding: 'quoted-printable',
+    size: 900,
+  } as MessageStructureObject;
   assert.equal(decodedPartSize(qp), 900);
 });
 
@@ -283,7 +293,7 @@ test('пересчёт размера base64 держится в предела�
     } as MessageStructureObject);
     assert.ok(
       Math.abs(back - bytes) <= 3,
-      `${String(bytes)} Б -> ${String(encoded)} Б -> ${String(back)} Б: расхождение больше трёх байт`
+      `${String(bytes)} Б -> ${String(encoded)} Б -> ${String(back)} Б: расхождение больше трёх байт`,
     );
   }
 });

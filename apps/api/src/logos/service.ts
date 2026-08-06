@@ -255,7 +255,12 @@ export class SenderLogoService {
       state,
       autoSource: cached?.source ?? null,
       hasManual,
-      version: state === 'manual' ? (decision?.version ?? null) : state === 'auto' ? (cached?.version ?? null) : null,
+      version:
+        state === 'manual'
+          ? (decision?.version ?? null)
+          : state === 'auto'
+            ? (cached?.version ?? null)
+            : null,
     };
   }
 

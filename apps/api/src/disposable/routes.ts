@@ -54,10 +54,7 @@ const patchSchema = z.object({
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
-export async function disposableRoutes(
-  app: FastifyInstance,
-  deps: DisposableDeps,
-): Promise<void> {
+export async function disposableRoutes(app: FastifyInstance, deps: DisposableDeps): Promise<void> {
   const sessionOf = (request: { mailSession: MailSession | null }): MailSession => {
     if (!request.mailSession) throw new UnauthorizedError();
     return request.mailSession;
@@ -69,42 +66,46 @@ export async function disposableRoutes(
     return deps.store;
   };
 
-  app.get('/aliases', { preHandler: app.requireSession }, async (request): Promise<DisposableState> => {
-    const session = sessionOf(request);
-    if (!deps.store) {
+  app.get(
+    '/aliases',
+    { preHandler: app.requireSession },
+    async (request): Promise<DisposableState> => {
+      const session = sessionOf(request);
+      if (!deps.store) {
+        return {
+          available: false,
+          reason: deps.unavailableReason,
+          items: [],
+          domain: domainOf(session.email),
+          limit: deps.limit,
+          used: 0,
+        };
+      }
+
+      const rows = await deps.store.list(session.email);
+      /*
+       * Сводка по журналу собирается ОДНИМ проходом на весь список
+       * (см. traffic.ts). Её отсутствие не должно ронять список: адреса
+       * важнее чисел про них, и раздел обязан открываться на сервере, где
+       * журнал Postfix не примонтирован вовсе.
+       */
+      let traffic: Awaited<ReturnType<typeof readTraffic>> = null;
+      try {
+        traffic = await readTraffic({ dir: deps.logDir, addresses: rows.map((r) => r.address) });
+      } catch {
+        traffic = null;
+      }
+
       return {
-        available: false,
-        reason: deps.unavailableReason,
-        items: [],
+        available: true,
+        reason: null,
+        items: rows.map((row) => toDto(row, traffic?.get(row.address.toLowerCase()) ?? null)),
         domain: domainOf(session.email),
         limit: deps.limit,
-        used: 0,
+        used: rows.length,
       };
-    }
-
-    const rows = await deps.store.list(session.email);
-    /*
-     * Сводка по журналу собирается ОДНИМ проходом на весь список
-     * (см. traffic.ts). Её отсутствие не должно ронять список: адреса
-     * важнее чисел про них, и раздел обязан открываться на сервере, где
-     * журнал Postfix не примонтирован вовсе.
-     */
-    let traffic: Awaited<ReturnType<typeof readTraffic>> = null;
-    try {
-      traffic = await readTraffic({ dir: deps.logDir, addresses: rows.map((r) => r.address) });
-    } catch {
-      traffic = null;
-    }
-
-    return {
-      available: true,
-      reason: null,
-      items: rows.map((row) => toDto(row, traffic?.get(row.address.toLowerCase()) ?? null)),
-      domain: domainOf(session.email),
-      limit: deps.limit,
-      used: rows.length,
-    };
-  });
+    },
+  );
 
   app.post('/aliases', { preHandler: app.requireSession }, async (request, reply) => {
     const session = sessionOf(request);
@@ -214,10 +215,7 @@ export async function disposableRoutes(
   );
 }
 
-const toDto = (
-  row: DisposableRow,
-  traffic: DisposableAlias['traffic'],
-): DisposableAlias => ({
+const toDto = (row: DisposableRow, traffic: DisposableAlias['traffic']): DisposableAlias => ({
   id: row.id,
   address: row.address,
   destination: row.destination,

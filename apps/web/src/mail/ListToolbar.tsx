@@ -240,9 +240,7 @@ export function ListToolbar(props: ListToolbarProps) {
                 <MenuItem
                   key={label.key}
                   onClick={() =>
-                    props.onLabelFilterChange?.(
-                      props.labelFilter === label.key ? null : label.key,
-                    )
+                    props.onLabelFilterChange?.(props.labelFilter === label.key ? null : label.key)
                   }
                   hint={props.labelFilter === label.key ? '✓' : undefined}
                 >

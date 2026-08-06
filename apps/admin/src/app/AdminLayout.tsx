@@ -43,12 +43,7 @@ export function AdminLayout() {
           </span>
         </div>
         <span className={styles.headerSep} aria-hidden="true" />
-        <Button
-          mode="secondary"
-          size="s"
-          className={styles.logout}
-          onClick={() => void logout()}
-        >
+        <Button mode="secondary" size="s" className={styles.logout} onClick={() => void logout()}>
           Выйти
         </Button>
       </header>

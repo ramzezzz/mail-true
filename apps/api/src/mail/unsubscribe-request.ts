@@ -37,10 +37,7 @@ export interface UnsubscribeLog {
  * нестандартных портов) и по тому, куда разрешается имя, — во внутреннюю
  * сеть не ходим. Перенаправления не выполняются: они увели бы куда угодно.
  */
-export async function requestOneClickUnsubscribe(
-  url: string,
-  log: UnsubscribeLog,
-): Promise<void> {
+export async function requestOneClickUnsubscribe(url: string, log: UnsubscribeLog): Promise<void> {
   if (!isSafeUnsubscribeUrl(url)) {
     throw new BadRequestError('Адрес отписки выглядит небезопасно');
   }

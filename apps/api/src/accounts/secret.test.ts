@@ -56,7 +56,10 @@ test('подмена байта обнаруживается, а не даёт �
 test('чужой формат и обрезанная строка отвергаются', () => {
   const box = new ExternalSecretBox(KEY);
   assert.throws(() => box.decrypt('не-наш-формат'), ExternalSecretError);
-  assert.throws(() => box.decrypt('v1.' + Buffer.from('короткий').toString('base64url')), ExternalSecretError);
+  assert.throws(
+    () => box.decrypt('v1.' + Buffer.from('короткий').toString('base64url')),
+    ExternalSecretError,
+  );
 });
 
 test('короткий ключ шифрования не принимается', () => {

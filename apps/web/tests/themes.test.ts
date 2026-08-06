@@ -103,9 +103,9 @@ describe('реестр тем и themes.css не разъехались', () => 
         '--mt-list-selection',
       );
     }
-    expect(themeBlock('dark')).toContain(`--mt-list-selection: ${
-      THEMES.find((t) => t.id === 'dark')!.selection
-    }`);
+    expect(themeBlock('dark')).toContain(
+      `--mt-list-selection: ${THEMES.find((t) => t.id === 'dark')!.selection}`,
+    );
   });
 
   it('цветные темы и тёмная переопределяют акцент значениями реестра', () => {

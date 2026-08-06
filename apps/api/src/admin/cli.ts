@@ -67,7 +67,9 @@ async function main(): Promise<void> {
         }
         const role = roleArg ?? 'owner';
         if (!isAdminRole(role)) {
-          process.stderr.write(`Неизвестная роль «${role}». Допустимо: ${ADMIN_ROLES.join(', ')}\n`);
+          process.stderr.write(
+            `Неизвестная роль «${role}». Допустимо: ${ADMIN_ROLES.join(', ')}\n`,
+          );
           process.exit(2);
         }
         try {

@@ -115,7 +115,10 @@ export class MailboxMasterAccess {
           'Dovecot отклонил служебный доступ. Проверьте master-пароль и настройку passdb (master = yes).',
         );
       }
-      this.opts.logger.warn(errorInfo(err, { email }), 'Не удалось открыть служебное IMAP-соединение');
+      this.opts.logger.warn(
+        errorInfo(err, { email }),
+        'Не удалось открыть служебное IMAP-соединение',
+      );
       throw new UpstreamUnavailableError();
     }
     try {
@@ -196,12 +199,19 @@ export class MailboxMasterAccess {
           { uid: false },
         )) {
           const env = msg.envelope;
-          const structure = msg.bodyStructure as { childNodes?: unknown[]; type?: string } | undefined;
+          const structure = msg.bodyStructure as
+            { childNodes?: unknown[]; type?: string } | undefined;
           items.push({
             uid: msg.uid,
             subject: env?.subject ?? '(без темы)',
-            from: (env?.from ?? []).map((a) => a.address ?? '').filter(Boolean).join(', '),
-            to: (env?.to ?? []).map((a) => a.address ?? '').filter(Boolean).join(', '),
+            from: (env?.from ?? [])
+              .map((a) => a.address ?? '')
+              .filter(Boolean)
+              .join(', '),
+            to: (env?.to ?? [])
+              .map((a) => a.address ?? '')
+              .filter(Boolean)
+              .join(', '),
             date: env?.date ? new Date(env.date).toISOString() : null,
             size: msg.size ?? 0,
             seen: msg.flags?.has('\\Seen') ?? false,
@@ -239,8 +249,14 @@ export class MailboxMasterAccess {
         return {
           uid: msg.uid,
           subject: env?.subject ?? '(без темы)',
-          from: (env?.from ?? []).map((a) => a.address ?? '').filter(Boolean).join(', '),
-          to: (env?.to ?? []).map((a) => a.address ?? '').filter(Boolean).join(', '),
+          from: (env?.from ?? [])
+            .map((a) => a.address ?? '')
+            .filter(Boolean)
+            .join(', '),
+          to: (env?.to ?? [])
+            .map((a) => a.address ?? '')
+            .filter(Boolean)
+            .join(', '),
           date: env?.date ? new Date(env.date).toISOString() : null,
           text: body.slice(0, 200_000),
           headers: msg.headers ? msg.headers.toString('utf8').slice(0, 20_000) : '',
@@ -266,7 +282,9 @@ export class MailboxMasterAccess {
    * нечем. Отказ не критичен — каталог всё равно уйдёт в карантин,
    * — поэтому результат возвращается, а не бросается исключением.
    */
-  async purgeMail(email: string): Promise<{ ok: boolean; foldersDeleted: number; error: string | null }> {
+  async purgeMail(
+    email: string,
+  ): Promise<{ ok: boolean; foldersDeleted: number; error: string | null }> {
     try {
       return await this.withClient(email, async (client) => {
         let foldersDeleted = 0;

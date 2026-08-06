@@ -49,8 +49,7 @@ const PASS = process.env.SHOT_PASSWORD ?? 'demo12345';
 const ADM_LOGIN = process.env.SHOT_ADMIN_LOGIN ?? 'rukovodstvo';
 const ADM_PASS = process.env.SHOT_ADMIN_PASSWORD ?? 'manual12345';
 
-const CHROME =
-  process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 const VIEWPORT = { width: 1440, height: 900 };
 
@@ -160,9 +159,13 @@ async function sessionCookies() {
 
 /** Вход в админку: она отвечает на том же адресе, но на своём имени хоста. */
 async function adminCookies() {
-  return login(`${WEB}/api/admin/auth/login`, { login: ADM_LOGIN, password: ADM_PASS }, {
-    host: ADMIN_HOST,
-  });
+  return login(
+    `${WEB}/api/admin/auth/login`,
+    { login: ADM_LOGIN, password: ADM_PASS },
+    {
+      host: ADMIN_HOST,
+    },
+  );
 }
 
 async function login(url, body, extraHeaders) {

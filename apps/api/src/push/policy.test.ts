@@ -81,10 +81,11 @@ test('спам и разложенное фильтрами по папкам н
 test('собственное отправленное письмо уведомления не даёт', () => {
   // Копия себе или возврат через список рассылки: письмо во «Входящих»,
   // но отправил его сам человек.
-  const decision = shouldNotify(
-    arrived({ from: { name: 'Я', address: 'TEST@Mail.Local' } }),
-    { prefs: prefs(), ownAddresses: OWN, now: NOON },
-  );
+  const decision = shouldNotify(arrived({ from: { name: 'Я', address: 'TEST@Mail.Local' } }), {
+    prefs: prefs(),
+    ownAddresses: OWN,
+    now: NOON,
+  });
   assert.deepEqual(decision, { notify: false, reason: 'own-message' });
 
   // Обратный ход: чужое письмо с похожим адресом проходит
@@ -151,12 +152,20 @@ test('дневное окно тихих часов не выворачивае�
 
 test('выключенные и вырожденные тихие часы никого не глушат', () => {
   assert.equal(
-    inQuietHours(new Date('2026-08-06T20:30:00Z'), { enabled: false, fromMinutes: 0, toMinutes: 1440 }, 'Europe/Moscow'),
+    inQuietHours(
+      new Date('2026-08-06T20:30:00Z'),
+      { enabled: false, fromMinutes: 0, toMinutes: 1440 },
+      'Europe/Moscow',
+    ),
     false,
   );
   // «С 8:00 до 8:00» — окно нулевой длины, а не круглые сутки молчания
   assert.equal(
-    inQuietHours(new Date('2026-08-06T20:30:00Z'), { enabled: true, fromMinutes: 480, toMinutes: 480 }, 'Europe/Moscow'),
+    inQuietHours(
+      new Date('2026-08-06T20:30:00Z'),
+      { enabled: true, fromMinutes: 480, toMinutes: 480 },
+      'Europe/Moscow',
+    ),
     false,
   );
 });
@@ -253,7 +262,10 @@ test('«только факт» не выдаёт ни отправителя, �
   // Значка отправителя тоже быть не должно: адрес логотипа выдаёт домен
   assert.equal(view.icon, '/brand/notification-icon.png');
   // Кнопок «прочитано» и «в архив» нет: решать вслепую нечестно
-  assert.deepEqual(view.actions.map((a) => a.action), ['open']);
+  assert.deepEqual(
+    view.actions.map((a) => a.action),
+    ['open'],
+  );
 });
 
 test('«отправитель и тема» показывает ровно их', () => {
@@ -274,7 +286,11 @@ test('«первые фразы» добавляют начало письма �
 });
 
 test('«сводка ИИ» показывает сводку, а без неё честно откатывается к началу письма', () => {
-  const withSummary = buildNotificationView({ items: [item()], level: 'ai-summary', accountKey: KEY });
+  const withSummary = buildNotificationView({
+    items: [item()],
+    level: 'ai-summary',
+    accountKey: KEY,
+  });
   assert.ok(withSummary.body.includes('ждёт согласования'), withSummary.body);
 
   // Предел ИИ исчерпан — сводки нет. Пустое окно было бы хуже всего.
@@ -302,7 +318,11 @@ test('щелчок ведёт в конкретное письмо, а не в �
 });
 
 test('значок — логотип отправителя, запасной — наш', () => {
-  const withLogo = buildNotificationView({ items: [item()], level: 'sender-subject', accountKey: KEY });
+  const withLogo = buildNotificationView({
+    items: [item()],
+    level: 'sender-subject',
+    accountKey: KEY,
+  });
   assert.equal(withLogo.icon, '/api/sender-logos/example.com/image?v=abc');
 
   const withoutLogo = buildNotificationView({
@@ -336,7 +356,10 @@ test('десять писем подряд дают одно окно, а не �
   // В группе перечисляем не всех, но и не забываем ни одного письма
   assert.equal(view.ids.length, 10);
   assert.equal(view.url, '/inbox/');
-  assert.deepEqual(view.actions.map((a) => a.action), ['open']);
+  assert.deepEqual(
+    view.actions.map((a) => a.action),
+    ['open'],
+  );
 });
 
 test('ярлык у разных ящиков разный: письма второго не затирают первый', () => {

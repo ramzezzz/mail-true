@@ -54,7 +54,10 @@ export function isPinnedToBottom(
  * писем идёт от свежих к старым, и «следить за новым» там означает стоять в
  * начале списка, а не в конце.
  */
-export function isPinnedToTop(position: Pick<ScrollPosition, 'scrollTop'>, slack = STICK_SLACK_PX): boolean {
+export function isPinnedToTop(
+  position: Pick<ScrollPosition, 'scrollTop'>,
+  slack = STICK_SLACK_PX,
+): boolean {
   return position.scrollTop <= slack;
 }
 

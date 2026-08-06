@@ -344,9 +344,7 @@ export class DeferredSpool {
   async removeFailure(owner: string, id: string): Promise<boolean> {
     if (!ID_RE.test(id)) return false;
     try {
-      const notice = JSON.parse(
-        await readFile(this.failPath(id), 'utf8'),
-      ) as SendFailureNotice;
+      const notice = JSON.parse(await readFile(this.failPath(id), 'utf8')) as SendFailureNotice;
       if (notice.owner !== owner) return false;
     } catch {
       return false;
@@ -384,8 +382,7 @@ export interface DeferredSenderOptions {
  * и отправляет.
  */
 export class DeferredSender {
-  readonly #options: Required<Pick<DeferredSenderOptions, 'maxAttempts'>> &
-    DeferredSenderOptions;
+  readonly #options: Required<Pick<DeferredSenderOptions, 'maxAttempts'>> & DeferredSenderOptions;
   #timer: NodeJS.Timeout | null = null;
   /** Одноразовый будильник к ближайшему сроку — см. wakeAt. */
   #wake: NodeJS.Timeout | null = null;
@@ -591,9 +588,7 @@ export function normalizeUndoSeconds(value: unknown): number {
 }
 
 export type DeferredCheck =
-  | { kind: 'now' }
-  | { kind: 'later'; at: Date }
-  | { kind: 'invalid'; reason: string };
+  { kind: 'now' } | { kind: 'later'; at: Date } | { kind: 'invalid'; reason: string };
 
 export function checkSendAt(sendAt: string | undefined, now: Date): DeferredCheck {
   if (!sendAt) return { kind: 'now' };

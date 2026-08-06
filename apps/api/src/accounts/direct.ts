@@ -183,10 +183,7 @@ export class ExternalImapPool {
  * не перепутал «Входящие» чужого ящика со своими: дерево показывается
  * отдельным, но живёт в том же списке.
  */
-export async function listExternalFolders(
-  client: ImapFlow,
-  accountId: number,
-): Promise<Folder[]> {
+export async function listExternalFolders(client: ImapFlow, accountId: number): Promise<Folder[]> {
   const folders = await listFolders(client);
   const prefix = `ext${String(accountId)}:`;
   return folders.map((folder) => ({

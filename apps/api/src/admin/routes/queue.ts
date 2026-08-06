@@ -33,10 +33,13 @@ const idSchema = z.object({ id: z.string().trim().min(5).max(32) });
 
 const historySchema = z.object({
   /** Окно времени. По умолчанию — сутки: столько обычно и ищут. */
-  hours: z.coerce.number().int().min(1).max(24 * 90).default(24),
-  status: z
-    .enum(['sent', 'deferred', 'bounced', 'expired', 'rejected', 'held'])
-    .optional(),
+  hours: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 90)
+    .default(24),
+  status: z.enum(['sent', 'deferred', 'bounced', 'expired', 'rejected', 'held']).optional(),
   direction: z.enum(['in', 'out', 'unknown']).optional(),
   search: z.string().trim().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -78,9 +81,7 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
 
     const needle = q.search?.toLowerCase() ?? '';
     const filtered = snapshot.messages.filter(
-      (m) =>
-        (q.queueName === undefined || m.queueName === q.queueName) &&
-        queueMatches(m, needle),
+      (m) => (q.queueName === undefined || m.queueName === q.queueName) && queueMatches(m, needle),
     );
 
     // Счётчики считаем по ВСЕЙ очереди, а не по отфильтрованному куску:
@@ -120,17 +121,21 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
    * (usersettings.view) в журнале отмечаются; чтение письма из очереди
    * не отмечалось ничем, хотя по существу это то же самое.
    */
-  app.get('/queue/:id/message', { preHandler: requireAdmin(app, 'mailbox.impersonate') }, async (request) => {
-    const { id } = idSchema.parse(request.params);
-    const result = await agent.message(id);
-    await audit(ctx, request, {
-      action: 'queue.view',
-      targetType: 'settings',
-      targetLabel: `Очередь: ${id}`,
-      after: { queueId: id, action: 'view' },
-    });
-    return { queueId: id, text: result.text, truncated: result.truncated };
-  });
+  app.get(
+    '/queue/:id/message',
+    { preHandler: requireAdmin(app, 'mailbox.impersonate') },
+    async (request) => {
+      const { id } = idSchema.parse(request.params);
+      const result = await agent.message(id);
+      await audit(ctx, request, {
+        action: 'queue.view',
+        targetType: 'settings',
+        targetLabel: `Очередь: ${id}`,
+        after: { queueId: id, action: 'view' },
+      });
+      return { queueId: id, text: result.text, truncated: result.truncated };
+    },
+  );
 
   /**
    * Попробовать доставить сейчас.
@@ -138,17 +143,21 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
    * Право берём users.write, а не overview.read: это действие, а не
    * просмотр. Читатель («Только чтение») очередь видит, но не трогает.
    */
-  app.post('/queue/:id/flush', { preHandler: requireAdmin(app, 'users.write') }, async (request) => {
-    const { id } = idSchema.parse(request.params);
-    await agent.flush(id);
-    await audit(ctx, request, {
-      action: 'queue.flush',
-      targetType: 'settings',
-      targetLabel: `Очередь: ${id}`,
-      after: { queueId: id, action: 'flush' },
-    });
-    return { ok: true };
-  });
+  app.post(
+    '/queue/:id/flush',
+    { preHandler: requireAdmin(app, 'users.write') },
+    async (request) => {
+      const { id } = idSchema.parse(request.params);
+      await agent.flush(id);
+      await audit(ctx, request, {
+        action: 'queue.flush',
+        targetType: 'settings',
+        targetLabel: `Очередь: ${id}`,
+        after: { queueId: id, action: 'flush' },
+      });
+      return { ok: true };
+    },
+  );
 
   /**
    * Удалить письмо из очереди.
@@ -158,29 +167,33 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
    * (users.delete) и обязательная запись в аудит с адресатами — чтобы
    * потом было видно не только «удалили ABC», но и что это было за письмо.
    */
-  app.post('/queue/:id/delete', { preHandler: requireAdmin(app, 'users.delete') }, async (request) => {
-    const { id } = idSchema.parse(request.params);
-    // Сведения о письме забираем ДО удаления: после него их взять неоткуда.
-    const snapshot = await agent.snapshot();
-    const doomed = snapshot.messages.find((m) => m.queueId === id);
-    await agent.remove(id);
-    await audit(ctx, request, {
-      action: 'queue.delete',
-      targetType: 'settings',
-      targetLabel: `Очередь: ${id}`,
-      before: doomed
-        ? {
-            queueId: id,
-            sender: doomed.sender,
-            recipients: doomed.recipients.map((r) => r.address),
-            sizeBytes: doomed.sizeBytes,
-            arrivalTime: doomed.arrivalTime.toISOString(),
-          }
-        : { queueId: id },
-      after: null,
-    });
-    return { ok: true };
-  });
+  app.post(
+    '/queue/:id/delete',
+    { preHandler: requireAdmin(app, 'users.delete') },
+    async (request) => {
+      const { id } = idSchema.parse(request.params);
+      // Сведения о письме забираем ДО удаления: после него их взять неоткуда.
+      const snapshot = await agent.snapshot();
+      const doomed = snapshot.messages.find((m) => m.queueId === id);
+      await agent.remove(id);
+      await audit(ctx, request, {
+        action: 'queue.delete',
+        targetType: 'settings',
+        targetLabel: `Очередь: ${id}`,
+        before: doomed
+          ? {
+              queueId: id,
+              sender: doomed.sender,
+              recipients: doomed.recipients.map((r) => r.address),
+              sizeBytes: doomed.sizeBytes,
+              arrivalTime: doomed.arrivalTime.toISOString(),
+            }
+          : { queueId: id },
+        after: null,
+      });
+      return { ok: true };
+    },
+  );
 
   /* ---------------------------------------------------------------- */
   /* История обработанных                                               */
@@ -236,26 +249,35 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
    * показать «за 90 суток» пустую таблицу, когда данным час, значит
    * соврать. Интерфейс обязан сказать глубину прямо.
    */
-  app.get('/queue/history/stats', { preHandler: requireAdmin(app, 'overview.read') }, async (request) => {
-    const q = z.object({ hours: z.coerce.number().int().min(1).max(24 * 90).default(24) })
-      .parse(request.query);
-    const to = new Date();
-    const from = new Date(to.getTime() - q.hours * 3600 * 1000);
-    const [stats, cursor] = await Promise.all([
-      flow.stats(from, to),
-      flow.getCursor('postfix'),
-    ]);
-    return {
-      hours: q.hours,
-      counts: stats.counts,
-      total: stats.total,
-      oldest: stats.oldest?.toISOString() ?? null,
-      newest: stats.newest?.toISOString() ?? null,
-      /** Когда разбор журнала увидел первую строку. */
-      collectingSince: cursor?.startedAt.toISOString() ?? null,
-      retentionDays: ctx.config.MAIL_FLOW_RETENTION_DAYS,
-      maxRows: ctx.config.MAIL_FLOW_MAX_ROWS,
-      queueAgentConfigured: agent.configured,
-    };
-  });
+  app.get(
+    '/queue/history/stats',
+    { preHandler: requireAdmin(app, 'overview.read') },
+    async (request) => {
+      const q = z
+        .object({
+          hours: z.coerce
+            .number()
+            .int()
+            .min(1)
+            .max(24 * 90)
+            .default(24),
+        })
+        .parse(request.query);
+      const to = new Date();
+      const from = new Date(to.getTime() - q.hours * 3600 * 1000);
+      const [stats, cursor] = await Promise.all([flow.stats(from, to), flow.getCursor('postfix')]);
+      return {
+        hours: q.hours,
+        counts: stats.counts,
+        total: stats.total,
+        oldest: stats.oldest?.toISOString() ?? null,
+        newest: stats.newest?.toISOString() ?? null,
+        /** Когда разбор журнала увидел первую строку. */
+        collectingSince: cursor?.startedAt.toISOString() ?? null,
+        retentionDays: ctx.config.MAIL_FLOW_RETENTION_DAYS,
+        maxRows: ctx.config.MAIL_FLOW_MAX_ROWS,
+        queueAgentConfigured: agent.configured,
+      };
+    },
+  );
 }

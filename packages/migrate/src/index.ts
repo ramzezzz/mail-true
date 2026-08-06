@@ -28,11 +28,7 @@ export type { DedupHeaders } from './dedup.js';
 export { parseCsv, parseCsvWithHeader, detectDelimiter, CsvParseError } from './csv.js';
 export { resolvePassword, writeSecretFile, PasswordError } from './secrets.js';
 export type { PasswordSources } from './secrets.js';
-export {
-  FileStateStore,
-  PgStateStore,
-  createStateStore,
-} from './state.js';
+export { FileStateStore, PgStateStore, createStateStore } from './state.js';
 export type { StateStore, FolderCursor } from './state.js';
 export {
   MailboxMigrator,

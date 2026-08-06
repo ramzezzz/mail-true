@@ -167,10 +167,9 @@ describe('строка состояния читается в каждой те�
       if (hover) {
         it('кнопка «Обновить» ≥ 4,5:1 и под курсором', () => {
           const value = contrastRatio(accent, hover);
-          expect(
-            value,
-            `${accent} на ${hover} = ${value.toFixed(2)}:1`,
-          ).toBeGreaterThanOrEqual(TEXT_MIN);
+          expect(value, `${accent} на ${hover} = ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            TEXT_MIN,
+          );
         });
       }
     });

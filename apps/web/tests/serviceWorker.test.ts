@@ -39,7 +39,9 @@ interface Harness {
 }
 
 /** Поднимает работника в песочнице с поддельным окружением браузера. */
-function loadWorker(options: { notificationResponse?: unknown; ok?: boolean; clients?: unknown[] } = {}): Harness {
+function loadWorker(
+  options: { notificationResponse?: unknown; ok?: boolean; clients?: unknown[] } = {},
+): Harness {
   const listeners: Listeners = {};
   const shown: Harness['shown'] = [];
   const requests: Harness['requests'] = [];
@@ -388,7 +390,10 @@ describe('выбор вкладки', () => {
   it('без своих вкладок выбирать нечего', () => {
     const harness = loadWorker();
     expect(
-      sw(harness).pickClient([{ url: 'https://example.com/', visibilityState: 'visible' }], 'https://mail.local'),
+      sw(harness).pickClient(
+        [{ url: 'https://example.com/', visibilityState: 'visible' }],
+        'https://mail.local',
+      ),
     ).toBeNull();
     expect(sw(harness).pickClient([], 'https://mail.local')).toBeNull();
   });

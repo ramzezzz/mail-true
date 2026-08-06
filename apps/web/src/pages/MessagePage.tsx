@@ -43,12 +43,7 @@ import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { errorText, isNotFoundError } from '../lib/errorText';
 import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
-import {
-  annotatePrintLinks,
-  printAddress,
-  printAddresses,
-  printDate,
-} from '../lib/printMessage';
+import { annotatePrintLinks, printAddress, printAddresses, printDate } from '../lib/printMessage';
 import { readReceiptAsk, readReceiptWho } from '../lib/readReceipt';
 import { unsubscribeLinks } from '../lib/unsubscribe';
 import { hotkeyFor } from '../lib/hotkeys';
@@ -505,7 +500,8 @@ export function MessagePage() {
   // Заголовки сервер отдаёт в нижнем регистре, поэтому ищем без учёта
   // регистра и понимаем сводный `list` от mailparser (см. lib/unsubscribe.ts)
   const unsubscribe = unsubscribeLinks(message.headers);
-  const toMe = message.to.length === 1 ? 'вам' : message.to.map((a) => a.name ?? a.address).join(', ');
+  const toMe =
+    message.to.length === 1 ? 'вам' : message.to.map((a) => a.name ?? a.address).join(', ');
   /**
    * Отправитель просит уведомить о прочтении. Плашка показывается, пока
    * человек не ответил: флаг `$MDNSent` сервер ставит и на «отправить»,
@@ -720,7 +716,9 @@ export function MessagePage() {
           <IconButton
             label="Предыдущее письмо"
             disabled={!prevId}
-            onClick={() => { if (prevId) void navigate(`/${folderId}/${encodeURIComponent(prevId)}`); }}
+            onClick={() => {
+              if (prevId) void navigate(`/${folderId}/${encodeURIComponent(prevId)}`);
+            }}
           >
             <IconArrowLeft size={20} />
           </IconButton>
@@ -729,7 +727,9 @@ export function MessagePage() {
           <IconButton
             label="Следующее письмо"
             disabled={!nextId}
-            onClick={() => { if (nextId) void navigate(`/${folderId}/${encodeURIComponent(nextId)}`); }}
+            onClick={() => {
+              if (nextId) void navigate(`/${folderId}/${encodeURIComponent(nextId)}`);
+            }}
           >
             <IconArrowRight size={20} />
           </IconButton>
@@ -787,9 +787,7 @@ export function MessagePage() {
         */}
         {isDraft && (
           <div className={styles.draftBanner}>
-            <span className={styles.draftText}>
-              Это черновик — письмо ещё не отправлено.
-            </span>
+            <span className={styles.draftText}>Это черновик — письмо ещё не отправлено.</span>
             <Button
               mode="primary"
               size="s"
@@ -1028,9 +1026,7 @@ export function MessagePage() {
         {/* Вложения */}
         {message.attachments.length > 0 && (
           <div className={styles.attachments}>
-            <div className={styles.attachmentsTitle}>
-              Вложения ({message.attachments.length})
-            </div>
+            <div className={styles.attachmentsTitle}>Вложения ({message.attachments.length})</div>
             <div className={styles.attachmentsList}>
               {message.attachments.map((a, i) => {
                 /*

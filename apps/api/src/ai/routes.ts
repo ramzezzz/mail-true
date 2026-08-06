@@ -220,96 +220,132 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
 
   /* --- резюме ------------------------------------------------------ */
 
-  app.post('/summarize', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = summarizeSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'summary');
-    const ctx = { accountId: mail.email };
+  app.post(
+    '/summarize',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = summarizeSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'summary');
+      const ctx = { accountId: mail.email };
 
-    if ('messageIds' in body) {
-      const messages = await loadMessagesForAi(app, mail, body.messageIds);
-      return unwrap(await assistant.summarizeThread(messages, ctx));
-    }
-    const message = await loadMessageForAi(app, mail, body.messageId);
-    return unwrap(await assistant.summarizeMessage(message, ctx));
-  });
+      if ('messageIds' in body) {
+        const messages = await loadMessagesForAi(app, mail, body.messageIds);
+        return unwrap(await assistant.summarizeThread(messages, ctx));
+      }
+      const message = await loadMessageForAi(app, mail, body.messageId);
+      return unwrap(await assistant.summarizeMessage(message, ctx));
+    },
+  );
 
   /* --- раскладка по смыслу ----------------------------------------- */
 
-  app.post('/classify', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = oneMessageSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'classify');
-    const message = await loadMessageForAi(app, mail, body.messageId);
-    return unwrap(await assistant.classifyMessage(message, { accountId: mail.email }));
-  });
+  app.post(
+    '/classify',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = oneMessageSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'classify');
+      const message = await loadMessageForAi(app, mail, body.messageId);
+      return unwrap(await assistant.classifyMessage(message, { accountId: mail.email }));
+    },
+  );
 
   /* --- помощь с ответом -------------------------------------------- */
 
-  app.post('/replies', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = repliesSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'reply');
-    const message = await loadMessageForAi(app, mail, body.messageId);
-    return unwrap(
-      await assistant.suggestReplies(message, { accountId: mail.email }, {
-        ...(body.tones === undefined ? {} : { tones: body.tones }),
-        ...(body.instruction === undefined ? {} : { instruction: body.instruction }),
-      }),
-    );
-  });
+  app.post(
+    '/replies',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = repliesSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'reply');
+      const message = await loadMessageForAi(app, mail, body.messageId);
+      return unwrap(
+        await assistant.suggestReplies(
+          message,
+          { accountId: mail.email },
+          {
+            ...(body.tones === undefined ? {} : { tones: body.tones }),
+            ...(body.instruction === undefined ? {} : { instruction: body.instruction }),
+          },
+        ),
+      );
+    },
+  );
 
-  app.post('/continue', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = continueSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'reply');
-    const message =
-      body.messageId === undefined ? null : await loadMessageForAi(app, mail, body.messageId);
-    return unwrap(
-      await assistant.continueWriting({ draft: body.draft, message }, { accountId: mail.email }),
-    );
-  });
+  app.post(
+    '/continue',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = continueSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'reply');
+      const message =
+        body.messageId === undefined ? null : await loadMessageForAi(app, mail, body.messageId);
+      return unwrap(
+        await assistant.continueWriting({ draft: body.draft, message }, { accountId: mail.email }),
+      );
+    },
+  );
 
-  app.post('/rewrite', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = rewriteSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'reply');
-    return unwrap(await assistant.rewriteText(body.text, body.mode, { accountId: mail.email }));
-  });
+  app.post(
+    '/rewrite',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = rewriteSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'reply');
+      return unwrap(await assistant.rewriteText(body.text, body.mode, { accountId: mail.email }));
+    },
+  );
 
   /* --- извлечение полезного ---------------------------------------- */
 
-  app.post('/extract', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = oneMessageSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'extract');
-    const message = await loadMessageForAi(app, mail, body.messageId);
-    return unwrap(await assistant.extractData(message, { accountId: mail.email }));
-  });
+  app.post(
+    '/extract',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = oneMessageSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'extract');
+      const message = await loadMessageForAi(app, mail, body.messageId);
+      return unwrap(await assistant.extractData(message, { accountId: mail.email }));
+    },
+  );
 
   /* --- перевод ------------------------------------------------------ */
 
-  app.post('/translate', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = translateSchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'translate');
-    const ctx = { accountId: mail.email };
+  app.post(
+    '/translate',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = translateSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'translate');
+      const ctx = { accountId: mail.email };
 
-    if ('messageId' in body) {
-      const message = await loadMessageForAi(app, mail, body.messageId);
-      return unwrap(await assistant.translateMessage(message, body.targetLanguage, ctx));
-    }
-    return unwrap(await assistant.translateText(body.text, body.targetLanguage, ctx));
-  });
+      if ('messageId' in body) {
+        const message = await loadMessageForAi(app, mail, body.messageId);
+        return unwrap(await assistant.translateMessage(message, body.targetLanguage, ctx));
+      }
+      return unwrap(await assistant.translateText(body.text, body.targetLanguage, ctx));
+    },
+  );
 
   /* --- поиск обычными словами --------------------------------------- */
 
-  app.post('/search-query', { preHandler: app.requireSession, config: AI_RATE_LIMIT }, async (request) => {
-    const mail = session(request);
-    const body = searchQuerySchema.parse(request.body);
-    const { assistant } = await service.forFeature(mail.email, 'search');
-    return unwrap(await assistant.parseSearchQuery(body.query, { accountId: mail.email }));
-  });
+  app.post(
+    '/search-query',
+    { preHandler: app.requireSession, config: AI_RATE_LIMIT },
+    async (request) => {
+      const mail = session(request);
+      const body = searchQuerySchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'search');
+      return unwrap(await assistant.parseSearchQuery(body.query, { accountId: mail.email }));
+    },
+  );
 
   /* --- потоковый черновик ответа ------------------------------------ */
 

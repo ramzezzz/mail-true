@@ -6,7 +6,12 @@
  * или встал. Перенос ящика занимает часы, крутящийся кружок в этих
  * условиях не сообщает ничего — нужны числа и последнее движение.
  */
-import type { MigrationItem, MigrationItemState, MigrationJob, MigrationJobState } from '../api/types';
+import type {
+  MigrationItem,
+  MigrationItemState,
+  MigrationJob,
+  MigrationJobState,
+} from '../api/types';
 
 /** Названия состояний задания на языке человека, а не базы. */
 export const JOB_STATE_LABELS: Readonly<Record<MigrationJobState, string>> = {

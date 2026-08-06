@@ -439,19 +439,21 @@ test('истёкший сертификат даёт отрицательный 
 });
 
 test('самоподписанный сертификат опознаётся', () => {
-  const cert = describeCertificate(
-    TARGET,
-    { subject: { CN: 'mail.local' }, issuer: { CN: 'mail.local' }, valid_to: '' } as never,
-  );
+  const cert = describeCertificate(TARGET, {
+    subject: { CN: 'mail.local' },
+    issuer: { CN: 'mail.local' },
+    valid_to: '',
+  } as never);
   assert.equal(cert.selfSigned, true);
   assert.equal(cert.validTo, null);
 });
 
 test('два поля CN не превращаются в «[object Array]»', () => {
-  const cert = describeCertificate(
-    TARGET,
-    { subject: { CN: ['mail.local', 'second'] }, issuer: { CN: 'CA' }, valid_to: '' } as never,
-  );
+  const cert = describeCertificate(TARGET, {
+    subject: { CN: ['mail.local', 'second'] },
+    issuer: { CN: 'CA' },
+    valid_to: '',
+  } as never);
   assert.equal(cert.subject, 'mail.local');
 });
 

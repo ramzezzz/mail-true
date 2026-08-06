@@ -238,9 +238,7 @@ export function AttachmentViewer({
         {loaded.state === 'text' && (
           <>
             {loaded.charset !== 'UTF-8' && (
-              <p className={styles.notice}>
-                Файл не в UTF-8 — показан как {loaded.charset}.
-              </p>
+              <p className={styles.notice}>Файл не в UTF-8 — показан как {loaded.charset}.</p>
             )}
             {/* Текстовый узел, а не разметка: содержимое чужого файла не
                 должно выполниться в интерфейсе ни при каких условиях. */}

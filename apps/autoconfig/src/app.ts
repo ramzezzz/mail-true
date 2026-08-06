@@ -35,7 +35,10 @@ const domainSchema = z
   .string()
   .min(1)
   .max(253)
-  .regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i, 'некорректный домен');
+  .regex(
+    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/i,
+    'некорректный домен',
+  );
 
 export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<FastifyInstance> {
   const settings: MailSettings = settingsFromEnv(config);
@@ -52,7 +55,7 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
   // принимаем любое тело как строку и разбираем сами.
   app.removeAllContentTypeParsers();
   app.addContentTypeParser('*', { parseAs: 'string', bodyLimit: 64 * 1024 }, (_req, body, done) =>
-    done(null, body)
+    done(null, body),
   );
 
   app.get('/healthz', async () => ({ ok: true, uptime: process.uptime() }));
@@ -79,10 +82,7 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
     const email = emailSchema.safeParse(parsed.email);
     if (!email.success) {
       request.log.info({ body: body.slice(0, 500) }, 'Autodiscover: запрос без корректного адреса');
-      return reply
-        .code(200)
-        .type(XML_TYPE)
-        .send(buildAutodiscoverError(600, 'Invalid Request'));
+      return reply.code(200).type(XML_TYPE).send(buildAutodiscoverError(600, 'Invalid Request'));
     }
     return reply.type(XML_TYPE).send(buildAutodiscoverResponse(settings, email.data));
   });
@@ -92,10 +92,7 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
     const q = (request.query ?? {}) as Record<string, string | undefined>;
     const email = emailSchema.safeParse(q['email'] ?? q['Email'] ?? q['emailaddress']);
     if (!email.success) {
-      return reply
-        .code(200)
-        .type(XML_TYPE)
-        .send(buildAutodiscoverError(600, 'Invalid Request'));
+      return reply.code(200).type(XML_TYPE).send(buildAutodiscoverError(600, 'Invalid Request'));
     }
     return reply.type(XML_TYPE).send(buildAutodiscoverResponse(settings, email.data));
   });
@@ -158,7 +155,7 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
   // 5. Страница помощи
   // ------------------------------------------------------------------
   app.get('/', async (_request, reply) =>
-    reply.type('text/html; charset=utf-8').send(buildHelpPage(settings))
+    reply.type('text/html; charset=utf-8').send(buildHelpPage(settings)),
   );
 
   return app;

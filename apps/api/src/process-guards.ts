@@ -37,17 +37,20 @@ export function handleFatal(logger: Logger, kind: GuardKind, err: unknown): void
       { err, kind, fatalGuard: true },
       kind === 'uncaughtException'
         ? 'Необработанное исключение — процесс продолжает работу'
-        : 'Необработанное отклонение обещания — процесс продолжает работу'
+        : 'Необработанное отклонение обещания — процесс продолжает работу',
     );
   } catch {
     // Журнал сломан — но и он не повод убивать процесс
-     
+
     console.error('Необработанная ошибка:', err);
   }
 }
 
 /** Вешает слушатели на uncaughtException и unhandledRejection. */
-export function installProcessGuards(logger: Logger, target: NodeJS.Process = process): ProcessGuards {
+export function installProcessGuards(
+  logger: Logger,
+  target: NodeJS.Process = process,
+): ProcessGuards {
   const onException = (err: unknown): void => handleFatal(logger, 'uncaughtException', err);
   const onRejection = (reason: unknown): void => handleFatal(logger, 'unhandledRejection', reason);
 

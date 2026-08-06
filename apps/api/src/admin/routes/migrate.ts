@@ -98,7 +98,13 @@ function mailboxCount(n: number): string {
   const tens = n % 100;
   const ones = n % 10;
   const word =
-    tens >= 11 && tens <= 14 ? 'ящиков' : ones === 1 ? 'ящик' : ones >= 2 && ones <= 4 ? 'ящика' : 'ящиков';
+    tens >= 11 && tens <= 14
+      ? 'ящиков'
+      : ones === 1
+        ? 'ящик'
+        : ones >= 2 && ones <= 4
+          ? 'ящика'
+          : 'ящиков';
   return `${String(n)} ${word}`;
 }
 
@@ -277,7 +283,10 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
     return {
       /** Готов ли раздел работать; если нет — reasons объясняют, чего не хватает. */
       ready:
-        ctx.config.masterConfigured && Boolean(ctx.migrationBox) && schemaReady && Boolean(ctx.migrationDest),
+        ctx.config.masterConfigured &&
+        Boolean(ctx.migrationBox) &&
+        schemaReady &&
+        Boolean(ctx.migrationDest),
       masterConfigured: ctx.config.masterConfigured,
       secretConfigured: Boolean(ctx.migrationBox),
       schemaReady,
@@ -295,43 +304,47 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
    * задание запускают на ночь, а опечатка в имени сервера или неверный
    * пароль обнаруживались бы утром — потеряв ночь переноса.
    */
-  app.post('/migrate/check', { preHandler: requireAdmin(app, 'migration.run') }, async (request) => {
-    const body = checkSchema.parse(request.body);
-    const result = await probeEndpoint(
-      {
-        host: body.host,
-        port: body.port,
-        secure: body.secure,
-        user: body.user,
-        pass: body.password,
-        ...(body.masterUser ? { masterUser: body.masterUser } : {}),
-        ...(body.masterUser && body.masterSeparator
-          ? { masterSeparator: body.masterSeparator }
-          : {}),
-        ...(body.allowInsecureTls ? { allowInsecureTls: true } : {}),
-      },
-      { role: 'исходному' },
-    );
+  app.post(
+    '/migrate/check',
+    { preHandler: requireAdmin(app, 'migration.run') },
+    async (request) => {
+      const body = checkSchema.parse(request.body);
+      const result = await probeEndpoint(
+        {
+          host: body.host,
+          port: body.port,
+          secure: body.secure,
+          user: body.user,
+          pass: body.password,
+          ...(body.masterUser ? { masterUser: body.masterUser } : {}),
+          ...(body.masterUser && body.masterSeparator
+            ? { masterSeparator: body.masterSeparator }
+            : {}),
+          ...(body.allowInsecureTls ? { allowInsecureTls: true } : {}),
+        },
+        { role: 'исходному' },
+      );
 
-    // Обращение к чужому серверу с чужими учётными данными — действие,
-    // и след от него нужен. Пароля в записи нет: пишутся адрес, порт и
-    // имя входа, то есть ровно то, что и так видно в задании.
-    await audit(ctx, request, {
-      action: 'migration.check',
-      targetType: 'migration',
-      targetLabel: `${body.host}:${String(body.port)}`,
-      after: { host: body.host, port: body.port, login: result.loginName, ok: result.ok },
-    });
+      // Обращение к чужому серверу с чужими учётными данными — действие,
+      // и след от него нужен. Пароля в записи нет: пишутся адрес, порт и
+      // имя входа, то есть ровно то, что и так видно в задании.
+      await audit(ctx, request, {
+        action: 'migration.check',
+        targetType: 'migration',
+        targetLabel: `${body.host}:${String(body.port)}`,
+        after: { host: body.host, port: body.port, login: result.loginName, ok: result.ok },
+      });
 
-    return {
-      ok: result.ok,
-      loginName: result.loginName,
-      folders: result.folders ?? null,
-      messages: result.messages ?? null,
-      /** Уже разобранное объяснение отказа, а не код и не «ошибка». */
-      error: result.error ?? null,
-    };
-  });
+      return {
+        ok: result.ok,
+        loginName: result.loginName,
+        folders: result.folders ?? null,
+        messages: result.messages ?? null,
+        /** Уже разобранное объяснение отказа, а не код и не «ошибка». */
+        error: result.error ?? null,
+      };
+    },
+  );
 
   /* --- разбор списка ящиков --------------------------------------- */
   /**
@@ -339,104 +352,118 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
    * Kerio содержит пароли всех сотрудников открытым текстом, и место им
    * только в памяти сервера между разбором и шифрованием.
    */
-  app.post('/migrate/parse', { preHandler: requireAdmin(app, 'migration.run') }, async (request) => {
-    const body = listSchema.parse(request.body);
-    const parsed = parseMigrationList(body.text, {
-      ...(body.sourceDomain !== undefined ? { sourceDomain: body.sourceDomain } : {}),
-      ...(body.destDomain !== undefined ? { destDomain: body.destDomain } : {}),
-    });
-    return {
-      format: parsed.format,
-      total: parsed.rows.length,
-      withPassword: parsed.withPassword,
-      problems: parsed.problems,
-      rows: rowsForApi(parsed.rows),
-    };
-  });
+  app.post(
+    '/migrate/parse',
+    { preHandler: requireAdmin(app, 'migration.run') },
+    async (request) => {
+      const body = listSchema.parse(request.body);
+      const parsed = parseMigrationList(body.text, {
+        ...(body.sourceDomain !== undefined ? { sourceDomain: body.sourceDomain } : {}),
+        ...(body.destDomain !== undefined ? { destDomain: body.destDomain } : {}),
+      });
+      return {
+        format: parsed.format,
+        total: parsed.rows.length,
+        withPassword: parsed.withPassword,
+        problems: parsed.problems,
+        rows: rowsForApi(parsed.rows),
+      };
+    },
+  );
 
   /* --- запуск задания --------------------------------------------- */
-  app.post('/migrate/jobs', { preHandler: requireAdmin(app, 'migration.run') }, async (request, reply) => {
-    await requireReady();
-    const body = startSchema.parse(request.body);
-    const admin = currentAdmin(request);
-    const box = ctx.migrationBox;
-    if (!box) throw new AdminUnavailableError('Перенос почты недоступен');
+  app.post(
+    '/migrate/jobs',
+    { preHandler: requireAdmin(app, 'migration.run') },
+    async (request, reply) => {
+      await requireReady();
+      const body = startSchema.parse(request.body);
+      const admin = currentAdmin(request);
+      const box = ctx.migrationBox;
+      if (!box) throw new AdminUnavailableError('Перенос почты недоступен');
 
-    const parsed = parseMigrationList(body.list.text, {
-      ...(body.list.sourceDomain !== undefined ? { sourceDomain: body.list.sourceDomain } : {}),
-      ...(body.list.destDomain !== undefined ? { destDomain: body.list.destDomain } : {}),
-    });
-    if (parsed.rows.length === 0) {
-      throw new BadRequestError(
-        'В списке нет ни одного ящика. Ожидается выгрузка Kerio (CSV или users.cfg), ' +
-          'CSV с парами «откуда → куда» или просто список адресов по одному в строке.',
-      );
-    }
+      const parsed = parseMigrationList(body.list.text, {
+        ...(body.list.sourceDomain !== undefined ? { sourceDomain: body.list.sourceDomain } : {}),
+        ...(body.list.destDomain !== undefined ? { destDomain: body.list.destDomain } : {}),
+      });
+      if (parsed.rows.length === 0) {
+        throw new BadRequestError(
+          'В списке нет ни одного ящика. Ожидается выгрузка Kerio (CSV или users.cfg), ' +
+            'CSV с парами «откуда → куда» или просто список адресов по одному в строке.',
+        );
+      }
 
-    const masterUser = body.source.masterUser ?? '';
-    const secrets = buildSecrets(masterUser, body.masterPassword, parsed.rows);
-    // Ящики-приёмники проверяются ДО постановки в очередь: см. resolveDestinations.
-    const destIds = await resolveDestinations(ctx.db, parsed.rows);
+      const masterUser = body.source.masterUser ?? '';
+      const secrets = buildSecrets(masterUser, body.masterPassword, parsed.rows);
+      // Ящики-приёмники проверяются ДО постановки в очередь: см. resolveDestinations.
+      const destIds = await resolveDestinations(ctx.db, parsed.rows);
 
-    const jobId = await ctx.db.createMigrationJob({
-      adminId: admin.adminId,
-      adminLogin: admin.login,
-      source: {
-        host: body.source.host,
-        port: body.source.port,
-        secure: body.source.secure,
-        allowInsecureTls: body.source.allowInsecureTls,
-        masterUser: masterUser === '' ? null : masterUser,
-        masterSeparator: masterUser === '' ? null : (body.source.masterSeparator ?? '*'),
-      },
-      secretEnc: packSecrets(box, secrets),
-      mailboxes: parsed.rows.map((r) => ({
-        sourceUser: r.sourceUser,
-        destUser: r.destUser,
-        destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
-      })),
-    });
+      const jobId = await ctx.db.createMigrationJob({
+        adminId: admin.adminId,
+        adminLogin: admin.login,
+        source: {
+          host: body.source.host,
+          port: body.source.port,
+          secure: body.source.secure,
+          allowInsecureTls: body.source.allowInsecureTls,
+          masterUser: masterUser === '' ? null : masterUser,
+          masterSeparator: masterUser === '' ? null : (body.source.masterSeparator ?? '*'),
+        },
+        secretEnc: packSecrets(box, secrets),
+        mailboxes: parsed.rows.map((r) => ({
+          sourceUser: r.sourceUser,
+          destUser: r.destUser,
+          destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
+        })),
+      });
 
-    // В журнале — кто, откуда, сколько ящиков и каким доступом. Ни одного
-    // пароля: buildAuditRecord вычистил бы их и сам, но их сюда и не кладут.
-    await audit(ctx, request, {
-      action: 'migration.start',
-      targetType: 'migration',
-      targetId: jobId,
-      targetLabel: `${body.source.host} → ${mailboxCount(parsed.rows.length)}`,
-      after: {
-        job_id: jobId,
-        source_host: body.source.host,
-        source_port: body.source.port,
-        mailboxes: parsed.rows.length,
-        master_user: masterUser === '' ? null : masterUser,
-        mode: masterUser === '' ? 'пароль каждого ящика' : 'служебный доступ',
-      },
-    });
+      // В журнале — кто, откуда, сколько ящиков и каким доступом. Ни одного
+      // пароля: buildAuditRecord вычистил бы их и сам, но их сюда и не кладут.
+      await audit(ctx, request, {
+        action: 'migration.start',
+        targetType: 'migration',
+        targetId: jobId,
+        targetLabel: `${body.source.host} → ${mailboxCount(parsed.rows.length)}`,
+        after: {
+          job_id: jobId,
+          source_host: body.source.host,
+          source_port: body.source.port,
+          mailboxes: parsed.rows.length,
+          master_user: masterUser === '' ? null : masterUser,
+          mode: masterUser === '' ? 'пароль каждого ящика' : 'служебный доступ',
+        },
+      });
 
-    // Работник заберёт задание ближайшим проходом. Запрос его не ждёт:
-    // перенос идёт часами, а ответ нужен сейчас.
-    ctx.migrationRunner?.nudge();
+      // Работник заберёт задание ближайшим проходом. Запрос его не ждёт:
+      // перенос идёт часами, а ответ нужен сейчас.
+      ctx.migrationRunner?.nudge();
 
-    reply.status(202);
-    return { ok: true, jobId, total: parsed.rows.length, state: 'queued' };
-  });
+      reply.status(202);
+      return { ok: true, jobId, total: parsed.rows.length, state: 'queued' };
+    },
+  );
 
   /* --- список и подробности --------------------------------------- */
   app.get('/migrate/jobs', { preHandler: requireAdmin(app, 'migration.read') }, async (request) => {
-    const query = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(request.query);
+    const query = z
+      .object({ limit: z.coerce.number().int().min(1).max(100).default(20) })
+      .parse(request.query);
     if (!(await ctx.db.migrationSchemaReady())) return { jobs: [], schemaReady: false };
     const rows = await ctx.db.listMigrationJobs(query.limit);
     return { jobs: rows.map(jobForApi), schemaReady: true };
   });
 
-  app.get('/migrate/jobs/:id', { preHandler: requireAdmin(app, 'migration.read') }, async (request) => {
-    const id = jobIdOf(request);
-    const job = await ctx.db.findMigrationJob(id);
-    if (!job) throw new NotFoundError('Задание переноса не найдено');
-    const items = await ctx.db.listMigrationItems(id);
-    return { job: jobForApi(job), items: items.map(itemForApi) };
-  });
+  app.get(
+    '/migrate/jobs/:id',
+    { preHandler: requireAdmin(app, 'migration.read') },
+    async (request) => {
+      const id = jobIdOf(request);
+      const job = await ctx.db.findMigrationJob(id);
+      if (!job) throw new NotFoundError('Задание переноса не найдено');
+      const items = await ctx.db.listMigrationItems(id);
+      return { job: jobForApi(job), items: items.map(itemForApi) };
+    },
+  );
 
   /* --- остановка --------------------------------------------------- */
   /**
@@ -445,23 +472,27 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
    * в ящик половину письма. Поэтому ответ приходит сразу, а задание
    * останавливается на ближайшей безопасной границе.
    */
-  app.post('/migrate/jobs/:id/stop', { preHandler: requireAdmin(app, 'migration.run') }, async (request) => {
-    const id = jobIdOf(request);
-    const job = await ctx.db.findMigrationJob(id);
-    if (!job) throw new NotFoundError('Задание переноса не найдено');
-    if (job.state !== 'queued' && job.state !== 'running') {
-      throw new BadRequestError(`Задание уже завершено (${job.state}) — останавливать нечего`);
-    }
-    await ctx.db.requestMigrationStop(id);
-    await audit(ctx, request, {
-      action: 'migration.stop',
-      targetType: 'migration',
-      targetId: id,
-      targetLabel: `${job.source_host} → ${mailboxCount(job.total)}`,
-      after: { job_id: id, done: job.done_count, copied: num(job.copied) },
-    });
-    return { ok: true, stopRequested: true };
-  });
+  app.post(
+    '/migrate/jobs/:id/stop',
+    { preHandler: requireAdmin(app, 'migration.run') },
+    async (request) => {
+      const id = jobIdOf(request);
+      const job = await ctx.db.findMigrationJob(id);
+      if (!job) throw new NotFoundError('Задание переноса не найдено');
+      if (job.state !== 'queued' && job.state !== 'running') {
+        throw new BadRequestError(`Задание уже завершено (${job.state}) — останавливать нечего`);
+      }
+      await ctx.db.requestMigrationStop(id);
+      await audit(ctx, request, {
+        action: 'migration.stop',
+        targetType: 'migration',
+        targetId: id,
+        targetLabel: `${job.source_host} → ${mailboxCount(job.total)}`,
+        after: { job_id: id, done: job.done_count, copied: num(job.copied) },
+      });
+      return { ok: true, stopRequested: true };
+    },
+  );
 
   /* --- повторить только неудавшиеся -------------------------------- */
   /**
@@ -472,76 +503,93 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
    * означало бы хранить их бессрочно. Повтор безопасен: уже перенесённые
    * письма пропускаются дедупликацией и состоянием переноса.
    */
-  app.post('/migrate/jobs/:id/retry', { preHandler: requireAdmin(app, 'migration.run') }, async (request, reply) => {
-    await requireReady();
-    const id = jobIdOf(request);
-    const body = retrySchema.parse(request.body);
-    const admin = currentAdmin(request);
-    const box = ctx.migrationBox;
-    if (!box) throw new AdminUnavailableError('Перенос почты недоступен');
+  app.post(
+    '/migrate/jobs/:id/retry',
+    { preHandler: requireAdmin(app, 'migration.run') },
+    async (request, reply) => {
+      await requireReady();
+      const id = jobIdOf(request);
+      const body = retrySchema.parse(request.body);
+      const admin = currentAdmin(request);
+      const box = ctx.migrationBox;
+      if (!box) throw new AdminUnavailableError('Перенос почты недоступен');
 
-    const job = await ctx.db.findMigrationJob(id);
-    if (!job) throw new NotFoundError('Задание переноса не найдено');
-    const items = await ctx.db.listMigrationItems(id);
-    const bad = items.filter((i) => i.state === 'failed' || i.state === 'partial' || i.state === 'stopped' || i.state === 'queued');
-    if (bad.length === 0) {
-      throw new BadRequestError('В этом задании нет ящиков, которые стоило бы повторить');
-    }
+      const job = await ctx.db.findMigrationJob(id);
+      if (!job) throw new NotFoundError('Задание переноса не найдено');
+      const items = await ctx.db.listMigrationItems(id);
+      const bad = items.filter(
+        (i) =>
+          i.state === 'failed' ||
+          i.state === 'partial' ||
+          i.state === 'stopped' ||
+          i.state === 'queued',
+      );
+      if (bad.length === 0) {
+        throw new BadRequestError('В этом задании нет ящиков, которые стоило бы повторить');
+      }
 
-    // Пароли берём заново: из тела запроса (служебный доступ) или из
-    // присланного заново списка (режим «пароль каждого ящика»).
-    const masterUser = job.source_master_user ?? '';
-    const fromList =
-      body.list !== undefined
-        ? parseMigrationList(body.list.text, {
-            ...(body.list.sourceDomain !== undefined ? { sourceDomain: body.list.sourceDomain } : {}),
-            ...(body.list.destDomain !== undefined ? { destDomain: body.list.destDomain } : {}),
-          }).rows
-        : [];
-    const byAddress = new Map(fromList.map((r) => [r.sourceUser.toLowerCase(), r.password]));
+      // Пароли берём заново: из тела запроса (служебный доступ) или из
+      // присланного заново списка (режим «пароль каждого ящика»).
+      const masterUser = job.source_master_user ?? '';
+      const fromList =
+        body.list !== undefined
+          ? parseMigrationList(body.list.text, {
+              ...(body.list.sourceDomain !== undefined
+                ? { sourceDomain: body.list.sourceDomain }
+                : {}),
+              ...(body.list.destDomain !== undefined ? { destDomain: body.list.destDomain } : {}),
+            }).rows
+          : [];
+      const byAddress = new Map(fromList.map((r) => [r.sourceUser.toLowerCase(), r.password]));
 
-    const rows = bad.map((item, index) => ({
-      position: index,
-      sourceUser: item.source_user,
-      destUser: item.dest_user,
-      password: byAddress.get(item.source_user.toLowerCase()),
-    }));
-    const secrets = buildSecrets(masterUser, body.masterPassword, rows);
-    // Повтор — такое же новое задание, и ящики для него проверяются заново:
-    // за время неудачного прогона приёмник могли и удалить, и отключить.
-    const destIds = await resolveDestinations(ctx.db, rows);
+      const rows = bad.map((item, index) => ({
+        position: index,
+        sourceUser: item.source_user,
+        destUser: item.dest_user,
+        password: byAddress.get(item.source_user.toLowerCase()),
+      }));
+      const secrets = buildSecrets(masterUser, body.masterPassword, rows);
+      // Повтор — такое же новое задание, и ящики для него проверяются заново:
+      // за время неудачного прогона приёмник могли и удалить, и отключить.
+      const destIds = await resolveDestinations(ctx.db, rows);
 
-    const jobId = await ctx.db.createMigrationJob({
-      adminId: admin.adminId,
-      adminLogin: admin.login,
-      source: {
-        host: job.source_host,
-        port: job.source_port,
-        secure: job.source_secure,
-        allowInsecureTls: job.source_insecure_tls,
-        masterUser: masterUser === '' ? null : masterUser,
-        masterSeparator: job.source_master_separator,
-      },
-      secretEnc: packSecrets(box, secrets),
-      mailboxes: rows.map((r) => ({
-        sourceUser: r.sourceUser,
-        destUser: r.destUser,
-        destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
-      })),
-    });
+      const jobId = await ctx.db.createMigrationJob({
+        adminId: admin.adminId,
+        adminLogin: admin.login,
+        source: {
+          host: job.source_host,
+          port: job.source_port,
+          secure: job.source_secure,
+          allowInsecureTls: job.source_insecure_tls,
+          masterUser: masterUser === '' ? null : masterUser,
+          masterSeparator: job.source_master_separator,
+        },
+        secretEnc: packSecrets(box, secrets),
+        mailboxes: rows.map((r) => ({
+          sourceUser: r.sourceUser,
+          destUser: r.destUser,
+          destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
+        })),
+      });
 
-    await audit(ctx, request, {
-      action: 'migration.start',
-      targetType: 'migration',
-      targetId: jobId,
-      targetLabel: `повтор задания ${String(id)}: ${mailboxCount(rows.length)}`,
-      after: { job_id: jobId, retry_of: id, mailboxes: rows.length, source_host: job.source_host },
-    });
+      await audit(ctx, request, {
+        action: 'migration.start',
+        targetType: 'migration',
+        targetId: jobId,
+        targetLabel: `повтор задания ${String(id)}: ${mailboxCount(rows.length)}`,
+        after: {
+          job_id: jobId,
+          retry_of: id,
+          mailboxes: rows.length,
+          source_host: job.source_host,
+        },
+      });
 
-    ctx.migrationRunner?.nudge();
-    reply.status(202);
-    return { ok: true, jobId, total: rows.length, state: 'queued', retryOf: id };
-  });
+      ctx.migrationRunner?.nudge();
+      reply.status(202);
+      return { ok: true, jobId, total: rows.length, state: 'queued', retryOf: id };
+    },
+  );
 }
 
 /** Номер задания из адреса. */

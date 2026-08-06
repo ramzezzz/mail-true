@@ -24,7 +24,11 @@ import type {
   AwaitingRow,
   AwaitingStore,
 } from './await-reply-db.js';
-import { AwaitReplyService, AWAIT_OVERDUE_KEYWORD, AWAIT_PINNED_KEYWORD } from './await-reply-service.js';
+import {
+  AwaitReplyService,
+  AWAIT_OVERDUE_KEYWORD,
+  AWAIT_PINNED_KEYWORD,
+} from './await-reply-service.js';
 
 const logger = pino({ level: 'silent' });
 const config = { IMAP_HOST: 'localhost', IMAP_PORT: 143 } as unknown as AppConfig;
@@ -142,8 +146,7 @@ class FakeMailbox {
             delimiter: '.',
             parentPath: '',
             flags: new Set<string>(),
-            specialUse:
-              path === 'INBOX' ? '\\Inbox' : path === 'Sent' ? '\\Sent' : undefined,
+            specialUse: path === 'INBOX' ? '\\Inbox' : path === 'Sent' ? '\\Sent' : undefined,
             status: { messages: self.boxes.get(path)?.length ?? 0, unseen: 0, uidValidity: 1n },
           })),
         ),

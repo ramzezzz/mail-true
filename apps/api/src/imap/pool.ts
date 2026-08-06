@@ -81,7 +81,10 @@ export class ImapPool {
     // Слушатель ошибок вешается ДО подключения: необработанное событие 'error'
     // на источнике событий убивает процесс Node целиком.
     client.on('error', (err: unknown) => {
-      this.opts.logger.warn(errorInfo(err, { email }), 'Ошибка IMAP-соединения при проверке логина');
+      this.opts.logger.warn(
+        errorInfo(err, { email }),
+        'Ошибка IMAP-соединения при проверке логина',
+      );
     });
     try {
       await client.connect();
@@ -166,7 +169,11 @@ export class ImapPool {
    * Выполняет fn с IMAP-клиентом пользователя.
    * Соединение берётся из пула или открывается заново — уже внутри очереди.
    */
-  async withClient<T>(email: string, password: string, fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+  async withClient<T>(
+    email: string,
+    password: string,
+    fn: (client: ImapFlow) => Promise<T>,
+  ): Promise<T> {
     const lane = this.laneFor(email);
     lane.pending += 1;
     if (lane.idleTimer) {

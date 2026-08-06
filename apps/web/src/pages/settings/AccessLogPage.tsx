@@ -20,12 +20,7 @@
 import { useMemo, useState } from 'react';
 import { Checkbox, Spinner } from '../../components';
 import { cx } from '../../lib/cx';
-import {
-  CHANNEL_TITLES,
-  formatMoment,
-  plural,
-  type AccessEvent,
-} from '../../settings/ownerApi';
+import { CHANNEL_TITLES, formatMoment, plural, type AccessEvent } from '../../settings/ownerApi';
 import { useAccessLog } from '../../settings/ownerQueries';
 import {
   SettingsEmpty,
@@ -48,9 +43,9 @@ export function AccessLogPage() {
     <>
       <SettingsTitle>Вход и действия</SettingsTitle>
       <SettingsLead>
-        Здесь видно, когда и откуда входили в этот ящик — через почту в браузере, почтовую
-        программу по IMAP или POP3 и при отправке писем. Если среди строк есть та, которую вы
-        не узнаёте, смените пароль.
+        Здесь видно, когда и откуда входили в этот ящик — через почту в браузере, почтовую программу
+        по IMAP или POP3 и при отправке писем. Если среди строк есть та, которую вы не узнаёте,
+        смените пароль.
       </SettingsLead>
 
       {!available && (
@@ -69,8 +64,8 @@ export function AccessLogPage() {
         <>
           {failures > 0 && (
             <p className={styles.alarm} role="status">
-              Неудачных попыток входа: {failures}. Это могли быть вы с опечаткой в пароле — но
-              если нет, пароль пора сменить.
+              Неудачных попыток входа: {failures}. Это могли быть вы с опечаткой в пароле — но если
+              нет, пароль пора сменить.
             </p>
           )}
 
@@ -83,17 +78,15 @@ export function AccessLogPage() {
               <span>
                 Показывать служебные подключения самой почты ({serviceCount})
                 <span className={styles.toggleNote}>
-                  Веб-интерфейс сам читает ящик по IMAP, и каждое такое подключение попадает
-                  в журнал почтового сервера. Это не чужие входы.
+                  Веб-интерфейс сам читает ящик по IMAP, и каждое такое подключение попадает в
+                  журнал почтового сервера. Это не чужие входы.
                 </span>
               </span>
             </label>
           )}
 
           {shown.length === 0 && (
-            <SettingsEmpty>
-              Пока пусто. Записи появятся при следующем входе в ящик.
-            </SettingsEmpty>
+            <SettingsEmpty>Пока пусто. Записи появятся при следующем входе в ящик.</SettingsEmpty>
           )}
 
           {shown.length > 0 && (
@@ -116,11 +109,10 @@ export function AccessLogPage() {
 
           <SettingsHint>
             Свои записи о входе через браузер хранятся {retentionDays}{' '}
-            {plural(retentionDays, 'день', 'дня', 'дней')}. Входы по IMAP, POP3 и отправка
-            читаются из журналов почтового сервера — они хранятся столько, сколько журналы, и
-            уезжают при их провороте. Страну по адресу мы не определяем: для этого нужна либо
-            база на сотни мегабайт, либо запрос в чужую службу — то есть выдача вашего адреса
-            наружу.
+            {plural(retentionDays, 'день', 'дня', 'дней')}. Входы по IMAP, POP3 и отправка читаются
+            из журналов почтового сервера — они хранятся столько, сколько журналы, и уезжают при их
+            провороте. Страну по адресу мы не определяем: для этого нужна либо база на сотни
+            мегабайт, либо запрос в чужую службу — то есть выдача вашего адреса наружу.
           </SettingsHint>
         </>
       )}

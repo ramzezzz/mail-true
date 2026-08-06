@@ -36,12 +36,7 @@ import {
   toMailboxList,
   domainFromKerioFilename,
 } from './kerio-users.js';
-import type {
-  FolderMappingOptions,
-  ImapEndpoint,
-  MailboxReport,
-  ProgressEvent,
-} from './types.js';
+import type { FolderMappingOptions, ImapEndpoint, MailboxReport, ProgressEvent } from './types.js';
 
 /** Простейший разбор аргументов: --key value, --flag, повторяющиеся --map. */
 function parseArgs(argv: string[]): { positional: string[]; options: Map<string, string[]> } {
@@ -87,7 +82,6 @@ function fail(message: string): never {
   process.stderr.write(`Ошибка: ${message}\n`);
   process.exit(2);
 }
-
 
 /** Пароль эндпоинта: файл, переменная окружения или (небезопасно) аргумент. */
 async function passwordFromArgs(
@@ -165,7 +159,9 @@ function printProgress(prefix: string, event: ProgressEvent): void {
       out(`старт: ${event.folders} папок, ~${event.messages} писем`);
       break;
     case 'folder-start':
-      out(`папка ${event.sourcePath} -> ${event.destPath}: к переносу ${event.toCopy} из ${event.total}`);
+      out(
+        `папка ${event.sourcePath} -> ${event.destPath}: к переносу ${event.toCopy} из ${event.total}`,
+      );
       break;
     case 'message':
       if (event.status === 'failed' || (event.copied + event.failed) % 100 === 0) {
@@ -278,9 +274,10 @@ async function cmdBatch(options: Map<string, string[]>): Promise<number> {
 async function cmdKerioUsers(options: Map<string, string[]>): Promise<number> {
   const file = required(options, 'file');
   const text = await readFile(file, 'utf8');
-  const users = file.endsWith('.cfg') || text.trimStart().startsWith('<')
-    ? parseKerioUsersCfg(text)
-    : parseKerioUsersCsv(text);
+  const users =
+    file.endsWith('.cfg') || text.trimStart().startsWith('<')
+      ? parseKerioUsersCfg(text)
+      : parseKerioUsersCsv(text);
   // Домен: параметр --domain или имя файла выгрузки users_<домен>_<дата>.csv
   const domain = opt(options, 'domain') ?? domainFromKerioFilename(file) ?? undefined;
   // Пароли в выгрузке Kerio лежат открытым текстом — в вывод они попадают
@@ -289,7 +286,9 @@ async function cmdKerioUsers(options: Map<string, string[]>): Promise<number> {
   const result =
     domain !== undefined
       ? toMailboxList(users, domain, withPasswords)
-      : users.map((u) => (withPasswords ? u : { ...u, password: u.password !== null ? '<скрыт>' : null }));
+      : users.map((u) =>
+          withPasswords ? u : { ...u, password: u.password !== null ? '<скрыт>' : null },
+        );
   const json = JSON.stringify(result, null, 2);
   const outFile = opt(options, 'out');
   if (outFile !== undefined) {
@@ -391,6 +390,8 @@ main().catch((err: unknown) => {
     process.stderr.write(`Ошибка: ${err.message}\n`);
     process.exit(2);
   }
-  process.stderr.write(`Сбой: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`);
+  process.stderr.write(
+    `Сбой: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}\n`,
+  );
   process.exit(1);
 });

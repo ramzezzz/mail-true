@@ -18,7 +18,11 @@ test('clientConfig: валидный XML со строгой структуро�
   assert.equal(provider.getElementsByTagName('domain')[0]?.textContent, 'mail.local');
 
   const incoming = [...provider.getElementsByTagName('incomingServer')];
-  assert.equal(incoming.length, 4, 'должно быть 4 incomingServer (IMAP SSL/STARTTLS, POP3 SSL/STARTTLS)');
+  assert.equal(
+    incoming.length,
+    4,
+    'должно быть 4 incomingServer (IMAP SSL/STARTTLS, POP3 SSL/STARTTLS)',
+  );
   assert.deepEqual(
     incoming.map((s) => [s.getAttribute('type'), s.getElementsByTagName('port')[0]?.textContent]),
     [
@@ -26,21 +30,18 @@ test('clientConfig: валидный XML со строгой структуро�
       ['imap', '143'],
       ['pop3', '995'],
       ['pop3', '110'],
-    ]
+    ],
   );
 
   // Порядок дочерних элементов сервера строго фиксирован
   const first = incoming[0]!;
   assert.deepEqual(
     [...first.children].map((c) => c.tagName),
-    ['hostname', 'port', 'socketType', 'username', 'authentication']
+    ['hostname', 'port', 'socketType', 'username', 'authentication'],
   );
   assert.equal(first.getElementsByTagName('socketType')[0]?.textContent, 'SSL');
   assert.equal(first.getElementsByTagName('username')[0]?.textContent, '%EMAILADDRESS%');
-  assert.equal(
-    first.getElementsByTagName('authentication')[0]?.textContent,
-    'password-cleartext'
-  );
+  assert.equal(first.getElementsByTagName('authentication')[0]?.textContent, 'password-cleartext');
 
   // Два исходящих сервера: 587 STARTTLS (основной — клиент берёт первый)
   // и 465 «TLS сразу» для тех, кто предпочитает или умеет только его.

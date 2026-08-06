@@ -148,7 +148,12 @@ function jpegSize(bytes: Buffer): { width: number; height: number } | null {
       return { height: bytes.readUInt16BE(pos + 5), width: bytes.readUInt16BE(pos + 7) };
     }
     // Маркеры без длины: заполнители, начало/конец потока
-    if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+    if (
+      marker === 0xd8 ||
+      marker === 0xd9 ||
+      marker === 0x01 ||
+      (marker >= 0xd0 && marker <= 0xd7)
+    ) {
       pos += 2;
       continue;
     }
@@ -207,7 +212,10 @@ const SVG_FORBIDDEN: ReadonlyArray<{ re: RegExp; what: string }> = [
   { re: /<!ENTITY\b/iu, what: 'объявление внешней сущности <!ENTITY>' },
   { re: /\son[a-z]+\s*=/iu, what: 'обработчик события (onload, onclick и подобные)' },
   { re: /javascript\s*:/iu, what: 'ссылка вида javascript:' },
-  { re: /<\s*(set|animate)\b[^>]*attributeName\s*=\s*["']?href/iu, what: 'подмена ссылки анимацией' },
+  {
+    re: /<\s*(set|animate)\b[^>]*attributeName\s*=\s*["']?href/iu,
+    what: 'подмена ссылки анимацией',
+  },
 ];
 
 /** Ссылки наружу: логотип не должен тянуть чужие файлы со стороннего сервера. */
@@ -225,11 +233,15 @@ function svgSize(text: string): { width: number; height: number } | null {
 
   const width = attr('width');
   const height = attr('height');
-  if (width !== null && height !== null) return { width: Math.round(width), height: Math.round(height) };
+  if (width !== null && height !== null)
+    return { width: Math.round(width), height: Math.round(height) };
 
   const viewBox = /<svg[^>]*\sviewBox\s*=\s*["']([^"']+)["']/iu.exec(text);
   if (viewBox?.[1]) {
-    const parts = viewBox[1].trim().split(/[\s,]+/u).map(Number);
+    const parts = viewBox[1]
+      .trim()
+      .split(/[\s,]+/u)
+      .map(Number);
     if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
       return { width: Math.round(parts[2] as number), height: Math.round(parts[3] as number) };
     }
@@ -330,11 +342,17 @@ function isSvg(bytes: Buffer): boolean {
   // Смотрим только начало: XML-пролог, комментарий и doctype могут быть длинными,
   // но корневой тег в первом килобайте есть всегда.
   const head = bytes.subarray(0, 1024).toString('utf8');
-  return /<\s*svg[\s>]/iu.test(head) || (/^\s*<\?xml/iu.test(head) && /<\s*svg[\s>]/iu.test(bytes.toString('utf8')));
+  return (
+    /<\s*svg[\s>]/iu.test(head) ||
+    (/^\s*<\?xml/iu.test(head) && /<\s*svg[\s>]/iu.test(bytes.toString('utf8')))
+  );
 }
 
 /** Размеры в точках. Для SVG попутно проверяет его безопасность (см. inspectSvg). */
-export function sizeOf(format: LogoFormat, bytes: Buffer): { width: number; height: number } | null {
+export function sizeOf(
+  format: LogoFormat,
+  bytes: Buffer,
+): { width: number; height: number } | null {
   switch (format) {
     case 'png':
       return pngSize(bytes);

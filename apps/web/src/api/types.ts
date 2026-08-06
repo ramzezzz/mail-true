@@ -4,7 +4,13 @@
  * Бэкенд пишется параллельно и следует тому же контракту.
  */
 
-import type { DraftPayload, MailAddress, Message, MessageFlags, MessageListPage } from '@mail-true/shared';
+import type {
+  DraftPayload,
+  MailAddress,
+  Message,
+  MessageFlags,
+  MessageListPage,
+} from '@mail-true/shared';
 
 /**
  * Полное письмо в том виде, в каком его отдаёт `GET /api/messages/:id`:

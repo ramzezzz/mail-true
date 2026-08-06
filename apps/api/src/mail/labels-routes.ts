@@ -29,12 +29,7 @@ import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
-import {
-  existingUids,
-  groupIdsByFolder,
-  listFolders,
-  requireFolder,
-} from '../imap/service.js';
+import { existingUids, groupIdsByFolder, listFolders, requireFolder } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { MAX_ENTITY_ID_LENGTH } from './folders.js';
 import {

@@ -27,7 +27,11 @@ const BY_PATH: Record<string, string> = {
 };
 
 /** Название папки для показа. Пользовательские папки сохраняют своё имя. */
-export function folderTitle(folder: { name: string; path?: string; specialUse?: string | null }): string {
+export function folderTitle(folder: {
+  name: string;
+  path?: string;
+  specialUse?: string | null;
+}): string {
   if (folder.specialUse) {
     const byUse = BY_SPECIAL_USE[folder.specialUse];
     if (byUse) return byUse;

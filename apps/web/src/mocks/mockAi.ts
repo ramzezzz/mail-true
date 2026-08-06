@@ -241,7 +241,12 @@ export function mockAiOutbound(_messageId: string): AiOutboundDisclosure {
       { kind: 'signature', count: 1, chars: 148, note: 'Подпись отправителя вырезана' },
       { kind: 'quote', count: 2, chars: 612, note: 'Цитаты предыдущей переписки вырезаны' },
       { kind: 'headers', count: 9, chars: 740, note: 'Служебные заголовки не отправлялись' },
-      { kind: 'html-markup', count: 1, chars: 2_140, note: 'Разметка письма отброшена, ушёл только текст' },
+      {
+        kind: 'html-markup',
+        count: 1,
+        chars: 2_140,
+        note: 'Разметка письма отброшена, ушёл только текст',
+      },
       { kind: 'attachment', count: 1, chars: 184_320, note: 'Вложение не отправлялось' },
     ],
     attachmentsExcluded: ['Счёт-1043.pdf'],
@@ -328,8 +333,18 @@ export function mockAiExtract(messageId: string): AiEnvelope<AiExtraction> {
       },
     ],
     amounts: [
-      { amount: '148 500,00', currency: 'RUB', purpose: 'Итого к оплате', source: 'Итого: 148 500,00 ₽' },
-      { amount: '24 750,00', currency: 'RUB', purpose: 'НДС 20%', source: 'в том числе НДС 24 750,00 ₽' },
+      {
+        amount: '148 500,00',
+        currency: 'RUB',
+        purpose: 'Итого к оплате',
+        source: 'Итого: 148 500,00 ₽',
+      },
+      {
+        amount: '24 750,00',
+        currency: 'RUB',
+        purpose: 'НДС 20%',
+        source: 'в том числе НДС 24 750,00 ₽',
+      },
     ],
     requisites: [
       { kind: 'inn', value: '7701234567', label: 'ИНН поставщика' },
@@ -346,7 +361,11 @@ export function mockAiExtract(messageId: string): AiEnvelope<AiExtraction> {
       },
     ],
     tracking: [
-      { number: 'RA123456785RU', carrier: 'Почта России', url: 'https://www.pochta.ru/tracking#RA123456785RU' },
+      {
+        number: 'RA123456785RU',
+        carrier: 'Почта России',
+        url: 'https://www.pochta.ru/tracking#RA123456785RU',
+      },
     ],
   });
 }

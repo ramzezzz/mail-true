@@ -197,7 +197,7 @@ export function sampleMessage(overrides?: Record<string, unknown>): {
     bodyHtml: null,
     attachments: [{ filename: 'schet-1024.pdf', mimeType: 'application/pdf', size: 84_213 }],
     headers: {
-      'Received': 'from mx.romashka.ru by mail.true',
+      Received: 'from mx.romashka.ru by mail.true',
       'DKIM-Signature': 'v=1; a=rsa-sha256; d=romashka.ru;',
       'X-Spam-Score': '0.1',
     },

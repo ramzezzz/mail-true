@@ -72,13 +72,7 @@ export const CHANNEL_TITLES: Record<AccessChannel, string> = {
 /* Выгрузка ящика                                                       */
 /* ------------------------------------------------------------------ */
 
-export type ExportState =
-  | 'queued'
-  | 'running'
-  | 'ready'
-  | 'failed'
-  | 'cancelled'
-  | 'expired';
+export type ExportState = 'queued' | 'running' | 'ready' | 'failed' | 'cancelled' | 'expired';
 
 export interface ExportJob {
   id: number;

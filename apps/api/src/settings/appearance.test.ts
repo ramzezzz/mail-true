@@ -39,7 +39,6 @@ class FakeDb {
   }
 }
 
- 
 const asDb = (fake: FakeDb): any => fake;
 
 test('новый ящик: тема системная, фон не выбран', () => {

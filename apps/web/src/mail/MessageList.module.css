@@ -215,7 +215,7 @@
 
 @media (hover: hover) {
   /* Наведение */
-.virtualRow:hover .row {
+  .virtualRow:hover .row {
     --row-bg: var(--mt-mail-color-list-letter-background-hover);
   }
 }
@@ -324,7 +324,7 @@
 
 @media (hover: hover) {
   /* При наведении разделитель растягивается на всю ширину строки */
-.virtualRow:hover .row::after {
+  .virtualRow:hover .row::after {
     left: 0;
     right: 0;
   }
@@ -332,7 +332,7 @@
 
 @media (hover: hover) {
   /* …а у соседней строки сверху — гаснет */
-.virtualRow:has(+ .virtualRow:hover) .row::after {
+  .virtualRow:has(+ .virtualRow:hover) .row::after {
     opacity: 0;
   }
 }
@@ -434,7 +434,7 @@
 @media (hover: hover) {
   /* Щит надёжного отправителя висит на краю аватара и торчал бы из-под
    чекбокса — вместе с аватаром он и уходит */
-.virtualRow:hover .reliableBadge {
+  .virtualRow:hover .reliableBadge {
     display: none;
   }
 }

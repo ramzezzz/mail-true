@@ -24,7 +24,7 @@ test('autodiscover: разбор запроса Outlook', () => {
 
 test('autodiscover: разбор нечувствителен к регистру тегов', () => {
   const parsed = parseAutodiscoverRequest(
-    '<autodiscover><request><emailaddress> user@mail.local </emailaddress></request></autodiscover>'
+    '<autodiscover><request><emailaddress> user@mail.local </emailaddress></request></autodiscover>',
   );
   assert.equal(parsed.email, 'user@mail.local');
 });
@@ -41,13 +41,13 @@ test('autodiscover: ответ — валидный XML со схемой Outloo
   assert.equal(root.tagName, 'Autodiscover');
   assert.equal(
     root.getAttribute('xmlns'),
-    'http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006'
+    'http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006',
   );
   const response = root.getElementsByTagName('Response')[0];
   assert.ok(response, 'нет Response');
   assert.equal(
     response.getAttribute('xmlns'),
-    'http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a'
+    'http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a',
   );
 
   const account = response.getElementsByTagName('Account')[0];
@@ -56,9 +56,7 @@ test('autodiscover: ответ — валидный XML со схемой Outloo
   assert.equal(account.getElementsByTagName('Action')[0]?.textContent, 'settings');
 
   const protocols = [...account.getElementsByTagName('Protocol')];
-  const byType = new Map(
-    protocols.map((p) => [p.getElementsByTagName('Type')[0]?.textContent, p])
-  );
+  const byType = new Map(protocols.map((p) => [p.getElementsByTagName('Type')[0]?.textContent, p]));
   assert.deepEqual([...byType.keys()].sort(), ['IMAP', 'POP3', 'SMTP']);
 
   const imap = byType.get('IMAP')!;

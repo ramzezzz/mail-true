@@ -54,7 +54,10 @@ const TEXT_MIN = 4.5;
 describe('значки состояния сервисов читаются', () => {
   it('«работает» — по нему судят, всё ли живо', () => {
     const value = ratio(token('--mt-admin-ok'), OK_TINT);
-    expect(value, `${token('--mt-admin-ok')} на ${OK_TINT} = ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(TEXT_MIN);
+    expect(
+      value,
+      `${token('--mt-admin-ok')} на ${OK_TINT} = ${value.toFixed(2)}:1`,
+    ).toBeGreaterThanOrEqual(TEXT_MIN);
   });
 
   it('«не настроено» и «не отвечает»', () => {

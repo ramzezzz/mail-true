@@ -18,7 +18,11 @@ function step(name: string, ok: boolean, extra = ''): void {
   if (!ok) failed = true;
 }
 
-async function call(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function call(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ status: number; json: any }> {
   const res = await fetch(API + path, {
     method,
     headers: {
@@ -60,13 +64,19 @@ async function main(): Promise<void> {
   step('сессия жива', session.status === 200 && session.json?.email === email);
 
   const account = await call('GET', '/api/account');
-  step('аккаунт', account.status === 200 && account.json?.email === email,
-    `quota=${account.json?.quotaUsedBytes}/${account.json?.quotaLimitBytes}`);
+  step(
+    'аккаунт',
+    account.status === 200 && account.json?.email === email,
+    `quota=${account.json?.quotaUsedBytes}/${account.json?.quotaLimitBytes}`,
+  );
 
   const folders = await call('GET', '/api/folders');
   const folderList: Array<{ id: string; path: string; role: string }> = folders.json?.folders ?? [];
-  step('папки', folders.status === 200 && folderList.some((f) => f.id === 'inbox'),
-    folderList.map((f) => `${f.id}(${f.path})`).join(', '));
+  step(
+    'папки',
+    folders.status === 200 && folderList.some((f) => f.id === 'inbox'),
+    folderList.map((f) => `${f.id}(${f.path})`).join(', '),
+  );
 
   const send = await call('POST', '/api/messages/send', {
     to: [{ name: null, address: email }],
@@ -76,12 +86,19 @@ async function main(): Promise<void> {
     bodyHtml: `<p>Письмо через API: <b>${marker}</b></p><script>alert(1)</script>`,
     attachmentIds: [],
   });
-  step('отправка письма себе', send.status === 200 && send.json?.ok === true, JSON.stringify(send.json));
+  step(
+    'отправка письма себе',
+    send.status === 200 && send.json?.ok === true,
+    JSON.stringify(send.json),
+  );
 
   // Ждём появления во Входящих
   let msgId: string | null = null;
   for (let i = 0; i < 30 && !msgId; i += 1) {
-    const list = await call('GET', `/api/messages?folderId=inbox&limit=10&search=${encodeURIComponent(marker)}`);
+    const list = await call(
+      'GET',
+      `/api/messages?folderId=inbox&limit=10&search=${encodeURIComponent(marker)}`,
+    );
     const items: Array<{ id: string; subject: string }> = list.json?.items ?? [];
     const hit = items.find((m) => m.subject.includes(marker));
     if (hit) {
@@ -95,18 +112,35 @@ async function main(): Promise<void> {
   if (msgId) {
     const msg = await call('GET', `/api/messages/${encodeURIComponent(msgId)}`);
     const html: string = msg.json?.bodyHtml ?? '';
-    step('чтение письма', msg.status === 200 && html.includes(marker), `subject=${msg.json?.subject}`);
+    step(
+      'чтение письма',
+      msg.status === 200 && html.includes(marker),
+      `subject=${msg.json?.subject}`,
+    );
     step('санитизация при чтении', !html.includes('<script'), 'script отсутствует в bodyHtml');
 
     const flag = await call('POST', '/api/messages/flags', { ids: [msgId], flagged: true });
     step('флаг «важное»', flag.status === 200 && flag.json?.updated === 1);
 
-    const copyInSent = await call('GET', `/api/messages?folderId=sent&limit=10&search=${encodeURIComponent(marker)}`);
+    const copyInSent = await call(
+      'GET',
+      `/api/messages?folderId=sent&limit=10&search=${encodeURIComponent(marker)}`,
+    );
     const sentItems: Array<{ subject: string }> = copyInSent.json?.items ?? [];
-    step('копия в Отправленных', sentItems.some((m) => m.subject.includes(marker)));
+    step(
+      'копия в Отправленных',
+      sentItems.some((m) => m.subject.includes(marker)),
+    );
 
-    const move = await call('POST', '/api/messages/move', { ids: [msgId], targetFolderId: 'archive' });
-    step('перемещение в архив', move.status === 200 && move.json?.moved === 1, JSON.stringify(move.json));
+    const move = await call('POST', '/api/messages/move', {
+      ids: [msgId],
+      targetFolderId: 'archive',
+    });
+    step(
+      'перемещение в архив',
+      move.status === 200 && move.json?.moved === 1,
+      JSON.stringify(move.json),
+    );
   }
 
   const draft = await call('POST', '/api/drafts', {
@@ -117,7 +151,11 @@ async function main(): Promise<void> {
     bodyHtml: '<p>черновик</p>',
     attachmentIds: [],
   });
-  step('сохранение черновика', draft.status === 200 && Boolean(draft.json?.draftUid), JSON.stringify(draft.json));
+  step(
+    'сохранение черновика',
+    draft.status === 200 && Boolean(draft.json?.draftUid),
+    JSON.stringify(draft.json),
+  );
 
   const logout = await call('POST', '/api/auth/logout');
   step('выход', logout.status === 200);

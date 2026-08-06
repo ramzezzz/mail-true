@@ -264,7 +264,8 @@ const tile = (starts: string): HTMLElement | undefined =>
     (el.getAttribute('title') ?? '').startsWith(starts),
   ) as HTMLElement | undefined;
 
-const stage = (): HTMLElement | null => document.querySelector('[data-testid="attachment-preview"]');
+const stage = (): HTMLElement | null =>
+  document.querySelector('[data-testid="attachment-preview"]');
 
 beforeEach(() => {
   host = document.createElement('div');
@@ -356,9 +357,9 @@ describe('PDF', () => {
 
     expect(stage()!.querySelector('iframe')).toBeNull();
     expect(createdBlobs).toHaveLength(0);
-    expect(document.querySelector('[data-testid="attachment-preview-refused"]')?.textContent).toMatch(
-      /не PDF/u,
-    );
+    expect(
+      document.querySelector('[data-testid="attachment-preview-refused"]')?.textContent,
+    ).toMatch(/не PDF/u);
   });
 });
 

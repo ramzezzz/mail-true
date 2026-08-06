@@ -40,7 +40,12 @@ describe('errorText', () => {
   });
 
   it('сообщение сервера показывается как есть', () => {
-    const error = new ApiError(400, '/api/messages/flags', 'Не указано ни одного флага', 'BAD_REQUEST');
+    const error = new ApiError(
+      400,
+      '/api/messages/flags',
+      'Не указано ни одного флага',
+      'BAD_REQUEST',
+    );
     expect(errorText(error)).toBe('Не указано ни одного флага');
   });
 

@@ -97,7 +97,9 @@ export interface MigrationRunnerOptions {
 const PROGRESS_FLUSH_MS = 2000;
 
 export class MigrationRunner {
-  readonly #opts: Required<Pick<MigrationRunnerOptions, 'intervalSeconds' | 'staleSeconds' | 'concurrency' | 'maxHours'>> &
+  readonly #opts: Required<
+    Pick<MigrationRunnerOptions, 'intervalSeconds' | 'staleSeconds' | 'concurrency' | 'maxHours'>
+  > &
     MigrationRunnerOptions;
   /** Свой идентификатор. У перезапущенного контейнера он другой — на этом всё и держится. */
   readonly #runner = randomUUID().slice(0, 32);
@@ -137,7 +139,10 @@ export class MigrationRunner {
     // Первый проход сразу: незавершённые задания предыдущего процесса
     // должны продолжиться, а не ждать десять секунд.
     void this.scan().catch(() => undefined);
-    this.#timer = setInterval(() => void this.scan().catch(() => undefined), this.#opts.intervalSeconds * 1000);
+    this.#timer = setInterval(
+      () => void this.scan().catch(() => undefined),
+      this.#opts.intervalSeconds * 1000,
+    );
     this.#timer.unref();
   }
 
@@ -221,8 +226,7 @@ export class MigrationRunner {
     }, 5000);
     beat.unref();
 
-    const state =
-      this.#opts.createState?.() ?? new PgStateStore(this.#opts.stateConnectionString);
+    const state = this.#opts.createState?.() ?? new PgStateStore(this.#opts.stateConnectionString);
     try {
       if (box === null) {
         await db.updateMigrationJob(id, {
@@ -387,7 +391,10 @@ export class MigrationRunner {
       // процесс возьмёт его сразу, продолжив с записанного курсора.
       if (this.#shuttingDown && !(await db.isMigrationStopRequested(id).catch(() => false))) {
         await db.releaseMigrationJob(id, this.#runner).catch(() => undefined);
-        logger.info({ jobId: id }, 'Перенос отпущен при остановке сервера — продолжится после запуска');
+        logger.info(
+          { jobId: id },
+          'Перенос отпущен при остановке сервера — продолжится после запуска',
+        );
         return;
       }
 
@@ -465,8 +472,20 @@ export class MigrationRunner {
     positions: number[];
     state: StateStore;
     signal: AbortSignal;
-    items: Array<{ position: number; copied: number; skipped: number; failed: number; state: string }>;
-  }): Promise<{ doneMailboxes: number; failedMailboxes: number; copied: number; skipped: number; failed: number }> {
+    items: Array<{
+      position: number;
+      copied: number;
+      skipped: number;
+      failed: number;
+      state: string;
+    }>;
+  }): Promise<{
+    doneMailboxes: number;
+    failedMailboxes: number;
+    copied: number;
+    skipped: number;
+    failed: number;
+  }> {
     const { db } = this.#opts;
     const { jobId, accounts, positions, items } = input;
 
@@ -486,7 +505,10 @@ export class MigrationRunner {
      * замирает перед первым непереехавшим письмом), поэтому число ошибок
      * текущего прохода и есть настоящее.
      */
-    const carried = new Map<number, { copied: number; skipped: number; failed: number; total: number }>();
+    const carried = new Map<
+      number,
+      { copied: number; skipped: number; failed: number; total: number }
+    >();
     for (const i of items) {
       carried.set(i.position, { copied: i.copied, skipped: i.skipped, failed: i.failed, total: 0 });
     }
@@ -503,7 +525,10 @@ export class MigrationRunner {
     // Ящики, до которых проход не дошёл, потому что они уже перенесены
     let doneMailboxes = untouched.filter((i) => i.state === 'ok' || i.state === 'partial').length;
     let failedMailboxes = untouched.filter((i) => i.state === 'failed').length;
-    const live = new Map<number, { copied: number; skipped: number; failed: number; total: number; folder: string | null }>();
+    const live = new Map<
+      number,
+      { copied: number; skipped: number; failed: number; total: number; folder: string | null }
+    >();
     let lastFlush = 0;
 
     /** Итог по ящику с учётом предыдущих проходов. */
@@ -576,11 +601,21 @@ export class MigrationRunner {
       onProgress: (index, _account, event: ProgressEvent) => {
         const position = positions[index];
         if (position === undefined) return;
-        const current = live.get(position) ?? { copied: 0, skipped: 0, failed: 0, total: 0, folder: null };
+        const current = live.get(position) ?? {
+          copied: 0,
+          skipped: 0,
+          failed: 0,
+          total: 0,
+          folder: null,
+        };
         if (event.type === 'start') {
           current.total = event.messages;
           void db
-            .updateMigrationItem(jobId, position, { state: 'running', total: event.messages, started: true })
+            .updateMigrationItem(jobId, position, {
+              state: 'running',
+              total: event.messages,
+              started: true,
+            })
             .catch(() => undefined);
         } else if (event.type === 'folder-start') {
           current.folder = event.sourcePath;

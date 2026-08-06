@@ -26,7 +26,12 @@ import {
   type LabelColor,
   type MailLabel,
 } from '../../mail/labelsApi';
-import { useCreateLabel, useDeleteLabel, useLabelsState, useUpdateLabel } from '../../mail/useLabels';
+import {
+  useCreateLabel,
+  useDeleteLabel,
+  useLabelsState,
+  useUpdateLabel,
+} from '../../mail/useLabels';
 import {
   SettingsEmpty,
   SettingsError,
@@ -39,9 +44,7 @@ import pillStyles from '../../mail/LabelPill.module.css';
 import styles from './LabelsPage.module.css';
 
 type DialogState =
-  | { kind: 'create' }
-  | { kind: 'edit'; label: MailLabel }
-  | { kind: 'delete'; label: MailLabel };
+  { kind: 'create' } | { kind: 'edit'; label: MailLabel } | { kind: 'delete'; label: MailLabel };
 
 export function LabelsPage() {
   const { available, reason, items } = useLabelsState();
@@ -54,9 +57,8 @@ export function LabelsPage() {
     <>
       <SettingsTitle>Метки</SettingsTitle>
       <SettingsLead>
-        Метка вешается на письмо, не вынимая его из папки: письмо остаётся во «Входящих», а
-        по метке его можно отобрать в списке и в поиске. На одном письме меток может быть
-        сколько угодно.
+        Метка вешается на письмо, не вынимая его из папки: письмо остаётся во «Входящих», а по метке
+        его можно отобрать в списке и в поиске. На одном письме меток может быть сколько угодно.
       </SettingsLead>
 
       {!available && (
@@ -126,11 +128,11 @@ export function LabelsPage() {
           )}
 
           <SettingsHint>
-            Метки хранятся в самих письмах — ключевыми словами IMAP. Это значит, что они
-            видны во всех вкладках и на телефоне и не пропадут с переустановкой браузера.
-            Но переезд ящика на другой сервер переносит ключевые слова не всегда, и не
-            всякая сторонняя почтовая программа их показывает: там, где не показывает,
-            письмо просто выглядит непомеченным — с ним самим ничего не происходит.
+            Метки хранятся в самих письмах — ключевыми словами IMAP. Это значит, что они видны во
+            всех вкладках и на телефоне и не пропадут с переустановкой браузера. Но переезд ящика на
+            другой сервер переносит ключевые слова не всегда, и не всякая сторонняя почтовая
+            программа их показывает: там, где не показывает, письмо просто выглядит непомеченным — с
+            ним самим ничего не происходит.
           </SettingsHint>
         </>
       )}
@@ -251,16 +253,21 @@ function LabelDialog({
           людей, которая цвета не различает, — пусть видно будет сразу. */}
       <div className={styles.preview}>
         <LabelPill
-          label={{ key: initial?.key ?? 'mt-preview', name: trimmed || 'Название', color, position: 0 }}
+          label={{
+            key: initial?.key ?? 'mt-preview',
+            name: trimmed || 'Название',
+            color,
+            position: 0,
+          }}
           large
         />
       </div>
 
       {initial && (
         <SettingsHint>
-          Ключевое слово в письмах ({initial.key}) при переименовании не меняется: иначе
-          пометку пришлось бы переставлять на каждом помеченном письме, и на тех, до
-          которых переделка не доехала бы, она пропала бы совсем.
+          Ключевое слово в письмах ({initial.key}) при переименовании не меняется: иначе пометку
+          пришлось бы переставлять на каждом помеченном письме, и на тех, до которых переделка не
+          доехала бы, она пропала бы совсем.
         </SettingsHint>
       )}
     </Modal>
@@ -303,8 +310,8 @@ function DeleteLabelDialog({
       }
     >
       <p className={styles.choiceText}>
-        Метка исчезнет из справочника и из меню. Сами письма останутся на своих местах —
-        метка не папка, писем она не хранит.
+        Метка исчезнет из справочника и из меню. Сами письма останутся на своих местах — метка не
+        папка, писем она не хранит.
       </p>
 
       <div className={styles.choice}>

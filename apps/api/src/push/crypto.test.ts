@@ -168,7 +168,11 @@ test('битые ключи подписки отвергаются до отп�
     /p256dh/u,
   );
   assert.throws(
-    () => encryptPushPayload({ keys: { p256dh: good, auth: toBase64Url(randomBytes(8)) }, payload: 'x' }),
+    () =>
+      encryptPushPayload({
+        keys: { p256dh: good, auth: toBase64Url(randomBytes(8)) },
+        payload: 'x',
+      }),
     /auth/u,
   );
 });

@@ -233,8 +233,7 @@ export class SpamStore {
         GROUP BY action`,
       [from, to],
     );
-    const of = (action: string): number =>
-      int(rows.find((row) => row.action === action)?.count);
+    const of = (action: string): number => int(rows.find((row) => row.action === action)?.count);
     return { spam: of('antispam.learn.spam'), ham: of('antispam.learn.ham') };
   }
 

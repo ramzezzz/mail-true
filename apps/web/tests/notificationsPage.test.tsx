@@ -68,7 +68,8 @@ function pushState(patch: Partial<PushState> = {}): PushState {
   return {
     pushAvailable: true,
     pushUnavailableReason: null,
-    vapidPublicKey: 'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8',
+    vapidPublicKey:
+      'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8',
     prefs: prefs(),
     devices: [],
     ai: { available: true, reason: null },
@@ -156,7 +157,11 @@ beforeEach(() => {
    */
   Object.defineProperty(window, 'PushManager', { value: class {}, configurable: true });
   Object.defineProperty(navigator, 'serviceWorker', {
-    value: { register: vi.fn(), getRegistration: vi.fn(async () => undefined), ready: Promise.resolve({}) },
+    value: {
+      register: vi.fn(),
+      getRegistration: vi.fn(async () => undefined),
+      ready: Promise.resolve({}),
+    },
     configurable: true,
   });
   vi.spyOn(notificationsApi, 'getState').mockResolvedValue(pushState());
@@ -318,7 +323,9 @@ describe('доставка при закрытой вкладке', () => {
   });
 
   it('содержимое в push выключено по умолчанию и объясняет обе стороны сделки', async () => {
-    vi.mocked(notificationsApi.getState).mockResolvedValue(pushState({ prefs: prefs({ push: true }) }));
+    vi.mocked(notificationsApi.getState).mockResolvedValue(
+      pushState({ prefs: prefs({ push: true }) }),
+    );
     render();
     await waitFor(() => text().includes('Класть содержимое'), 'настройку содержимого в push');
 
@@ -338,7 +345,8 @@ describe('доставка при закрытой вкладке', () => {
     vi.mocked(notificationsApi.getState).mockResolvedValue(
       pushState({
         pushAvailable: false,
-        pushUnavailableReason: 'Уведомления при закрытой вкладке выключены на сервере (PUSH_ENABLED=false)',
+        pushUnavailableReason:
+          'Уведомления при закрытой вкладке выключены на сервере (PUSH_ENABLED=false)',
         prefs: prefs({ push: true }),
       }),
     );
@@ -389,7 +397,12 @@ describe('тихие часы', () => {
       generalSettings({ notifications: { browser: true, tabCounter: true } }),
     );
     vi.mocked(notificationsApi.getState).mockResolvedValue(
-      pushState({ prefs: prefs({ quietHours: { enabled: true, fromMinutes: 1380, toMinutes: 420 }, timeZone: null }) }),
+      pushState({
+        prefs: prefs({
+          quietHours: { enabled: true, fromMinutes: 1380, toMinutes: 420 },
+          timeZone: null,
+        }),
+      }),
     );
     render();
     await waitFor(() => text().includes('Тихие часы'), 'раздел тихих часов');
@@ -405,7 +418,9 @@ describe('тихие часы', () => {
       generalSettings({ notifications: { browser: true, tabCounter: true } }),
     );
     vi.mocked(notificationsApi.getState).mockResolvedValue(
-      pushState({ prefs: prefs({ quietHours: { enabled: true, fromMinutes: 1380, toMinutes: 420 } }) }),
+      pushState({
+        prefs: prefs({ quietHours: { enabled: true, fromMinutes: 1380, toMinutes: 420 } }),
+      }),
     );
     render();
     await waitFor(() => text().includes('Тихие часы'), 'раздел тихих часов');

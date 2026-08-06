@@ -411,8 +411,7 @@ export function buildRestorePlan(
   const sections: SectionPlan[] = [];
   const warnings: string[] = [];
 
-  const lower = (list: readonly string[]): Set<string> =>
-    new Set(list.map((s) => s.toLowerCase()));
+  const lower = (list: readonly string[]): Set<string> => new Set(list.map((s) => s.toLowerCase()));
 
   const split = <T>(
     id: BackupSection,
@@ -539,7 +538,8 @@ export function buildRestorePlan(
 
   if (wanted.has('branding')) {
     const branding = file.data.branding;
-    const has = branding !== null && (branding.logoBase64 !== null || branding.companyName !== null);
+    const has =
+      branding !== null && (branding.logoBase64 !== null || branding.companyName !== null);
     sections.push({
       id: 'branding',
       title: SECTION_TITLES.branding,

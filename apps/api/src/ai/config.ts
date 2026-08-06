@@ -12,9 +12,7 @@ import { z } from 'zod';
 const intVar = (def: number, min = 0, max = Number.MAX_SAFE_INTEGER) =>
   z.coerce.number().int().min(min).max(max).default(def);
 
-const boolFlag = z
-  .enum(['true', 'false', '1', '0'])
-  .transform((v) => v === 'true' || v === '1');
+const boolFlag = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
 export const aiEnvSchema = z.object({
   /** Подключение к базе почтового стека. Без него ИИ выключен целиком. */

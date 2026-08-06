@@ -68,7 +68,12 @@ function fakeHarvester(): { harvester: ContactHarvester; kicks: number } {
       state.kicks += 1;
     },
   } as unknown as ContactHarvester;
-  return { harvester, get kicks() { return state.kicks; } };
+  return {
+    harvester,
+    get kicks() {
+      return state.kicks;
+    },
+  };
 }
 
 const allowAll: ContactsEnvironment = { collectReceived: async () => true };

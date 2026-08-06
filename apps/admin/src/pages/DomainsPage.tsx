@@ -113,7 +113,11 @@ export function DomainsPage() {
 
       <Toolbar>
         <ToolbarSpacer />
-        {can('domains.write') && <Button size="s" onClick={() => setAddOpen(true)}>Добавить домен</Button>}
+        {can('domains.write') && (
+          <Button size="s" onClick={() => setAddOpen(true)}>
+            Добавить домен
+          </Button>
+        )}
       </Toolbar>
 
       <TableWrap>
@@ -139,10 +143,16 @@ export function DomainsPage() {
             {items.map((domain) => (
               <tr key={domain.id}>
                 <td className="mt-mono">{domain.name}</td>
-                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{domain.userCount}</td>
-                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{domain.aliasCount}</td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>
+                  {domain.userCount}
+                </td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>
+                  {domain.aliasCount}
+                </td>
                 <td className={`mt-mono ${tableStyles.optionalNarrow}`}>{domain.dkimSelector}</td>
-                <td><DnsBadge status={domain.dnsOverall} /></td>
+                <td>
+                  <DnsBadge status={domain.dnsOverall} />
+                </td>
                 <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>
                   {formatRelative(domain.dnsCheckedAt)}
                 </td>
@@ -234,7 +244,7 @@ export function DomainsPage() {
             setFlash(
               aliasesRemoved > 0
                 ? `Домен ${name} удалён вместе с ${String(aliasesRemoved)} алиас(ами). ` +
-                  'Список удалённых алиасов остался в журнале аудита.'
+                    'Список удалённых алиасов остался в журнале аудита.'
                 : `Домен ${name} удалён.`,
             );
             setRemoving(null);
@@ -311,8 +321,8 @@ function DeleteDomainModal({
         <Notice tone="error">
           В домене {domain.userCount} ящик(ов) — удалить его нельзя. Удаление уничтожило бы их
           записи вместе с настройками, подписями и правилами, а письма остались бы лежать в
-          хранилище без владельца. Сначала перенесите ящики на другой домен или удалите их в
-          разделе «Ящики»: там удаление ящика убирает и его почту.
+          хранилище без владельца. Сначала перенесите ящики на другой домен или удалите их в разделе
+          «Ящики»: там удаление ящика убирает и его почту.
         </Notice>
       ) : (
         <Notice tone="error">
@@ -429,8 +439,8 @@ function DkimModal({
           /var/lib/rspamd/dkim/{domain.name}.{selector}.dns.txt
         </code>
         <br />
-        Скопируйте оттуда значение поля <code className="mt-mono">p=</code> — админка сверит
-        его с тем, что опубликовано в DNS.
+        Скопируйте оттуда значение поля <code className="mt-mono">p=</code> — админка сверит его с
+        тем, что опубликовано в DNS.
       </Notice>
       <Field label="Селектор">
         <input

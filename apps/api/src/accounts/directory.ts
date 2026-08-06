@@ -60,7 +60,7 @@ export class AccountDirectory {
       try {
         const res = await pool.query<{ created_at: Date }>(
           'SELECT created_at FROM virtual_users WHERE lower(email) = $1 LIMIT 1',
-          [key]
+          [key],
         );
         const row = res.rows[0];
         if (row?.created_at) value = new Date(row.created_at).toISOString();

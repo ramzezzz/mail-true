@@ -127,8 +127,10 @@ describe('подпись в новом письме', () => {
     );
     render();
     act(() => useUiStore.getState().openCompose());
-    await waitFor(() => useUiStore.getState().composeWindows[0]?.draft.signatureApplied === true,
-      'решение о подписи');
+    await waitFor(
+      () => useUiStore.getState().composeWindows[0]?.draft.signatureApplied === true,
+      'решение о подписи',
+    );
 
     expect(editor()!.textContent!.trim()).toBe('');
     // Выбирать не из чего — списка тоже нет

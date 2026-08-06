@@ -136,9 +136,7 @@ export function SettingsLayout() {
    * недоступен», — это кнопка без поведения.
    */
   const withRecovery = recovery.available
-    ? withTemplates.flatMap((item) =>
-        item.to === RECOVERY_AFTER ? [item, RECOVERY_ITEM] : [item],
-      )
+    ? withTemplates.flatMap((item) => (item.to === RECOVERY_AFTER ? [item, RECOVERY_ITEM] : [item]))
     : withTemplates;
   /*
    * Одноразовые адреса — по тому же правилу: нет применённой миграции

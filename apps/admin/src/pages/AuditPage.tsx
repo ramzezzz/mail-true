@@ -130,13 +130,18 @@ export function AuditPage() {
               </tbody>
             </Table>
           </TableWrap>
-          <Pager total={audit.data?.total ?? 0} limit={LIMIT} offset={offset} onChange={setOffset} />
+          <Pager
+            total={audit.data?.total ?? 0}
+            limit={LIMIT}
+            offset={offset}
+            onChange={setOffset}
+          />
         </>
       ) : (
         <>
           <Notice tone="info">
-            Каждый вход администратора в чужой ящик требует причины и попадает сюда.
-            Владелец ящика тоже видит эти входы в своей истории действий.
+            Каждый вход администратора в чужой ящик требует причины и попадает сюда. Владелец ящика
+            тоже видит эти входы в своей истории действий.
           </Notice>
           <TableWrap>
             <Table>
@@ -169,7 +174,12 @@ export function AuditPage() {
               </tbody>
             </Table>
           </TableWrap>
-          <Pager total={access.data?.total ?? 0} limit={LIMIT} offset={offset} onChange={setOffset} />
+          <Pager
+            total={access.data?.total ?? 0}
+            limit={LIMIT}
+            offset={offset}
+            onChange={setOffset}
+          />
         </>
       )}
     </>

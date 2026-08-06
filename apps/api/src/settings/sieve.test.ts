@@ -19,7 +19,12 @@ import {
   tokenizeSieve,
   valueToRegex,
 } from './sieve.js';
-import { DEFAULT_ACTIONS, defaultMailSettings, type FilterActions, type FilterRule } from './types.js';
+import {
+  DEFAULT_ACTIONS,
+  defaultMailSettings,
+  type FilterActions,
+  type FilterRule,
+} from './types.js';
 
 function rule(partial: Partial<FilterRule> & { id: number }): FilterRule {
   return {
@@ -76,10 +81,7 @@ test('conditionToTest: поля и операторы', () => {
     conditionToTest({ field: 'from', op: 'contains', value: 'boss@example.com' }),
     'header :contains "from" "boss@example.com"',
   );
-  assert.equal(
-    conditionToTest({ field: 'cc', op: 'is', value: 'a@b' }),
-    'header :is "cc" "a@b"',
-  );
+  assert.equal(conditionToTest({ field: 'cc', op: 'is', value: 'a@b' }), 'header :is "cc" "a@b"');
   // Кириллица переводится в :regex: компаратор по умолчанию сворачивает
   // регистр только латиницы (см. valueToRegex и тесты ниже)
   assert.equal(
@@ -185,9 +187,7 @@ test('requiredExtensions: используемое правилами плюс �
     'include',
   ]);
   assert.deepEqual(
-    requiredExtensions([
-      rule({ id: 1, actions: actions({ markRead: true, forwardTo: ['a@b'] }) }),
-    ]),
+    requiredExtensions([rule({ id: 1, actions: actions({ markRead: true, forwardTo: ['a@b'] }) })]),
     ['fileinto', 'mailbox', 'include', 'imap4flags', 'copy'],
   );
   const settings = defaultMailSettings('u@mail.local');
@@ -265,9 +265,27 @@ test('buildSieveScript: любая использованная команда �
 
 test('buildSieveScript: порядок правил соответствует position', () => {
   const script = buildSieveScript([
-    rule({ id: 1, name: 'Третье', position: 2, conditions: [{ field: 'from', op: 'contains', value: 'c' }], actions: actions({ folder: 'C' }) }),
-    rule({ id: 2, name: 'Первое', position: 0, conditions: [{ field: 'from', op: 'contains', value: 'a' }], actions: actions({ folder: 'A' }) }),
-    rule({ id: 3, name: 'Второе', position: 1, conditions: [{ field: 'from', op: 'contains', value: 'b' }], actions: actions({ folder: 'B' }) }),
+    rule({
+      id: 1,
+      name: 'Третье',
+      position: 2,
+      conditions: [{ field: 'from', op: 'contains', value: 'c' }],
+      actions: actions({ folder: 'C' }),
+    }),
+    rule({
+      id: 2,
+      name: 'Первое',
+      position: 0,
+      conditions: [{ field: 'from', op: 'contains', value: 'a' }],
+      actions: actions({ folder: 'A' }),
+    }),
+    rule({
+      id: 3,
+      name: 'Второе',
+      position: 1,
+      conditions: [{ field: 'from', op: 'contains', value: 'b' }],
+      actions: actions({ folder: 'B' }),
+    }),
   ]);
   const order = [...script.matchAll(/# === Правило: (.+?) ===/g)].map((m) => m[1]);
   assert.deepEqual(order, ['Первое', 'Второе', 'Третье']);
@@ -279,7 +297,13 @@ test('buildSieveScript: порядок правил соответствует p
 test('buildSieveScript: выключенное правило в файл не попадает', () => {
   const script = buildSieveScript([
     rule({ id: 1, name: 'Включено', actions: actions({ folder: 'A' }) }),
-    rule({ id: 2, name: 'Выключено', enabled: false, position: 1, actions: actions({ folder: 'B' }) }),
+    rule({
+      id: 2,
+      name: 'Выключено',
+      enabled: false,
+      position: 1,
+      actions: actions({ folder: 'B' }),
+    }),
   ]);
   assert.match(script, /Включено/);
   assert.doesNotMatch(script, /Выключено/);
@@ -298,7 +322,12 @@ test('buildSieveScript: require перечисляет расширения од
 
 test('buildSieveScript: одинаковые правила дают побайтово одинаковый файл', () => {
   const rules = [
-    rule({ id: 1, name: 'Р', conditions: [{ field: 'to', op: 'is', value: 'me@x' }], actions: actions({ folder: 'F' }) }),
+    rule({
+      id: 1,
+      name: 'Р',
+      conditions: [{ field: 'to', op: 'is', value: 'me@x' }],
+      actions: actions({ folder: 'F' }),
+    }),
   ];
   assert.equal(buildSieveScript(rules), buildSieveScript(rules));
 });
@@ -388,7 +417,9 @@ test('parseSieveScript: автоответ правила восстанавли
       id: 8,
       name: 'Автоответ',
       conditions: [{ field: 'to', op: 'is', value: 'support@mail.local' }],
-      actions: actions({ autoReply: { subject: 'Принято', text: 'Ответим в течение дня', days: 2 } }),
+      actions: actions({
+        autoReply: { subject: 'Принято', text: 'Ответим в течение дня', days: 2 },
+      }),
     }),
   ];
   const parsed = parseSieveScript(buildSieveScript(source));

@@ -77,11 +77,7 @@ export function generateVapidKeys(): VapidKeys {
   const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const jwk = privateKey.export({ format: 'jwk' }) as { d?: string; x?: string; y?: string };
   if (!jwk.d || !jwk.x || !jwk.y) throw new Error('Не удалось создать ключи VAPID');
-  const raw = Buffer.concat([
-    Buffer.from([0x04]),
-    fromBase64Url(jwk.x),
-    fromBase64Url(jwk.y),
-  ]);
+  const raw = Buffer.concat([Buffer.from([0x04]), fromBase64Url(jwk.x), fromBase64Url(jwk.y)]);
   // Публичный ключ берём из JWK, а не из export('spki'): наружу нужен
   // именно голый вид точки, а не обёртка ASN.1 — его ждёт браузер.
   void publicKey;

@@ -90,7 +90,8 @@ function parsePush(raw) {
 function toNotification(view, options) {
   const source = view && typeof view === 'object' ? view : FALLBACK;
   const supportsActions = Boolean(options && options.supportsActions);
-  const actions = supportsActions && Array.isArray(source.actions) ? source.actions.slice(0, 2) : [];
+  const actions =
+    supportsActions && Array.isArray(source.actions) ? source.actions.slice(0, 2) : [];
   return {
     title: typeof source.title === 'string' && source.title ? source.title : FALLBACK.title,
     options: {
@@ -125,7 +126,9 @@ function toNotification(view, options) {
  */
 function pickClient(clients, origin) {
   const list = Array.isArray(clients) ? clients : [];
-  const own = list.filter((client) => typeof client.url === 'string' && client.url.startsWith(origin));
+  const own = list.filter(
+    (client) => typeof client.url === 'string' && client.url.startsWith(origin),
+  );
   if (own.length === 0) return null;
   // Видимая вкладка предпочтительнее свёрнутой: человек смотрит на неё.
   return own.find((client) => client.visibilityState === 'visible') ?? own[0];

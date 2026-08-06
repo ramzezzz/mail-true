@@ -301,16 +301,18 @@ export function LineChart({
         ))}
 
         {area &&
-          series.slice(0, 1).map((s) =>
-            segments(s.values).map((run, i) => (
-              <path
-                key={`${s.series.id}-area-${i}`}
-                d={areaPath(run, count, max, geo)}
-                fill={hueVar(s.series.hue)}
-                fillOpacity="var(--mt-chart-area-alpha)"
-              />
-            )),
-          )}
+          series
+            .slice(0, 1)
+            .map((s) =>
+              segments(s.values).map((run, i) => (
+                <path
+                  key={`${s.series.id}-area-${i}`}
+                  d={areaPath(run, count, max, geo)}
+                  fill={hueVar(s.series.hue)}
+                  fillOpacity="var(--mt-chart-area-alpha)"
+                />
+              )),
+            )}
 
         {/* Сами линии; каждый сплошной кусок — свой путь (разрывы честные) */}
         {series.map((s) =>
@@ -429,9 +431,7 @@ export function BarChart({
   const max = useMemo(
     () =>
       niceCeil(
-        stacked
-          ? Math.max(...columnTotals, 0)
-          : Math.max(...series.map((s) => maxOf(s.values)), 0),
+        stacked ? Math.max(...columnTotals, 0) : Math.max(...series.map((s) => maxOf(s.values)), 0),
       ),
     [columnTotals, series, stacked],
   );
@@ -545,7 +545,12 @@ export function BarChart({
           <text
             key={index}
             className={`${styles.axisText} ${styles.axisTextMiddle}`}
-            x={round(clampLabelX(barLayout(index, count, geo).x + barLayout(index, count, geo).width / 2, geo.width))}
+            x={round(
+              clampLabelX(
+                barLayout(index, count, geo).x + barLayout(index, count, geo).width / 2,
+                geo.width,
+              ),
+            )}
             y={height - 6}
           >
             {labels[index]}
@@ -676,10 +681,7 @@ export function Meter({
         aria-valuemin={0}
         aria-valuemax={100}
       >
-        <div
-          className={styles.meterFill}
-          style={{ width: `${value}%`, background: hueVar(hue) }}
-        />
+        <div className={styles.meterFill} style={{ width: `${value}%`, background: hueVar(hue) }} />
       </div>
       <span className={styles.meterValue}>{label}</span>
     </div>

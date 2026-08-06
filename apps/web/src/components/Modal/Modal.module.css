@@ -13,8 +13,8 @@
 
 /* Закрытие: обратный ход, столько же — MODAL_EXIT_MS в Modal.tsx */
 .overlayClosing {
-  animation: overlayShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease)
-    reverse forwards;
+  animation: overlayShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease) reverse
+    forwards;
   pointer-events: none;
 }
 
@@ -41,8 +41,8 @@
 }
 
 .cardClosing {
-  animation: cardShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease)
-    reverse forwards;
+  animation: cardShow var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease) reverse
+    forwards;
 }
 
 @keyframes cardShow {

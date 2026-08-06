@@ -16,7 +16,13 @@
  * сотни тысяч, и «показать всё» означало бы повесить браузер.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
 import { api } from '../api/client';
@@ -176,7 +182,10 @@ function QueueTab() {
   const [queueName, setQueueName] = useState('');
   const [offset, setOffset] = useState(0);
   const [viewing, setViewing] = useState<QueueMessage | null>(null);
-  const [confirming, setConfirming] = useState<{ message: QueueMessage; action: 'flush' | 'delete' } | null>(null);
+  const [confirming, setConfirming] = useState<{
+    message: QueueMessage;
+    action: 'flush' | 'delete';
+  } | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
   // Чтение письма из очереди приравнено к чтению журналов почты: и там и
@@ -282,15 +291,15 @@ function QueueTab() {
       {done && <Notice tone="success">{done}</Notice>}
       {queue.data?.truncated && (
         <Notice tone="info">
-          Очередь длиннее предела разбора — показана её часть. Разберитесь с причиной
-          затора: столько писем в очереди сами не расходятся.
+          Очередь длиннее предела разбора — показана её часть. Разберитесь с причиной затора:
+          столько писем в очереди сами не расходятся.
         </Notice>
       )}
 
       <p className={styles.source}>
         Данные из очереди Postfix на {queue.data ? formatDateTime(queue.data.takenAt) : '—'}.
-        {queue.data ? ` Всего в очереди: ${queue.data.queueTotal}.` : ''} Очередь — это письма,
-        ещё не доставленные; доставленные в ней не остаются, их видно в «Обработанных».
+        {queue.data ? ` Всего в очереди: ${queue.data.queueTotal}.` : ''} Очередь — это письма, ещё
+        не доставленные; доставленные в ней не остаются, их видно в «Обработанных».
       </p>
 
       <TableWrap>
@@ -442,14 +451,14 @@ function QueueTab() {
           </p>
           {confirming.action === 'flush' ? (
             <p>
-              Postfix попробует доставить его прямо сейчас, не дожидаясь своего расписания.
-              Если причина отказа не устранена, письмо снова отложится.
+              Postfix попробует доставить его прямо сейчас, не дожидаясь своего расписания. Если
+              причина отказа не устранена, письмо снова отложится.
             </p>
           ) : (
             <p>
-              Письмо исчезнет насовсем: отправитель не получит ни доставки, ни отбойника —
-              для него письмо просто пропадёт. Отменить это нельзя. Действие попадёт в журнал
-              аудита вместе с адресами.
+              Письмо исчезнет насовсем: отправитель не получит ни доставки, ни отбойника — для него
+              письмо просто пропадёт. Отменить это нельзя. Действие попадёт в журнал аудита вместе с
+              адресами.
             </p>
           )}
         </Modal>
@@ -591,7 +600,8 @@ function HistoryTab() {
   useEffect(() => {
     if (!freshItems || freshItems.length === 0) return;
     // Прокручивается не окно, а колонка содержимого панели — считаем по ней.
-    if (isPinnedToTop({ scrollTop: scrollTopNear(sentinel.current) })) merge(freshItems, freshGapped);
+    if (isPinnedToTop({ scrollTop: scrollTopNear(sentinel.current) }))
+      merge(freshItems, freshGapped);
     else setPendingItems(freshItems);
   }, [freshItems, freshGapped, merge]);
 
@@ -769,13 +779,13 @@ function HistoryTab() {
 function HistoryDepth({ stats }: { stats: FlowHistoryStats }) {
   return (
     <p className={styles.source}>
-      Источник — журнал Postfix: сам почтовый сервер историю обработанных писем не хранит,
-      письмо исчезает из очереди вместе со своим файлом.{' '}
+      Источник — журнал Postfix: сам почтовый сервер историю обработанных писем не хранит, письмо
+      исчезает из очереди вместе со своим файлом.{' '}
       {stats.collectingSince
         ? `Разбор ведётся с ${formatDateTime(stats.collectingSince)}; раньше этого момента данных нет.`
         : 'Разбор журнала ещё не начинался.'}{' '}
-      Храним {stats.retentionDays} сут. и не больше {stats.maxRows.toLocaleString('ru-RU')} записей —
-      что вытеснено, того больше нет.
+      Храним {stats.retentionDays} сут. и не больше {stats.maxRows.toLocaleString('ru-RU')} записей
+      — что вытеснено, того больше нет.
       {stats.oldest ? ` Самая старая запись: ${formatDateTime(stats.oldest)}.` : ''}
     </p>
   );

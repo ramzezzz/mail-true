@@ -181,7 +181,10 @@ test('служебный доступ: один пароль на все ящи�
   const secrets = { masterPassword: 'odin-parol' };
 
   const first = sourceEndpointFor(withMaster, secrets, { sourceUser: 'a@staraya.ru', position: 0 });
-  const second = sourceEndpointFor(withMaster, secrets, { sourceUser: 'b@staraya.ru', position: 1 });
+  const second = sourceEndpointFor(withMaster, secrets, {
+    sourceUser: 'b@staraya.ru',
+    position: 1,
+  });
 
   assert.equal(first?.pass, 'odin-parol');
   assert.equal(second?.pass, 'odin-parol', 'второму ящику отдельный пароль не нужен');
@@ -210,7 +213,11 @@ test('нет пароля — нет подключения, а не пусто�
   // Пустой пароль ушёл бы на чужой сервер и вернулся отказом «неверный
   // пароль» — человек пошёл бы проверять чужой сервер вместо своего списка.
   assert.equal(
-    sourceEndpointFor(source, { mailboxPasswords: {} }, { sourceUser: 'a@staraya.ru', position: 0 }),
+    sourceEndpointFor(
+      source,
+      { mailboxPasswords: {} },
+      { sourceUser: 'a@staraya.ru', position: 0 },
+    ),
     null,
   );
   assert.equal(

@@ -269,11 +269,15 @@ async function askOne(
  * в следующий раз — иначе на каждой записи мы бы заново ждали таймаута
  * от резольвера, который в этой сети недоступен.
  */
-export function createPublicQuerier(options: {
-  servers?: readonly string[] | undefined;
-  timeoutMs?: number | undefined;
-} = {}): DnsQuerier {
-  const servers = [...(options.servers && options.servers.length > 0 ? options.servers : PUBLIC_RESOLVERS)];
+export function createPublicQuerier(
+  options: {
+    servers?: readonly string[] | undefined;
+    timeoutMs?: number | undefined;
+  } = {},
+): DnsQuerier {
+  const servers = [
+    ...(options.servers && options.servers.length > 0 ? options.servers : PUBLIC_RESOLVERS),
+  ];
   const timeoutMs = options.timeoutMs ?? 4000;
   const answered = new Set<string>();
   let preferred = 0;
@@ -391,7 +395,10 @@ export interface SpfRecord {
 
 /** Разбор строки SPF на механизмы. */
 export function parseSpfRecord(value: string): SpfRecord {
-  const tokens = value.trim().split(/\s+/).filter((t) => t !== '');
+  const tokens = value
+    .trim()
+    .split(/\s+/)
+    .filter((t) => t !== '');
   const first = tokens[0]?.toLowerCase() ?? '';
   const rest = tokens.slice(1);
   let all: string | null = null;
@@ -421,7 +428,8 @@ export function spfAllowsHost(
   for (const m of record.mechanisms) {
     if (m === 'mx' || m === `mx:${target}`) return 'yes';
     if (m === `a:${target}`) return 'yes';
-    if (publicIpv4 && (m === `ip4:${publicIpv4}` || m.startsWith(`ip4:${publicIpv4}/`))) return 'yes';
+    if (publicIpv4 && (m === `ip4:${publicIpv4}` || m.startsWith(`ip4:${publicIpv4}/`)))
+      return 'yes';
   }
   return record.delegates ? 'unclear' : 'no';
 }
@@ -612,10 +620,7 @@ function judgeTarget(
  * Никогда не бросает: недоступность резольвера превращается в вывод
  * «не удалось спросить», а не в «не настроено».
  */
-export async function checkDomainDns(
-  domain: string,
-  options: DnsCheckOptions,
-): Promise<DnsReport> {
+export async function checkDomainDns(domain: string, options: DnsCheckOptions): Promise<DnsReport> {
   const name = fqdn(domain);
   const host = fqdn(options.mailHostname);
   const selector = options.dkimSelector || 'mail';
@@ -654,7 +659,8 @@ export async function checkDomainDns(
    * момент уже опубликован: это A-запись «${host}», которую мы только что
    * спросили. Берём её, а в подсказке честно говорим, откуда взят адрес.
    */
-  const ptrIp = configuredIp !== '' ? configuredIp : (publishedIps.find((v) => isIP(v) === 4) ?? '');
+  const ptrIp =
+    configuredIp !== '' ? configuredIp : (publishedIps.find((v) => isIP(v) === 4) ?? '');
   const ptrIpFromDns = configuredIp === '' && ptrIp !== '';
 
   const [
@@ -758,9 +764,12 @@ export async function checkDomainDns(
   const exchangesOf = (values: string[]): string[] => [
     ...new Set(values.map((v) => fqdn(v.split(/\s+/)[1] ?? '')).filter((v) => v !== '')),
   ];
-  const foreignExchanges = mxAnswer.kind === 'records'
-    ? exchangesOf(mxAnswer.values).filter((e) => e !== host).slice(0, 3)
-    : [];
+  const foreignExchanges =
+    mxAnswer.kind === 'records'
+      ? exchangesOf(mxAnswer.values)
+          .filter((e) => e !== host)
+          .slice(0, 3)
+      : [];
   const exchangeAddresses = new Map<string, DnsAnswer>([[host, hostA]]);
   await Promise.all(
     foreignExchanges.map(async (exchange) => {
@@ -815,12 +824,15 @@ export async function checkDomainDns(
               diff: null,
               hint:
                 `Почта домена направлена на «${host}»` +
-                (target?.kind === 'records' ? `, и это имя разворачивается в ${target.values.join(', ')}` : '') +
+                (target?.kind === 'records'
+                  ? `, и это имя разворачивается в ${target.values.join(', ')}`
+                  : '') +
                 ' — верно.',
             };
           }
           // Имя чужое — но, возможно, это тот же самый сервер под другим именем.
-          const reachesUs = serverIps.length > 0 &&
+          const reachesUs =
+            serverIps.length > 0 &&
             foreignExchanges.some((exchange) => {
               const a = exchangeAddresses.get(exchange);
               return a?.kind === 'records' && a.values.some((v) => serverIps.includes(v));
@@ -967,7 +979,8 @@ export async function checkDomainDns(
             `/var/lib/rspamd/dkim/${name}.${selector}.dns.txt — опубликуйте его значением TXT. ` +
             'Значение длинное; панели, которые режут его на куски по 255 символов, — это нормально.',
           judge: (values) => {
-            const record = values.find((v) => v.toLowerCase().includes('v=dkim1')) ?? values[0] ?? '';
+            const record =
+              values.find((v) => v.toLowerCase().includes('v=dkim1')) ?? values[0] ?? '';
             const parsed = parseDkimRecord(record);
             if (parsed.revoked) {
               return {

@@ -487,7 +487,9 @@ describe('остальные возможности', () => {
       );
       assert.ok(result.ok);
       assert.equal(result.disclosure?.attachmentsExcluded.length, 2);
-      const sent = outboundText(r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null });
+      const sent = outboundText(
+        r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null },
+      );
       assert.ok(sent.includes('Письмо 1'));
       assert.ok(sent.includes('Письмо 2'));
     } finally {
@@ -529,7 +531,9 @@ describe('остальные возможности', () => {
       );
       assert.ok(result.ok);
       assert.equal(result.value.continuation, ' до 20 марта включительно.');
-      const sent = outboundText(r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null });
+      const sent = outboundText(
+        r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null },
+      );
       assert.ok(sent.includes('Мы оплатим счёт'));
     } finally {
       await r.close();

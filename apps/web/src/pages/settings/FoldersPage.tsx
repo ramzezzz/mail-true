@@ -22,12 +22,7 @@ import { cx } from '../../lib/cx';
 import { folderTitle } from '../../lib/folderNames';
 import { folderRights, formatFolderCount } from '../../lib/folderRights';
 import { IconBroom, IconFolderRole, IconPencil, IconPlus, IconTrash } from '../../mail/icons';
-import {
-  SettingsError,
-  SettingsRow,
-  SettingsSkeleton,
-  SettingsTitle,
-} from '../../settings/ui';
+import { SettingsError, SettingsRow, SettingsSkeleton, SettingsTitle } from '../../settings/ui';
 import styles from './FoldersPage.module.css';
 
 type DialogState =
@@ -75,10 +70,7 @@ export function FoldersPage() {
               return (
                 <tr key={folder.id} className={styles.row}>
                   <td className={styles.nameCell}>
-                    <span
-                      className={styles.name}
-                      style={{ paddingLeft: `${folder.depth * 24}px` }}
-                    >
+                    <span className={styles.name} style={{ paddingLeft: `${folder.depth * 24}px` }}>
                       <span className={styles.icon}>
                         <IconFolderRole role={folder.role} />
                       </span>

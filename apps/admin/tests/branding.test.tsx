@@ -68,9 +68,9 @@ describe('разделы панели', () => {
     const backups = NAV_ITEMS.find((i) => i.to === '/backups');
     expect(backups?.requires).toEqual(['backup.export', 'backup.restore']);
     // Внутри файла копии хэши паролей — дежурному «только чтение» его не видеть
-    expect(visibleNav(['overview.read', 'users.read'] as Permission[]).map((i) => i.to)).not.toContain(
-      '/backups',
-    );
+    expect(
+      visibleNav(['overview.read', 'users.read'] as Permission[]).map((i) => i.to),
+    ).not.toContain('/backups');
   });
 
   it('«Резервные копии» больше не помечены как «скоро»', () => {
@@ -108,7 +108,7 @@ describe('страница оформления', () => {
     // Аккуратный знак из плоских фигур весит меньше килобайта, и
     // округление до нуля читалось бы как «файл пустой». Найдено на
     // живом стенде: PNG 240×48 весит 288 байт.
-    expect(source).toContain("return `${bytes} Б`");
+    expect(source).toContain('return `${bytes} Б`');
   });
 
   it('текст отказа берётся с сервера, а не сочиняется на месте', () => {

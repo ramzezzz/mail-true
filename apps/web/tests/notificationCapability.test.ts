@@ -35,7 +35,10 @@ function env(patch: Partial<BrowserEnvironment> = {}): BrowserEnvironment {
   };
 }
 
-function notice(patch: Partial<BrowserEnvironment> = {}, options: Partial<Parameters<typeof capabilityNotice>[0]> = {}) {
+function notice(
+  patch: Partial<BrowserEnvironment> = {},
+  options: Partial<Parameters<typeof capabilityNotice>[0]> = {},
+) {
   return capabilityNotice({
     capabilities: capabilitiesOf(env(patch)),
     userAgent: env(patch).userAgent,
@@ -103,7 +106,8 @@ describe('состояние браузера', () => {
       {
         wantsPush: true,
         pushAvailable: false,
-        pushUnavailableReason: 'Уведомления при закрытой вкладке выключены на сервере (PUSH_ENABLED=false)',
+        pushUnavailableReason:
+          'Уведомления при закрытой вкладке выключены на сервере (PUSH_ENABLED=false)',
       },
     );
     expect(result?.text).toContain('PUSH_ENABLED=false');

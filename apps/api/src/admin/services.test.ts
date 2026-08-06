@@ -7,7 +7,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAntispam, checkResolver, readSigningVerdict, signingProbeMessage } from './services.js';
+import {
+  checkAntispam,
+  checkResolver,
+  readSigningVerdict,
+  signingProbeMessage,
+} from './services.js';
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

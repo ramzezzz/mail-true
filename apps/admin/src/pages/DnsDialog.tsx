@@ -72,7 +72,12 @@ function CopyButton({ value, name }: { value: string; name: string }) {
 
   return (
     <>
-      <Button mode="secondary" size="s" onClick={onClick} aria-label={`Скопировать значение: ${name}`}>
+      <Button
+        mode="secondary"
+        size="s"
+        onClick={onClick}
+        aria-label={`Скопировать значение: ${name}`}
+      >
         Копировать
       </Button>
       {state === 'done' && (

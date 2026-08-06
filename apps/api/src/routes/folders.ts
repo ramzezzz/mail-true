@@ -12,7 +12,7 @@ export async function folderRoutes(app: FastifyInstance): Promise<void> {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
     const folders = await pool.withClient(session.email, session.password, (client) =>
-      listFolders(client)
+      listFolders(client),
     );
     return { folders };
   });

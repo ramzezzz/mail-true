@@ -185,14 +185,17 @@ function testConfig(smtpPort: number, uploadDir: string): AppConfig {
 
 async function buildTestApp(
   client: FakeClient,
-  config: AppConfig
+  config: AppConfig,
 ): Promise<{ app: FastifyInstance; scope: FastifyInstance }> {
   const app = Fastify({ logger: false }) as unknown as FastifyInstance;
   const pool = {
     withClient: async <T>(_e: string, _p: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> =>
       fn(client as unknown as ImapFlow),
   };
-  const uploads = { get: async () => null, delete: async () => undefined } as unknown as UploadStore;
+  const uploads = {
+    get: async () => null,
+    delete: async () => undefined,
+  } as unknown as UploadStore;
   app.decorate('deps', {
     pool,
     uploads,
@@ -213,7 +216,7 @@ async function buildTestApp(
       await composeRoutes(instance);
       scope = instance;
     },
-    { prefix: '/api' }
+    { prefix: '/api' },
   );
   await app.ready();
   if (!scope) throw new Error('маршруты написания не зарегистрировались');

@@ -85,12 +85,7 @@ export interface AiOutboundField {
 }
 
 export type AiRemovedKind =
-  | 'signature'
-  | 'quote'
-  | 'attachment'
-  | 'headers'
-  | 'truncated'
-  | 'html-markup';
+  'signature' | 'quote' | 'attachment' | 'headers' | 'truncated' | 'html-markup';
 
 export interface AiRemovedPart {
   kind: AiRemovedKind;
@@ -308,8 +303,7 @@ export interface AiRewriteRequest {
 }
 
 export type AiTranslateRequest =
-  | { messageId: string; targetLanguage: string }
-  | { text: string; targetLanguage: string };
+  { messageId: string; targetLanguage: string } | { text: string; targetLanguage: string };
 
 /* --- Русские подписи ------------------------------------------------- */
 

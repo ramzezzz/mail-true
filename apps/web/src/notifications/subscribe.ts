@@ -100,7 +100,11 @@ export async function ensureServiceWorker(): Promise<ServiceWorkerRegistration |
  * и написан так подробно.
  */
 export async function enablePush(vapidPublicKey: string | null): Promise<EnableResult> {
-  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+  if (
+    typeof navigator === 'undefined' ||
+    !('serviceWorker' in navigator) ||
+    !('PushManager' in window)
+  ) {
     return {
       ok: false,
       reason: 'unsupported',

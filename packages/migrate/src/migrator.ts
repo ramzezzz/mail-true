@@ -124,7 +124,8 @@ export async function connectWithReason(
     } else if (code === 'ECONNREFUSED' || /ECONNREFUSED/.test(detail)) {
       hint = 'сервер отказал в соединении — проверьте порт и что служба запущена';
     } else if (code === 'ETIMEDOUT' || /ETIMEDOUT|timed? out/i.test(detail)) {
-      hint = 'сервер не ответил — проверьте адрес, порт и то, что путь не закрыт межсетевым экраном';
+      hint =
+        'сервер не ответил — проверьте адрес, порт и то, что путь не закрыт межсетевым экраном';
     } else if (/certificate|self.signed|DEPTH_ZERO/i.test(detail)) {
       // Подсказка не называет флаг командной строки: этот же текст
       // показывается в панели, где никаких флагов нет, и совет «добавьте
@@ -262,10 +263,15 @@ export function describeImapError(err: unknown): string {
 export function isQuotaError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const e = err as ImapCommandError;
-  if (typeof e.serverResponseCode === 'string' && e.serverResponseCode.toUpperCase() === 'OVERQUOTA') {
+  if (
+    typeof e.serverResponseCode === 'string' &&
+    e.serverResponseCode.toUpperCase() === 'OVERQUOTA'
+  ) {
     return true;
   }
-  return looksLikeQuota(`${e.responseText ?? ''} ${typeof e.response === 'string' ? e.response : ''} ${e.message}`);
+  return looksLikeQuota(
+    `${e.responseText ?? ''} ${typeof e.response === 'string' ? e.response : ''} ${e.message}`,
+  );
 }
 
 /**
@@ -325,7 +331,11 @@ export class CursorTracker {
    * @param pending  UID писем, которые предстоит перенести (ещё не разобраны)
    * @param startUid прежнее значение курсора — назад не отматываем
    */
-  constructor(private readonly uids: readonly number[], pending: Iterable<number>, startUid = 0) {
+  constructor(
+    private readonly uids: readonly number[],
+    pending: Iterable<number>,
+    startUid = 0,
+  ) {
     this.pending = new Set(pending);
     this.value = startUid;
   }
@@ -561,7 +571,8 @@ export class MailboxMigrator extends EventEmitter {
 
       if (stopped) {
         report.status = 'stopped';
-        report.error = 'перенос остановлен: продолжить можно тем же заданием, ' +
+        report.error =
+          'перенос остановлен: продолжить можно тем же заданием, ' +
           'уже перенесённые письма повторно не поедут';
       } else if (report.failed > 0 || report.folders.some((f) => f.errors.length > 0)) {
         report.status = 'partial';
@@ -716,10 +727,7 @@ export class MailboxMigrator extends EventEmitter {
    * ключ не уникален, и «ключ встречался — значит дубль» выбрасывало
    * законно новые письма при втором проходе.
    */
-  private async collectDestCounts(
-    dest: ImapFlow,
-    destPath: string,
-  ): Promise<Map<string, number>> {
+  private async collectDestCounts(dest: ImapFlow, destPath: string): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
     const lock = await dest.getMailboxLock(destPath);
     try {
@@ -842,9 +850,7 @@ export class MailboxMigrator extends EventEmitter {
       if (!keySeen.has(meta.key)) {
         keySeen.add(meta.key);
         const inDest = destCounts.get(meta.key) ?? 0;
-        const inState = state
-          ? await state.migratedCount(this.accountKey, destPath, meta.key)
-          : 0;
+        const inState = state ? await state.migratedCount(this.accountKey, destPath, meta.key) : 0;
         // При инкрементальном чтении письма, ради которых копии уже лежат
         // в приёмнике, в metas не попали (их UID меньше курсора) — значит,
         // эти копии заняты и «съесть» новое письмо не могут. Иначе дельта

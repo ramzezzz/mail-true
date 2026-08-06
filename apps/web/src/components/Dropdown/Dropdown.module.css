@@ -73,8 +73,7 @@
   line-height: var(--mt-font-paragraph-line-height, 20px);
   text-align: left;
   cursor: pointer;
-  transition: background-color var(--mt-anim-duration-s, 0.1s)
-    var(--mt-anim-easing-default, ease);
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
 @media (hover: hover) {

@@ -115,8 +115,8 @@ async function openHistory(): Promise<void> {
     );
   });
   await settle();
-  const tab = [...container.querySelectorAll('button')].find(
-    (b) => b.textContent?.includes('Обработанные'),
+  const tab = [...container.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes('Обработанные'),
   );
   await act(async () => tab?.click());
   await settle();
@@ -189,11 +189,7 @@ describe('вкладка «Обработанные»: автообновлен�
 
   it('новая запись дописывается сверху, а показанное остаётся на месте', async () => {
     await openHistory();
-    expect(recipients()).toEqual([
-      'third@example.org',
-      'second@example.org',
-      'first@example.org',
-    ]);
+    expect(recipients()).toEqual(['third@example.org', 'second@example.org', 'first@example.org']);
 
     freshQueue = [[event('40', 'fresh@example.org', '2026-08-05T20:30:09.000Z')]];
     await act(async () => checkbox().click());

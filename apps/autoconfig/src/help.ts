@@ -54,7 +54,7 @@ export function buildHelpPage(settings: MailSettings): string {
       ${rows
         .map(
           ([what, h, port, enc]) =>
-            `<tr><td>${what}</td><td><code>${h}</code></td><td><code>${port}</code></td><td>${enc}</td></tr>`
+            `<tr><td>${what}</td><td><code>${h}</code></td><td><code>${port}</code></td><td>${enc}</td></tr>`,
         )
         .join('\n      ')}
     </table>

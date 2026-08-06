@@ -63,9 +63,8 @@ function summary(uid: number): MessageSummary {
 /** Отвечает как сервер: не больше limit писем и общий total. */
 function serverPages() {
   return vi.fn(async (query: MessageListQuery) => {
-    const items = Array.from(
-      { length: Math.min(query.limit, TOTAL - query.offset) },
-      (_, i) => summary(query.offset + i + 1),
+    const items = Array.from({ length: Math.min(query.limit, TOTAL - query.offset) }, (_, i) =>
+      summary(query.offset + i + 1),
     );
     return { items, total: TOTAL, offset: query.offset, limit: query.limit };
   });
@@ -194,7 +193,6 @@ describe('отказ мутации', () => {
     expect(text()).toContain('Сервер не отвечает');
   });
 });
-
 
 /**
  * «Переслать как вложение» в меню над списком.

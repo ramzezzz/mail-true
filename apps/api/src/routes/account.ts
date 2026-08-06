@@ -24,7 +24,7 @@ export interface AccountRoutesOptions {
 
 export async function accountRoutes(
   app: FastifyInstance,
-  options: AccountRoutesOptions = {}
+  options: AccountRoutesOptions = {},
 ): Promise<void> {
   const { pool, logger } = app.deps;
 
@@ -54,9 +54,7 @@ export async function accountRoutes(
     // ImapFlow кладёт занятое место в поле usage, хотя в его типах и примере
     // из JSDoc написано used. Из-за этого квота всегда приходила нулевой.
     const usedBytes =
-      (storage as { usage?: number; used?: number } | null)?.usage ??
-      storage?.used ??
-      0;
+      (storage as { usage?: number; used?: number } | null)?.usage ?? storage?.used ?? 0;
 
     const account: Account = {
       id: session.email,

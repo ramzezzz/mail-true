@@ -141,7 +141,9 @@ describe('читаемость в наихудшем случае (чёрная 
 
   it('текст внутри карточки настроек ≥ 4.5:1, включая вторичный', () => {
     expect(contrastRatio('#2c2d2e', settingsCard)).toBeGreaterThanOrEqual(4.5);
-    expect(contrastRatio(WALLPAPER_SURFACE.secondaryText, settingsCard)).toBeGreaterThanOrEqual(4.5);
+    expect(contrastRatio(WALLPAPER_SURFACE.secondaryText, settingsCard)).toBeGreaterThanOrEqual(
+      4.5,
+    );
   });
 
   it('карточка настроек светлее своей страницы — иначе она не карточка', () => {
@@ -184,7 +186,9 @@ describe('строки списка различимы поверх картин
     expect(block).toContain(
       `--mt-mail-color-list-letter-background-hover: rgba(0, 16, 61, ${WALLPAPER_SURFACE.rowHover})`,
     );
-    expect(block).toContain(`--mt-list-selection: rgba(0, 16, 61, ${WALLPAPER_SURFACE.rowSelected})`);
+    expect(block).toContain(
+      `--mt-list-selection: rgba(0, 16, 61, ${WALLPAPER_SURFACE.rowSelected})`,
+    );
   });
 });
 

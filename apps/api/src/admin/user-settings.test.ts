@@ -30,7 +30,12 @@ import cookiePlugin from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { pino } from 'pino';
 import { registerErrorHandling } from '../http-errors.js';
-import { defaultMailSettings, type FilterRule, type MailSettings, type Signature } from '../settings/types.js';
+import {
+  defaultMailSettings,
+  type FilterRule,
+  type MailSettings,
+  type Signature,
+} from '../settings/types.js';
 import type { SettingsService } from '../settings/service.js';
 import { BrandingStore } from './branding.js';
 import { loadAdminConfig } from './config.js';

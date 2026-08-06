@@ -7,11 +7,7 @@
  */
 
 import { forwardRef, useId, type ReactNode } from 'react';
-import type {
-  InputHTMLAttributes,
-  SelectHTMLAttributes,
-  TextareaHTMLAttributes,
-} from 'react';
+import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import { cx } from '../../lib/cx';
 import styles from './Field.module.css';
 

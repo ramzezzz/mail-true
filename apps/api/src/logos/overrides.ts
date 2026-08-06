@@ -248,10 +248,9 @@ export class LogoOverrideStore {
       WHERE ($1::text IS NULL OR d.domain LIKE $1::text)`;
 
     try {
-      const totalRes = await this.#pool.query<{ n: string }>(
-        `SELECT count(*)::text AS n ${base}`,
-        [like],
-      );
+      const totalRes = await this.#pool.query<{ n: string }>(`SELECT count(*)::text AS n ${base}`, [
+        like,
+      ]);
 
       const res = await this.#pool.query<{
         domain: string;

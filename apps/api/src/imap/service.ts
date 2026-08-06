@@ -1,12 +1,7 @@
 /**
  * Операции над почтовым ящиком поверх открытого IMAP-соединения.
  */
-import type {
-  ImapFlow,
-  FetchMessageObject,
-  MessageStructureObject,
-  SearchObject,
-} from 'imapflow';
+import type { ImapFlow, FetchMessageObject, MessageStructureObject, SearchObject } from 'imapflow';
 import {
   parseSearch,
   type Folder,
@@ -42,7 +37,11 @@ export async function listFolders(client: ImapFlow): Promise<Folder[]> {
     if (!status && !item.flags.has('\\Noselect')) {
       // Сервер без LIST-STATUS: запрашиваем статус отдельно
       try {
-        status = await client.status(item.path, { messages: true, unseen: true, uidValidity: true });
+        status = await client.status(item.path, {
+          messages: true,
+          unseen: true,
+          uidValidity: true,
+        });
       } catch {
         /* папка может быть недоступна */
       }
@@ -254,7 +253,10 @@ export function attachmentFilter(
  * не помня имя файла целиком, — а помнят его почти никогда.
  */
 export function attachmentNameMatches(names: readonly string[], needle: string): boolean {
-  const wanted = needle.trim().toLowerCase().replace(/^\*+|\*+$/gu, '');
+  const wanted = needle
+    .trim()
+    .toLowerCase()
+    .replace(/^\*+|\*+$/gu, '');
   if (wanted === '') return true;
   return names.some((name) => name.toLowerCase().includes(wanted));
 }
@@ -278,7 +280,7 @@ export async function searchUids(client: ImapFlow, query: SearchObject): Promise
   const found = await client.search(query, { uid: true });
   if (!Array.isArray(found)) {
     throw new UpstreamUnavailableError(
-      'Почтовый сервер не смог выполнить поиск. Повторите попытку позже.'
+      'Почтовый сервер не смог выполнить поиск. Повторите попытку позже.',
     );
   }
   return found;
@@ -395,7 +397,11 @@ async function selectUidsWithAttachments(
 ): Promise<Set<number>> {
   const kept = new Set<number>();
   for (const range of chunkUidSets(uids)) {
-    const structures = await client.fetchAll(range, { uid: true, bodyStructure: true }, { uid: true });
+    const structures = await client.fetchAll(
+      range,
+      { uid: true, bodyStructure: true },
+      { uid: true },
+    );
     for (const uid of keepUidsWithAttachments(structures, filename)) kept.add(uid);
   }
   return kept;
@@ -628,7 +634,10 @@ async function fetchListMessages(
 }
 
 /** Постраничный список писем в папке (новые первыми). */
-export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Promise<MessageListPage> {
+export async function listMessages(
+  client: ImapFlow,
+  args: ListMessagesArgs,
+): Promise<MessageListPage> {
   const { folder, offset, limit, filter, search, label, withSnippets = true } = args;
   const lock = await client.getMailboxLock(folder.path);
   try {
@@ -729,12 +738,14 @@ export async function listMessages(client: ImapFlow, args: ListMessagesArgs): Pr
       fetched.sort((a, b) => b.uid - a.uid);
       for (const msg of fetched) {
         const snippet = withSnippets ? await fetchSnippet(client, msg) : '';
-        items.push(buildSummary({
-          folderId: folder.id,
-          msg,
-          snippet,
-          rawHeaders: msg.headers,
-        }));
+        items.push(
+          buildSummary({
+            folderId: folder.id,
+            msg,
+            snippet,
+            rawHeaders: msg.headers,
+          }),
+        );
       }
     }
 

@@ -239,10 +239,7 @@ describe('кнопка «Отложить»', () => {
     const chosen = new Date(2026, 8, 1, 9, 0);
     act(() => {
       // Поле правится как обычное поле React: значение + событие ввода.
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLInputElement.prototype,
-        'value',
-      )?.set;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
       setter?.call(input, toLocalInputValue(chosen));
       input?.dispatchEvent(new Event('input', { bubbles: true }));
     });
@@ -302,9 +299,7 @@ describe('папка «Отложенные»', () => {
 
   it('«Вернуть сейчас» шлёт серверу именно выбранные письма', async () => {
     vi.spyOn(snoozeApi, 'fetchSnoozed').mockResolvedValue(state());
-    const unsnooze = vi
-      .spyOn(snoozeApi, 'unsnoozeMessages')
-      .mockResolvedValue({ returned: 1 });
+    const unsnooze = vi.spyOn(snoozeApi, 'unsnoozeMessages').mockResolvedValue({ returned: 1 });
     await renderFolder('snoozed', [snoozedMessage]);
     act(() => useUiStore.getState().selectMany(['snoozed:501']));
     await act(async () => {
@@ -323,11 +318,7 @@ describe('вернувшееся письмо заметно', () => {
    * а найти его нельзя. Ровно так же поступает Яндекс.
    */
   it('поднимается отдельной группой в самый верх списка', () => {
-    const rows = flattenRows([
-      summary(1),
-      summary(2, { returnedFromSnooze: true }),
-      summary(3),
-    ]);
+    const rows = flattenRows([summary(1), summary(2, { returnedFromSnooze: true }), summary(3)]);
     expect(rows[0]).toEqual({ type: 'header', label: RETURNED_GROUP_LABEL });
     expect(rows[1]).toMatchObject({ type: 'message', message: { id: 'inbox:2' } });
     // Остальные письма остаются в своих периодах, а не сливаются с группой.
@@ -336,9 +327,7 @@ describe('вернувшееся письмо заметно', () => {
 
   it('без вернувшихся писем лишней группы не появляется', () => {
     const rows = flattenRows([summary(1), summary(2)]);
-    expect(rows.some((r) => r.type === 'header' && r.label === RETURNED_GROUP_LABEL)).toBe(
-      false,
-    );
+    expect(rows.some((r) => r.type === 'header' && r.label === RETURNED_GROUP_LABEL)).toBe(false);
   });
 
   it('в строке рисуется значок времени — иначе непонятно, почему письмо наверху', async () => {

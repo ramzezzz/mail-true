@@ -171,7 +171,13 @@ export const FLOW_SERIES: readonly ChartSeries[] = [
   { id: 'sent', title: 'Доставлено', hue: 'green', dash: '', pattern: 'solid' },
   { id: 'deferred', title: 'Отложено', hue: 'amber', dash: '6 3', pattern: 'diagonal' },
   { id: 'bounced', title: 'Отбито', hue: 'red', dash: '2 3', pattern: 'grid' },
-  { id: 'rejected', title: 'Отклонено на приёме', hue: 'magenta', dash: '9 3 2 3', pattern: 'dots' },
+  {
+    id: 'rejected',
+    title: 'Отклонено на приёме',
+    hue: 'magenta',
+    dash: '9 3 2 3',
+    pattern: 'dots',
+  },
   { id: 'expired', title: 'Истёк срок', hue: 'violet', dash: '1 3', pattern: 'reverse' },
   { id: 'held', title: 'Задержано вручную', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },
 ];
@@ -193,7 +199,13 @@ export const HOURLY_SERIES: readonly ChartSeries[] = [
 /** Ряды графика ресурсов. */
 export const RESOURCE_SERIES: readonly ChartSeries[] = [
   { id: 'cpuNode', title: 'Процессор узла', hue: 'blue', dash: '', pattern: 'solid' },
-  { id: 'cpuApi', title: 'Процессор: сервер приложения', hue: 'violet', dash: '6 3', pattern: 'diagonal' },
+  {
+    id: 'cpuApi',
+    title: 'Процессор: сервер приложения',
+    hue: 'violet',
+    dash: '6 3',
+    pattern: 'diagonal',
+  },
   { id: 'mem', title: 'Память узла', hue: 'magenta', dash: '2 3', pattern: 'grid' },
   { id: 'disk', title: 'Диск', hue: 'teal', dash: '9 3 2 3', pattern: 'dots' },
   { id: 'load', title: 'Средняя нагрузка', hue: 'gray', dash: '4 2 1 2', pattern: 'dense' },

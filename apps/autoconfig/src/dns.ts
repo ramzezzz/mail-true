@@ -35,7 +35,7 @@ export function parseDkimDnsTxt(text: string): string | null {
 /** Читает DKIM-запись из каталога ключей rspamd; null, если ключа ещё нет. */
 export async function readDkimRecord(
   settings: MailSettings,
-  domain: string
+  domain: string,
 ): Promise<string | null> {
   const file = join(settings.dkimDnsDir, `${domain}.${settings.dkimSelector}.dns.txt`);
   try {
@@ -49,7 +49,7 @@ export async function readDkimRecord(
 export function buildDnsRecords(
   settings: MailSettings,
   domain: string,
-  dkimValue: string | null
+  dkimValue: string | null,
 ): DnsRecord[] {
   const host = `${settings.hostname}.`;
   const sel = settings.dkimSelector;
@@ -136,7 +136,11 @@ function txtZoneValue(value: string): string {
 }
 
 /** Фрагмент зонного файла BIND для копирования целиком. */
-export function buildZoneFile(settings: MailSettings, domain: string, records: DnsRecord[]): string {
+export function buildZoneFile(
+  settings: MailSettings,
+  domain: string,
+  records: DnsRecord[],
+): string {
   const ttl = settings.dnsTtl;
   const lines = [`; DNS-записи для почтового домена ${domain} (Mail.True)`, `$ORIGIN ${domain}.`];
   for (const r of records) {
@@ -185,7 +189,7 @@ export interface DnsResolverLike {
   resolveCname(hostname: string): Promise<string[]>;
   resolve4(hostname: string): Promise<string[]>;
   resolveSrv(
-    hostname: string
+    hostname: string,
   ): Promise<Array<{ priority: number; weight: number; port: number; name: string }>>;
 }
 
@@ -197,7 +201,7 @@ export async function checkDns(
   settings: MailSettings,
   domain: string,
   records: DnsRecord[],
-  resolver: DnsResolverLike = new Resolver()
+  resolver: DnsResolverLike = new Resolver(),
 ): Promise<DnsCheckResult[]> {
   const host = stripDot(settings.hostname);
   const fqdn = (name: string): string => (name === '@' ? domain : `${name}.${domain}`);
@@ -222,14 +226,24 @@ export async function checkDns(
           const mx = await withTimeout(resolver.resolveMx(fqdn(r.name)));
           const found = mx.map((m) => `${m.priority} ${m.exchange}`);
           const ok = mx.some((m) => stripDot(m.exchange) === host);
-          return { ...base, status: ok ? 'ok' : 'mismatch', found, comment: ok ? 'MX указывает на наш сервер' : 'MX не указывает на наш сервер' };
+          return {
+            ...base,
+            status: ok ? 'ok' : 'mismatch',
+            found,
+            comment: ok ? 'MX указывает на наш сервер' : 'MX не указывает на наш сервер',
+          };
         }
         case 'TXT': {
           const txt = (await withTimeout(resolver.resolveTxt(fqdn(r.name)))).map((c) => c.join(''));
           const marker = r.name === '@' ? 'v=spf1' : r.name === '_dmarc' ? 'v=DMARC1' : 'v=DKIM1';
           const relevant = txt.filter((t) => t.includes(marker));
           if (relevant.length === 0) {
-            return { ...base, status: 'missing', found: txt, comment: `TXT-запись с ${marker} не найдена` };
+            return {
+              ...base,
+              status: 'missing',
+              found: txt,
+              comment: `TXT-запись с ${marker} не найдена`,
+            };
           }
           const normalize = (s: string): string => s.replace(/[\s;]+/g, '');
           const ok = !r.ready || relevant.some((t) => normalize(t) === normalize(r.value));
@@ -245,7 +259,12 @@ export async function checkDns(
           try {
             const cname = await withTimeout(resolver.resolveCname(name));
             const ok = cname.some((c) => stripDot(c) === host);
-            return { ...base, status: ok ? 'ok' : 'mismatch', found: cname, comment: ok ? 'CNAME указывает на наш сервер' : 'CNAME указывает не туда' };
+            return {
+              ...base,
+              status: ok ? 'ok' : 'mismatch',
+              found: cname,
+              comment: ok ? 'CNAME указывает на наш сервер' : 'CNAME указывает не туда',
+            };
           } catch {
             // Вместо CNAME допустима A-запись — но ТОЛЬКО если она ведёт на
             // наш сервер. Раньше здесь безусловно возвращалось «ok»: чужая
@@ -281,7 +300,12 @@ export async function checkDns(
           const [, , portStr] = r.value.split(' ');
           const wantPort = Number(portStr);
           const ok = srv.some((s) => stripDot(s.name) === host && s.port === wantPort);
-          return { ...base, status: ok ? 'ok' : 'mismatch', found, comment: ok ? 'опубликовано' : 'хост или порт не совпадают' };
+          return {
+            ...base,
+            status: ok ? 'ok' : 'mismatch',
+            found,
+            comment: ok ? 'опубликовано' : 'хост или порт не совпадают',
+          };
         }
       }
     } catch (err) {

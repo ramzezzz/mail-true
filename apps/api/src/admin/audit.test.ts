@@ -39,7 +39,10 @@ test('секреты не попадают в журнал', () => {
 });
 
 test('redactSecrets переживает массивы, даты, null и примитивы', () => {
-  assert.deepEqual(redactSecrets([{ password: 'x' }, { a: 1 }]), [{ password: REDACTED }, { a: 1 }]);
+  assert.deepEqual(redactSecrets([{ password: 'x' }, { a: 1 }]), [
+    { password: REDACTED },
+    { a: 1 },
+  ]);
   assert.equal(redactSecrets(null), null);
   assert.equal(redactSecrets(undefined), null);
   assert.equal(redactSecrets('строка'), 'строка');
@@ -102,10 +105,14 @@ test('buildAuditRecord собирает полную строку журнала
 });
 
 test('buildAuditRecord подставляет null там, где ничего не передали', () => {
-  const record = buildAuditRecord(actor, { ip: null, userAgent: null }, {
-    action: 'admin.logout',
-    targetType: 'admin',
-  });
+  const record = buildAuditRecord(
+    actor,
+    { ip: null, userAgent: null },
+    {
+      action: 'admin.logout',
+      targetType: 'admin',
+    },
+  );
   assert.equal(record.targetId, null);
   assert.equal(record.targetLabel, null);
   assert.equal(record.ip, null);

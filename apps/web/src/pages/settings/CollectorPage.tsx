@@ -18,7 +18,15 @@ import {
 } from '../../api/settingsQueries';
 import { useFolders } from '../../api/queries';
 import type { CollectorDraft, CollectorProtocol } from '../../api/settingsTypes';
-import { Button, Checkbox, IconButton, Modal, SelectField, Switch, TextField } from '../../components';
+import {
+  Button,
+  Checkbox,
+  IconButton,
+  Modal,
+  SelectField,
+  Switch,
+  TextField,
+} from '../../components';
 import { cx } from '../../lib/cx';
 import { folderTitle } from '../../lib/folderNames';
 import { formatMessageDate } from '../../lib/listDates';
@@ -53,8 +61,8 @@ export function CollectorPage() {
     <>
       <SettingsTitle>Почта с других ящиков</SettingsTitle>
       <SettingsLead>
-        Собирайте письма из всех своих ящиков в один. Подойдёт любой сервер, работающий по
-        протоколу IMAP или POP3.
+        Собирайте письма из всех своих ящиков в один. Подойдёт любой сервер, работающий по протоколу
+        IMAP или POP3.
       </SettingsLead>
 
       <SettingsRow className={styles.providers}>
@@ -87,9 +95,7 @@ export function CollectorPage() {
       {isPending && <SettingsSkeleton rows={3} />}
       {isError && <SettingsError>Не удалось загрузить список ящиков.</SettingsError>}
 
-      {collectors?.length === 0 && (
-        <SettingsEmpty>Подключённых ящиков пока нет.</SettingsEmpty>
-      )}
+      {collectors?.length === 0 && <SettingsEmpty>Подключённых ящиков пока нет.</SettingsEmpty>}
 
       <div className={styles.list}>
         {collectors?.map((collector) => {

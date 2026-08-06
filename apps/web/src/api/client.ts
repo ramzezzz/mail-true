@@ -228,10 +228,11 @@ export const httpApi: MailApi = {
   // Времени сохранения сервер не присылает — ставим своё, чтобы в окне
   // написания не появлялось «Сохранено в Invalid Date».
   saveDraft: async (request) => {
-    const saved = await apiFetch<{ ok?: boolean; draftId?: string | null; draftUid?: number | null }>(
-      '/api/drafts',
-      { method: 'POST', body: JSON.stringify(request) },
-    );
+    const saved = await apiFetch<{
+      ok?: boolean;
+      draftId?: string | null;
+      draftUid?: number | null;
+    }>('/api/drafts', { method: 'POST', body: JSON.stringify(request) });
     return {
       ok: saved.ok ?? true,
       draftId: saved.draftId ?? null,

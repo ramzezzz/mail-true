@@ -11,12 +11,7 @@
  *      префикс «INBOX/» (Courier, Exchange и др.) отбрасывается.
  */
 
-import type {
-  FolderMapping,
-  FolderMappingOptions,
-  SourceFolder,
-  SpecialRole,
-} from './types.js';
+import type { FolderMapping, FolderMappingOptions, SourceFolder, SpecialRole } from './types.js';
 
 /** SPECIAL-USE атрибут → роль. */
 const SPECIAL_USE_ROLES: Record<string, SpecialRole> = {
@@ -36,28 +31,28 @@ const SPECIAL_USE_ROLES: Record<string, SpecialRole> = {
 const NAME_ROLES: Record<string, SpecialRole> = {
   // Входящие
   inbox: 'inbox',
-  'входящие': 'inbox',
+  входящие: 'inbox',
   // Отправленные: Kerio/Exchange — "Sent Items", Dovecot — "Sent",
   // Apple Mail — "Sent Messages", Gmail — "[Gmail]/Sent Mail"
   sent: 'sent',
   'sent items': 'sent',
   'sent messages': 'sent',
   'sent mail': 'sent',
-  'отправленные': 'sent',
+  отправленные: 'sent',
   'отправленные письма': 'sent',
-  'исходящие': 'sent',
+  исходящие: 'sent',
   // Черновики
   drafts: 'drafts',
   draft: 'drafts',
-  'черновики': 'drafts',
+  черновики: 'drafts',
   // Корзина: Kerio/Exchange — "Deleted Items"
   trash: 'trash',
   'deleted items': 'trash',
   'deleted messages': 'trash',
   bin: 'trash',
-  'корзина': 'trash',
-  'удаленные': 'trash',
-  'удалённые': 'trash',
+  корзина: 'trash',
+  удаленные: 'trash',
+  удалённые: 'trash',
   // Спам: Kerio/Outlook — "Junk E-mail", Dovecot по умолчанию — "Junk",
   // у нас — "Spam"
   junk: 'junk',
@@ -65,13 +60,13 @@ const NAME_ROLES: Record<string, SpecialRole> = {
   'junk email': 'junk',
   'junk mail': 'junk',
   spam: 'junk',
-  'спам': 'junk',
+  спам: 'junk',
   'нежелательная почта': 'junk',
   // Архив
   archive: 'archive',
   archives: 'archive',
   'all mail': 'archive',
-  'архив': 'archive',
+  архив: 'archive',
 };
 
 /** Имена спец-папок нашего сервера по умолчанию (infra/dovecot: separator "/"). */
@@ -148,7 +143,12 @@ export function sanitizeDestPath(
 ): string {
   const parts = destDelimiter ? destPath.split(destDelimiter) : [destPath];
   return parts
-    .map((s) => sanitizeSegment(s, unsafe.filter((c) => c !== destDelimiter)))
+    .map((s) =>
+      sanitizeSegment(
+        s,
+        unsafe.filter((c) => c !== destDelimiter),
+      ),
+    )
     .join(destDelimiter);
 }
 
@@ -190,9 +190,7 @@ export function translatePath(
 export function detectInboxPrefix(folders: SourceFolder[]): boolean {
   const others = folders.filter((f) => f.path.toLowerCase() !== 'inbox');
   if (others.length === 0) return false;
-  return others.every((f) =>
-    f.path.toLowerCase().startsWith(`inbox${f.delimiter}`.toLowerCase()),
-  );
+  return others.every((f) => f.path.toLowerCase().startsWith(`inbox${f.delimiter}`.toLowerCase()));
 }
 
 /**
@@ -233,7 +231,12 @@ export function buildFolderMappings(
     // 1. Явное переопределение
     const override = overrides[folder.path];
     if (override !== undefined) {
-      mappings.push({ source: folder, destPath: override, role: detectRole(folder), reason: 'override' });
+      mappings.push({
+        source: folder,
+        destPath: override,
+        role: detectRole(folder),
+        reason: 'override',
+      });
       continue;
     }
 

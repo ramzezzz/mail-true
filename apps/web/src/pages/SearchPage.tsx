@@ -196,8 +196,8 @@ export function SearchPage() {
       */}
       {search.plan.unknownFolder !== null && (
         <div className={styles.note}>
-          Папки <b>{search.plan.unknownFolder}</b> нет. Уберите условие «Папка» или назовите
-          папку так, как она называется в левой колонке.
+          Папки <b>{search.plan.unknownFolder}</b> нет. Уберите условие «Папка» или назовите папку
+          так, как она называется в левой колонке.
         </div>
       )}
 

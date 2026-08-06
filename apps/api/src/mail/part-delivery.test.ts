@@ -43,7 +43,14 @@ test('прочие исполняемые типы тоже скачиваютс
 });
 
 test('растровые картинки показываются — встроенные изображения писем должны работать', () => {
-  for (const t of ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp', 'image/avif']) {
+  for (const t of [
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'image/bmp',
+    'image/avif',
+  ]) {
     const d = decidePartDelivery(t);
     assert.equal(d.inline, true, `${t} должен показываться`);
     assert.equal(d.contentType, t);
@@ -82,8 +89,14 @@ test('тема — это данные: путь из неё не собирае
 
 test('письмо без темы получает читаемое имя, а не пустое', () => {
   assert.equal(emlFileName('', new Date('2026-01-02T00:00:00Z')), 'Письмо без темы 2026-01-02.eml');
-  assert.equal(emlFileName('   ', new Date('2026-01-02T00:00:00Z')), 'Письмо без темы 2026-01-02.eml');
-  assert.equal(emlFileName(null, new Date('2026-01-02T00:00:00Z')), 'Письмо без темы 2026-01-02.eml');
+  assert.equal(
+    emlFileName('   ', new Date('2026-01-02T00:00:00Z')),
+    'Письмо без темы 2026-01-02.eml',
+  );
+  assert.equal(
+    emlFileName(null, new Date('2026-01-02T00:00:00Z')),
+    'Письмо без темы 2026-01-02.eml',
+  );
 });
 
 test('без даты имя остаётся без даты, а не с сегодняшней', () => {

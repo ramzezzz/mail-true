@@ -70,8 +70,7 @@ test('строки без ящика отбрасываются: их неком
 test('работающая сессия IMAP — не вход и в историю не попадает', () => {
   // `imap(...)` без `-login` пишется на каждое закрытие соединения.
   // Без отбора по службе каждое событие удваивалось бы.
-  const line =
-    'Aug 06 17:43:20 imap(test@mail.local)<8488><Q00Q>: Info: Logged out in=123 out=456';
+  const line = 'Aug 06 17:43:20 imap(test@mail.local)<8488><Q00Q>: Info: Logged out in=123 out=456';
   assert.equal(parseDovecotAccess(line, NOW), null);
 });
 

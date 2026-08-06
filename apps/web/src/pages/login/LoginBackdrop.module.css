@@ -42,7 +42,11 @@
   position: absolute;
   inset: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle, var(--mt-login-aura, rgba(0, 110, 198, 0.22)) 0%, transparent 62%);
+  background: radial-gradient(
+    circle,
+    var(--mt-login-aura, rgba(0, 110, 198, 0.22)) 0%,
+    transparent 62%
+  );
 }
 .aura::before,
 .aura::after {

@@ -15,7 +15,7 @@ test('вырезает <script> и его содержимое', () => {
 test('вырезает обработчики событий (onerror, onclick)', () => {
   const { html } = sanitizeEmailHtml(
     '<img src="cid:x" onerror="alert(1)"><div onclick="steal()">text</div>',
-    { allowRemote: true }
+    { allowRemote: true },
   );
   assert.ok(!html.includes('onerror'), 'onerror должен быть удалён');
   assert.ok(!html.includes('onclick'), 'onclick должен быть удалён');
@@ -26,7 +26,7 @@ test('вырезает iframe, object, embed, form', () => {
   const { html } = sanitizeEmailHtml(
     '<iframe src="https://evil.example"></iframe><object data="x"></object>' +
       '<embed src="x"><form action="https://evil.example"><input name="pwd"></form><b>ok</b>',
-    { allowRemote: true }
+    { allowRemote: true },
   );
   assert.ok(!html.includes('<iframe'));
   assert.ok(!html.includes('<object'));
@@ -46,10 +46,13 @@ test('запрещает javascript: в ссылках', () => {
 test('блокирует внешние картинки по умолчанию', () => {
   const { html, blockedRemote } = sanitizeEmailHtml(
     '<img src="https://tracker.example/pixel.png" alt="x">',
-    { allowRemote: false }
+    { allowRemote: false },
   );
   assert.equal(blockedRemote, 1);
-  assert.ok(html.includes('data-mt-src="https://tracker.example/pixel.png"'), 'исходный URL сохранён');
+  assert.ok(
+    html.includes('data-mt-src="https://tracker.example/pixel.png"'),
+    'исходный URL сохранён',
+  );
   assert.ok(html.includes(BLOCKED_PIXEL), 'вместо src — заглушка');
 });
 
@@ -80,7 +83,7 @@ test('неизвестный cid удаляется', () => {
 test('чистит внешние url() в inline-стилях', () => {
   const { html, blockedRemote } = sanitizeEmailHtml(
     '<div style="background-image: url(https://evil.example/bg.png); color: red">x</div>',
-    { allowRemote: false }
+    { allowRemote: false },
   );
   assert.ok(!html.includes('evil.example'));
   assert.ok(html.includes('color: red'));
@@ -101,7 +104,7 @@ test('внешний url() со скобкой внутри кавычек не 
   // то есть отправитель узнавал о прочтении письма вопреки включённой защите.
   const { html, blockedRemote } = sanitizeEmailHtml(
     '<div style="background-image: url(&quot;http://tracker.example/a)b.png&quot;)">x</div>',
-    { allowRemote: false }
+    { allowRemote: false },
   );
   assert.ok(!html.includes('tracker.example'), 'внешний адрес не должен остаться в CSS');
   assert.ok(blockedRemote > 0, 'блокировка должна быть засчитана');
@@ -109,8 +112,8 @@ test('внешний url() со скобкой внутри кавычек не 
 
 test('внешний url() в одинарных кавычках со скобкой тоже блокируется', () => {
   const { html, blockedRemote } = sanitizeEmailHtml(
-    "<div style=\"background-image: url('http://tracker.example/x(1).png')\">x</div>",
-    { allowRemote: false }
+    '<div style="background-image: url(\'http://tracker.example/x(1).png\')">x</div>',
+    { allowRemote: false },
   );
   assert.ok(!html.includes('tracker.example'));
   assert.ok(blockedRemote > 0);
@@ -119,7 +122,7 @@ test('внешний url() в одинарных кавычках со скоб�
 test('при разрешённых картинках внешний url() со скобкой сохраняется', () => {
   const { html } = sanitizeEmailHtml(
     '<div style="background-image: url(&quot;http://cdn.example/a)b.png&quot;)">x</div>',
-    { allowRemote: true }
+    { allowRemote: true },
   );
   assert.ok(html.includes('cdn.example'), 'при разрешении картинок адрес должен остаться');
 });

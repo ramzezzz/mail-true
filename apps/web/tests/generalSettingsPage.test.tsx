@@ -117,12 +117,14 @@ describe('срок автоответчика', () => {
   it('остаётся на экране и после сохранения', async () => {
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings());
     // Сервер и в ответе на сохранение отдаёт даты полным ISO
-    const saveGeneral = vi.spyOn(settingsApi, 'saveGeneral').mockImplementation(async (settings) => {
-      const saved = structuredClone(settings);
-      saved.autoReply.from = '2026-08-01T00:00:00.000Z';
-      saved.autoReply.to = '2026-08-20T00:00:00.000Z';
-      return saved;
-    });
+    const saveGeneral = vi
+      .spyOn(settingsApi, 'saveGeneral')
+      .mockImplementation(async (settings) => {
+        const saved = structuredClone(settings);
+        saved.autoReply.from = '2026-08-01T00:00:00.000Z';
+        saved.autoReply.to = '2026-08-20T00:00:00.000Z';
+        return saved;
+      });
 
     render();
     await waitFor(() => dateFields().length === 2, 'поля срока автоответчика');
@@ -199,8 +201,8 @@ describe('идентификатор подписи', () => {
     act(() => button('Сохранить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     await waitFor(() => host.textContent!.includes('Настройки сохранены'), 'отметку об успехе');
 
-    const select = [...host.querySelectorAll('select')].find(
-      (s) => [...s.options].some((o) => o.textContent === 'Без подписи'),
+    const select = [...host.querySelectorAll('select')].find((s) =>
+      [...s.options].some((o) => o.textContent === 'Без подписи'),
     );
     expect(select?.value).toBe('31');
   });
@@ -233,8 +235,7 @@ describe('адресная книга', () => {
     await waitFor(() => host.textContent!.includes('Адресная книга'), 'раздел адресной книги');
 
     const toggle = [...host.querySelectorAll('input[type="checkbox"]')].find(
-      (node) =>
-        node.closest('label')?.textContent?.includes('Пополнять контакты') === true,
+      (node) => node.closest('label')?.textContent?.includes('Пополнять контакты') === true,
     ) as HTMLInputElement | undefined;
     expect(toggle, 'переключателя пополнения контактов нет').toBeTruthy();
     expect(toggle!.checked).toBe(true);
@@ -274,9 +275,7 @@ describe('отмена отправки', () => {
     );
 
   it('предлагает выключить и три срока — ровно то, что понимает сервер', async () => {
-    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
-      serverSettings({ undoSendSeconds: 5 }),
-    );
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings({ undoSendSeconds: 5 }));
     render();
     await waitFor(() => Boolean(undoSelect()), 'выбор срока отмены');
 
@@ -288,9 +287,7 @@ describe('отмена отправки', () => {
   });
 
   it('выбранный срок уходит на сервер числом, а не строкой', async () => {
-    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
-      serverSettings({ undoSendSeconds: 5 }),
-    );
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings({ undoSendSeconds: 5 }));
     const saveGeneral = vi
       .spyOn(settingsApi, 'saveGeneral')
       .mockImplementation(async (settings) => structuredClone(settings));
@@ -300,10 +297,7 @@ describe('отмена отправки', () => {
 
     const select = undoSelect()!;
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(
-        HTMLSelectElement.prototype,
-        'value',
-      )?.set;
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
       setter?.call(select, '30');
       select.dispatchEvent(new Event('change', { bubbles: true }));
     });
@@ -316,9 +310,7 @@ describe('отмена отправки', () => {
   });
 
   it('«выключено» сохраняется как ноль, а не пропадает из запроса', async () => {
-    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(
-      serverSettings({ undoSendSeconds: 0 }),
-    );
+    vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(serverSettings({ undoSendSeconds: 0 }));
     const saveGeneral = vi
       .spyOn(settingsApi, 'saveGeneral')
       .mockImplementation(async (settings) => structuredClone(settings));

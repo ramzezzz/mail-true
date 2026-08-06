@@ -12,7 +12,18 @@ const querySchema = z.object({
   action: z.string().trim().max(64).optional(),
   adminLogin: z.string().trim().max(128).optional(),
   targetType: z
-    .enum(['user', 'alias', 'domain', 'admin', 'mailbox', 'settings', 'branding', 'backup', 'migration', 'antispam'])
+    .enum([
+      'user',
+      'alias',
+      'domain',
+      'admin',
+      'mailbox',
+      'settings',
+      'branding',
+      'backup',
+      'migration',
+      'antispam',
+    ])
     .optional(),
   search: z.string().trim().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -58,29 +69,33 @@ export async function adminAuditRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  app.get('/audit/mailbox-access', { preHandler: requireAdmin(app, 'audit.read') }, async (request) => {
-    const q = accessQuerySchema.parse(request.query);
-    const { rows, total } = await ctx.db.listMailboxAccess({
-      mailboxEmail: q.mailbox,
-      limit: q.limit,
-      offset: q.offset,
-    });
-    return {
-      items: rows.map((r) => ({
-        id: r.id,
-        adminLogin: r.admin_login,
-        mailboxEmail: r.mailbox_email,
-        reason: r.reason,
-        ip: r.ip,
-        startedAt: r.started_at.toISOString(),
-        endedAt: r.ended_at?.toISOString() ?? null,
-        /** Чем закончился сеанс; null вместе с endedAt — идёт прямо сейчас. */
-        endReason: r.end_reason,
-        active: r.ended_at === null,
-      })),
-      total,
-      limit: q.limit,
-      offset: q.offset,
-    };
-  });
+  app.get(
+    '/audit/mailbox-access',
+    { preHandler: requireAdmin(app, 'audit.read') },
+    async (request) => {
+      const q = accessQuerySchema.parse(request.query);
+      const { rows, total } = await ctx.db.listMailboxAccess({
+        mailboxEmail: q.mailbox,
+        limit: q.limit,
+        offset: q.offset,
+      });
+      return {
+        items: rows.map((r) => ({
+          id: r.id,
+          adminLogin: r.admin_login,
+          mailboxEmail: r.mailbox_email,
+          reason: r.reason,
+          ip: r.ip,
+          startedAt: r.started_at.toISOString(),
+          endedAt: r.ended_at?.toISOString() ?? null,
+          /** Чем закончился сеанс; null вместе с endedAt — идёт прямо сейчас. */
+          endReason: r.end_reason,
+          active: r.ended_at === null,
+        })),
+        total,
+        limit: q.limit,
+        offset: q.offset,
+      };
+    },
+  );
 }

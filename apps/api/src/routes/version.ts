@@ -64,8 +64,12 @@ export interface VersionResponse {
 }
 
 export async function versionRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/version', { preHandler: app.requireSession }, async (request): Promise<VersionResponse> => {
-    if (!request.mailSession) throw new UnauthorizedError();
-    return { version: VERSION };
-  });
+  app.get(
+    '/version',
+    { preHandler: app.requireSession },
+    async (request): Promise<VersionResponse> => {
+      if (!request.mailSession) throw new UnauthorizedError();
+      return { version: VERSION };
+    },
+  );
 }

@@ -29,7 +29,13 @@ import { aiRequisiteTitles } from '../api/aiTypes';
 import { Button, IconButton, MenuItem, Spinner } from '../components';
 import { cx } from '../lib/cx';
 import { IconCheck, IconClose, IconCopy, IconSparkles, IconTranslate } from '../mail/icons';
-import { AI_SETTINGS_PATH, aiFeatureVisible, aiErrorText, aiNeedsConsent, aiVisible } from './aiVisibility';
+import {
+  AI_SETTINGS_PATH,
+  aiFeatureVisible,
+  aiErrorText,
+  aiNeedsConsent,
+  aiVisible,
+} from './aiVisibility';
 import { OutboundDetails } from './OutboundDetails';
 import styles from './MessageAi.module.css';
 
@@ -143,7 +149,17 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
     // Извлечение полезного считаем заодно с резюме: пользователь нажал
     // одну кнопку, и оба ответа относятся к одному и тому же письму.
     if (extractVisible && !extract.data && !extract.isPending) extract.mutate(messageId);
-  }, [messageId, needsConsent, openSettings, summaryOpen, summarize, isThread, ids, extractVisible, extract]);
+  }, [
+    messageId,
+    needsConsent,
+    openSettings,
+    summaryOpen,
+    summarize,
+    isThread,
+    ids,
+    extractVisible,
+    extract,
+  ]);
 
   const doTranslate = useCallback(() => {
     if (!messageId) return;
@@ -345,7 +361,11 @@ function ExtractionBanner({ controller }: { controller: MessageAiController }) {
   if (!data) return null;
 
   const found =
-    data.events.length + data.amounts.length + data.requisites.length + data.tasks.length + data.tracking.length;
+    data.events.length +
+    data.amounts.length +
+    data.requisites.length +
+    data.tasks.length +
+    data.tracking.length;
   // Ничего не нашлось — плашки нет вовсе, пустая рамка только мешает.
   if (found === 0) return null;
 
@@ -365,7 +385,9 @@ function ExtractionBanner({ controller }: { controller: MessageAiController }) {
               <CopyItem
                 key={`${e.title}-${i}`}
                 value={e.title}
-                label={[formatWhen(e.startsAt), e.location].filter(Boolean).join(', ') || 'Без даты'}
+                label={
+                  [formatWhen(e.startsAt), e.location].filter(Boolean).join(', ') || 'Без даты'
+                }
               />
             ))}
           </Group>
@@ -401,7 +423,9 @@ function ExtractionBanner({ controller }: { controller: MessageAiController }) {
               <CopyItem
                 key={`${t.title}-${i}`}
                 value={t.title}
-                label={[formatWhen(t.dueAt), t.assignee].filter(Boolean).join(', ') || 'Срок не указан'}
+                label={
+                  [formatWhen(t.dueAt), t.assignee].filter(Boolean).join(', ') || 'Срок не указан'
+                }
               />
             ))}
           </Group>
@@ -410,7 +434,11 @@ function ExtractionBanner({ controller }: { controller: MessageAiController }) {
         {data.tracking.length > 0 && (
           <Group title="Отслеживание">
             {data.tracking.map((t, i) => (
-              <CopyItem key={`${t.number}-${i}`} value={t.number} label={t.carrier ?? 'Перевозчик не указан'} />
+              <CopyItem
+                key={`${t.number}-${i}`}
+                value={t.number}
+                label={t.carrier ?? 'Перевозчик не указан'}
+              />
             ))}
           </Group>
         )}

@@ -107,7 +107,8 @@ export function iconCandidates(html: string, base: string): string[] {
   for (const match of html.matchAll(/<link\b[^>]*>/giu)) {
     const tag = match[0];
     const rel = (attr(tag, 'rel') ?? '').toLowerCase().split(/\s+/u);
-    const isApple = rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed');
+    const isApple =
+      rel.includes('apple-touch-icon') || rel.includes('apple-touch-icon-precomposed');
     const isIcon = rel.includes('icon') || rel.includes('shortcut');
     if (!isApple && !isIcon) continue;
     // Одноцветный силуэт для панели Safari — в кружке это клякса.

@@ -10,7 +10,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { SignatureBulkCounts } from '../src/api/types';
-import { bulkNeedsConfirmation, bulkResultText, bulkSummaryText, plural } from '../src/lib/signatureBulk';
+import {
+  bulkNeedsConfirmation,
+  bulkResultText,
+  bulkSummaryText,
+  plural,
+} from '../src/lib/signatureBulk';
 
 function counts(over: Partial<SignatureBulkCounts> = {}): SignatureBulkCounts {
   return {
@@ -39,7 +44,13 @@ describe('склонение', () => {
 describe('сводка групповой установки', () => {
   it('называет число затираемых чужих подписей первым', () => {
     const text = bulkSummaryText(
-      counts({ total: 12, willAdd: 7, willReplace: 5, signaturesReplaced: 8, withExistingSignatures: 5 }),
+      counts({
+        total: 12,
+        willAdd: 7,
+        willReplace: 5,
+        signaturesReplaced: 8,
+        withExistingSignatures: 5,
+      }),
     );
     expect(text).toMatch(/^Будет уничтожено 8 существующих подписей/);
     expect(text).toContain('Подпись получат 12 ящиков из 12.');

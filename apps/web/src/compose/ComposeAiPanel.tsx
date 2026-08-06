@@ -15,7 +15,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAiContinue, useAiReplies, useAiRewrite, useAiState } from '../api/aiQueries';
 import type { AiRewriteMode } from '../api/aiTypes';
 import { aiRewriteTitles, aiToneTitles } from '../api/aiTypes';
-import { AI_SETTINGS_PATH, aiErrorText, aiFeatureVisible, aiNeedsConsent } from '../ai/aiVisibility';
+import {
+  AI_SETTINGS_PATH,
+  aiErrorText,
+  aiFeatureVisible,
+  aiNeedsConsent,
+} from '../ai/aiVisibility';
 import { OutboundDetails } from '../ai/OutboundDetails';
 import { Button, Spinner } from '../components';
 import { IconSparkles } from '../mail/icons';
@@ -143,11 +148,15 @@ export function ComposeAiPanel({
         </div>
       )}
 
-      {!pending && replies.error && <div className={styles.error}>{aiErrorText(replies.error)}</div>}
+      {!pending && replies.error && (
+        <div className={styles.error}>{aiErrorText(replies.error)}</div>
+      )}
       {!pending && continuation.error && (
         <div className={styles.error}>{aiErrorText(continuation.error)}</div>
       )}
-      {!pending && rewrite.error && <div className={styles.error}>{aiErrorText(rewrite.error)}</div>}
+      {!pending && rewrite.error && (
+        <div className={styles.error}>{aiErrorText(rewrite.error)}</div>
+      )}
 
       {/* Варианты ответа */}
       {!pending && repliesData && (

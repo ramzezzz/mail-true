@@ -107,58 +107,74 @@ const EMPTY: ParsedSearch = {
 
 /** Текстовые операторы: значение дописывается как есть. */
 const FIELD_ALIASES: Record<string, 'from' | 'to' | 'cc' | 'subject' | 'filename' | 'folder'> = {
-  'от': 'from',
-  'from': 'from',
-  'кому': 'to',
-  'to': 'to',
-  'копия': 'cc',
-  'cc': 'cc',
-  'тема': 'subject',
-  'subject': 'subject',
-  'файл': 'filename',
-  'вложение': 'filename',
-  'filename': 'filename',
-  'папка': 'folder',
-  'folder': 'folder',
+  от: 'from',
+  from: 'from',
+  кому: 'to',
+  to: 'to',
+  копия: 'cc',
+  cc: 'cc',
+  тема: 'subject',
+  subject: 'subject',
+  файл: 'filename',
+  вложение: 'filename',
+  filename: 'filename',
+  папка: 'folder',
+  folder: 'folder',
 };
 
 /** Операторы, у которых значение — календарная дата ГГГГ-ММ-ДД. */
 const DATE_ALIASES: Record<string, 'since' | 'before'> = {
-  'после': 'since',
-  'since': 'since',
-  'after': 'since',
-  'до': 'before',
-  'before': 'before',
+  после: 'since',
+  since: 'since',
+  after: 'since',
+  до: 'before',
+  before: 'before',
 };
 
 /** Операторы «за последние N» и «старше N». */
 const AGE_ALIASES: Record<string, 'since' | 'before'> = {
-  'новее': 'since',
-  'newer': 'since',
-  'newer_than': 'since',
-  'старше': 'before',
-  'older': 'before',
-  'older_than': 'before',
+  новее: 'since',
+  newer: 'since',
+  newer_than: 'since',
+  старше: 'before',
+  older: 'before',
+  older_than: 'before',
 };
 
 /** Операторы размера письма. */
 const SIZE_ALIASES: Record<string, 'larger' | 'smaller'> = {
-  'больше': 'larger',
-  'larger': 'larger',
-  'меньше': 'smaller',
-  'smaller': 'smaller',
+  больше: 'larger',
+  larger: 'larger',
+  меньше: 'smaller',
+  smaller: 'smaller',
 };
 
 /** Одиночные слова-признаки без двоеточия. */
 const FLAG_WORDS: Record<string, (out: Writable) => void> = {
-  'непрочитанные': (o) => { o.seen = false; },
-  'непрочитанное': (o) => { o.seen = false; },
-  'unread': (o) => { o.seen = false; },
-  'прочитанные': (o) => { o.seen = true; },
-  'read': (o) => { o.seen = true; },
-  'важные': (o) => { o.flagged = true; },
-  'важное': (o) => { o.flagged = true; },
-  'flagged': (o) => { o.flagged = true; },
+  непрочитанные: (o) => {
+    o.seen = false;
+  },
+  непрочитанное: (o) => {
+    o.seen = false;
+  },
+  unread: (o) => {
+    o.seen = false;
+  },
+  прочитанные: (o) => {
+    o.seen = true;
+  },
+  read: (o) => {
+    o.seen = true;
+  },
+  важные: (o) => {
+    o.flagged = true;
+  },
+  важное: (o) => {
+    o.flagged = true;
+  },
+  flagged: (o) => {
+    o.flagged = true;
+  },
 };
 
 /** Значения оператора «есть:». */
@@ -264,10 +280,37 @@ function parseDate(value: string): Date | null {
 
 /** Сколько дней в единице срока. Месяц и год — календарные, считаем точно. */
 const AGE_UNITS: Record<string, 'day' | 'week' | 'month' | 'year'> = {
-  'д': 'day', 'дн': 'day', 'день': 'day', 'дня': 'day', 'дней': 'day', 'd': 'day', 'day': 'day', 'days': 'day',
-  'н': 'week', 'нед': 'week', 'неделя': 'week', 'недели': 'week', 'недель': 'week', 'w': 'week', 'week': 'week', 'weeks': 'week',
-  'м': 'month', 'мес': 'month', 'месяц': 'month', 'месяца': 'month', 'месяцев': 'month', 'm': 'month', 'month': 'month', 'months': 'month',
-  'г': 'year', 'год': 'year', 'года': 'year', 'лет': 'year', 'y': 'year', 'year': 'year', 'years': 'year',
+  д: 'day',
+  дн: 'day',
+  день: 'day',
+  дня: 'day',
+  дней: 'day',
+  d: 'day',
+  day: 'day',
+  days: 'day',
+  н: 'week',
+  нед: 'week',
+  неделя: 'week',
+  недели: 'week',
+  недель: 'week',
+  w: 'week',
+  week: 'week',
+  weeks: 'week',
+  м: 'month',
+  мес: 'month',
+  месяц: 'month',
+  месяца: 'month',
+  месяцев: 'month',
+  m: 'month',
+  month: 'month',
+  months: 'month',
+  г: 'year',
+  год: 'year',
+  года: 'year',
+  лет: 'year',
+  y: 'year',
+  year: 'year',
+  years: 'year',
 };
 
 /**
@@ -293,10 +336,21 @@ function parseAge(value: string, now: Date): Date | null {
 
 /** Множители размера. Килобайт здесь двоичный — как его считает почтовый клиент. */
 const SIZE_UNITS: Record<string, number> = {
-  '': 1, 'б': 1, 'b': 1,
-  'к': 1024, 'кб': 1024, 'k': 1024, 'kb': 1024,
-  'м': 1024 * 1024, 'мб': 1024 * 1024, 'm': 1024 * 1024, 'mb': 1024 * 1024,
-  'г': 1024 * 1024 * 1024, 'гб': 1024 * 1024 * 1024, 'g': 1024 * 1024 * 1024, 'gb': 1024 * 1024 * 1024,
+  '': 1,
+  б: 1,
+  b: 1,
+  к: 1024,
+  кб: 1024,
+  k: 1024,
+  kb: 1024,
+  м: 1024 * 1024,
+  мб: 1024 * 1024,
+  m: 1024 * 1024,
+  mb: 1024 * 1024,
+  г: 1024 * 1024 * 1024,
+  гб: 1024 * 1024 * 1024,
+  g: 1024 * 1024 * 1024,
+  gb: 1024 * 1024 * 1024,
 };
 
 /** `5м`, `500к`, `1048576` в байты. */
@@ -315,7 +369,10 @@ function parseSize(value: string): number | null {
  * `now` — только ради проверок и ради того, чтобы «старше:1г» на сервере и
  * в браузере считалось от одного и того же мгновения.
  */
-export function parseSearch(input: string | undefined | null, now: Date = new Date()): ParsedSearch {
+export function parseSearch(
+  input: string | undefined | null,
+  now: Date = new Date(),
+): ParsedSearch {
   const raw = (input ?? '').trim();
   if (raw === '') return { ...EMPTY };
 

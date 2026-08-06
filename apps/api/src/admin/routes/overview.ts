@@ -161,9 +161,7 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
       if (s.state === 'fail') problems.push(`${s.title}: ${s.detail}`);
     }
     if (dnsProblems.length > 0) {
-      problems.push(
-        `DNS требует внимания у доменов: ${dnsProblems.map((d) => d.name).join(', ')}`,
-      );
+      problems.push(`DNS требует внимания у доменов: ${dnsProblems.map((d) => d.name).join(', ')}`);
     }
     if (dnsNeverChecked.length > 0) {
       problems.push(
@@ -234,7 +232,8 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     // Потолок в 30 суток не выдуман: дольше история и не живёт (см.
     // MAIL_FLOW_RETENTION_DAYS и MAIL_METRICS_RETENTION_DAYS), а запрос
     // «за год» просто прочесал бы всю таблицу ради пустого графика.
-    const hours = Number.isFinite(parsed) && parsed >= 1 ? Math.min(720, Math.floor(parsed)) : fallback;
+    const hours =
+      Number.isFinite(parsed) && parsed >= 1 ? Math.min(720, Math.floor(parsed)) : fallback;
     const to = new Date();
     return { from: new Date(to.getTime() - hours * 3600_000), to, hours };
   };
@@ -498,8 +497,18 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     const host = apiConfig.SMTP_HOST;
     const targets: TlsTarget[] = [
       { title: 'Отправка почты (SMTPS 465)', host, port: 465, implicitTls: true },
-      { title: 'Чтение почты (IMAPS 993)', host: apiConfig.IMAP_HOST, port: 993, implicitTls: true },
-      { title: 'Чтение почты (POP3S 995)', host: apiConfig.IMAP_HOST, port: 995, implicitTls: true },
+      {
+        title: 'Чтение почты (IMAPS 993)',
+        host: apiConfig.IMAP_HOST,
+        port: 993,
+        implicitTls: true,
+      },
+      {
+        title: 'Чтение почты (POP3S 995)',
+        host: apiConfig.IMAP_HOST,
+        port: 995,
+        implicitTls: true,
+      },
     ];
     const [certificates, domains] = await Promise.all([
       readCertificates(targets),

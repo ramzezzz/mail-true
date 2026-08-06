@@ -2,7 +2,12 @@
  * Проверка админской сессии и прав. Вызывается на КАЖДОМ админском запросе:
  * интерфейс не является источником истины, права решаются здесь.
  */
-import type { FastifyInstance, FastifyReply, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  preHandlerAsyncHookHandler,
+} from 'fastify';
 import { UnauthorizedError } from '../errors.js';
 import { buildAuditRecord, type AuditInput, type AuditOrigin } from './audit.js';
 import { assertPermission, type Permission } from './permissions.js';
@@ -83,9 +88,7 @@ export async function audit(
   input: AuditInput,
 ): Promise<void> {
   const admin = request.admin;
-  const actor = admin
-    ? { id: admin.adminId, login: admin.login }
-    : { id: 0, login: 'anonymous' };
+  const actor = admin ? { id: admin.adminId, login: admin.login } : { id: 0, login: 'anonymous' };
   await ctx.db.writeAudit(buildAuditRecord(actor, originOf(request), input));
 }
 

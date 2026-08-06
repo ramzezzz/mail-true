@@ -67,7 +67,8 @@ describe('buildSearchUrl', () => {
   });
 
   it('разбор и сборка — обратные операции', () => {
-    const query = 'q_query=%D1%81%D1%87%D0%B5%D1%82&scope=inbox&junk=1&flagged=1&period=year%3A2020';
+    const query =
+      'q_query=%D1%81%D1%87%D0%B5%D1%82&scope=inbox&junk=1&flagged=1&period=year%3A2020';
     const state = parse(query);
     const rebuilt = parse(buildSearchUrl(state).split('?')[1] ?? '');
     expect(rebuilt).toEqual(state);

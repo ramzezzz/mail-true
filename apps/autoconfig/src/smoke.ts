@@ -33,7 +33,7 @@ function parseXmlStrict(xml: string): Document {
   assert.equal(
     doc.getElementsByTagName('parsererror').length,
     0,
-    `невалидный XML: ${xml.slice(0, 200)}`
+    `невалидный XML: ${xml.slice(0, 200)}`,
   );
   return doc;
 }
@@ -44,7 +44,7 @@ function parseXmlStrict(xml: string): Document {
  */
 function req(
   path: string,
-  init?: { method?: string; headers?: Record<string, string>; body?: string }
+  init?: { method?: string; headers?: Record<string, string>; body?: string },
 ): Promise<{ status: number; type: string; body: string }> {
   const url = new URL(`${base}${path}`);
   return new Promise((resolve, reject) => {
@@ -64,9 +64,9 @@ function req(
             status: res.statusCode ?? 0,
             type: res.headers['content-type'] ?? '',
             body: Buffer.concat(chunks).toString('utf8'),
-          })
+          }),
         );
-      }
+      },
     );
     r.on('error', reject);
     if (init?.body) r.write(init.body);

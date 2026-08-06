@@ -124,8 +124,10 @@ describe('запасной цвет в var() не должен быть наст
       for (const hit of text.matchAll(/var\(\s*(--[a-z0-9-]+)\s*,\s*(#[0-9a-fA-F]{3,8})/gu)) {
         const token = hit[1]!;
         if (isDefined(token)) continue;
-        offenders.push(`${path.relative(SRC, file)}: ${token} нигде не определён, ` +
-          `значит цвет ${hit[2]} применяется во всех темах`);
+        offenders.push(
+          `${path.relative(SRC, file)}: ${token} нигде не определён, ` +
+            `значит цвет ${hit[2]} применяется во всех темах`,
+        );
       }
     }
     expect(offenders, offenders.join('\n')).toEqual([]);

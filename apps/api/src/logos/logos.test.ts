@@ -27,7 +27,9 @@ test('BIMI: имя записи — селектор default', () => {
 });
 
 test('BIMI: разбирает адрес логотипа и сертификата', () => {
-  const rec = parseBimiRecord('v=BIMI1; l=https://example.com/logo.svg; a=https://example.com/vmc.pem');
+  const rec = parseBimiRecord(
+    'v=BIMI1; l=https://example.com/logo.svg; a=https://example.com/vmc.pem',
+  );
   assert.equal(rec?.location, 'https://example.com/logo.svg');
   assert.equal(rec?.authority, 'https://example.com/vmc.pem');
 });
@@ -137,7 +139,8 @@ test('значки: <base href> меняет точку отсчёта отно�
 test('значки: число попыток ограничено', () => {
   const html = Array.from(
     { length: 20 },
-    (_, i) => `<link rel="icon" sizes="${String(64 + i)}x${String(64 + i)}" href="/i${String(i)}.png">`,
+    (_, i) =>
+      `<link rel="icon" sizes="${String(64 + i)}x${String(64 + i)}" href="/i${String(i)}.png">`,
   ).join('');
   assert.equal(iconCandidates(html, 'https://example.com/').length, MAX_ICON_CANDIDATES);
 });
@@ -211,7 +214,7 @@ test('картинка: безобидный SVG принимается', () => 
 });
 
 test('картинка: исполняемый файл под видом значка отвергается', () => {
-  assert.equal(inspectSenderLogo(Buffer.from('MZ�\u0090\u0000...', 'latin1')), null);
+  assert.equal(inspectSenderLogo(Buffer.from('MZ�\u0090\u0000...', 'latin1')), null);
   assert.equal(inspectSenderLogo(Buffer.from('<?php system($_GET[0]); ?>', 'latin1')), null);
 });
 

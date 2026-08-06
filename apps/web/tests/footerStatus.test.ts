@@ -140,7 +140,9 @@ describe('состояние связи', () => {
 
   it('ни одного ответа — обновляться нечему, времени нет', () => {
     expect(mailStatus([], true).updatedAt).toBeNull();
-    expect(mailStatus([snapshot({ dataUpdatedAt: 7000, hasData: false })], true).updatedAt).toBeNull();
+    expect(
+      mailStatus([snapshot({ dataUpdatedAt: 7000, hasData: false })], true).updatedAt,
+    ).toBeNull();
   });
 
   it('сравниваются времена, а не флаги: удача после отказа снимает тревогу', () => {

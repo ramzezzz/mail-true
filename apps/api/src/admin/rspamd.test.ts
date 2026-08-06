@@ -166,10 +166,7 @@ test('senderFromMessage: адрес берётся из From, даже если 
     senderFromMessage('From: Иван Петров <Ivan@Partner.Example>\r\nSubject: тест\r\n\r\nтекст'),
     'ivan@partner.example',
   );
-  assert.equal(
-    senderFromMessage('From: seller@spam.example\r\n\r\nтекст'),
-    'seller@spam.example',
-  );
+  assert.equal(senderFromMessage('From: seller@spam.example\r\n\r\nтекст'), 'seller@spam.example');
 });
 
 test('senderFromMessage: строка «From:» в теле письма конвертом не считается', () => {

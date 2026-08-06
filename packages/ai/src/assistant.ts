@@ -21,12 +21,7 @@ import {
   type BudgetSnapshot,
   type BudgetTracker,
 } from './budget.js';
-import {
-  MemoryAiCache,
-  buildCacheKey,
-  fingerprint,
-  type AiCacheStore,
-} from './cache.js';
+import { MemoryAiCache, buildCacheKey, fingerprint, type AiCacheStore } from './cache.js';
 import {
   assistantOptionsSchema,
   budgetLimitsSchema,
@@ -129,8 +124,7 @@ export interface MailAssistantInit {
 }
 
 export type CreateAssistantResult =
-  | { ok: true; assistant: MailAssistant }
-  | { ok: false; message: string; issues: string[] };
+  { ok: true; assistant: MailAssistant } | { ok: false; message: string; issues: string[] };
 
 interface RunParams<S extends z.ZodTypeAny> {
   feature: AiFeature;
@@ -479,10 +473,7 @@ export class MailAssistant {
   }
 
   /** Извлечение дат, сумм, реквизитов, задач и номеров отслеживания. */
-  async extractData(
-    message: AiSourceMessage,
-    ctx: AiCallContext,
-  ): Promise<AiOutcome<Extraction>> {
+  async extractData(message: AiSourceMessage, ctx: AiCallContext): Promise<AiOutcome<Extraction>> {
     const prepared = this.#prepare(message);
     const language = this.#language(ctx);
     return this.#run({
@@ -514,11 +505,7 @@ export class MailAssistant {
       messageId: message.id,
       system: translatePrompt(targetLanguage),
       user: prepared.body,
-      disclosure: describePlainText(
-        'Текст письма',
-        prepared.body,
-        this.#disclosureContext(),
-      ),
+      disclosure: describePlainText('Текст письма', prepared.body, this.#disclosureContext()),
       schema: translationSchema,
       variant: { targetLanguage },
       ctx,
@@ -555,10 +542,7 @@ export class MailAssistant {
    * Поле `explanation` возвращается всегда — интерфейс обязан показать
    * пользователю, во что превратился его запрос.
    */
-  async parseSearchQuery(
-    query: string,
-    ctx: AiCallContext,
-  ): Promise<AiOutcome<ParsedSearchQuery>> {
+  async parseSearchQuery(query: string, ctx: AiCallContext): Promise<AiOutcome<ParsedSearchQuery>> {
     if (query.trim().length === 0) {
       return aiFail('invalid-input', 'Поисковый запрос пуст', { retryable: false });
     }
@@ -592,7 +576,11 @@ export class MailAssistant {
     message: AiSourceMessage,
     ctx: AiCallContext,
     options?: { tone?: ReplyTone; instruction?: string },
-  ): AsyncGenerator<StreamEvent | { type: 'disclosure'; disclosure: OutboundDisclosure }, void, void> {
+  ): AsyncGenerator<
+    StreamEvent | { type: 'disclosure'; disclosure: OutboundDisclosure },
+    void,
+    void
+  > {
     if (!this.#config.enabled) {
       yield { type: 'error', error: this.#disabled().error };
       return;
@@ -772,10 +760,7 @@ export class MailAssistant {
       messages,
       json: true,
       ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
-      maxTokens: Math.max(
-        this.#config.maxOutputTokens,
-        params.minOutputTokens ?? 0,
-      ),
+      maxTokens: Math.max(this.#config.maxOutputTokens, params.minOutputTokens ?? 0),
     };
     const response = await this.#provider.chat(request, params.ctx.signal);
 
@@ -816,11 +801,7 @@ export class MailAssistant {
 
     // 5. Кэш и журнал.
     if (ctxUsesCache(params.ctx)) {
-      await this.#cache.set(
-        cacheKey,
-        JSON.stringify(parsed.value),
-        this.#options.cacheTtlSeconds,
-      );
+      await this.#cache.set(cacheKey, JSON.stringify(parsed.value), this.#options.cacheTtlSeconds);
     }
     await this.#record({
       ctx: params.ctx,

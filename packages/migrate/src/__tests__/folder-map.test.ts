@@ -108,9 +108,14 @@ describe('buildFolderMappings', () => {
   });
 
   it('переопределения пользователя сильнее всего', () => {
-    const mappings = buildFolderMappings(kerio, '/', {}, {
-      overrides: { 'Sent Items': 'Архив/Отправленные', Projects: 'Работа' },
-    });
+    const mappings = buildFolderMappings(
+      kerio,
+      '/',
+      {},
+      {
+        overrides: { 'Sent Items': 'Архив/Отправленные', Projects: 'Работа' },
+      },
+    );
     const byPath = new Map(mappings.map((m) => [m.source.path, m.destPath]));
     assert.equal(byPath.get('Sent Items'), 'Архив/Отправленные');
     assert.equal(byPath.get('Projects'), 'Работа');
@@ -119,13 +124,19 @@ describe('buildFolderMappings', () => {
 
   it('исключает папки из списка exclude', () => {
     const mappings = buildFolderMappings(kerio, '/', {}, { exclude: ['Junk E-mail'] });
-    assert.equal(mappings.some((m) => m.source.path === 'Junk E-mail'), false);
+    assert.equal(
+      mappings.some((m) => m.source.path === 'Junk E-mail'),
+      false,
+    );
   });
 
   it('пропускает невыбираемые папки (\\Noselect)', () => {
     const withNoselect = [...kerio, { ...folder('Public Folders'), noSelect: true }];
     const mappings = buildFolderMappings(withNoselect, '/');
-    assert.equal(mappings.some((m) => m.source.path === 'Public Folders'), false);
+    assert.equal(
+      mappings.some((m) => m.source.path === 'Public Folders'),
+      false,
+    );
   });
 
   it('переносит иерархию с точкой-разделителем и префиксом INBOX', () => {
@@ -154,6 +165,9 @@ describe('buildFolderMappings', () => {
     const byPath = new Map(mappings.map((m) => [m.source.path, m.destPath]));
     assert.equal(byPath.get('[Gmail]/Sent Mail'), 'Sent');
     assert.equal(byPath.get('[Gmail]/Spam'), 'Spam');
-    assert.equal(mappings.some((m) => m.source.path === '[Gmail]'), false);
+    assert.equal(
+      mappings.some((m) => m.source.path === '[Gmail]'),
+      false,
+    );
   });
 });

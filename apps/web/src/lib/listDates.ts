@@ -25,17 +25,19 @@ export function formatListDate(iso: string, now: Date = new Date()): string {
     return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
   }
   const sameYear = date.getFullYear() === now.getFullYear();
-  return date
-    .toLocaleDateString('ru-RU', {
-      day: 'numeric',
-      month: 'short',
-      year: sameYear ? undefined : 'numeric',
-    })
-    .replace(/\./g, '')
-    // Пробел перед «г» обязателен. Иначе, после удаления точек, это правило
-    // съедало последнюю букву в «авг» и август показывался как «4 ав» —
-    // единственный месяц, чьё сокращение оканчивается на «г».
-    .replace(/\s+г$/, '');
+  return (
+    date
+      .toLocaleDateString('ru-RU', {
+        day: 'numeric',
+        month: 'short',
+        year: sameYear ? undefined : 'numeric',
+      })
+      .replace(/\./g, '')
+      // Пробел перед «г» обязателен. Иначе, после удаления точек, это правило
+      // съедало последнюю букву в «авг» и август показывался как «4 ав» —
+      // единственный месяц, чьё сокращение оканчивается на «г».
+      .replace(/\s+г$/, '')
+  );
 }
 
 /** «Сегодня, 4:38» / «Вчера, 22:15» / «5 августа, 14:20» / «5 августа 2025, 14:20». */

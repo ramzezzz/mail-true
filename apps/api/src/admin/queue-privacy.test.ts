@@ -51,11 +51,22 @@ function readRouteSource(): string {
 
 const source = readRouteSource();
 
-/** Объявление маршрута целиком: от app.get до конца тела обработчика. */
-function routeBlock(marker: string): string {
-  const at = source.indexOf(marker);
-  assert.ok(at > 0, `маршрут ${marker} пропал`);
-  return source.slice(at, at + 1200);
+/**
+ * Объявление маршрута целиком: от app.get до конца тела обработчика.
+ *
+ * Ищется регулярным выражением, а не подстрокой, и вот почему: Prettier
+ * переносит длинный вызов на несколько строк, и после имени метода перед
+ * адресом появляется перевод строки. Проверка, искавшая точную подстроку,
+ * объявляла бы после форматирования, что маршрут «пропал», — то есть падала
+ * бы на переносе строки, а не на потере права доступа, ради которой она и
+ * написана.
+ */
+function routeBlock(method: 'get' | 'post', route: string): string {
+  const escaped = route.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  const pattern = new RegExp(`app\\.${method}\\(\\s*'${escaped}'`, 'u');
+  const found = pattern.exec(source);
+  assert.ok(found, `маршрут app.${method}('${route}') пропал`);
+  return source.slice(found.index, found.index + 1200);
 }
 
 void test('текст письма из очереди закрыт как вход в чужой ящик', () => {
@@ -68,7 +79,7 @@ void test('текст письма из очереди закрыт как вх�
    * чужое письмо и войти в чужой ящик по существу одно действие, значит и
    * право одно: mailbox.impersonate.
    */
-  const block = routeBlock("app.get('/queue/:id/message'");
+  const block = routeBlock('get', '/queue/:id/message');
   assert.match(
     block,
     /requireAdmin\(app, 'mailbox\.impersonate'\)/u,
@@ -82,14 +93,14 @@ void test('текст письма из очереди закрыт как вх�
 });
 
 void test('чтение письма из очереди оставляет след в журнале аудита', () => {
-  const block = routeBlock("app.get('/queue/:id/message'");
+  const block = routeBlock('get', '/queue/:id/message');
   assert.match(block, /action: 'queue\.view'/u, 'просмотр чужого письма обязан записываться');
 });
 
 void test('сводка очереди остаётся доступной всем: в ней нет содержания писем', () => {
   // Не перекрыть лишнего: список очереди — это адреса и причины отсрочки,
   // он нужен дежурному и закрывать его правом аудита незачем.
-  const block = routeBlock("app.get('/queue',");
+  const block = routeBlock('get', '/queue');
   assert.match(block, /requireAdmin\(app, 'overview\.read'\)/u);
 });
 

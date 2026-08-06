@@ -142,7 +142,10 @@ describe('сцена: вращение, шары, значки', () => {
   });
 
   it('плоскость шара повторяет угол кольца — иначе шар летит мимо проволоки', () => {
-    const plane = backdrop.slice(backdrop.indexOf('.ballPlane {'), backdrop.indexOf('.ballOrbit {'));
+    const plane = backdrop.slice(
+      backdrop.indexOf('.ballPlane {'),
+      backdrop.indexOf('.ballOrbit {'),
+    );
     const ring = backdrop.slice(backdrop.indexOf('.ring {'), backdrop.indexOf('.ringBright'));
     const turn = 'rotateX(var(--mt-ring-x, 0deg)) rotateY(var(--mt-ring-y, 0deg))';
     expect(ring).toContain(turn);

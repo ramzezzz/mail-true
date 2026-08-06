@@ -117,7 +117,10 @@ const byText = (text: string): HTMLElement | undefined =>
 /** Открывает меню «три точки» и жмёт пункт исходника. */
 async function openSource() {
   render();
-  await waitFor(() => Boolean(document.querySelector('[aria-label="Ещё действия"]')), 'страницу письма');
+  await waitFor(
+    () => Boolean(document.querySelector('[aria-label="Ещё действия"]')),
+    'страницу письма',
+  );
   click(document.querySelector('[aria-label="Ещё действия"]'));
   await waitFor(() => Boolean(byText('Исходный текст письма')), 'пункт меню');
   click(byText('Исходный текст письма'));
@@ -127,8 +130,7 @@ async function openSource() {
   );
 }
 
-const sourceEl = (): HTMLElement | null =>
-  document.querySelector('[data-testid="message-source"]');
+const sourceEl = (): HTMLElement | null => document.querySelector('[data-testid="message-source"]');
 
 beforeEach(() => {
   host = document.createElement('div');
@@ -243,7 +245,9 @@ describe('длинные письма не вешают браузер', () => {
   it('исходник в мегабайты обрезается с честной пометкой', () => {
     // Строки не похожи на base64 (есть пробелы) — свернуть их нечем,
     // остаётся только обрезать
-    const huge = Array.from({ length: 20_000 }, (_, i) => `X-Trace-${i}: значение значение`).join('\n');
+    const huge = Array.from({ length: 20_000 }, (_, i) => `X-Trace-${i}: значение значение`).join(
+      '\n',
+    );
     const folded = foldMessageSource(huge);
 
     expect(folded.truncated).toBe(true);

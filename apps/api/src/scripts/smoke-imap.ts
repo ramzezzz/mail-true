@@ -72,11 +72,21 @@ async function main(): Promise<void> {
     step('Письмо дошло до Входящих', found !== null, found ? `uid=${found}` : 'не найдено за 30 с');
 
     if (found !== null) {
-      const msg = await client.fetchOne(String(found), { uid: true, envelope: true, source: true }, { uid: true });
+      const msg = await client.fetchOne(
+        String(found),
+        { uid: true, envelope: true, source: true },
+        { uid: true },
+      );
       // Тело может быть закодировано (base64/QP), поэтому маркер проверяем
       // по декодированной теме из ENVELOPE, а наличие исходника — отдельно
-      const ok = Boolean(msg && msg.source && msg.source.length > 0 && msg.envelope?.subject?.includes(marker));
-      step('Чтение письма из Входящих', ok, msg && msg.envelope ? `subject=${msg.envelope.subject ?? ''}` : '');
+      const ok = Boolean(
+        msg && msg.source && msg.source.length > 0 && msg.envelope?.subject?.includes(marker),
+      );
+      step(
+        'Чтение письма из Входящих',
+        ok,
+        msg && msg.envelope ? `subject=${msg.envelope.subject ?? ''}` : '',
+      );
     }
   } finally {
     lock.release();

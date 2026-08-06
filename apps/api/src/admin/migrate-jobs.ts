@@ -202,12 +202,13 @@ export function parseMigrationList(
       try {
         parsed = parseCsvWithHeader(trimmed);
       } catch (err) {
-        problems.push(`Не удалось разобрать CSV: ${err instanceof Error ? err.message : String(err)}`);
+        problems.push(
+          `Не удалось разобрать CSV: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return finish('pairs-csv', rows, problems);
       }
       parsed.forEach((row, index) => {
-        const source =
-          row['source_user'] ?? row['source'] ?? row['откуда'] ?? row['from'] ?? '';
+        const source = row['source_user'] ?? row['source'] ?? row['откуда'] ?? row['from'] ?? '';
         const dest = row['dest_user'] ?? row['dest'] ?? row['куда'] ?? row['to'] ?? '';
         const password = row['source_pass'] ?? row['password'] ?? row['пароль'] ?? '';
         if (source.trim() === '') {
@@ -219,7 +220,8 @@ export function parseMigrationList(
           sourceUser,
           // Пустая правая колонка — «тот же адрес»: при переезде домена
           // целиком заполнять её вручную для каждой строки бессмысленно.
-          destUser: dest.trim() === '' ? destAddress(sourceUser, destDomain) : withDomain(dest, destDomain),
+          destUser:
+            dest.trim() === '' ? destAddress(sourceUser, destDomain) : withDomain(dest, destDomain),
           ...(password.trim() !== '' ? { password } : {}),
         });
       });

@@ -44,7 +44,8 @@ test('sha512Crypt повторяет контрольные примеры сп�
     {
       // Длинный пароль (> 64 байт) — проверяет повтор дайджеста в шагах 9-10.
       // Эталон снят с `openssl passwd -6` в контейнере dovecot.
-      password: 'a very much longer text to encrypt.  This one even stretches over morethan one line.',
+      password:
+        'a very much longer text to encrypt.  This one even stretches over morethan one line.',
       salt: 'anotherlongsalts',
       rounds: 5000,
       expected:

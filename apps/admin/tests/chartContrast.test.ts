@@ -69,7 +69,9 @@ function channels(hex: string): number[] {
 
 /** Относительная яркость по WCAG 2.1. */
 function luminance(hex: string): number {
-  const linear = channels(hex).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  const linear = channels(hex).map((c) =>
+    c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4,
+  );
   return 0.2126 * linear[0]! + 0.7152 * linear[1]! + 0.0722 * linear[2]!;
 }
 
@@ -99,8 +101,7 @@ function deltaE(a: string, b: string): number {
 
 /** Значение переменной из блока темы в charts.css. */
 function cssVar(block: ChartSurface, name: string): string {
-  const marker =
-    block === 'light' ? ':root {' : `:root[data-theme='${block}']`;
+  const marker = block === 'light' ? ':root {' : `:root[data-theme='${block}']`;
   const start = css.indexOf(marker);
   expect(start, `в charts.css нет блока ${block}`).toBeGreaterThanOrEqual(0);
   const open = css.indexOf('{', start);

@@ -117,7 +117,13 @@ describe('доля выполнения', () => {
 describe('что происходит прямо сейчас', () => {
   it('называет ящик, папку и номер письма', () => {
     const text = currentActivity([
-      item({ state: 'running', currentFolder: 'INBOX/Проекты', total: 800, copied: 120, skipped: 5 }),
+      item({
+        state: 'running',
+        currentFolder: 'INBOX/Проекты',
+        total: 800,
+        copied: 120,
+        skipped: 5,
+      }),
     ]);
     expect(text).toContain('ivan@staraya.ru');
     expect(text).toContain('INBOX/Проекты');

@@ -91,8 +91,7 @@ export function OutboundDetails({ disclosure, className }: OutboundDetailsProps)
                 <li key={`${part.kind}-${i}`}>
                   {part.note} — {formatNumber(part.count)}{' '}
                   {plural(part.count, ['фрагмент', 'фрагмента', 'фрагментов'])},{' '}
-                  {formatNumber(part.chars)}{' '}
-                  {plural(part.chars, ['символ', 'символа', 'символов'])}
+                  {formatNumber(part.chars)} {plural(part.chars, ['символ', 'символа', 'символов'])}
                 </li>
               ))}
             </ul>

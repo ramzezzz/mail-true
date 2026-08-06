@@ -145,13 +145,7 @@ export class MuteDb implements MuteStore {
              lifted_at = NULL,
              updated_at = now()
        RETURNING ${COLUMNS}`,
-      [
-        entry.accountEmail,
-        entry.threadKey,
-        entry.messageIds,
-        entry.subject,
-        entry.fromAddress,
-      ],
+      [entry.accountEmail, entry.threadKey, entry.messageIds, entry.subject, entry.fromAddress],
     );
     const row = rows[0];
     if (!row) throw new Error('Не удалось записать заглушённую цепочку');

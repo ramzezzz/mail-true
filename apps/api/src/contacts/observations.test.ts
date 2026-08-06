@@ -140,8 +140,18 @@ test('свёртка складывает счётчики и не теряет 
 
 test('имя берётся из самого свежего письма', () => {
   const folded = foldObservations([
-    { address: 'a@example.com', name: 'Анна Иванова', direction: 'received', at: new Date('2026-01-01') },
-    { address: 'a@example.com', name: 'Анна Петрова', direction: 'received', at: new Date('2026-05-01') },
+    {
+      address: 'a@example.com',
+      name: 'Анна Иванова',
+      direction: 'received',
+      at: new Date('2026-01-01'),
+    },
+    {
+      address: 'a@example.com',
+      name: 'Анна Петрова',
+      direction: 'received',
+      at: new Date('2026-05-01'),
+    },
   ]);
   assert.equal(folded[0]?.name, 'Анна Петрова');
 });

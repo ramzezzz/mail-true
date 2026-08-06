@@ -181,7 +181,13 @@ test('свои отправленные и черновики в группы о
 test('в группе считаются письма, место, непрочитанные и папки', () => {
   const groups = groupMailings([
     message({ from: 'shop@example.com', size: 1500, seen: false }),
-    message({ from: 'shop@example.com', size: 2500, seen: true, folderId: 'archive', folderRole: 'archive' }),
+    message({
+      from: 'shop@example.com',
+      size: 2500,
+      seen: true,
+      folderId: 'archive',
+      folderRole: 'archive',
+    }),
     message({ from: 'shop@example.com', size: 1000, seen: false }),
   ]);
   const group = groups[0];
@@ -197,7 +203,11 @@ test('в группе считаются письма, место, непроч�
 test('имя группы берётся у самого свежего письма', () => {
   const groups = groupMailings([
     message({ from: 'shop@example.com', fromName: 'Магазин', date: '2025-01-01T00:00:00.000Z' }),
-    message({ from: 'shop@example.com', fromName: 'Магазин и Ко', date: '2026-01-01T00:00:00.000Z' }),
+    message({
+      from: 'shop@example.com',
+      fromName: 'Магазин и Ко',
+      date: '2026-01-01T00:00:00.000Z',
+    }),
   ]);
   assert.equal(groups[0]?.title, 'Магазин и Ко');
 });
@@ -255,16 +265,10 @@ test('защита непрочитанного и помеченного суж
     message({ date: daysAgo(100) }),
   ];
   assert.equal(selectForSweep(messages, { olderThanDays: 30 }, NOW).length, 3);
+  assert.equal(selectForSweep(messages, { olderThanDays: 30, keepUnread: true }, NOW).length, 2);
   assert.equal(
-    selectForSweep(messages, { olderThanDays: 30, keepUnread: true }, NOW).length,
-    2,
-  );
-  assert.equal(
-    selectForSweep(
-      messages,
-      { olderThanDays: 30, keepUnread: true, keepFlagged: true },
-      NOW,
-    ).length,
+    selectForSweep(messages, { olderThanDays: 30, keepUnread: true, keepFlagged: true }, NOW)
+      .length,
     1,
   );
 });
@@ -339,7 +343,14 @@ test('предпросмотр называет те же письма, что �
 
 test('пустой отбор — это нули, а не выдуманные даты', () => {
   const preview = summarizeSelection([]);
-  assert.deepEqual(preview, { count: 0, bytes: 0, oldest: null, newest: null, unread: 0, flagged: 0 });
+  assert.deepEqual(preview, {
+    count: 0,
+    bytes: 0,
+    oldest: null,
+    newest: null,
+    unread: 0,
+    flagged: 0,
+  });
 });
 
 test('самые тяжёлые письма идут по убыванию размера', () => {

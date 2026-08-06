@@ -9,11 +9,7 @@
  * к 12 ящикам» при 5 уничтоженных подписях. Такой текст проверяется
  * тестом, а разметка — нет.
  */
-import type {
-  SignatureBulkCounts,
-  SignatureBulkMode,
-  SignatureBulkOutcome,
-} from '../api/types';
+import type { SignatureBulkCounts, SignatureBulkMode, SignatureBulkOutcome } from '../api/types';
 
 /** Склонение числительного: 1 ящик, 2 ящика, 5 ящиков. */
 export function plural(n: number, one: string, few: string, many: string): string {
@@ -71,7 +67,7 @@ export function bulkSummaryText(counts: SignatureBulkCounts): string {
     created === 0
       ? 'Ни одному ящику подпись не достанется.'
       : `Подпись получат ${String(created)} ${plural(created, 'ящик', 'ящика', 'ящиков')} ` +
-        `из ${String(counts.total)}.`,
+          `из ${String(counts.total)}.`,
   );
 
   if (counts.willSkipExisting > 0) {

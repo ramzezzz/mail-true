@@ -339,9 +339,6 @@ test('без доступа к хранилищу правил возможно�
 });
 
 test('идентификаторы всех переписок сводятся в один список без повторов', () => {
-  const rows = [
-    { messageIds: ['a@x', 'b@x'] },
-    { messageIds: ['B@X', 'c@x'] },
-  ] as MutedRow[];
+  const rows = [{ messageIds: ['a@x', 'b@x'] }, { messageIds: ['B@X', 'c@x'] }] as MutedRow[];
   assert.deepEqual(collectIds(rows), ['a@x', 'b@x', 'c@x']);
 });

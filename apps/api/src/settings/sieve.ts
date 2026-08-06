@@ -346,7 +346,8 @@ export function conditionToTest(condition: FilterCondition): string {
     return condition.op === 'has-not' ? `not ${ATTACHMENT_TEST}` : ATTACHMENT_TEST;
   }
 
-  const rule = OPERATOR_MATCH[condition.op as keyof typeof OPERATOR_MATCH] ?? OPERATOR_MATCH.contains;
+  const rule =
+    OPERATOR_MATCH[condition.op as keyof typeof OPERATOR_MATCH] ?? OPERATOR_MATCH.contains;
   const value = oneLine(condition.value);
   // Кириллица (и любые буквы вне ASCII) — через :regex с перечислением
   // регистров: компаратор по умолчанию сворачивает регистр только латиницы
@@ -468,7 +469,9 @@ export function actionsToCommands(
     const subject = actions.autoReply.subject
       ? ` :subject ${quoteSieveString(actions.autoReply.subject)}`
       : '';
-    out.push(`vacation :days ${String(days)}${subject} ${quoteSieveString(actions.autoReply.text)};`);
+    out.push(
+      `vacation :days ${String(days)}${subject} ${quoteSieveString(actions.autoReply.text)};`,
+    );
   }
 
   if (actions.deleteMessage === 'trash') {
@@ -1051,7 +1054,8 @@ function parseTest(c: Cursor, negated = false): ParsedTest {
     const numToken = next(c);
     if (numToken.kind !== 'number') throw new SieveParseError('Тест size ожидает число');
     const multiplier = numToken.suffix === 'M' ? 1024 : numToken.suffix === 'G' ? 1024 * 1024 : 1;
-    const kb = numToken.suffix === '' ? Math.round(numToken.value / 1024) : numToken.value * multiplier;
+    const kb =
+      numToken.suffix === '' ? Math.round(numToken.value / 1024) : numToken.value * multiplier;
     return {
       kind: 'condition',
       condition: { field: 'size', op: tag === ':under' ? 'less' : 'greater', value: String(kb) },

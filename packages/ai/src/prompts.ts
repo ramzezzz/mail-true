@@ -7,7 +7,13 @@
  */
 
 import type { AiFeature } from './types.js';
-import { categoryTitles, mailCategories, toneTitles, type ReplyTone, type RewriteMode } from './schemas.js';
+import {
+  categoryTitles,
+  mailCategories,
+  toneTitles,
+  type ReplyTone,
+  type RewriteMode,
+} from './schemas.js';
 
 export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   'summarize.message': 'v1',

@@ -116,12 +116,7 @@ export interface OutboundField {
 }
 
 export type RemovedKind =
-  | 'signature'
-  | 'quote'
-  | 'attachment'
-  | 'headers'
-  | 'truncated'
-  | 'html-markup';
+  'signature' | 'quote' | 'attachment' | 'headers' | 'truncated' | 'html-markup';
 
 export interface RemovedPart {
   kind: RemovedKind;

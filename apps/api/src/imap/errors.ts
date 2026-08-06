@@ -75,7 +75,8 @@ const CONNECTION_LIMIT_RE =
   /maximum number of connections|too many connections|connection limit|too many simultaneous/i;
 
 /** Текст, которым сервер говорит именно про учётные данные. */
-const AUTH_TEXT_RE = /authentication failed|invalid credentials|login failed|authentication failure/i;
+const AUTH_TEXT_RE =
+  /authentication failed|invalid credentials|login failed|authentication failure/i;
 
 function textOf(err: ImapErrorLike): string {
   return [err.response, err.responseText, err.message]
@@ -94,7 +95,7 @@ export function isConnectionLost(err: unknown): boolean {
   if (CONNECTION_ERROR_CODES.has(codeOf(e))) return true;
   const text = textOf(e);
   return /connection not available|connection closed|socket (?:closed|hang up)|read ECONNRESET/i.test(
-    text
+    text,
   );
 }
 

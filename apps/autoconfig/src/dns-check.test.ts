@@ -43,7 +43,7 @@ function fakeResolver(tables: {
 }
 
 const cnameRecords = buildDnsRecords(testSettings, 'mail.local', null).filter(
-  (r) => r.type === 'CNAME'
+  (r) => r.type === 'CNAME',
 );
 
 test('dns-check: чужая A-запись вместо CNAME — это mismatch, а не «ok»', async () => {

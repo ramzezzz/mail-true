@@ -397,7 +397,10 @@ describe('поле «Кому» с подсказкой', () => {
   });
 
   it('отказ сервера не мешает набирать адрес руками', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) }) as unknown as Response));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false, json: async () => ({}) }) as unknown as Response),
+    );
     render();
     type('ив');
     await settle();

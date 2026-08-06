@@ -27,7 +27,7 @@ const NEWSLETTER = Buffer.from(
     'текст',
     '',
   ].join('\r\n'),
-  'utf8'
+  'utf8',
 );
 
 /**
@@ -41,7 +41,7 @@ test('заголовки отписки доходят до клиента', asy
   const headers = await parseMessageHeaders(NEWSLETTER);
   assert.equal(
     headers['list-unsubscribe'],
-    '<https://example.com/u?id=1>, <mailto:unsub@example.com?subject=stop>'
+    '<https://example.com/u?id=1>, <mailto:unsub@example.com?subject=stop>',
   );
   assert.equal(headers['list-unsubscribe-post'], 'List-Unsubscribe=One-Click');
   assert.equal(headers['list-id'], 'Weekly <weekly.example.com>');
@@ -66,27 +66,27 @@ test('свёрнутый заголовок склеивается в одну �
       'From: a@example.com',
       'Subject: тема',
       'List-Unsubscribe: <https://example.com/very/long/link>,',
-      "\t<mailto:unsub@example.com>",
+      '\t<mailto:unsub@example.com>',
       'Content-Type: text/plain',
       '',
       'тело',
       '',
     ].join('\r\n'),
-    'utf8'
+    'utf8',
   );
   const headers = await parseMessageHeaders(folded);
   assert.equal(
     headers['list-unsubscribe'],
-    '<https://example.com/very/long/link>, <mailto:unsub@example.com>'
+    '<https://example.com/very/long/link>, <mailto:unsub@example.com>',
   );
 });
 
 test('обычное письмо заголовков отписки не получает', async () => {
   const plain = Buffer.from(
     ['From: a@example.com', 'Subject: привет', 'Content-Type: text/plain', '', 'тело', ''].join(
-      '\r\n'
+      '\r\n',
     ),
-    'utf8'
+    'utf8',
   );
   const headers = await parseMessageHeaders(plain);
   assert.equal(canUnsubscribe(headers), false);
@@ -96,7 +96,8 @@ test('обычное письмо заголовков отписки не по�
 
 test('разбирается и ссылка, и почтовый адрес, и признак одного клика', () => {
   const info = parseUnsubscribe({
-    'list-unsubscribe': '<https://example.com/u?id=1>, <mailto:unsub@example.com?subject=stop&body=go>',
+    'list-unsubscribe':
+      '<https://example.com/u?id=1>, <mailto:unsub@example.com?subject=stop&body=go>',
     'list-unsubscribe-post': 'List-Unsubscribe=One-Click',
   });
   assert.equal(info.url, 'https://example.com/u?id=1');
@@ -134,7 +135,9 @@ test('мусор в заголовке не роняет разбор', () => {
     mailto: null,
     oneClick: false,
   });
-  const info = parseUnsubscribe({ 'list-unsubscribe': '<ftp://example.com/x>, <mailto:без-собаки>' });
+  const info = parseUnsubscribe({
+    'list-unsubscribe': '<ftp://example.com/x>, <mailto:без-собаки>',
+  });
   assert.equal(info.url, null);
   assert.equal(info.mailto, null);
 });

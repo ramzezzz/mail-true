@@ -21,18 +21,12 @@ import { parseFullMessage, parseMessageHeaders } from '../mail/parse.js';
 import { decidePartDelivery, emlFileName } from '../mail/part-delivery.js';
 import { loadAccountsConfig } from '../accounts/config.js';
 import { SnoozeDb } from '../mail/snooze-db.js';
-import {
-  SNOOZE_PINNED_KEYWORD,
-  SNOOZE_RETURNED_KEYWORD,
-} from '../mail/snooze-mailbox.js';
+import { SNOOZE_PINNED_KEYWORD, SNOOZE_RETURNED_KEYWORD } from '../mail/snooze-mailbox.js';
 import { SnoozeService } from '../mail/snooze-service.js';
 import { LabelsDb } from '../mail/labels-db.js';
 import { labelRoutes, LABELS_MIGRATION_HINT } from '../mail/labels-routes.js';
 import { SavedSearchesDb } from '../mail/saved-searches-db.js';
-import {
-  savedSearchRoutes,
-  SAVED_SEARCHES_MIGRATION_HINT,
-} from '../mail/saved-searches-routes.js';
+import { savedSearchRoutes, SAVED_SEARCHES_MIGRATION_HINT } from '../mail/saved-searches-routes.js';
 import { mailingsRoutes } from '../mail/mailings-routes.js';
 import { MuteDb } from '../mail/mute-db.js';
 import { MUTE_MIGRATION_HINT, MuteService } from '../mail/mute-service.js';
@@ -141,7 +135,7 @@ function requireMailSession(session: MailSession | null): MailSession {
  */
 async function resolveTargets(
   client: ImapFlow,
-  byFolder: Map<string, number[]>
+  byFolder: Map<string, number[]>,
 ): Promise<Array<{ folder: Folder; uids: number[] }>> {
   const targets: Array<{ folder: Folder; uids: number[] }> = [];
   for (const [folderId, uids] of byFolder) {
@@ -175,25 +169,29 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     const session = requireMailSession(request.mailSession);
     const q = listQuerySchema.parse(request.query);
 
-    const page: MessageListPage = await pool.withClient(session.email, session.password, async (client) => {
-      const folder = await requireFolder(client, q.folderId);
-      return listMessages(client, {
-        folder,
-        offset: q.offset,
-        limit: q.limit,
-        filter: q.filter,
-        search: q.search,
-        label: q.label,
-        withSnippets: q.snippets === '1',
-        /*
-         * Группировка по переписке. Раньше признак принимался и молча
-         * терялся — список оставался плоским, и это было записано в
-         * известных ограничениях API. Теперь он доходит до сборки списка;
-         * применить его или нет, решает сама папка (threadingAllowed).
-         */
-        threaded: q.threaded,
-      });
-    });
+    const page: MessageListPage = await pool.withClient(
+      session.email,
+      session.password,
+      async (client) => {
+        const folder = await requireFolder(client, q.folderId);
+        return listMessages(client, {
+          folder,
+          offset: q.offset,
+          limit: q.limit,
+          filter: q.filter,
+          search: q.search,
+          label: q.label,
+          withSnippets: q.snippets === '1',
+          /*
+           * Группировка по переписке. Раньше признак принимался и молча
+           * терялся — список оставался плоским, и это было записано в
+           * известных ограничениях API. Теперь он доходит до сборки списка;
+           * применить его или нет, решает сама папка (threadingAllowed).
+           */
+          threaded: q.threaded,
+        });
+      },
+    );
     return page;
   });
 
@@ -219,7 +217,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
             internalDate: true,
             source: true,
           },
-          { uid: true }
+          { uid: true },
         );
         if (!msg || !msg.source) throw new NotFoundError('Письмо не найдено');
         const { message, blockedRemote } = await parseFullMessage({
@@ -292,53 +290,67 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
     // Раньше здесь стоял идентификатор письма, и в «Загрузках» лежал
     // `inbox_209.eml`, о котором назавтра нельзя было сказать ничего.
     const filename = emlFileName(found.subject, found.date);
-    reply.header('content-disposition', `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    reply.header(
+      'content-disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
     reply.header('cache-control', 'private, max-age=3600');
     return reply.send(found.source);
   });
 
   // Вложение или встроенная картинка
-  app.get('/messages/:id/parts/:partId', { preHandler: app.requireSession }, async (request, reply) => {
-    const session = requireMailSession(request.mailSession);
-    const { id, partId } = partParamsSchema.parse(request.params);
-    const { folderId, uid } = splitMessageId(id);
+  app.get(
+    '/messages/:id/parts/:partId',
+    { preHandler: app.requireSession },
+    async (request, reply) => {
+      const session = requireMailSession(request.mailSession);
+      const { id, partId } = partParamsSchema.parse(request.params);
+      const { folderId, uid } = splitMessageId(id);
 
-    const { meta, content } = await pool.withClient(session.email, session.password, async (client) => {
-      const folder = await requireFolder(client, folderId);
-      const lock = await client.getMailboxLock(folder.path);
-      try {
-        const dl = await client.download(String(uid), partId, { uid: true });
-        // Скачиваем часть целиком под блокировкой, чтобы не держать ящик
-        const chunks: Buffer[] = [];
-        for await (const chunk of dl.content) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
-        }
-        return { meta: dl.meta, content: Buffer.concat(chunks) };
-      } finally {
-        lock.release();
-      }
-    });
+      const { meta, content } = await pool.withClient(
+        session.email,
+        session.password,
+        async (client) => {
+          const folder = await requireFolder(client, folderId);
+          const lock = await client.getMailboxLock(folder.path);
+          try {
+            const dl = await client.download(String(uid), partId, { uid: true });
+            // Скачиваем часть целиком под блокировкой, чтобы не держать ящик
+            const chunks: Buffer[] = [];
+            for await (const chunk of dl.content) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+            }
+            return { meta: dl.meta, content: Buffer.concat(chunks) };
+          } finally {
+            lock.release();
+          }
+        },
+      );
 
-    if (content.length === 0) throw new NotFoundError('Часть письма не найдена');
+      if (content.length === 0) throw new NotFoundError('Часть письма не найдена');
 
-    const filename = meta.filename ?? 'attachment';
-    // Правило «показывать или скачивать» живёт в одном месте и покрыто
-    // тестами — см. mail/part-delivery.ts, там же объяснено почему.
-    const { contentType: safeType, inline } = decidePartDelivery(meta.contentType);
+      const filename = meta.filename ?? 'attachment';
+      // Правило «показывать или скачивать» живёт в одном месте и покрыто
+      // тестами — см. mail/part-delivery.ts, там же объяснено почему.
+      const { contentType: safeType, inline } = decidePartDelivery(meta.contentType);
 
-    reply.header('content-type', safeType);
-    reply.header('x-content-type-options', 'nosniff');
-    // Вторая линия обороны: даже если тип когда-нибудь снова окажется
-    // исполняемым, эта политика не даст выполнить ни скрипт, ни встроенный
-    // объект и запретит открывать содержимое в рамке.
-    reply.header('content-security-policy', "default-src 'none'; sandbox; frame-ancestors 'none'");
-    reply.header(
-      'content-disposition',
-      `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(filename)}`
-    );
-    reply.header('cache-control', 'private, max-age=3600');
-    return reply.send(content);
-  });
+      reply.header('content-type', safeType);
+      reply.header('x-content-type-options', 'nosniff');
+      // Вторая линия обороны: даже если тип когда-нибудь снова окажется
+      // исполняемым, эта политика не даст выполнить ни скрипт, ни встроенный
+      // объект и запретит открывать содержимое в рамке.
+      reply.header(
+        'content-security-policy',
+        "default-src 'none'; sandbox; frame-ancestors 'none'",
+      );
+      reply.header(
+        'content-disposition',
+        `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(filename)}`,
+      );
+      reply.header('cache-control', 'private, max-age=3600');
+      return reply.send(content);
+    },
+  );
 
   /**
    * Отписка от рассылки одним запросом (RFC 8058).
@@ -426,7 +438,8 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
           const present = await existingUids(client, uids);
           if (present.length === 0) continue;
           if (toAdd.length > 0) await client.messageFlagsAdd(present, toAdd, { uid: true });
-          if (toRemove.length > 0) await client.messageFlagsRemove(present, toRemove, { uid: true });
+          if (toRemove.length > 0)
+            await client.messageFlagsRemove(present, toRemove, { uid: true });
           updated += present.length;
         } finally {
           lock.release();

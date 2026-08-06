@@ -114,10 +114,7 @@ test('общие настройки: DTO -> заплатка, «после уд�
   assert.equal(patch.collectContacts, false);
   assert.equal(patch.autoReply?.until, null);
 
-  const back = toWebGeneral(
-    { ...defaultMailSettings('u@mail.local'), afterDelete: 'list' },
-    [],
-  );
+  const back = toWebGeneral({ ...defaultMailSettings('u@mail.local'), afterDelete: 'list' }, []);
   assert.equal(back.afterDelete, 'list');
 });
 
@@ -156,7 +153,11 @@ test('правило: внутреннее -> DTO интерфейса', () => {
     { field: 'from', operator: 'contains', value: 'buh@example.com' },
     { field: 'size', operator: 'greater', value: '500' },
   ]);
-  assert.deepEqual(dto.actions.applyToExistingFolderIds, [], 'разовое действие в правиле не хранится');
+  assert.deepEqual(
+    dto.actions.applyToExistingFolderIds,
+    [],
+    'разовое действие в правиле не хранится',
+  );
 });
 
 test('правило: DTO -> внутреннее, «совпадает с» становится :is', () => {
@@ -213,19 +214,13 @@ test('правило переживает оборот DTO -> внутренне
     },
   };
   const input = fromWebRule(dto, FOLDERS);
-  const back = toWebRule(
-    { id: 5, position: 0, ...input, name: input.name },
-    FOLDERS,
-  );
+  const back = toWebRule({ id: 5, position: 0, ...input, name: input.name }, FOLDERS);
   assert.deepEqual(back, dto);
 });
 
 test('имя правила выводится из первого условия', () => {
   assert.equal(ruleNameFrom([]), 'Все письма');
-  assert.equal(
-    ruleNameFrom([{ field: 'from', op: 'contains', value: 'a@b' }]),
-    'От: a@b',
-  );
+  assert.equal(ruleNameFrom([{ field: 'from', op: 'contains', value: 'a@b' }]), 'От: a@b');
   assert.equal(
     ruleNameFrom([{ field: 'resent-to', op: 'is', value: 'list@x' }]),
     'Переадресовано для: list@x',

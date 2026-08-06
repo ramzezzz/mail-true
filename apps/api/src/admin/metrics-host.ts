@@ -300,7 +300,7 @@ export class HostMetricsReader {
         if (prev && now - prev.at >= MIN_DELTA_MS) {
           const elapsedUsec = (now - prev.at) * 1000;
           cpuApi = {
-            value: clampCore((((usec - prev.usec) / elapsedUsec) * 100)),
+            value: clampCore(((usec - prev.usec) / elapsedUsec) * 100),
             source: `${CG_CPU_STAT} (контейнер api)`,
           };
         } else {

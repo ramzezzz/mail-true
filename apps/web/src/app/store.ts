@@ -335,7 +335,10 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => ({
       composeWindows: s.composeWindows.map((w) =>
         w.id === id
-          ? { ...w, draft: { ...w.draft, ...(typeof patch === 'function' ? patch(w.draft) : patch) } }
+          ? {
+              ...w,
+              draft: { ...w.draft, ...(typeof patch === 'function' ? patch(w.draft) : patch) },
+            }
           : w,
       ),
     })),

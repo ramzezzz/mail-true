@@ -114,5 +114,4 @@ export const IconShieldCheck = (p: IconProps = {}) =>
   stroke(['M12 3 5 5.8v5.4c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V5.8L12 3Z', 'M9 11.8l2.2 2.2 3.8-4'], p);
 
 /** Выключатель — включить/отключить алиас. */
-export const IconPower = (p: IconProps = {}) =>
-  stroke(['M12 4v8', 'M7.4 6.6a7 7 0 1 0 9.2 0'], p);
+export const IconPower = (p: IconProps = {}) => stroke(['M12 4v8', 'M7.4 6.6a7 7 0 1 0 9.2 0'], p);

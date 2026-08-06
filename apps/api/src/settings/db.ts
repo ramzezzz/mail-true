@@ -181,7 +181,9 @@ export function parseActions(raw: unknown): FilterActions {
     // Проверка ключа — здесь, а не только в маршруте: в базу правило может
     // попасть и мимо API, а из базы собирается файл Sieve, где `addflag`
     // примет любое слово, включая `\Deleted`. См. mail/labels.ts.
-    base.labels = rec['labels'].filter((k): k is string => typeof k === 'string' && isUserLabelKey(k));
+    base.labels = rec['labels'].filter(
+      (k): k is string => typeof k === 'string' && isUserLabelKey(k),
+    );
   }
   if (rec['deleteMessage'] === 'trash' || rec['deleteMessage'] === 'purge') {
     base.deleteMessage = rec['deleteMessage'];
@@ -358,7 +360,8 @@ export class SettingsDb {
     if (patch.theme !== undefined) put('theme', patch.theme);
     if (patch.wallpaper !== undefined) put('wallpaper', patch.wallpaper);
     if (patch.replyQuote !== undefined) put('reply_quote', patch.replyQuote);
-    if (patch.afterDelete !== undefined) put('after_delete', patch.afterDelete satisfies AfterDelete);
+    if (patch.afterDelete !== undefined)
+      put('after_delete', patch.afterDelete satisfies AfterDelete);
     if (patch.notifyBrowser !== undefined) put('notify_browser', patch.notifyBrowser);
     if (patch.notifyTab !== undefined) put('notify_tab', patch.notifyTab);
     if (patch.collectContacts !== undefined) put('collect_contacts', patch.collectContacts);
@@ -550,7 +553,8 @@ export class SettingsDb {
     if (patch.enabled !== undefined) put('enabled', patch.enabled);
     if (patch.auto !== undefined) put('is_auto', patch.auto);
     if (patch.matchMode !== undefined) put('match_mode', patch.matchMode);
-    if (patch.conditions !== undefined) put('conditions', JSON.stringify(patch.conditions), '::jsonb');
+    if (patch.conditions !== undefined)
+      put('conditions', JSON.stringify(patch.conditions), '::jsonb');
     if (patch.actions !== undefined) put('actions', JSON.stringify(patch.actions), '::jsonb');
     if (sets.length > 0) {
       values.push(id, email);

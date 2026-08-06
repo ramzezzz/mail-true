@@ -50,11 +50,7 @@ export function Sidebar() {
         пустое меню было бы ровно такой же пустышкой.
       */}
       <div className={styles.composeRow}>
-        <button
-          type="button"
-          className={cx(styles.composeButton)}
-          onClick={() => openCompose()}
-        >
+        <button type="button" className={cx(styles.composeButton)} onClick={() => openCompose()}>
           <span className={styles.composeInner}>
             <IconCompose />
             <span>Написать письмо</span>
@@ -109,7 +105,13 @@ export function Sidebar() {
           className={cx(styles.item, styles.newFolder)}
           onClick={() => void navigate('/settings/folders')}
         >
-          <svg width="20" height="20" viewBox="0 0 16 16" aria-hidden="true" className={styles.folderIcon}>
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            className={styles.folderIcon}
+          >
             <path
               d="M8 3a.75.75 0 0 1 .75.75v3.5h3.5a.75.75 0 0 1 0 1.5h-3.5v3.5a.75.75 0 0 1-1.5 0v-3.5h-3.5a.75.75 0 0 1 0-1.5h3.5v-3.5A.75.75 0 0 1 8 3Z"
               fill="currentColor"

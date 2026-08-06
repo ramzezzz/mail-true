@@ -290,8 +290,8 @@ function QuotaBar({ cleanup }: { cleanup: CleanupState }) {
   if (!quota || quota.limitBytes <= 0) {
     return (
       <p className={styles.note}>
-        Почтовый сервер не сообщает предел ящика — сказать, сколько места
-        освободится в долях, нельзя. Размеры писем ниже настоящие.
+        Почтовый сервер не сообщает предел ящика — сказать, сколько места освободится в долях,
+        нельзя. Размеры писем ниже настоящие.
       </p>
     );
   }
@@ -412,9 +412,7 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
       {
         onSuccess: (result) => {
           setCheckedHeavy(new Set());
-          showNotice(
-            `Убрали в корзину: ${messagesWord(result.moved)}, ${formatBytes(heavyBytes)}`,
-          );
+          showNotice(`Убрали в корзину: ${messagesWord(result.moved)}, ${formatBytes(heavyBytes)}`);
         },
       },
     );
@@ -471,9 +469,7 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
           {loading && (
             <div className={styles.centered}>
               <Spinner />
-              <p className={styles.note}>
-                Смотрим ящик целиком — это дольше, чем открыть папку.
-              </p>
+              <p className={styles.note}>Смотрим ящик целиком — это дольше, чем открыть папку.</p>
             </div>
           )}
 
@@ -488,9 +484,8 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
                 {state.truncated && (
                   <>
                     {' '}
-                    — <b>это не весь ящик</b>: разбор смотрит не больше{' '}
-                    {String(state.limit)} писем за раз, начиная со свежих. Числа ниже
-                    относятся к осмотренной части.
+                    — <b>это не весь ящик</b>: разбор смотрит не больше {String(state.limit)} писем
+                    за раз, начиная со свежих. Числа ниже относятся к осмотренной части.
                   </>
                 )}
               </p>
@@ -504,8 +499,8 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
                       label="Только рассылки"
                     />
                     <span className={styles.filterHint}>
-                      Рассылка — это письмо с адресом отписки или с признаком списка.
-                      Снимите галочку, чтобы увидеть всех, кто вам пишет.
+                      Рассылка — это письмо с адресом отписки или с признаком списка. Снимите
+                      галочку, чтобы увидеть всех, кто вам пишет.
                     </span>
                   </label>
 
@@ -598,8 +593,8 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
                       </Button>
                     </div>
                     <p className={styles.note}>
-                      Корзина, черновики и отложенные письма не убираются никогда —
-                      ни при каких условиях.
+                      Корзина, черновики и отложенные письма не убираются никогда — ни при каких
+                      условиях.
                     </p>
                   </section>
 

@@ -181,7 +181,9 @@ export function renameToken(source) {
   }
 
   /* Прочие простые группы VKUI: прозрачности, блюр, градиенты, z-index */
-  if ((m = base.match(/^--vkui--(opacity|blur|gradient|tone_value|z_index|type_border)(?:_(.+))?$/))) {
+  if (
+    (m = base.match(/^--vkui--(opacity|blur|gradient|tone_value|z_index|type_border)(?:_(.+))?$/))
+  ) {
     const tail = m[2] ? `-${slug(m[2])}` : '';
     return { name: `--mt-${slug(m[1])}${tail}${state}`, group: 'effect' };
   }
@@ -307,7 +309,10 @@ function main() {
 }
 
 // запускаем только при прямом вызове (не при импорте из тестов)
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href
+) {
   main();
 } else if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main();

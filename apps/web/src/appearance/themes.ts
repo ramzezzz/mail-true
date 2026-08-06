@@ -14,14 +14,7 @@
  */
 
 export type ThemeName =
-  | 'light'
-  | 'dark'
-  | 'emerald'
-  | 'violet'
-  | 'coral'
-  | 'lagoon'
-  | 'sunset'
-  | 'wallpaper';
+  'light' | 'dark' | 'emerald' | 'violet' | 'coral' | 'lagoon' | 'sunset' | 'wallpaper';
 
 /** Явный выбор пользователя; 'system' — следовать prefers-color-scheme. */
 export type ThemeSetting = ThemeName | 'system';

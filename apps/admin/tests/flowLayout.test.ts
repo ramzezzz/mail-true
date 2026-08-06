@@ -28,10 +28,7 @@ function css(page: string): string {
 }
 
 function tsx(page: string): string {
-  return readFileSync(
-    fileURLToPath(new URL(`../src/pages/${page}.tsx`, import.meta.url)),
-    'utf8',
-  );
+  return readFileSync(fileURLToPath(new URL(`../src/pages/${page}.tsx`, import.meta.url)), 'utf8');
 }
 
 /** Тело правила по его селектору. */

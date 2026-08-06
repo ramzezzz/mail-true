@@ -235,10 +235,7 @@ export function FolderPage() {
       // нельзя — при неудаче метка снимается и письма возвращаются на место.
       setLeavingIds(ids);
       for (const chunk of chunkIds(ids)) {
-        moveMessages.mutate(
-          { ids: chunk, targetFolderId },
-          { onError: () => setLeavingIds([]) },
-        );
+        moveMessages.mutate({ ids: chunk, targetFolderId }, { onError: () => setLeavingIds([]) });
       }
       clearSelection();
       setFocusedId(null);
@@ -284,8 +281,7 @@ export function FolderPage() {
   const createFilter = useCallback(
     (address?: string) => {
       const from =
-        address ??
-        messages.find((m) => m.id === (focusedId ?? [...selectedIds][0]))?.from.address;
+        address ?? messages.find((m) => m.id === (focusedId ?? [...selectedIds][0]))?.from.address;
       const query = from ? `?new=${encodeURIComponent(serializeRulePrefill('from', from))}` : '';
       void navigate(`/settings/filters${query}`);
     },
@@ -411,7 +407,10 @@ export function FolderPage() {
           const next =
             index === -1
               ? 0
-              : Math.min(messages.length - 1, Math.max(0, index + (action === 'nav-down' ? 1 : -1)));
+              : Math.min(
+                  messages.length - 1,
+                  Math.max(0, index + (action === 'nav-down' ? 1 : -1)),
+                );
           setFocusedId(messages[next]?.id ?? null);
           return;
         }
@@ -748,9 +747,13 @@ export function FolderPage() {
       */}
       {labelFilter && !page.isPending && !page.isError && messages.length === 0 && (
         <div className={styles.labelFilterNote} role="status">
-          С меткой «{labelDictionary.find((l) => l.key === labelFilter)?.name ?? labelFilter}»
-          писем нет.{' '}
-          <button type="button" className={styles.labelFilterReset} onClick={() => setLabelFilter(null)}>
+          С меткой «{labelDictionary.find((l) => l.key === labelFilter)?.name ?? labelFilter}» писем
+          нет.{' '}
+          <button
+            type="button"
+            className={styles.labelFilterReset}
+            onClick={() => setLabelFilter(null)}
+          >
             Показать все
           </button>
         </div>

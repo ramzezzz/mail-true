@@ -248,11 +248,7 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
 }
 
 /** Выполняет действие под блокировкой папки и всегда её отпускает. */
-async function withFolder<T>(
-  client: ImapFlow,
-  path: string,
-  action: () => Promise<T>,
-): Promise<T> {
+async function withFolder<T>(client: ImapFlow, path: string, action: () => Promise<T>): Promise<T> {
   const lock = await client.getMailboxLock(path);
   try {
     return await action();

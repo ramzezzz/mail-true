@@ -29,7 +29,16 @@ import type { MigrationCheck, MigrationListPreview } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap } from '../components/Table';
-import { Badge, ErrorNotice, Notice, Panel, Tile, Tiles, Toolbar, ToolbarSpacer } from '../components/ui';
+import {
+  Badge,
+  ErrorNotice,
+  Notice,
+  Panel,
+  Tile,
+  Tiles,
+  Toolbar,
+  ToolbarSpacer,
+} from '../components/ui';
 import { can } from '../lib/access';
 import { formatDateTime } from '../lib/format';
 import {
@@ -88,21 +97,24 @@ export function MigratePage() {
 
   const [openJob, setOpenJob] = useState<number | null>(null);
 
-  const settings = useQuery({ queryKey: ['migrate-settings'], queryFn: () => api.migrateSettings() });
+  const settings = useQuery({
+    queryKey: ['migrate-settings'],
+    queryFn: () => api.migrateSettings(),
+  });
   const jobs = useQuery({
     queryKey: ['migrate-jobs'],
     queryFn: () => api.migrateJobs(20),
     // Пока хоть одно задание идёт, список сам обновляется: иначе человек
     // видит «в очереди» и не понимает, взялся ли кто-нибудь за работу.
-    refetchInterval: (query) =>
-      (query.state.data?.jobs ?? []).some(isJobLive) ? POLL_MS : false,
+    refetchInterval: (query) => ((query.state.data?.jobs ?? []).some(isJobLive) ? POLL_MS : false),
   });
 
   const details = useQuery({
     queryKey: ['migrate-job', openJob],
     queryFn: () => api.migrateJob(openJob ?? 0),
     enabled: openJob !== null,
-    refetchInterval: (query) => (query.state.data && isJobLive(query.state.data.job) ? POLL_MS : false),
+    refetchInterval: (query) =>
+      query.state.data && isJobLive(query.state.data.job) ? POLL_MS : false,
   });
 
   // Открытое задание закончилось — список заданий должен это показать сразу,
@@ -290,9 +302,9 @@ export function MigratePage() {
 
           <h3>Проверка связи</h3>
           <p className={styles.why}>
-            Секунда сейчас против потерянной ночи потом: перенос запускают на ночь, и опечатка
-            в адресе или неверный пароль иначе обнаружатся утром, когда задание встало на первом
-            же ящике.
+            Секунда сейчас против потерянной ночи потом: перенос запускают на ночь, и опечатка в
+            адресе или неверный пароль иначе обнаружатся утром, когда задание встало на первом же
+            ящике.
           </p>
           <div className={styles.grid}>
             <TextField
@@ -325,8 +337,9 @@ export function MigratePage() {
             <Notice tone={probe.ok ? 'success' : 'error'}>
               {probe.ok ? (
                 <>
-                  Связь есть. Вход выполнен как <span className={styles.mono}>{probe.loginName}</span>;
-                  папок — {probe.folders ?? 0}, писем — {probe.messages ?? 0}.
+                  Связь есть. Вход выполнен как{' '}
+                  <span className={styles.mono}>{probe.loginName}</span>; папок —{' '}
+                  {probe.folders ?? 0}, писем — {probe.messages ?? 0}.
                 </>
               ) : (
                 <>
@@ -490,7 +503,13 @@ export function MigratePage() {
             <Tile value={job.failed} label="ошибок" />
           </Tiles>
 
-          <div className={styles.bar} role="progressbar" aria-valuenow={Math.round(jobProgress(job, items) * 100)} aria-valuemin={0} aria-valuemax={100}>
+          <div
+            className={styles.bar}
+            role="progressbar"
+            aria-valuenow={Math.round(jobProgress(job, items) * 100)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          >
             <span
               className={cx(
                 styles.barFill,
@@ -539,9 +558,9 @@ export function MigratePage() {
           </Toolbar>
           {mayRun && !isJobLive(job) && bad.length > 0 && (
             <p className={styles.why}>
-              Пароль нужно ввести заново — он стёрт вместе с завершённым заданием и не хранится
-              «на случай повтора». Повтор безопасен: уже перенесённые письма пропускаются, они
-              не поедут дважды.
+              Пароль нужно ввести заново — он стёрт вместе с завершённым заданием и не хранится «на
+              случай повтора». Повтор безопасен: уже перенесённые письма пропускаются, они не поедут
+              дважды.
               {!useMaster && ' Для повтора с паролями ящиков оставьте список выше на месте.'}
             </p>
           )}
@@ -586,9 +605,7 @@ export function MigratePage() {
                           {item.errors.slice(0, 5).map((text, index) => (
                             <li key={`${String(item.position)}-${String(index)}`}>{text}</li>
                           ))}
-                          {item.errors.length > 5 && (
-                            <li>…и ещё {item.errors.length - 5}</li>
-                          )}
+                          {item.errors.length > 5 && <li>…и ещё {item.errors.length - 5}</li>}
                         </ul>
                       )}
                     </td>

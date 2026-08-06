@@ -60,10 +60,7 @@ function nodeFilename(node: MessageStructureObject): string | null {
   // Источники перебираются по порядку, а негодные пропускаются: раньше
   // бралось первое непустое, и обломок разбора из `filename` побеждал
   // совершенно годное имя из `name`.
-  for (const candidate of [
-    node.dispositionParameters?.['filename'],
-    node.parameters?.['name'],
-  ]) {
+  for (const candidate of [node.dispositionParameters?.['filename'], node.parameters?.['name']]) {
     if (looksLikeFilename(candidate)) return (candidate as string).trim();
   }
   // У вложенного письма нет ни Content-Disposition, ни имени файла: почтовые
@@ -123,14 +120,17 @@ function isAttachmentNode(node: MessageStructureObject): boolean {
 }
 
 /** Собирает список вложений (включая inline-картинки) из BODYSTRUCTURE. */
-export function collectAttachments(structure: MessageStructureObject | undefined): AttachmentInfo[] {
+export function collectAttachments(
+  structure: MessageStructureObject | undefined,
+): AttachmentInfo[] {
   const result: AttachmentInfo[] = [];
   if (!structure) return result;
 
   const walk = (node: MessageStructureObject): void => {
     if (isAttachmentNode(node)) {
       const contentId = cleanContentId(node.id);
-      const inline = node.disposition?.toLowerCase() === 'inline' || (!node.disposition && Boolean(contentId));
+      const inline =
+        node.disposition?.toLowerCase() === 'inline' || (!node.disposition && Boolean(contentId));
       result.push({
         partId: node.part ?? '1',
         filename: nodeFilename(node) ?? 'attachment',

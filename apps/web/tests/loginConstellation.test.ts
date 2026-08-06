@@ -115,7 +115,10 @@ describe('уважение к просьбе не двигать картинк�
   it('без движения кадры не запрашиваются, но кадр всё-таки нарисован', () => {
     const { paint, calls } = fakePaint();
     const requestFrame = vi.fn(() => 1);
-    const sky = startConstellation(fakeCanvas(paint), fakeHost({ reduceMotion: true, requestFrame }));
+    const sky = startConstellation(
+      fakeCanvas(paint),
+      fakeHost({ reduceMotion: true, requestFrame }),
+    );
 
     expect(sky).not.toBeNull();
     expect(requestFrame).not.toHaveBeenCalled();
@@ -210,7 +213,10 @@ describe('уборка за собой', () => {
   it('останов отменяет кадр и больше не рисует', () => {
     const { paint, calls } = fakePaint();
     const cancelFrame = vi.fn();
-    const sky = startConstellation(fakeCanvas(paint), fakeHost({ cancelFrame, reduceMotion: true }));
+    const sky = startConstellation(
+      fakeCanvas(paint),
+      fakeHost({ cancelFrame, reduceMotion: true }),
+    );
     sky?.stop();
     expect(cancelFrame).toHaveBeenCalled();
 

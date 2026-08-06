@@ -17,13 +17,13 @@ test('действующий предел вложения меньше пред
 
   assert.ok(
     config.ATTACHMENT_MAX_BYTES < config.MESSAGE_MAX_BYTES,
-    'предел вложения не может равняться пределу письма'
+    'предел вложения не может равняться пределу письма',
   );
   // Вложение допустимого размера обязано пролезть в письмо после кодирования
   const encoded = Math.ceil(config.ATTACHMENT_MAX_BYTES * ENCODING_OVERHEAD);
   assert.ok(
     encoded <= config.MESSAGE_MAX_BYTES,
-    `закодированное вложение ${encoded} не помещается в ${config.MESSAGE_MAX_BYTES}`
+    `закодированное вложение ${encoded} не помещается в ${config.MESSAGE_MAX_BYTES}`,
   );
 });
 
@@ -48,6 +48,6 @@ test('предел тела запроса на написание письма 
   // bodyHtml по схеме — до 10 МБ; предел тела запроса обязан это вмещать
   assert.ok(
     config.COMPOSE_BODY_MAX_BYTES > 10 * 1024 * 1024,
-    'письмо со вставленными картинками упрётся в невидимый потолок'
+    'письмо со вставленными картинками упрётся в невидимый потолок',
   );
 });

@@ -212,7 +212,9 @@ export class TemplatesDb implements TemplateStore {
     templateId: number,
     attachments: readonly StoredAttachment[],
   ): Promise<void> {
-    await client.query(`DELETE FROM mail_template_attachments WHERE template_id = $1`, [templateId]);
+    await client.query(`DELETE FROM mail_template_attachments WHERE template_id = $1`, [
+      templateId,
+    ]);
     let position = 0;
     for (const file of attachments) {
       await client.query(
@@ -296,10 +298,10 @@ export class TemplatesDb implements TemplateStore {
     const before = await this.#one(accountEmail, id);
     if (!before) return null;
     // Вложения уходят сами: ON DELETE CASCADE в миграции 0026.
-    await this.#query(`DELETE FROM mail_templates WHERE lower(account_email) = lower($1) AND id = $2`, [
-      accountEmail,
-      id,
-    ]);
+    await this.#query(
+      `DELETE FROM mail_templates WHERE lower(account_email) = lower($1) AND id = $2`,
+      [accountEmail, id],
+    );
     return before;
   }
 

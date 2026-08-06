@@ -22,11 +22,7 @@ describe('breadcrumbsFor', () => {
 
   it('со страницы импорта видно, как вернуться к списку ящиков', () => {
     const crumbs = breadcrumbsFor('/users/import');
-    expect(crumbs.map((c) => c.title)).toEqual([
-      'Дашборд',
-      'Пользователи',
-      'Импорт ящиков из CSV',
-    ]);
+    expect(crumbs.map((c) => c.title)).toEqual(['Дашборд', 'Пользователи', 'Импорт ящиков из CSV']);
     // Именно этого и не было: ссылки на список ящиков не существовало
     expect(crumbs[1]?.to).toBe('/users');
   });

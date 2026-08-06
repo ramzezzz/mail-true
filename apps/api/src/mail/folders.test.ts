@@ -1,7 +1,13 @@
 /** Тесты маппинга IMAP-папок в роли и идентификаторы. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectRole, encodePathId, decodePathId, mapFolders, type RawFolderInfo } from './folders.js';
+import {
+  detectRole,
+  encodePathId,
+  decodePathId,
+  mapFolders,
+  type RawFolderInfo,
+} from './folders.js';
 
 function raw(partial: Partial<RawFolderInfo> & { path: string }): RawFolderInfo {
   const name = partial.path.split(partial.delimiter ?? '/').pop() ?? partial.path;
@@ -43,7 +49,11 @@ test('encodePathId/decodePathId обратимы для юникода', () => {
 test('mapFolders: роли, идентификаторы, счётчики', () => {
   const folders = mapFolders([
     raw({ path: 'INBOX', status: { messages: 42, unseen: 7, uidValidity: 123n } }),
-    raw({ path: 'Sent', specialUse: '\\Sent', status: { messages: 10, unseen: 0, uidValidity: 5n } }),
+    raw({
+      path: 'Sent',
+      specialUse: '\\Sent',
+      status: { messages: 10, unseen: 0, uidValidity: 5n },
+    }),
     raw({ path: 'Drafts', specialUse: '\\Drafts' }),
     raw({ path: 'Junk', specialUse: '\\Junk' }),
     raw({ path: 'Trash', specialUse: '\\Trash' }),
@@ -60,7 +70,10 @@ test('mapFolders: роли, идентификаторы, счётчики', () 
   assert.equal(inbox.system, true);
 
   for (const id of ['sent', 'drafts', 'spam', 'trash', 'archive']) {
-    assert.ok(folders.some((f) => f.id === id), `должна быть папка с id=${id}`);
+    assert.ok(
+      folders.some((f) => f.id === id),
+      `должна быть папка с id=${id}`,
+    );
   }
 
   const custom = folders.find((f) => f.path === 'Работа');
@@ -126,16 +139,19 @@ test('mapFolders: служебные каталоги Dovecot в дерево н
   assert.equal(
     folders.some((f) => f.path.startsWith('dovecot')),
     false,
-    'служебный каталог не должен показываться как папка пользователя'
+    'служебный каталог не должен показываться как папка пользователя',
   );
   assert.deepEqual(
     folders.map((f) => f.path),
-    ['INBOX', 'Проекты']
+    ['INBOX', 'Проекты'],
   );
 });
 
 test('mapFolders: обычная папка со словом dovecot внутри имени остаётся', () => {
-  const folders = mapFolders([raw({ path: 'INBOX' }), raw({ path: 'Про dovecot', name: 'Про dovecot' })]);
+  const folders = mapFolders([
+    raw({ path: 'INBOX' }),
+    raw({ path: 'Про dovecot', name: 'Про dovecot' }),
+  ]);
   assert.ok(folders.some((f) => f.path === 'Про dovecot'));
 });
 

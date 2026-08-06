@@ -37,9 +37,7 @@ const STAMP = `itest${String(Date.now()).slice(-8)}`;
 const DOMAIN = `${STAMP}.local`;
 const MAILBOX = `box@${DOMAIN}`;
 
-async function withDb(
-  fn: (admin: AdminDb, ai: AiDb) => Promise<void>,
-): Promise<void> {
+async function withDb(fn: (admin: AdminDb, ai: AiDb) => Promise<void>): Promise<void> {
   const admin = new AdminDb({ connectionString: url, logger, max: 2 });
   const ai = new AiDb({ connectionString: url, logger, max: 2 });
   try {
@@ -121,10 +119,9 @@ void test('удаление ящика убирает его строки из �
       `INSERT INTO mail_signatures (account_email, name, body_html) VALUES ($1, 'Подпись', '<p>x</p>')`,
       [MAILBOX],
     );
-    await admin.query(
-      `INSERT INTO mail_filters (account_email, name) VALUES ($1, 'Правило')`,
-      [MAILBOX],
-    );
+    await admin.query(`INSERT INTO mail_filters (account_email, name) VALUES ($1, 'Правило')`, [
+      MAILBOX,
+    ]);
     await admin.query(
       `INSERT INTO migrate_cursors (account, source_folder, uid_validity, last_uid)
        VALUES ($1, 'INBOX', '1', 10)`,

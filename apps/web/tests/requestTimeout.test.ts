@@ -83,9 +83,7 @@ describe('предел ожидания ответа', () => {
     // сервера, и показывать «сервер не ответил» здесь было бы враньём.
     vi.stubGlobal('fetch', neverAnswers());
     const controller = new AbortController();
-    const promise = apiFetch('/api/search', { signal: controller.signal }).catch(
-      (e: unknown) => e,
-    );
+    const promise = apiFetch('/api/search', { signal: controller.signal }).catch((e: unknown) => e);
     controller.abort();
     const error = await promise;
     expect(isTimeoutError(error)).toBe(false);

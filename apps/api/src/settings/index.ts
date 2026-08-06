@@ -199,7 +199,9 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
             const edge = new Date(Date.now() - config.MAILBOX_ACCESS_LOG_DAYS * 24 * 3600_000);
             void ownerDb
               .purgeAccess(edge)
-              .catch((err: unknown) => logger.warn(errorInfo(err), 'Уборка истории входов не удалась'));
+              .catch((err: unknown) =>
+                logger.warn(errorInfo(err), 'Уборка истории входов не удалась'),
+              );
           };
           accessJanitor = setInterval(sweep, ACCESS_JANITOR_MS);
           accessJanitor.unref?.();

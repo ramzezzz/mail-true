@@ -29,7 +29,10 @@ export function htmlToText(html: string): string {
     const num = Number(code);
     return Number.isFinite(num) && num > 0 && num < 0x110000 ? String.fromCodePoint(num) : '';
   });
-  return text.replace(/[\t ]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+  return text
+    .replace(/[\t ]+/g, ' ')
+    .replace(/\s*\n\s*/g, '\n')
+    .trim();
 }
 
 /** Сниппет — первые max символов текста без переносов и лишних пробелов. */

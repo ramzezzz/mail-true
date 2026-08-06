@@ -89,7 +89,10 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
               'к работающей базе — до этого помощник будет отвечать «выключено».',
           );
         } else if (!keyBox) {
-          logger.info({ reason: keyBoxReason }, 'Ключи доступа к внешним сервисам ИИ хранить нельзя');
+          logger.info(
+            { reason: keyBoxReason },
+            'Ключи доступа к внешним сервисам ИИ хранить нельзя',
+          );
         }
       })
       .catch((err) => logger.error({ err }, 'Не удалось проверить схему помощника ИИ'));

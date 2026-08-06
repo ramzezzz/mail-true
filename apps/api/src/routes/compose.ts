@@ -163,7 +163,7 @@ async function composeRaw(
   from: string,
   uploads: UploadStore,
   forwarded: readonly ForwardedMessage[] = [],
-  settings?: { keepBcc?: boolean }
+  settings?: { keepBcc?: boolean },
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
   for (const id of payload.attachmentIds) {
@@ -314,7 +314,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     session: MailSession,
     raw: Buffer,
     requestedUid: number | undefined,
-    draftKey: string | undefined
+    draftKey: string | undefined,
   ): Promise<number | null> {
     const key = draftKey ? `${session.email}:${draftKey}` : session.email;
     return drafts.save(key, requestedUid, Boolean(draftKey), async (previousUid) =>
@@ -331,7 +331,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           }
         }
         return { uid, result: uid };
-      })
+      }),
     );
   }
 
@@ -348,7 +348,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     session: MailSession,
     payload: DraftBody,
     forwarded: readonly ForwardedMessage[],
-    log: { warn: (obj: unknown, msg: string) => void }
+    log: { warn: (obj: unknown, msg: string) => void },
   ): Promise<{ draftUid: number | null; draftId: string | null }> {
     if (payload.draftUid) {
       // Исходный черновик не трогали — он на месте
@@ -374,7 +374,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   async function dropDraftAfterSend(
     session: MailSession,
     payload: DraftBody,
-    log: { warn: (obj: unknown, msg: string) => void }
+    log: { warn: (obj: unknown, msg: string) => void },
   ): Promise<void> {
     if (!payload.draftUid && !payload.draftKey) return;
     const key = payload.draftKey ? `${session.email}:${payload.draftKey}` : session.email;
@@ -420,7 +420,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
    */
   async function loadForwardedMessages(
     session: MailSession,
-    ids: readonly string[]
+    ids: readonly string[],
   ): Promise<ForwardedMessage[]> {
     if (ids.length === 0) return [];
     return pool.withClient(session.email, session.password, async (client) => {
@@ -433,7 +433,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           const msg = await client.fetchOne(
             String(uid),
             { uid: true, source: true, envelope: true },
-            { uid: true }
+            { uid: true },
           );
           if (!msg || !msg.source) {
             throw new NotFoundError(`Письмо для пересылки не найдено: ${id}`);
@@ -459,7 +459,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   async function appendToSent(
     email: string,
     password: string,
-    raw: Buffer
+    raw: Buffer,
   ): Promise<{ uid?: number } | false> {
     return pool.withClient(email, password, async (client) => {
       const folders = await listFolders(client);
@@ -556,7 +556,13 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       draftUid: notice.draftUid,
     });
     app.log.warn(
-      { deferredId: entry.id, owner: entry.owner, noticeId: notice.id, draftUid, told: Boolean(told) },
+      {
+        deferredId: entry.id,
+        owner: entry.owner,
+        noticeId: notice.id,
+        draftUid,
+        told: Boolean(told),
+      },
       'Письмо не отправлено — сохранено в черновиках, человеку выписано извещение',
     );
   }
@@ -575,7 +581,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         const failure = classifySmtpError(err);
         app.log.warn(
           errorInfo(err, { deferredId: entry.id }),
-          'Отложенное письмо не ушло с этой попытки'
+          'Отложенное письмо не ушло с этой попытки',
         );
         // Причину запоминаем на каждой попытке: если попытки кончатся,
         // человеку надо сказать не «не отправилось», а что именно ответил
@@ -723,7 +729,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       throw new MessageTooLargeError(
         `Письмо ${megabytes(raw.length)} МБ, а почтовый сервер принимает не больше ` +
           `${megabytes(config.MESSAGE_MAX_BYTES)} МБ. Письмо сохранено в черновиках.`,
-        kept
+        kept,
       );
     }
 
@@ -743,13 +749,13 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           envelopeTo: allRecipients(payload),
           subject: payload.subject,
         },
-        raw
+        raw,
       );
       await dropDraftAfterSend(session, payload, request.log);
       await Promise.all(payload.attachmentIds.map((id) => uploads.delete(id)));
       request.log.info(
         { deferredId: entry.id, sendAt: entry.sendAt },
-        'Письмо принято к отложенной отправке'
+        'Письмо принято к отложенной отправке',
       );
       return {
         ok: true,
@@ -834,7 +840,10 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       if (failure.permanent) {
         // Сервер доступен и ответил отказом: повторять бессмысленно,
         // 503 «почтовый сервер недоступен» здесь был неправдой дважды
-        request.log.warn(errorInfo(err, { smtpCode: failure.code }), 'Почтовый сервер отклонил письмо');
+        request.log.warn(
+          errorInfo(err, { smtpCode: failure.code }),
+          'Почтовый сервер отклонил письмо',
+        );
         const kept = await keepDraftAfterFailure(session, payload, forwarded, request.log);
         const details = {
           ...kept,
@@ -864,9 +873,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       throw new UpstreamUnavailableError(
         kept.draftId
           ? 'Почтовый сервер сейчас недоступен, письмо не отправлено. ' +
-            'Текст сохранён в черновиках — попробуйте отправить ещё раз.'
+              'Текст сохранён в черновиках — попробуйте отправить ещё раз.'
           : 'Почтовый сервер сейчас недоступен, письмо не отправлено.',
-        kept
+        kept,
       );
     } finally {
       transport.close();
@@ -892,7 +901,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       savedToSent = false;
       request.log.warn(
         errorInfo(err),
-        'Письмо отправлено, но копию в «Отправленные» сохранить не удалось'
+        'Письмо отправлено, но копию в «Отправленные» сохранить не удалось',
       );
     }
 
@@ -905,7 +914,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     if (payload.inReplyTo) {
       try {
         await pool.withClient(session.email, session.password, (client) =>
-          markAnswered(client, payload.inReplyTo as string)
+          markAnswered(client, payload.inReplyTo as string),
         );
       } catch (err) {
         request.log.warn(errorInfo(err), 'Не удалось пометить исходное письмо отвеченным');
@@ -1048,9 +1057,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   app.get('/drafts/:uid', { preHandler: app.requireSession }, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
-    const { uid } = z
-      .object({ uid: z.coerce.number().int().positive() })
-      .parse(request.params);
+    const { uid } = z.object({ uid: z.coerce.number().int().positive() }).parse(request.params);
 
     const source = await pool.withClient(session.email, session.password, async (client) => {
       const folder = await requireDraftsFolder(client);
@@ -1074,11 +1081,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     const sendFailure = readFailureFromRaw(source);
     const attachments: DraftContent['attachments'] = [];
     for (const part of parsed.attachments) {
-      const meta = await uploads.save(
-        part.filename,
-        part.mimeType,
-        Readable.from(part.content)
-      );
+      const meta = await uploads.save(part.filename, part.mimeType, Readable.from(part.content));
       attachments.push({ id: meta.id, filename: meta.filename, size: meta.size });
     }
 
@@ -1126,7 +1129,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         const msg = await client.fetchOne(
           String(uid),
           { uid: true, headers: true, envelope: true, flags: true },
-          { uid: true }
+          { uid: true },
         );
         if (!msg) return null;
         return {
@@ -1173,7 +1176,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         throw failure.permanent
           ? new SendRejectedError(`${failure.message}. Уведомление не отправлено.`)
           : new UpstreamUnavailableError(
-              'Почтовый сервер сейчас недоступен, уведомление не отправлено.'
+              'Почтовый сервер сейчас недоступен, уведомление не отправлено.',
             );
       } finally {
         transport.close();

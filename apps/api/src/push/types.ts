@@ -67,7 +67,10 @@ export function isNotificationLevel(value: unknown): value is NotificationLevel 
 }
 
 /** Понижает уровень до допустимого: используется, когда ИИ недоступен. */
-export function levelAtMost(level: NotificationLevel, ceiling: NotificationLevel): NotificationLevel {
+export function levelAtMost(
+  level: NotificationLevel,
+  ceiling: NotificationLevel,
+): NotificationLevel {
   const a = NOTIFICATION_LEVELS.indexOf(level);
   const b = NOTIFICATION_LEVELS.indexOf(ceiling);
   return a <= b ? level : ceiling;

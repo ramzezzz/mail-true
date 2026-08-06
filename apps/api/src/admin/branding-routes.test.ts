@@ -262,7 +262,11 @@ test('загруженный логотип сразу отдаётся всем
   assert.equal(upload.statusCode, 200);
   const state = upload.json<{ logo: { url: string; width: number; version: string } }>();
   assert.equal(state.logo.width, 240);
-  assert.match(state.logo.url, /^\/api\/admin\/branding\/logo\?v=/u, 'адрес обязан нести отпечаток');
+  assert.match(
+    state.logo.url,
+    /^\/api\/admin\/branding\/logo\?v=/u,
+    'адрес обязан нести отпечаток',
+  );
 
   // Без cookie — как со страницы входа
   const shown = await h.app.inject({ method: 'GET', url: state.logo.url });
@@ -454,10 +458,17 @@ test('выгрузка отдаётся файлом, не кэшируется 
     headers: { cookie: await h.cookie() },
   });
   assert.equal(res.statusCode, 200);
-  assert.match(String(res.headers['content-disposition']), /attachment; filename="mailtrue-settings-/u);
+  assert.match(
+    String(res.headers['content-disposition']),
+    /attachment; filename="mailtrue-settings-/u,
+  );
   assert.equal(res.headers['cache-control'], 'no-store');
 
-  const file = JSON.parse(res.body) as { kind: string; version: number; source: { hostname: string } };
+  const file = JSON.parse(res.body) as {
+    kind: string;
+    version: number;
+    source: { hostname: string };
+  };
   assert.equal(file.kind, SETTINGS_BACKUP_KIND);
   assert.equal(file.version, 1);
   assert.equal(file.source.hostname, 'mail.nasha.ru');
@@ -517,9 +528,8 @@ test('предпросмотр копии показывает план, нич�
   const h = await harness();
   const cookie = await h.cookie();
   const backup = JSON.parse(
-    (
-      await h.app.inject({ method: 'POST', url: '/api/admin/backup/export', headers: { cookie } })
-    ).body,
+    (await h.app.inject({ method: 'POST', url: '/api/admin/backup/export', headers: { cookie } }))
+      .body,
   ) as Record<string, unknown>;
 
   const before = h.db.audits.length;

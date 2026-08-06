@@ -223,7 +223,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 
 /** Определяет, является ли строка заголовком таблицы. */
 function looksLikeHeader(cells: readonly string[]): boolean {
-  return cells.some((c) => HEADER_ALIASES[c.trim().toLowerCase()] !== undefined && !c.includes('@'));
+  return cells.some(
+    (c) => HEADER_ALIASES[c.trim().toLowerCase()] !== undefined && !c.includes('@'),
+  );
 }
 
 /**

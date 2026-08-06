@@ -25,12 +25,24 @@ test('mobileconfig: валидный plist с настройками IMAP/SMTP',
 
   assert.deepEqual(plistValue(doc, 'EmailAccountType'), { tag: 'string', text: 'EmailTypeIMAP' });
   assert.deepEqual(plistValue(doc, 'EmailAddress'), { tag: 'string', text: 'test@mail.local' });
-  assert.deepEqual(plistValue(doc, 'IncomingMailServerHostName'), { tag: 'string', text: 'mail.local' });
-  assert.deepEqual(plistValue(doc, 'IncomingMailServerPortNumber'), { tag: 'integer', text: '993' });
+  assert.deepEqual(plistValue(doc, 'IncomingMailServerHostName'), {
+    tag: 'string',
+    text: 'mail.local',
+  });
+  assert.deepEqual(plistValue(doc, 'IncomingMailServerPortNumber'), {
+    tag: 'integer',
+    text: '993',
+  });
   assert.equal(plistValue(doc, 'IncomingMailServerUseSSL')?.tag, 'true');
-  assert.deepEqual(plistValue(doc, 'OutgoingMailServerPortNumber'), { tag: 'integer', text: '587' });
+  assert.deepEqual(plistValue(doc, 'OutgoingMailServerPortNumber'), {
+    tag: 'integer',
+    text: '587',
+  });
   assert.equal(plistValue(doc, 'OutgoingPasswordSameAsIncomingPassword')?.tag, 'true');
-  assert.deepEqual(plistValue(doc, 'PayloadType'), { tag: 'string', text: 'com.apple.mail.managed' });
+  assert.deepEqual(plistValue(doc, 'PayloadType'), {
+    tag: 'string',
+    text: 'com.apple.mail.managed',
+  });
 });
 
 test('mobileconfig: UUID детерминированы и различны для profile/payload', () => {
@@ -55,7 +67,8 @@ test('mobileconfig: PayloadIdentifier профиля свой у каждого 
     const doc = parseXml(buildMobileConfig(testSettings, email));
     const out: string[] = [];
     for (const el of doc.getElementsByTagName('key')) {
-      if (el.textContent === 'PayloadIdentifier') out.push(el.nextElementSibling?.textContent ?? '');
+      if (el.textContent === 'PayloadIdentifier')
+        out.push(el.nextElementSibling?.textContent ?? '');
     }
     return out;
   };

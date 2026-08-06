@@ -63,7 +63,9 @@ export function useMuteThreads() {
        * по продолжающим приходить письмам.
        */
       if (result.deliveryError) {
-        showNotice(`Переписка заглушена, но правило доставки не записалось: ${result.deliveryError}`);
+        showNotice(
+          `Переписка заглушена, но правило доставки не записалось: ${result.deliveryError}`,
+        );
         return;
       }
       const threads = result.muted;

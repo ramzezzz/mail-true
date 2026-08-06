@@ -22,7 +22,12 @@ import { LoginConstellation } from '@web/pages/login/LoginConstellation';
 import { LoginGlobe } from '@web/pages/login/LoginGlobe';
 import { pausedAttr, usePageVisible } from '@web/pages/login/usePageVisible';
 import { useSession } from '../app/session';
-import { ADMIN_CENTER_ICON, ADMIN_ORBIT_ICONS, AdminIconSprite, ICON_PREFIX } from './login/adminIcons';
+import {
+  ADMIN_CENTER_ICON,
+  ADMIN_ORBIT_ICONS,
+  AdminIconSprite,
+  ICON_PREFIX,
+} from './login/adminIcons';
 import { constellationLook, paletteVars } from './login/loginPalette';
 import styles from './LoginPage.module.css';
 
@@ -108,8 +113,8 @@ export function LoginPage() {
               читающий с экрана, понимает, куда попал. */}
           <h1 className={styles.title}>Вход в панель управления</h1>
           <p className={styles.subtitle}>
-            Управление почтовым сервером: ящики и пользователи, домены, ключи подписи, журнал.
-            Это не вход в почту — почтовый ящик здесь не подойдёт.
+            Управление почтовым сервером: ящики и пользователи, домены, ключи подписи, журнал. Это
+            не вход в почту — почтовый ящик здесь не подойдёт.
           </p>
 
           {error && (
@@ -213,7 +218,8 @@ export function LoginPage() {
             <code>
               docker compose -f infra/docker-compose.yml exec api \
               <br />
-              &nbsp;&nbsp;node apps/api/dist/admin/cli.js create-admin &lt;логин&gt; &lt;пароль&gt; owner
+              &nbsp;&nbsp;node apps/api/dist/admin/cli.js create-admin &lt;логин&gt; &lt;пароль&gt;
+              owner
             </code>
             <br />
             Роль: <code>owner</code>, <code>user_manager</code> или <code>readonly</code>.

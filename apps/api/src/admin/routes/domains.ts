@@ -115,28 +115,32 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
     },
   );
 
-  app.post('/domains', { preHandler: requireAdmin(app, 'domains.write') }, async (request, reply) => {
-    const body = createSchema.parse(request.body);
-    const existing = await ctx.db.resolveDomain(body.name, false);
-    if (existing) throw new ConflictError(`Домен ${body.name} уже добавлен`);
-    try {
-      const domain = await ctx.db.resolveDomain(body.name, true);
-      if (!domain) throw new BadRequestError('Не удалось добавить домен');
-      await audit(ctx, request, {
-        action: 'domain.create',
-        targetType: 'domain',
-        targetId: domain.id,
-        targetLabel: domain.name,
-        after: { name: domain.name },
-      });
-      const row = await ctx.db.findDomainById(domain.id);
-      reply.status(201);
-      return row ? toDto(row, host) : { id: domain.id, name: domain.name };
-    } catch (err) {
-      if (isUniqueViolation(err)) throw new ConflictError(`Домен ${body.name} уже добавлен`);
-      throw err;
-    }
-  });
+  app.post(
+    '/domains',
+    { preHandler: requireAdmin(app, 'domains.write') },
+    async (request, reply) => {
+      const body = createSchema.parse(request.body);
+      const existing = await ctx.db.resolveDomain(body.name, false);
+      if (existing) throw new ConflictError(`Домен ${body.name} уже добавлен`);
+      try {
+        const domain = await ctx.db.resolveDomain(body.name, true);
+        if (!domain) throw new BadRequestError('Не удалось добавить домен');
+        await audit(ctx, request, {
+          action: 'domain.create',
+          targetType: 'domain',
+          targetId: domain.id,
+          targetLabel: domain.name,
+          after: { name: domain.name },
+        });
+        const row = await ctx.db.findDomainById(domain.id);
+        reply.status(201);
+        return row ? toDto(row, host) : { id: domain.id, name: domain.name };
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new ConflictError(`Домен ${body.name} уже добавлен`);
+        throw err;
+      }
+    },
+  );
 
   app.patch<{ Params: { id: string } }>(
     '/domains/:id',
@@ -214,7 +218,10 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
         const boxes = await ctx.db.listMailUsers({ domainId: id, limit: 20, offset: 0 });
         throw new BadRequestError(
           `Домен ${row.name} удалить нельзя: в нём ${String(userCount)} ящик(ов) — ` +
-            `${listNames(boxes.rows.map((u) => u.email), userCount)}. ` +
+            `${listNames(
+              boxes.rows.map((u) => u.email),
+              userCount,
+            )}. ` +
             'Удаление домена уничтожило бы их записи вместе с настройками и правилами. ' +
             'Сначала перенесите ящики на другой домен или удалите их.',
         );

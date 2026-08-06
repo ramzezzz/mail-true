@@ -5,12 +5,7 @@ import assert from 'node:assert/strict';
 
 import { InMemoryAuditLog, LoggerAuditLog, sumEntries, type AiAuditEntry } from '../audit.js';
 import { InMemoryBudgetTracker, RedisBudgetTracker, type RedisLike } from '../budget.js';
-import {
-  MemoryAiCache,
-  RedisAiCache,
-  buildCacheKey,
-  type RedisCacheClient,
-} from '../cache.js';
+import { MemoryAiCache, RedisAiCache, buildCacheKey, type RedisCacheClient } from '../cache.js';
 import { budgetLimitsSchema } from '../config.js';
 
 // --- Совместимость с настоящими клиентами (проверка на уровне типов) --------
@@ -133,27 +128,39 @@ describe('MemoryAiCache', () => {
 
   it('удаление по письму убирает все его записи', async () => {
     const cache = new MemoryAiCache();
-    await cache.set(buildCacheKey({
-      feature: 'summarize.message',
-      promptVersion: 'v1',
-      model: 'm',
-      messageId: 'inbox:7',
-      contentFingerprint: 'a',
-    }), '1', 60);
-    await cache.set(buildCacheKey({
-      feature: 'classify',
-      promptVersion: 'v1',
-      model: 'm',
-      messageId: 'inbox:7',
-      contentFingerprint: 'b',
-    }), '2', 60);
-    await cache.set(buildCacheKey({
-      feature: 'classify',
-      promptVersion: 'v1',
-      model: 'm',
-      messageId: 'inbox:8',
-      contentFingerprint: 'c',
-    }), '3', 60);
+    await cache.set(
+      buildCacheKey({
+        feature: 'summarize.message',
+        promptVersion: 'v1',
+        model: 'm',
+        messageId: 'inbox:7',
+        contentFingerprint: 'a',
+      }),
+      '1',
+      60,
+    );
+    await cache.set(
+      buildCacheKey({
+        feature: 'classify',
+        promptVersion: 'v1',
+        model: 'm',
+        messageId: 'inbox:7',
+        contentFingerprint: 'b',
+      }),
+      '2',
+      60,
+    );
+    await cache.set(
+      buildCacheKey({
+        feature: 'classify',
+        promptVersion: 'v1',
+        model: 'm',
+        messageId: 'inbox:8',
+        contentFingerprint: 'c',
+      }),
+      '3',
+      60,
+    );
 
     assert.equal(await cache.deleteByMessage('inbox:7'), 2);
     assert.equal(cache.size, 1);

@@ -44,7 +44,12 @@ import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
 import type { AppConfig } from '../config.js';
 import { ApiError, BadRequestError, NotFoundError, UpstreamUnavailableError } from '../errors.js';
-import { existingUids, groupIdsByFolder, requireFolder, requireOrCreateFolder } from '../imap/service.js';
+import {
+  existingUids,
+  groupIdsByFolder,
+  requireFolder,
+  requireOrCreateFolder,
+} from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import type { SnoozeStore, SnoozedRow } from './snooze-db.js';
 import {

@@ -37,8 +37,8 @@ async function wait(ms: number): Promise<void> {
 }
 
 const buttonWith = (text: string): HTMLButtonElement | undefined =>
-  [...host.querySelectorAll('button')].find(
-    (b) => (b.getAttribute('aria-label') ?? b.textContent ?? '').includes(text),
+  [...host.querySelectorAll('button')].find((b) =>
+    (b.getAttribute('aria-label') ?? b.textContent ?? '').includes(text),
   );
 
 describe('модальное окно', () => {

@@ -128,7 +128,6 @@ describe('правила стилей, без которых страница у
     expect(btn).toContain('width: 2.75rem');
     expect(btn).toContain('height: 2.75rem');
   });
-
 });
 
 /*

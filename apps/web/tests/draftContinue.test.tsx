@@ -108,8 +108,14 @@ function stubLayout() {
       disconnect() {}
     };
   }
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 800 });
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get: () => 1200,
+  });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get: () => 800,
+  });
 }
 
 function renderFolder() {
@@ -235,7 +241,10 @@ describe('щелчок по черновику открывает окно на�
   it('вместо просмотра письма открывается окно с набранным письмом', async () => {
     const getDraft = vi.spyOn(api, 'getDraft').mockResolvedValue(draftContent());
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
 
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'));
     await waitFor(composeOpen, 'окно написания');
@@ -251,15 +260,20 @@ describe('щелчок по черновику открывает окно на�
     expect(editor()?.textContent).toContain('Отправляю договор');
     // Вложение черновика на месте — ровно одно
     expect(host.textContent).toContain('договор.pdf');
-    expect([...host.querySelectorAll('[class*="attachChip"]')].filter(
-      (chip) => chip.textContent?.includes('договор.pdf'),
-    )).toHaveLength(1);
+    expect(
+      [...host.querySelectorAll('[class*="attachChip"]')].filter((chip) =>
+        chip.textContent?.includes('договор.pdf'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('Ctrl+щелчок остаётся ссылкой: открывается просмотр, а не окно', async () => {
     const getDraft = vi.spyOn(api, 'getDraft').mockResolvedValue(draftContent());
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
 
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'), { ctrlKey: true });
     await act(async () => {
@@ -278,7 +292,14 @@ describe('щелчок по черновику открывает окно на�
     const getDraft = vi.spyOn(api, 'getDraft').mockResolvedValue(draftContent());
     vi.spyOn(api, 'getFolders').mockResolvedValue([]);
     vi.spyOn(api, 'getMessages').mockResolvedValue({
-      items: [{ ...draftSummary(7), id: 'inbox:7', folderId: 'inbox', flags: { ...draftSummary().flags, draft: false } }],
+      items: [
+        {
+          ...draftSummary(7),
+          id: 'inbox:7',
+          folderId: 'inbox',
+          flags: { ...draftSummary().flags, draft: false },
+        },
+      ],
       total: 1,
       offset: 0,
       limit: 100,
@@ -289,7 +310,15 @@ describe('щелчок по черновику открывает окно на�
         <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={['/inbox']}>
             <Routes>
-              <Route path=":folderId" element={<><FolderPage /><ComposeWindows /></>} />
+              <Route
+                path=":folderId"
+                element={
+                  <>
+                    <FolderPage />
+                    <ComposeWindows />
+                  </>
+                }
+              />
             </Routes>
           </MemoryRouter>
         </QueryClientProvider>,
@@ -320,7 +349,10 @@ describe('дописанный черновик не плодит копии', (
     }));
 
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'));
     await waitFor(composeOpen, 'окно написания');
 
@@ -334,7 +366,9 @@ describe('дописанный черновик не плодит копии', (
     // Второе сохранение ссылается на последнюю версию, а не заводит третью:
     // без этого в папке лежали бы три письма вместо одного
     expect((saveDraft.mock.calls[1]?.[0] as SendRequest).draftUid).toBe(39);
-    expect(saveDraft.mock.calls.every((c) => (c[0] as SendRequest).draftUid !== undefined)).toBe(true);
+    expect(saveDraft.mock.calls.every((c) => (c[0] as SendRequest).draftUid !== undefined)).toBe(
+      true,
+    );
   });
 
   it('вложение уходит на сервер ровно одно — и при первом, и при повторном сохранении', async () => {
@@ -347,7 +381,10 @@ describe('дописанный черновик не плодит копии', (
     });
 
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'));
     await waitFor(composeOpen, 'окно написания');
 
@@ -368,7 +405,10 @@ describe('дописанный черновик не плодит копии', (
       .mockResolvedValue({ ok: true, sentMessageId: 'sent:1' });
 
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'));
     await waitFor(composeOpen, 'окно написания');
 
@@ -386,7 +426,10 @@ describe('черновик не обрастает подписями', () => {
       draftContent({ bodyHtml: '<div>текст</div><div>-- <br>Иван</div>' }),
     );
     renderFolder();
-    await waitFor(() => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')), 'строку черновика');
+    await waitFor(
+      () => Boolean(host.querySelector('a[href="/drafts/drafts%3A38"]')),
+      'строку черновика',
+    );
     click(host.querySelector('a[href="/drafts/drafts%3A38"]'));
     await waitFor(composeOpen, 'окно написания');
     await act(async () => {

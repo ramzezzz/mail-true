@@ -99,10 +99,7 @@ describe('обычный вызов', () => {
 describe('повторные попытки', () => {
   it('после 503 запрос повторяется и удаётся', async () => {
     await withServer(
-      [
-        { status: 503, body: 'service unavailable' },
-        { json: completion('со второй попытки') },
-      ],
+      [{ status: 503, body: 'service unavailable' }, { json: completion('со второй попытки') }],
       async (server) => {
         const result = await makeProvider(server.baseUrl).chat(ask);
         assert.ok(result.ok);
@@ -125,12 +122,15 @@ describe('повторные попытки', () => {
   });
 
   it('код 400 не повторяется', async () => {
-    await withServer([{ status: 400, body: '{"error":{"message":"bad model"}}' }], async (server) => {
-      const result = await makeProvider(server.baseUrl).chat(ask);
-      assert.equal(result.ok, false);
-      if (!result.ok) assert.equal(result.error.retryable, false);
-      assert.equal(server.requests.length, 1);
-    });
+    await withServer(
+      [{ status: 400, body: '{"error":{"message":"bad model"}}' }],
+      async (server) => {
+        const result = await makeProvider(server.baseUrl).chat(ask);
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.equal(result.error.retryable, false);
+        assert.equal(server.requests.length, 1);
+      },
+    );
   });
 
   it('код 429 распознаётся как ограничение частоты', async () => {

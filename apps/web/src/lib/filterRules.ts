@@ -29,13 +29,7 @@ export const FIELD_TITLES: Record<FilterField, string> = {
 };
 
 export type FilterOperator =
-  | 'contains'
-  | 'not-contains'
-  | 'equals'
-  | 'greater'
-  | 'less'
-  | 'has'
-  | 'has-not';
+  'contains' | 'not-contains' | 'equals' | 'greater' | 'less' | 'has' | 'has-not';
 
 export const OPERATOR_TITLES: Record<FilterOperator, string> = {
   contains: 'содержит',
@@ -152,7 +146,9 @@ export function emptyRule(): FilterRule {
  */
 export function buildRule(draft: FilterRule): FilterRule {
   const conditions = draft.conditions
-    .map((c) => (conditionNeedsValue(c.field) ? { ...c, value: c.value.trim() } : { ...c, value: '' }))
+    .map((c) =>
+      conditionNeedsValue(c.field) ? { ...c, value: c.value.trim() } : { ...c, value: '' },
+    )
     // Условие «Вложение» остаётся без значения — оно и не нужно ему.
     .filter((c) => !conditionNeedsValue(c.field) || c.value.length > 0)
     .map((c) =>

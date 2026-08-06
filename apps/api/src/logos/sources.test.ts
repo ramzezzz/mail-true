@@ -14,7 +14,11 @@ import type { FetchOutcome } from './net.js';
 import type { TxtLookup } from './dns.js';
 
 const config = loadLogoConfig({});
-const logger = { debug: () => undefined, warn: () => undefined, info: () => undefined } as unknown as Logger;
+const logger = {
+  debug: () => undefined,
+  warn: () => undefined,
+  info: () => undefined,
+} as unknown as Logger;
 
 /** Годная картинка: PNG 128×128. */
 function png(): Buffer {
@@ -60,9 +64,7 @@ function deps(scenario: Scenario): FindLogoDeps & { calls: string[] } {
       // («не дозвонились»), и оператор `??` подменял бы его на 'absent'.
       return 'fallback' in scenario ? (scenario.fallback as FetchOutcome) : 'absent';
     },
-    ...(scenario.ai === undefined
-      ? {}
-      : { ai: { hint: async () => scenario.ai ?? null } }),
+    ...(scenario.ai === undefined ? {} : { ai: { hint: async () => scenario.ai ?? null } }),
   };
 }
 
@@ -88,7 +90,10 @@ test('BIMI отвечает первым — на сайт не идём вов�
 test('без BIMI берётся значок сайта', async () => {
   const d = deps({
     http: {
-      'https://example.com/': page('<link rel="apple-touch-icon" href="/touch.png">', 'https://example.com/'),
+      'https://example.com/': page(
+        '<link rel="apple-touch-icon" href="/touch.png">',
+        'https://example.com/',
+      ),
       'https://example.com/touch.png': image('https://example.com/touch.png'),
     },
   });
@@ -109,7 +114,10 @@ test('явный отказ владельца (l= пустое) закрыва�
   });
   const outcome = await findLogo('example.com', d);
   assert.equal(outcome.kind, 'none');
-  assert.equal(d.calls.some((c) => c.startsWith('http:')), false);
+  assert.equal(
+    d.calls.some((c) => c.startsWith('http:')),
+    false,
+  );
 });
 
 test('ИИ спрашивается ПОСЛЕДНИМ и только когда первые два молчат', async () => {
@@ -168,10 +176,10 @@ test('у поддомена спрашиваются оба имени, но н�
   const d = deps({ fallback: 'absent' });
   const outcome = await findLogo('news.example.com', d);
   assert.equal(outcome.kind, 'none');
-  assert.deepEqual(d.calls.filter((c) => c.startsWith('dns:')), [
-    'dns:default._bimi.news.example.com',
-    'dns:default._bimi.example.com',
-  ]);
+  assert.deepEqual(
+    d.calls.filter((c) => c.startsWith('dns:')),
+    ['dns:default._bimi.news.example.com', 'dns:default._bimi.example.com'],
+  );
   // Предел походов наружу на один домен: сюда входят два запроса DNS,
   // две страницы и по одному запасному /favicon.ico на каждую.
   assert.ok(outcome.requests <= 7, `запросов ${String(outcome.requests)}`);
@@ -188,7 +196,10 @@ test('негодная картинка по адресу из BIMI не меш�
     http: {
       // По адресу из записи лежит не картинка, а страница.
       'https://example.com/broken.svg': page('<html></html>', 'https://example.com/broken.svg'),
-      'https://example.com/': page('<link rel="icon" sizes="128x128" href="/i.png">', 'https://example.com/'),
+      'https://example.com/': page(
+        '<link rel="icon" sizes="128x128" href="/i.png">',
+        'https://example.com/',
+      ),
       'https://example.com/i.png': image('https://example.com/i.png'),
     },
   });

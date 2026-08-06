@@ -39,7 +39,10 @@ class MemoryStore implements DisposableStore {
   /** Всё, что видит Postfix: и наши адреса, и админские. */
   aliases: { id: number; address: string; destination: string; active: boolean }[] = [];
   /** Пристройка: чей адрес и когда выключен. */
-  own = new Map<number, { ownerEmail: string; note: string; createdAt: Date; disabledAt: Date | null }>();
+  own = new Map<
+    number,
+    { ownerEmail: string; note: string; createdAt: Date; disabledAt: Date | null }
+  >();
   mailboxes = new Set<string>(['test@mail.local', 'chuzhoy@mail.local']);
   domains = new Map<string, number>([['mail.local', 1]]);
   private next = 1;
@@ -76,9 +79,7 @@ class MemoryStore implements DisposableStore {
 
   async taken(address: string): Promise<boolean> {
     const lower = address.toLowerCase();
-    return (
-      this.mailboxes.has(lower) || this.aliases.some((a) => a.address.toLowerCase() === lower)
-    );
+    return this.mailboxes.has(lower) || this.aliases.some((a) => a.address.toLowerCase() === lower);
   }
 
   async domainId(domain: string): Promise<number | null> {
@@ -148,7 +149,9 @@ interface Harness {
   close(): Promise<void>;
 }
 
-async function build(options: { store?: MemoryStore | null; limit?: number; email?: string } = {}): Promise<Harness> {
+async function build(
+  options: { store?: MemoryStore | null; limit?: number; email?: string } = {},
+): Promise<Harness> {
   const store = options.store === undefined ? new MemoryStore() : options.store;
   const email = options.email ?? 'test@mail.local';
 

@@ -128,11 +128,7 @@ class FakeClient {
       flags: new Set<string>(),
       status: { messages: 0, unseen: 0, uidValidity: 1n },
     });
-    return [
-      folder('INBOX', '\\Inbox'),
-      folder('Sent', '\\Sent'),
-      folder('Drafts', '\\Drafts'),
-    ];
+    return [folder('INBOX', '\\Inbox'), folder('Sent', '\\Sent'), folder('Drafts', '\\Drafts')];
   }
 
   /** Что лежит под каким UID — по этому FETCH читает черновик обратно. */
@@ -395,7 +391,10 @@ test('с включённой отменой письмо не уходит ср
 
     // Срок назван, и он тот, который выбрал человек
     const until = Date.parse(body.undoUntil ?? '');
-    assert.ok(until >= before + 5000 && until <= before + 6000, `срок отмены: ${String(body.undoUntil)}`);
+    assert.ok(
+      until >= before + 5000 && until <= before + 6000,
+      `срок отмены: ${String(body.undoUntil)}`,
+    );
 
     // Именно НА ДИСКЕ. Это и отличает нашу отмену от таймера в браузере:
     // вкладку закроют, процесс перезапустят — письмо всё равно уйдёт.

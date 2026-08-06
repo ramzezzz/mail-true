@@ -358,11 +358,7 @@ export function LogsPage() {
           onChange={(e) => setSearch(e.target.value)}
         />
         <label className={styles.auto}>
-          <input
-            type="checkbox"
-            checked={auto}
-            onChange={(e) => toggleAuto(e.target.checked)}
-          />
+          <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
           <span>Автообновление</span>
         </label>
         <ToolbarSpacer />
@@ -381,15 +377,15 @@ export function LogsPage() {
       <ErrorNotice error={error} />
       {rotated && (
         <Notice tone="info">
-          Журнал провернулся, пока вы его читали: прежнее место в файле больше ничего не
-          значит. Нажмите «Обновить», чтобы перейти к новому файлу. Что было раньше — в
-          разделе «Почтовый поток»: обработанные письма туда попадают и проворот переживают.
+          Журнал провернулся, пока вы его читали: прежнее место в файле больше ничего не значит.
+          Нажмите «Обновить», чтобы перейти к новому файлу. Что было раньше — в разделе «Почтовый
+          поток»: обработанные письма туда попадают и проворот переживают.
         </Notice>
       )}
       {loaded.budgetExhausted && (
         <Notice tone="info">
-          Просмотрен кусок журнала, подходящих строк в нём нет. Прокрутите ленту вверх —
-          поиск продолжится дальше по файлу.
+          Просмотрен кусок журнала, подходящих строк в нём нет. Прокрутите ленту вверх — поиск
+          продолжится дальше по файлу.
         </Notice>
       )}
 
@@ -453,17 +449,16 @@ export function LogsPage() {
         )}
         {sourceInfo && sourceInfo.rotatedFiles > 0 && (
           <span>
-            Рядом лежит провёрнутых кусков: {sourceInfo.rotatedFiles} — раздел показывает
-            только текущий файл
+            Рядом лежит провёрнутых кусков: {sourceInfo.rotatedFiles} — раздел показывает только
+            текущий файл
           </span>
         )}
       </div>
 
       {sources.data && sourceInfo && !sourceInfo.present && (
         <Notice tone="error">
-          Файла {sourceInfo.fileName} нет в {sources.data.dir}. Служба либо не запущена, либо
-          не настроена писать журнал в общий том (см. том maillogs в
-          infra/docker-compose.yml).
+          Файла {sourceInfo.fileName} нет в {sources.data.dir}. Служба либо не запущена, либо не
+          настроена писать журнал в общий том (см. том maillogs в infra/docker-compose.yml).
         </Notice>
       )}
     </>

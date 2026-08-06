@@ -53,7 +53,11 @@ describe('прилипание к концу списка', () => {
     const almost = { scrollTop: 900 - (STICK_SLACK_PX - 1), scrollHeight: 1500, clientHeight: 600 };
     expect(isPinnedToBottom(almost)).toBe(true);
 
-    const tooFar = { scrollTop: 900 - (STICK_SLACK_PX + 10), scrollHeight: 1500, clientHeight: 600 };
+    const tooFar = {
+      scrollTop: 900 - (STICK_SLACK_PX + 10),
+      scrollHeight: 1500,
+      clientHeight: 600,
+    };
     expect(isPinnedToBottom(tooFar)).toBe(false);
   });
 
@@ -187,7 +191,11 @@ describe('кто на самом деле прокручивается', () => {
     document.body.append(main);
     Object.defineProperty(main, 'clientHeight', { value: 600, configurable: true });
     Object.defineProperty(main, 'scrollHeight', { value: 600 + extra, configurable: true });
-    Object.defineProperty(main, 'scrollTop', { value: scrollTop, writable: true, configurable: true });
+    Object.defineProperty(main, 'scrollTop', {
+      value: scrollTop,
+      writable: true,
+      configurable: true,
+    });
     return inner;
   }
 

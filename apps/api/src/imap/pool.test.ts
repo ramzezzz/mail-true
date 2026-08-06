@@ -49,7 +49,7 @@ interface Harness {
 
 function makePool(
   tune: (client: FakeClient) => void = () => undefined,
-  extra: Partial<ImapPoolOptions> = {}
+  extra: Partial<ImapPoolOptions> = {},
 ): Harness {
   const created: FakeClient[] = [];
   const pool = new ImapPool({
@@ -84,9 +84,7 @@ test('60 параллельных запросов открывают ровно
   });
 
   const results = await Promise.all(
-    Array.from({ length: 60 }, (_, i) =>
-      pool.withClient('test@mail.local', 'pass', async () => i)
-    )
+    Array.from({ length: 60 }, (_, i) => pool.withClient('test@mail.local', 'pass', async () => i)),
   );
 
   assert.equal(results.length, 60);
@@ -116,8 +114,8 @@ test('обращения одного пользователя не пересе
         maxInside = Math.max(maxInside, inside);
         await new Promise((r) => setTimeout(r, 1));
         inside -= 1;
-      })
-    )
+      }),
+    ),
   );
   assert.equal(maxInside, 1, 'соединение используется строго по очереди');
 });
@@ -199,7 +197,7 @@ test('обрыв соединения посреди запроса даёт 503
       assert.equal(e.statusCode, 503);
       assert.equal(e.code, 'UPSTREAM_UNAVAILABLE');
       return true;
-    }
+    },
   );
 });
 
@@ -224,7 +222,7 @@ test('прикладная ошибка внутри задачи не подм�
     pool.withClient('test@mail.local', 'p', async () => {
       throw new Error('Папка не найдена');
     }),
-    /Папка не найдена/
+    /Папка не найдена/,
   );
 });
 

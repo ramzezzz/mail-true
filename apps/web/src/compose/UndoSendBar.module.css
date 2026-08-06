@@ -147,8 +147,7 @@
     max-width: none;
     transform: none;
     bottom: calc(
-      56px + 16px + 56px + 12px + env(safe-area-inset-bottom, 0px) +
-        var(--mt-undo-offset, 0px)
+      56px + 16px + 56px + 12px + env(safe-area-inset-bottom, 0px) + var(--mt-undo-offset, 0px)
     );
     /* Ход другой: на телефоне плашка во всю ширину и по X не сдвинута,
        поэтому сдвиг центрирования из undoShow здесь только помешал бы */

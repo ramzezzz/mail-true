@@ -47,7 +47,9 @@ test('без служебного пользователя имя входа —
  * Поддельный IMAP-сервер, принимающий ТОЛЬКО служебное имя входа.
  * Так проверяется, что в сеть уходит именно склеенное имя, а не ящик.
  */
-function imapExpectingLogin(expected: string): Promise<{ port: number; server: Server; seen: string[] }> {
+function imapExpectingLogin(
+  expected: string,
+): Promise<{ port: number; server: Server; seen: string[] }> {
   const seen: string[] = [];
   return new Promise((resolve) => {
     const server = createServer((socket) => {

@@ -51,8 +51,7 @@ export function AliasesPage() {
   };
 
   const toggle = useMutation({
-    mutationFn: ({ id, active }: { id: number; active: boolean }) =>
-      api.setAliasActive(id, active),
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => api.setAliasActive(id, active),
     // Об успехе сообщаем, как в списке ящиков: молчание после нажатия
     // неотличимо от «кнопка не сработала», и человек жмёт ещё раз.
     onSuccess: (_data, variables) => {
@@ -91,7 +90,11 @@ export function AliasesPage() {
           }}
         />
         <ToolbarSpacer />
-        {can('aliases.write') && <Button size="s" onClick={() => setAddOpen(true)}>Создать алиас</Button>}
+        {can('aliases.write') && (
+          <Button size="s" onClick={() => setAddOpen(true)}>
+            Создать алиас
+          </Button>
+        )}
       </Toolbar>
 
       <TableWrap>
@@ -117,7 +120,9 @@ export function AliasesPage() {
                 <td className="mt-mono">{alias.source}</td>
                 <td className="mt-mono">{alias.destination}</td>
                 <td className={`mt-mono ${tableStyles.optionalNarrow}`}>{alias.domain}</td>
-                <td><ActiveBadge active={alias.active} /></td>
+                <td>
+                  <ActiveBadge active={alias.active} />
+                </td>
                 <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>
                   {formatDateTime(alias.createdAt)}
                 </td>
@@ -175,8 +180,8 @@ export function AliasesPage() {
           <ErrorNotice error={remove.error} />
           <Notice tone="error">
             Письма, приходящие на <span className="mt-mono">{removing.source}</span>, перестанут
-            попадать на <span className="mt-mono">{removing.destination}</span> и будут
-            отбиваться отправителям. Восстановить пересылку можно только заново создав алиас.
+            попадать на <span className="mt-mono">{removing.destination}</span> и будут отбиваться
+            отправителям. Восстановить пересылку можно только заново создав алиас.
           </Notice>
         </Modal>
       )}
@@ -200,7 +205,8 @@ function AddAliasModal({ onClose, onAdded }: { onClose: () => void; onAdded: () 
   const [destination, setDestination] = useState('');
 
   const add = useMutation({
-    mutationFn: () => api.createAlias(source.trim().toLowerCase(), destination.trim().toLowerCase()),
+    mutationFn: () =>
+      api.createAlias(source.trim().toLowerCase(), destination.trim().toLowerCase()),
     onSuccess: onAdded,
   });
 

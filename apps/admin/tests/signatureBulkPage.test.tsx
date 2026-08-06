@@ -74,7 +74,13 @@ function preview(over: Partial<SignatureBulkPreview> = {}): SignatureBulkPreview
     withExistingSignatures: 0,
     rows: [],
     rowsTruncated: 0,
-    sample: { email: 'a@mail.local', displayName: 'Анна', outcome: 'add', missing: [], text: 'Анна' },
+    sample: {
+      email: 'a@mail.local',
+      displayName: 'Анна',
+      outcome: 'add',
+      missing: [],
+      text: 'Анна',
+    },
     ...over,
   };
 }
@@ -156,7 +162,9 @@ describe('групповая установка подписей', () => {
     const apply = button('Применить');
     expect(apply.disabled).toBe(true);
 
-    const confirm = container.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)');
+    const confirm = container.querySelector<HTMLInputElement>(
+      'input[type="checkbox"]:not(:disabled)',
+    );
     expect(confirm).not.toBeNull();
   });
 

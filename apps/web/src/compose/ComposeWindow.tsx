@@ -378,14 +378,7 @@ export function ComposeWindow({
     if (applySignature(defaultSignature(preferences)?.id ?? null)) {
       patch({ signatureApplied: true });
     }
-  }, [
-    draft.signatureApplied,
-    settingsPending,
-    win.minimized,
-    preferences,
-    applySignature,
-    patch,
-  ]);
+  }, [draft.signatureApplied, settingsPending, win.minimized, preferences, applySignature, patch]);
 
   /**
    * Выбранный размер шрифта. У нативного `select` он показывался сам;
@@ -408,11 +401,7 @@ export function ComposeWindow({
 
   /** Экранирование: текст от модели вставляется как текст, а не как разметка. */
   const asHtml = (text: string): string =>
-    text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\n/g, '<br>');
+    text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
 
   const readAll = (): string => editorRef.current?.innerText ?? '';
 
@@ -614,9 +603,7 @@ export function ComposeWindow({
      * человек может написать и намеренно. Второе нажатие отправляет.
      */
     if (!placeholdersWarned) {
-      const leftovers = unresolvedPlaceholders(
-        `${payload.subject} ${currentBodyHtml()}`,
-      );
+      const leftovers = unresolvedPlaceholders(`${payload.subject} ${currentBodyHtml()}`);
       if (leftovers.length > 0) {
         setPlaceholdersWarned(true);
         setError(
@@ -730,7 +717,10 @@ export function ComposeWindow({
    * когда есть что терять.
    */
   const discard = (): void => {
-    if (hasContent() && !window.confirm('Закрыть письмо без сохранения? Написанное будет потеряно.')) {
+    if (
+      hasContent() &&
+      !window.confirm('Закрыть письмо без сохранения? Написанное будет потеряно.')
+    ) {
       return;
     }
     closeCompose(win.id);
@@ -790,9 +780,7 @@ export function ComposeWindow({
             onError: (err) => {
               // Сеть отвалилась на самой отмене. Обещать, что письмо
               // осталось, нельзя — сервер о нашем нажатии не узнал.
-              showNotice(
-                actionErrorText('Не удалось отменить отправку, письмо уйдёт', err),
-              );
+              showNotice(actionErrorText('Не удалось отменить отправку, письмо уйдёт', err));
               closeCompose(win.id);
             },
           });
@@ -826,7 +814,9 @@ export function ComposeWindow({
         /* Каскад задаётся переменной, а не свойством right: на узком экране
            окно раскрывается во весь экран правилом из CSS, а встроенный стиль
            перебил бы его и оставил окно у правого края. */
-        style={maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)}
+        style={
+          maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)
+        }
         aria-label="Новое письмо"
         onKeyDown={(e) => {
           // Esc сохраняет черновик и закрывает окно (как в mail.ru).
@@ -874,11 +864,7 @@ export function ComposeWindow({
                 onClick={() => setMaximized((v) => !v)}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M5 5h14v14H5V5Zm2 2v10h10V7H7Z"
-                    fill="currentColor"
-                    fillRule="evenodd"
-                  />
+                  <path d="M5 5h14v14H5V5Zm2 2v10h10V7H7Z" fill="currentColor" fillRule="evenodd" />
                 </svg>
               </IconButton>
             </Tooltip>
@@ -901,8 +887,7 @@ export function ComposeWindow({
         */}
         {win.init.sendFailure && (
           <div className={styles.sendFailure} role="status">
-            <b>Письмо не отправлено.</b>{' '}
-            {failureSummary({ ...win.init.sendFailure })}
+            <b>Письмо не отправлено.</b> {failureSummary({ ...win.init.sendFailure })}
           </div>
         )}
 
@@ -924,12 +909,20 @@ export function ComposeWindow({
           />
           <span className={styles.fieldLinks}>
             {!showCc && (
-              <button type="button" className={styles.fieldLink} onClick={() => patch({ showCc: true })}>
+              <button
+                type="button"
+                className={styles.fieldLink}
+                onClick={() => patch({ showCc: true })}
+              >
                 Копия
               </button>
             )}
             {!showBcc && (
-              <button type="button" className={styles.fieldLink} onClick={() => patch({ showBcc: true })}>
+              <button
+                type="button"
+                className={styles.fieldLink}
+                onClick={() => patch({ showBcc: true })}
+              >
                 Скрытая
               </button>
             )}
@@ -1027,18 +1020,18 @@ export function ComposeWindow({
               e.target.value = '';
             }}
           />
-          <button type="button" className={styles.attachButton} onClick={() => fileRef.current?.click()}>
+          <button
+            type="button"
+            className={styles.attachButton}
+            onClick={() => fileRef.current?.click()}
+          >
             <IconAttach />
             Прикрепить файл
           </button>
           {/* «Из Почты» — прикрепить файл, который уже приходил в другом
               письме. Кнопка была пустышкой (писала в консоль); теперь
               открывает выбор — см. MailAttachmentPicker. */}
-          <button
-            type="button"
-            className={styles.attachButton}
-            onClick={() => setPickerOpen(true)}
-          >
+          <button type="button" className={styles.attachButton} onClick={() => setPickerOpen(true)}>
             Из Почты
           </button>
           {attachments.map((a) => (
@@ -1100,16 +1093,36 @@ export function ComposeWindow({
           команда применилась бы в пустоту.
         */}
         <div className={styles.formatBar} onMouseDown={(e) => e.preventDefault()}>
-          <button type="button" className={styles.fmtButton} title="Жирный" onClick={() => exec('bold')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Жирный"
+            onClick={() => exec('bold')}
+          >
             <b>Ж</b>
           </button>
-          <button type="button" className={styles.fmtButton} title="Наклонный" onClick={() => exec('italic')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Наклонный"
+            onClick={() => exec('italic')}
+          >
             <i>К</i>
           </button>
-          <button type="button" className={styles.fmtButton} title="Подчёркнутый" onClick={() => exec('underline')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Подчёркнутый"
+            onClick={() => exec('underline')}
+          >
             <u>Ч</u>
           </button>
-          <button type="button" className={styles.fmtButton} title="Зачёркнутый" onClick={() => exec('strikeThrough')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Зачёркнутый"
+            onClick={() => exec('strikeThrough')}
+          >
             <s>З</s>
           </button>
 
@@ -1157,25 +1170,60 @@ export function ComposeWindow({
 
           <span className={styles.fmtSeparator} />
 
-          <button type="button" className={styles.fmtButton} title="По левому краю" onClick={() => exec('justifyLeft')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="По левому краю"
+            onClick={() => exec('justifyLeft')}
+          >
             <IconAlignLeft size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="По центру" onClick={() => exec('justifyCenter')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="По центру"
+            onClick={() => exec('justifyCenter')}
+          >
             <IconAlignCenter size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="По правому краю" onClick={() => exec('justifyRight')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="По правому краю"
+            onClick={() => exec('justifyRight')}
+          >
             <IconAlignRight size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="Маркированный список" onClick={() => exec('insertUnorderedList')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Маркированный список"
+            onClick={() => exec('insertUnorderedList')}
+          >
             <IconListBulleted size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="Нумерованный список" onClick={() => exec('insertOrderedList')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Нумерованный список"
+            onClick={() => exec('insertOrderedList')}
+          >
             <IconListNumbered size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="Отменить" onClick={() => exec('undo')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Отменить"
+            onClick={() => exec('undo')}
+          >
             <IconUndo size={20} />
           </button>
-          <button type="button" className={styles.fmtButton} title="Повторить" onClick={() => exec('redo')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Повторить"
+            onClick={() => exec('redo')}
+          >
             <IconRedo size={20} />
           </button>
           <button
@@ -1206,7 +1254,12 @@ export function ComposeWindow({
             <EmojiGrid onPick={(symbol) => exec('insertText', symbol)} />
           </Dropdown>
 
-          <button type="button" className={styles.fmtButton} title="Очистить форматирование" onClick={() => exec('removeFormat')}>
+          <button
+            type="button"
+            className={styles.fmtButton}
+            title="Очистить форматирование"
+            onClick={() => exec('removeFormat')}
+          >
             <IconClearFormat size={20} />
           </button>
 
@@ -1299,12 +1352,13 @@ export function ComposeWindow({
 
         {/* Нижняя панель */}
         <div className={styles.footer}>
-          <Button mode="primary" className={styles.sendButton} onClick={send} disabled={sendMessage.isPending}>
-            {sendMessage.isPending
-              ? 'Отправка…'
-              : draft.sendAt
-                ? 'Отправить позже'
-                : 'Отправить'}
+          <Button
+            mode="primary"
+            className={styles.sendButton}
+            onClick={send}
+            disabled={sendMessage.isPending}
+          >
+            {sendMessage.isPending ? 'Отправка…' : draft.sendAt ? 'Отправить позже' : 'Отправить'}
           </Button>
           <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
             {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
@@ -1314,7 +1368,11 @@ export function ComposeWindow({
           </Button>
           {savedAt && (
             <span className={styles.savedNote}>
-              Сохранено в {new Date(savedAt).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+              Сохранено в{' '}
+              {new Date(savedAt).toLocaleTimeString('ru-RU', {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
             </span>
           )}
           {/* Назначенное время видно всегда, а не только внутри меню:

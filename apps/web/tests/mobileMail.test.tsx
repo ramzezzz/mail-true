@@ -266,9 +266,7 @@ describe('строка списка на телефоне', () => {
   it('на телефоне строка разложена сеткой в три ряда: отправитель, тема, превью', () => {
     const css = narrowRules(read('mail/MessageList.module.css'), 600);
     const row = block(css, '.row');
-    expect(row, 'строка на телефоне осталась однострочным flex-ом').toMatch(
-      /display:\s*grid/u,
-    );
+    expect(row, 'строка на телефоне осталась однострочным flex-ом').toMatch(/display:\s*grid/u);
     // Три ряда: отправитель, тема, превью
     const rows = /grid-template-rows:\s*([^;]+);/u.exec(row);
     expect(rows, 'у сетки строки не задано трёх рядов').not.toBeNull();
@@ -285,9 +283,7 @@ describe('строка списка на телефоне', () => {
     const css = narrowRules(read('mail/MessageList.module.css'), 600);
     const snippet = block(css, '.snippet');
     // Раньше здесь стояло ровно `display: none`
-    expect(snippet, 'превью на телефоне по-прежнему спрятано').not.toMatch(
-      /display:\s*none/u,
-    );
+    expect(snippet, 'превью на телефоне по-прежнему спрятано').not.toMatch(/display:\s*none/u);
     // И оно занимает отдельную строку, а не встаёт рядом с темой
     expect(snippet).toMatch(/flex:\s*1\s+0\s+100%/u);
   });
@@ -449,8 +445,8 @@ describe('смахивание строки списка', () => {
     });
     const row = host.querySelector<HTMLAnchorElement>('a[class*="row"]')!;
     const click = () =>
-      act(() =>
-        void row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })),
+      act(
+        () => void row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })),
       );
 
     // Смахнули — и следом браузер шлёт клик по той же строке
@@ -552,7 +548,10 @@ describe('у каждого жеста есть кнопка', () => {
     const button = [...host.querySelectorAll('button')].find((b) =>
       (b.textContent ?? '').includes('Обновить'),
     );
-    expect(button, 'кнопки «Обновить» нет — жест остался единственным способом').not.toBeUndefined();
+    expect(
+      button,
+      'кнопки «Обновить» нет — жест остался единственным способом',
+    ).not.toBeUndefined();
 
     act(() => void button!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(refresh).toHaveBeenCalled();
@@ -667,7 +666,6 @@ function stubApi() {
 /** Даём react-query доехать: список папок приходит отдельным запросом. */
 async function flush() {
   for (let i = 0; i < 8; i += 1) {
-     
     await act(async () => {
       await new Promise((done) => setTimeout(done, 0));
     });
@@ -697,12 +695,7 @@ describe('нижняя навигация телефона', () => {
   beforeEach(() => stubApi());
 
   it('в полосу попадают главные папки в понятном порядке', () => {
-    expect(pinnedFolders(folders).map((f) => f.role)).toEqual([
-      'inbox',
-      'sent',
-      'drafts',
-      'trash',
-    ]);
+    expect(pinnedFolders(folders).map((f) => f.role)).toEqual(['inbox', 'sent', 'drafts', 'trash']);
     // Папки, которой у ящика нет, в полосе быть не должно
     expect(pinnedFolders([folders[0]!]).map((f) => f.role)).toEqual(['inbox']);
     expect(pinnedFolders(undefined)).toEqual([]);
@@ -722,9 +715,7 @@ describe('нижняя навигация телефона', () => {
     expect(hrefs).toContain('/trash/');
 
     // «Ещё» открывает тот же ящик с папками — это второе касание
-    const more = bar!.querySelector<HTMLButtonElement>(
-      `button[aria-controls="${NAV_DRAWER_ID}"]`,
-    );
+    const more = bar!.querySelector<HTMLButtonElement>(`button[aria-controls="${NAV_DRAWER_ID}"]`);
     expect(more, 'из полосы не добраться до остальных папок').not.toBeNull();
     expect(more!.getAttribute('aria-expanded')).toBe('false');
 
@@ -744,7 +735,10 @@ describe('нижняя навигация телефона', () => {
     await flush();
 
     const fab = host.querySelector<HTMLButtonElement>('button[aria-label="Написать письмо"]');
-    expect(fab, 'кнопка написания есть только в выдвижном ящике — одной рукой не достать').not.toBeNull();
+    expect(
+      fab,
+      'кнопка написания есть только в выдвижном ящике — одной рукой не достать',
+    ).not.toBeNull();
 
     act(() => void fab!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(useUiStore.getState().composeWindows).toHaveLength(1);
@@ -813,8 +807,10 @@ describe('касание вместо мыши', () => {
     }
     // На сенсорном экране наведение залипает: коснулся строки — она осталась
     // подсвеченной, коснулся кнопки — она осталась «под курсором».
-    expect(offenders, `правила наведения вне @media (hover: hover):\n${offenders.join('\n')}`)
-      .toHaveLength(0);
+    expect(
+      offenders,
+      `правила наведения вне @media (hover: hover):\n${offenders.join('\n')}`,
+    ).toHaveLength(0);
   });
 
   it('там, где было наведение, живой отклик остался нажатием', () => {

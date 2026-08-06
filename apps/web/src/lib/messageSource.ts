@@ -45,7 +45,7 @@ export function foldMessageSource(raw: string): FoldedSource {
   const out: string[] = [];
   let foldedLines = 0;
 
-  for (let i = 0; i < lines.length; ) {
+  for (let i = 0; i < lines.length;) {
     if (!base64Line(lines[i] ?? '')) {
       out.push(lines[i] ?? '');
       i += 1;

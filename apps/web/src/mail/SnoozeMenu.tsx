@@ -104,8 +104,8 @@ export function SnoozeMenu({
       <CustomWake onPick={(until) => onSnooze({ preset: 'custom', until })} />
       {!scheduledReturn && (
         <p className={styles.warning}>
-          Возврат по расписанию сейчас не работает: письмо придётся вернуть вручную из
-          папки «Отложенные».
+          Возврат по расписанию сейчас не работает: письмо придётся вернуть вручную из папки
+          «Отложенные».
         </p>
       )}
     </Dropdown>

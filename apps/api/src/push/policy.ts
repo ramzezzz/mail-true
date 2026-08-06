@@ -310,7 +310,10 @@ function messageUrl(item: NotificationItem): string {
 }
 
 /** Заголовок и тело для одного письма на выбранном уровне. */
-function singleView(item: NotificationItem, level: NotificationLevel): { title: string; body: string } {
+function singleView(
+  item: NotificationItem,
+  level: NotificationLevel,
+): { title: string; body: string } {
   const sender = senderLabel(item.from);
   const subject = clip(subjectLabel(item.subject), 90);
 

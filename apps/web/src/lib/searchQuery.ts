@@ -248,11 +248,7 @@ export function queryStems(query: string): string[] {
     if (isFlagWord(part.value)) continue;
     stems.push(part.quoted ? part.value : trimRussianEnding(part.value));
   }
-  return [
-    ...new Set(
-      stems.map((s) => normalizeForMatch(s).trim()).filter((s) => s.length > 0),
-    ),
-  ];
+  return [...new Set(stems.map((s) => normalizeForMatch(s).trim()).filter((s) => s.length > 0))];
 }
 
 export interface HighlightSegment {

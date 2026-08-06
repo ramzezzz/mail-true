@@ -37,14 +37,7 @@ export function isUniqueViolation(err: unknown): boolean {
 
 /** Что записываем своей рукой. Набор проверяет код, а не база. */
 export type AccessKind =
-  | 'login'
-  | 'login.failed'
-  | 'logout'
-  | 'settings'
-  | 'filters'
-  | 'folders'
-  | 'trash'
-  | 'export';
+  'login' | 'login.failed' | 'logout' | 'settings' | 'filters' | 'folders' | 'trash' | 'export';
 
 export interface AccessInsert {
   accountEmail: string;
@@ -255,7 +248,11 @@ export interface OwnerStore {
   /** Уборка истории: старше срока — удалить. Возвращает число строк. */
   purgeAccess(olderThan: Date): Promise<number>;
 
-  createExport(accountEmail: string, includeSpam: boolean, includeTrash: boolean): Promise<ExportRow>;
+  createExport(
+    accountEmail: string,
+    includeSpam: boolean,
+    includeTrash: boolean,
+  ): Promise<ExportRow>;
   listExports(accountEmail: string, limit: number): Promise<ExportRow[]>;
   findExport(id: number): Promise<ExportRow | null>;
   /** Берёт следующее задание в работу; null — очередь пуста. */
@@ -328,10 +325,9 @@ export class OwnerDb implements OwnerStore {
   }
 
   async #tableExists(name: string): Promise<boolean> {
-    const rows = await this.#query<{ ok: boolean }>(
-      `SELECT to_regclass($1) IS NOT NULL AS ok`,
-      [`public.${name}`],
-    );
+    const rows = await this.#query<{ ok: boolean }>(`SELECT to_regclass($1) IS NOT NULL AS ok`, [
+      `public.${name}`,
+    ]);
     return rows[0]?.ok === true;
   }
 
@@ -378,7 +374,11 @@ export class OwnerDb implements OwnerStore {
     );
   }
 
-  async listAccess(accountEmail: string, limit: number, before: string | null): Promise<AccessRow[]> {
+  async listAccess(
+    accountEmail: string,
+    limit: number,
+    before: string | null,
+  ): Promise<AccessRow[]> {
     const rows = await this.#query<AccessRowRaw>(
       `SELECT id, at, kind, channel, success, ip, user_agent, detail
          FROM mailbox_access_log
@@ -401,10 +401,9 @@ export class OwnerDb implements OwnerStore {
   }
 
   async purgeAccess(olderThan: Date): Promise<number> {
-    const result = await this.#pool.query(
-      `DELETE FROM mailbox_access_log WHERE at < $1`,
-      [olderThan.toISOString()],
-    );
+    const result = await this.#pool.query(`DELETE FROM mailbox_access_log WHERE at < $1`, [
+      olderThan.toISOString(),
+    ]);
     return result.rowCount ?? 0;
   }
 

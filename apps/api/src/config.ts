@@ -6,9 +6,7 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 /** Булево значение из строки окружения: 'true' | 'false' | '1' | '0'. */
-const boolFlag = z
-  .enum(['true', 'false', '1', '0'])
-  .transform((v) => v === 'true' || v === '1');
+const boolFlag = z.enum(['true', 'false', '1', '0']).transform((v) => v === 'true' || v === '1');
 
 const intVar = (def: number, min = 0, max = Number.MAX_SAFE_INTEGER) =>
   z.coerce.number().int().min(min).max(max).default(def);
@@ -157,7 +155,7 @@ export const envSchema = z
      */
     ATTACHMENT_MAX_BYTES: Math.min(
       cfg.UPLOAD_MAX_BYTES,
-      Math.floor(cfg.MESSAGE_MAX_BYTES / ENCODING_OVERHEAD)
+      Math.floor(cfg.MESSAGE_MAX_BYTES / ENCODING_OVERHEAD),
     ),
   }));
 
@@ -167,9 +165,7 @@ export type AppConfig = z.infer<typeof envSchema>;
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
-    const details = parsed.error.issues
-      .map((i) => `${i.path.join('.')}: ${i.message}`)
-      .join('; ');
+    const details = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
     throw new Error(`Некорректная конфигурация окружения: ${details}`);
   }
   return parsed.data;

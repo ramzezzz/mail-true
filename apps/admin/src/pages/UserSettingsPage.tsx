@@ -197,10 +197,7 @@ export function UserSettingsPage() {
   const error =
     bundle.error ?? saveGeneral.error ?? saveRule.error ?? deleteRule.error ?? reorder.error;
 
-  const signatureIds = useMemo(
-    () => new Set((draft?.signatures ?? []).map((s) => s.id)),
-    [draft],
-  );
+  const signatureIds = useMemo(() => new Set((draft?.signatures ?? []).map((s) => s.id)), [draft]);
 
   return (
     <>
@@ -328,11 +325,7 @@ export function UserSettingsPage() {
                   Добавить подпись
                 </Button>
                 <ToolbarSpacer />
-                <Button
-                  size="s"
-                  disabled={busy}
-                  onClick={() => saveGeneral.mutate(draft)}
-                >
+                <Button size="s" disabled={busy} onClick={() => saveGeneral.mutate(draft)}>
                   {saveGeneral.isPending ? 'Сохраняем…' : 'Сохранить настройки'}
                 </Button>
               </Toolbar>
@@ -660,7 +653,10 @@ function RuleModal({
             onClick={() =>
               setDraft({
                 ...draft,
-                conditions: [...draft.conditions, { field: 'from', operator: 'contains', value: '' }],
+                conditions: [
+                  ...draft.conditions,
+                  { field: 'from', operator: 'contains', value: '' },
+                ],
               })
             }
           >

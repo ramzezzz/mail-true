@@ -358,7 +358,9 @@ describe('закрытие окна написания', () => {
   });
 
   it('окно не закрывается, если черновик не сохранился', async () => {
-    vi.spyOn(api, 'saveDraft').mockRejectedValue(new ApiError(503, '/api/drafts', 'Сервер не отвечает'));
+    vi.spyOn(api, 'saveDraft').mockRejectedValue(
+      new ApiError(503, '/api/drafts', 'Сервер не отвечает'),
+    );
 
     render();
     act(() => useUiStore.getState().openCompose());
@@ -402,7 +404,10 @@ describe('закрытие окна написания', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     act(() => button('Отменить')!.click());
     expect(confirm).toHaveBeenCalled();
-    expect(useUiStore.getState().composeWindows.length, 'отказ от подтверждения оставляет окно').toBe(1);
+    expect(
+      useUiStore.getState().composeWindows.length,
+      'отказ от подтверждения оставляет окно',
+    ).toBe(1);
 
     confirm.mockReturnValue(true);
     act(() => button('Отменить')!.click());

@@ -185,7 +185,10 @@ export function SaveTemplateDialog({
       className={styles.dialog}
       footer={
         <>
-          <Button disabled={trimmed === '' || busy} onClick={() => onSubmit(trimmed, withAttachments)}>
+          <Button
+            disabled={trimmed === '' || busy}
+            onClick={() => onSubmit(trimmed, withAttachments)}
+          >
             {busy ? 'Сохраняем…' : 'Сохранить'}
           </Button>
           <Button mode="secondary" disabled={busy} onClick={onClose}>
@@ -206,8 +209,8 @@ export function SaveTemplateDialog({
       />
 
       <p className={styles.dialogNote}>
-        В шаблон попадут тема и текст письма. Получатели — нет: шаблон вставляют в разные письма,
-        и запомнить адрес значило бы однажды отправить не тому.
+        В шаблон попадут тема и текст письма. Получатели — нет: шаблон вставляют в разные письма, и
+        запомнить адрес значило бы однажды отправить не тому.
       </p>
 
       {attachmentCount > 0 && (

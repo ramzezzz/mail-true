@@ -93,7 +93,15 @@ test('threadIdOf: ответы группируются с исходным пи
 
 test('flagsFromSet: все системные флаги', () => {
   const flags = flagsFromSet(
-    new Set(['\\Seen', '\\Flagged', '\\Answered', '\\Draft', '\\Deleted', '$Forwarded', '$MDNSent']),
+    new Set([
+      '\\Seen',
+      '\\Flagged',
+      '\\Answered',
+      '\\Draft',
+      '\\Deleted',
+      '$Forwarded',
+      '$MDNSent',
+    ]),
   );
   assert.deepEqual(flags, {
     seen: true,
@@ -117,5 +125,7 @@ test('flagsFromSet: без $MDNSent поле честно false, а не отс�
 });
 
 test('labelsFromSet: системные ключевые слова отфильтрованы', () => {
-  assert.deepEqual(labelsFromSet(new Set(['\\Seen', '$Forwarded', '$MDNSent', 'Важное'])), ['Важное']);
+  assert.deepEqual(labelsFromSet(new Set(['\\Seen', '$Forwarded', '$MDNSent', 'Важное'])), [
+    'Важное',
+  ]);
 });

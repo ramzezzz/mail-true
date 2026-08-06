@@ -51,9 +51,7 @@ describe('панель над списком повторяет мейловск
     // Токен есть в выгрузке ровно с этим значением
     expect(tokensCss).toMatch(/--mt-mail-color-button-text:\s*#333333/iu);
     // …и в тёмной теме он возвращается к основному тексту
-    expect(themesCss).toMatch(
-      /--mt-mail-color-button-text:\s*var\(--mt-color-text-primary\)/u,
-    );
+    expect(themesCss).toMatch(/--mt-mail-color-button-text:\s*var\(--mt-color-text-primary\)/u);
   });
 
   it('панель отступает от края колонки на 16px, как «Выделить все» на x=248', () => {
@@ -76,9 +74,22 @@ describe('левый столбец', () => {
 
   it('значки папок 20×20, а не 16×16', () => {
     expect(sidebarTsx).toMatch(/<IconFolderRole role=\{f\.role\} size=\{20\} \/>/u);
-    // «Новая папка» рисуется своим svg — и он тоже 20
-    expect(sidebarTsx).toMatch(/<svg width="20" height="20"/u);
-    expect(sidebarTsx).not.toMatch(/<svg width="16" height="16"[^>]*folderIcon/u);
+    /*
+     * «Новая папка» рисуется своим svg — и он тоже 20.
+     *
+     * Размеры ищутся по отдельности, а не одной строкой `width="20"
+     * height="20"`: Prettier разносит атрибуты по строкам, и проверка,
+     * привязанная к их порядку и соседству, падала бы на форматировании —
+     * то есть говорила бы «значок не того размера» там, где размер не
+     * менялся вовсе.
+     */
+    const ownSvg = /<svg[^>]*>/gsu;
+    const svgTags = [...sidebarTsx.matchAll(ownSvg)].map((m) => m[0]);
+    expect(svgTags.length).toBeGreaterThan(0);
+    for (const tag of svgTags) {
+      expect(tag).toMatch(/width="20"/u);
+      expect(tag).toMatch(/height="20"/u);
+    }
   });
 });
 

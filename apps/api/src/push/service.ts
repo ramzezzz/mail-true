@@ -360,7 +360,7 @@ export class PushService {
   async onNewMessage(
     session: MailSession,
     message: ArrivedMessage,
-    options: { liveClientIds: ReadonlySet<string>; ownAddresses?: readonly string[] } ,
+    options: { liveClientIds: ReadonlySet<string>; ownAddresses?: readonly string[] },
   ): Promise<{ notified: boolean; reason: SkipReason | null; pushed: number }> {
     const prefs = await this.prefs(session.email);
     const decision = shouldNotify(message, {
@@ -491,7 +491,10 @@ export class PushService {
   }
 
   /** Разовая проверка: отправляет push в подписки этого браузера. */
-  async sendTestPush(email: string, clientId: string): Promise<{ sent: number; error: string | null }> {
+  async sendTestPush(
+    email: string,
+    clientId: string,
+  ): Promise<{ sent: number; error: string | null }> {
     if (!this.pushAvailable || !this.#db || !this.#keys) {
       return { sent: 0, error: this.pushUnavailableReason };
     }
@@ -610,9 +613,7 @@ export class PushService {
     if (raw.length === 1) {
       const only = raw[0]!;
       if (only.logoDomain) {
-        only.logoUrl = await this.#env
-          .logoUrl(session.email, only.logoDomain)
-          .catch(() => null);
+        only.logoUrl = await this.#env.logoUrl(session.email, only.logoDomain).catch(() => null);
       }
     }
     return raw;

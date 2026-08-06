@@ -68,7 +68,11 @@ test('слова-признаки узнаются без двоеточия', (
 test('«есть:вложение» просит отбор по вложениям', () => {
   assert.equal(parseSearch('есть:вложение').hasAttachment, true);
   assert.equal(parseSearch('has:attachment').hasAttachment, true);
-  assert.equal(parseSearch('есть:луна').hasAttachment, false, 'неизвестное значение — это просто слова');
+  assert.equal(
+    parseSearch('есть:луна').hasAttachment,
+    false,
+    'неизвестное значение — это просто слова',
+  );
   assert.equal(parseSearch('есть:луна').text, 'есть:луна');
 });
 

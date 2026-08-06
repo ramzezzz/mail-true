@@ -289,9 +289,7 @@ export class MetricsStore {
         cpuApiPercent: round2(num(row.cpu_api)),
         load1: round2(num(row.load1)),
         memUsedPercent:
-          memTotal && memUsed !== null && memTotal > 0
-            ? round2((memUsed / memTotal) * 100)
-            : null,
+          memTotal && memUsed !== null && memTotal > 0 ? round2((memUsed / memTotal) * 100) : null,
         memApiBytes: roundInt(num(row.mem_api)),
         diskUsedPercent:
           diskTotal && diskFree !== null && diskTotal > 0
@@ -354,7 +352,11 @@ export class MetricsStore {
    * каталог Postgres в контейнер api не смонтирован, зато сама база про
    * свой размер знает и отвечает мгновенно.
    */
-  async databaseSize(): Promise<{ totalBytes: number; indexBytes: number; tables: Array<{ name: string; bytes: number }> }> {
+  async databaseSize(): Promise<{
+    totalBytes: number;
+    indexBytes: number;
+    tables: Array<{ name: string; bytes: number }>;
+  }> {
     const row = await this.db.one<{ total: string; indexes: string }>(
       `SELECT pg_database_size(current_database())::text AS total,
               (SELECT coalesce(sum(pg_indexes_size(c.oid)), 0)

@@ -107,7 +107,9 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
      * недоступен — администратор не разрешил помощника или не дано
      * согласие на отправку писем сервису ИИ.
      */
-    aiAvailability: async (email: string): Promise<{ available: boolean; reason: string | null }> => {
+    aiAvailability: async (
+      email: string,
+    ): Promise<{ available: boolean; reason: string | null }> => {
       if (!app.hasDecorator('aiService')) {
         return { available: false, reason: 'Помощник на основе ИИ на сервере не подключён' };
       }
@@ -159,7 +161,8 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
            * фразами письма. Молчать было бы худшим из решений — человек
            * включал уведомления не ради сводки, а ради письма.
            */
-          const budget = outcome.error.kind === 'budget-exceeded' || outcome.error.kind === 'rate-limited';
+          const budget =
+            outcome.error.kind === 'budget-exceeded' || outcome.error.kind === 'rate-limited';
           return {
             text: null,
             degraded: budget

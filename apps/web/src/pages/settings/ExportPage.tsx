@@ -62,9 +62,9 @@ export function ExportPage() {
     <>
       <SettingsTitle>Выгрузка ящика</SettingsTitle>
       <SettingsLead>
-        Соберём всю вашу почту в один ZIP-архив: папка ящика — каталог, письмо — файл .eml.
-        Такой файл открывается двойным щелчком в любой почтовой программе, а сам архив —
-        в проводнике без единой установленной программы.
+        Соберём всю вашу почту в один ZIP-архив: папка ящика — каталог, письмо — файл .eml. Такой
+        файл открывается двойным щелчком в любой почтовой программе, а сам архив — в проводнике без
+        единой установленной программы.
       </SettingsLead>
 
       {!available && (
@@ -120,9 +120,7 @@ export function ExportPage() {
             </div>
           )}
 
-          {jobs.length === 0 && (
-            <SettingsEmpty>Выгрузок пока не было.</SettingsEmpty>
-          )}
+          {jobs.length === 0 && <SettingsEmpty>Выгрузок пока не было.</SettingsEmpty>}
 
           {jobs.length > 0 && (
             <div className={styles.jobs}>
@@ -139,10 +137,10 @@ export function ExportPage() {
 
           <SettingsHint>
             Готовый архив хранится {ttlHours} {plural(ttlHours, 'час', 'часа', 'часов')}, потом
-            удаляется с сервера: это копия всей вашей переписки в открытом виде, и лежать на
-            диске вечно она не должна. Одновременно идёт одна выгрузка на весь сервер — так она
-            не мешает почте остальных. Пометки «прочитано», флажки и метки в архив не попадают:
-            файл .eml их не хранит, это свойства письма в ящике, а не самого письма.
+            удаляется с сервера: это копия всей вашей переписки в открытом виде, и лежать на диске
+            вечно она не должна. Одновременно идёт одна выгрузка на весь сервер — так она не мешает
+            почте остальных. Пометки «прочитано», флажки и метки в архив не попадают: файл .eml их
+            не хранит, это свойства письма в ящике, а не самого письма.
           </SettingsHint>
         </>
       )}
@@ -209,10 +207,7 @@ function JobCard({
             {plural(job.doneMessages, 'письмо', 'письма', 'писем')} · архив{' '}
             {formatBytes(job.fileBytes)}
             {job.skipped > 0 && (
-              <span className={styles.skipped}>
-                {' '}
-                · не удалось прочитать: {job.skipped}
-              </span>
+              <span className={styles.skipped}> · не удалось прочитать: {job.skipped}</span>
             )}
           </p>
           <SettingsRow>
@@ -225,9 +220,7 @@ function JobCard({
               Скачать архив
             </a>
             {job.expiresAt && (
-              <span className={styles.expires}>
-                удалится через {formatLeft(job.expiresAt)}
-              </span>
+              <span className={styles.expires}>удалится через {formatLeft(job.expiresAt)}</span>
             )}
           </SettingsRow>
         </>

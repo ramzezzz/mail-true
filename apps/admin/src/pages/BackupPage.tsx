@@ -101,8 +101,8 @@ export function BackupPage() {
 
       <Notice tone="info">
         Это копия <b>настроек</b>, а не писем. Письма, очередь и саму базу снимает скрипт{' '}
-        <code>install/backup.sh</code> на сервере, восстанавливает — <code>install/restore.sh</code>.
-        Настроечная копия весит килобайты и переносится на другую установку.
+        <code>install/backup.sh</code> на сервере, восстанавливает — <code>install/restore.sh</code>
+        . Настроечная копия весит килобайты и переносится на другую установку.
       </Notice>
 
       <Panel title="Создать копию">
@@ -141,8 +141,8 @@ export function BackupPage() {
         ) : (
           <>
             <p style={MUTED}>
-              Сначала выберите файл — панель покажет, что именно изменится. Ничего не
-              применяется, пока вы не нажмёте «Восстановить».
+              Сначала выберите файл — панель покажет, что именно изменится. Ничего не применяется,
+              пока вы не нажмёте «Восстановить».
             </p>
             <input
               ref={fileRef}
@@ -264,7 +264,10 @@ export function BackupPage() {
             <Notice tone="success">
               Применено:{' '}
               {Object.entries(result.applied)
-                .map(([id, counts]) => `${id} — создано ${counts.created}, обновлено ${counts.updated}`)
+                .map(
+                  ([id, counts]) =>
+                    `${id} — создано ${counts.created}, обновлено ${counts.updated}`,
+                )
                 .join('; ') || 'изменений не потребовалось'}
             </Notice>
             {result.note && <Notice tone="info">{result.note}</Notice>}
@@ -272,8 +275,7 @@ export function BackupPage() {
               <Notice tone="error">
                 Всё перечисленное выше восстановлено, а оформление входа — нет:{' '}
                 {result.brandingError}. Логотип и подписи остались прежними; повторять
-                восстановление целиком ради них не нужно, задайте их в разделе «Оформление
-                входа».
+                восстановление целиком ради них не нужно, задайте их в разделе «Оформление входа».
               </Notice>
             )}
             {result.sieve.errors.length > 0 && (

@@ -82,10 +82,7 @@ export interface WebGeneralSettings {
 }
 
 /** Внутренние настройки + подписи -> DTO интерфейса. */
-export function toWebGeneral(
-  settings: MailSettings,
-  signatures: Signature[],
-): WebGeneralSettings {
+export function toWebGeneral(settings: MailSettings, signatures: Signature[]): WebGeneralSettings {
   const def = signatures.find((s) => s.isDefault) ?? null;
   return {
     senderName: settings.senderName ?? '',
@@ -172,24 +169,10 @@ export function folderIdOfPath(folders: readonly Folder[], path: string | null):
  * терять условие при первом же открытии формы.
  */
 export type WebFilterField =
-  | 'from'
-  | 'to'
-  | 'subject'
-  | 'cc'
-  | 'size'
-  | 'body'
-  | 'attachment'
-  | 'resent-from'
-  | 'resent-to';
+  'from' | 'to' | 'subject' | 'cc' | 'size' | 'body' | 'attachment' | 'resent-from' | 'resent-to';
 
 export type WebFilterOperator =
-  | 'contains'
-  | 'not-contains'
-  | 'equals'
-  | 'greater'
-  | 'less'
-  | 'has'
-  | 'has-not';
+  'contains' | 'not-contains' | 'equals' | 'greater' | 'less' | 'has' | 'has-not';
 
 export interface WebFilterCondition {
   field: WebFilterField;

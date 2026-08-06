@@ -81,7 +81,7 @@ export class DraftSequencer {
     key: string,
     requestedUid: number | undefined,
     trackWindow: boolean,
-    op: (previousUid: number | undefined) => Promise<DraftSaveResult<T>>
+    op: (previousUid: number | undefined) => Promise<DraftSaveResult<T>>,
   ): Promise<T> {
     const chain = this.chainFor(key);
 
@@ -111,7 +111,7 @@ export class DraftSequencer {
     const task = chain.queue.then(run, run);
     chain.queue = task.then(
       () => undefined,
-      () => undefined
+      () => undefined,
     );
     try {
       return await task;

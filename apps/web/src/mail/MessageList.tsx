@@ -69,8 +69,7 @@ import {
 } from './threadList';
 
 export type ListRow =
-  | { type: 'header'; label: string }
-  | { type: 'message'; message: MessageSummary };
+  { type: 'header'; label: string } | { type: 'message'; message: MessageSummary };
 
 /**
  * Пустой справочник меток — постоянная, а не `[]` по месту.
@@ -422,8 +421,7 @@ function Row({
       onDragStart={(e) => {
         // Тащим выделение целиком, если тащат одно из выделенных писем;
         // иначе — только строку под курсором.
-        const ids =
-          selection.selected && selectedIds.size > 0 ? [...selectedIds] : [message.id];
+        const ids = selection.selected && selectedIds.size > 0 ? [...selectedIds] : [message.id];
         setDragMessages(e.dataTransfer, ids);
       }}
       onClick={(e) => {
@@ -528,11 +526,7 @@ function Row({
           в MessageList.module.css. Требование к вёрстке то же, что и для
           строки-переписки: ROW_HEIGHT одно на все виды строк.
         */}
-        <LabelPills
-          keywords={labelKeys}
-          dictionary={labels}
-          className={styles.rowLabels}
-        />
+        <LabelPills keywords={labelKeys} dictionary={labels} className={styles.rowLabels} />
         <span className={styles.subject}>{message.subject || '(без темы)'}</span>
         <span className={styles.snippet}>{message.snippet}</span>
       </span>
@@ -773,8 +767,8 @@ export function MessageList({
   }, []);
 
   /** Строка, попадающая в обход по Tab: под курсором, иначе — первая. */
-  const firstMessage = rows.find((r): r is Extract<ListRow, { type: 'message' }> =>
-    r.type === 'message',
+  const firstMessage = rows.find(
+    (r): r is Extract<ListRow, { type: 'message' }> => r.type === 'message',
   );
   const tabbableId = focusedId ?? firstMessage?.message.id ?? null;
 

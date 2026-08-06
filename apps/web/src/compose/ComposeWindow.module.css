@@ -231,8 +231,7 @@
   font: inherit;
   font-size: var(--mt-font-subhead-size, 14px);
   cursor: pointer;
-  transition: background-color var(--mt-anim-duration-s, 0.1s)
-    var(--mt-anim-easing-default, ease);
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
 @media (hover: hover) {
@@ -289,8 +288,7 @@
   font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  transition: background-color var(--mt-anim-duration-s, 0.1s)
-    var(--mt-anim-easing-default, ease);
+  transition: background-color var(--mt-anim-duration-s, 0.1s) var(--mt-anim-easing-default, ease);
 }
 
 @media (hover: hover) {
@@ -496,8 +494,7 @@
   box-shadow: var(--mt-compose-shadow);
   color: var(--mt-color-text-primary);
   /* Плашка выезжает снизу — это и есть «окно свернулось» */
-  animation: composeMinimize var(--mt-anim-duration-m, 0.2s)
-    var(--mt-anim-easing-default, ease);
+  animation: composeMinimize var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
 }
 
 @keyframes composeMinimize {

@@ -187,8 +187,7 @@ export const api = {
    * экран ждал бы самого медленного из них.
    */
   overviewResources: () => get<OverviewResources>('/overview/resources'),
-  overviewHistory: (hours: number) =>
-    get<OverviewHistory>(`/overview/history${query({ hours })}`),
+  overviewHistory: (hours: number) => get<OverviewHistory>(`/overview/history${query({ hours })}`),
   /**
    * Почтовый поток. Часовой пояс браузера уходит на сервер: график
    * «Пиковые часы» считается запросом (по всему окну, а не по точкам),
@@ -404,9 +403,7 @@ export const api = {
    * пути по-разному понимается прокси и сервером приложения.
    */
   spamListRemove: (id: string, value: string) =>
-    del<SpamListChange>(
-      `/spam/lists/${encodeURIComponent(id)}/entries${query({ value })}`,
-    ),
+    del<SpamListChange>(`/spam/lists/${encodeURIComponent(id)}/entries${query({ value })}`),
   spamCheck: (message: string, as: 'outside' | 'own') =>
     post<SpamCheckResult>('/spam/check', { message, as }),
   spamLearn: (message: string, kind: 'spam' | 'ham') =>

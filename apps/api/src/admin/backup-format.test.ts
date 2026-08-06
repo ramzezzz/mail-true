@@ -257,7 +257,11 @@ test('план называет ПОИМЁННО то, что перезапиш
     hostname: 'mail.staraya.ru',
   });
   const boxes = plan.sections.find((s) => s.id === 'mailboxes');
-  assert.deepEqual(boxes?.overwrite, ['ivan@staraya.ru'], 'имя перезаписываемого ящика обязано быть видно');
+  assert.deepEqual(
+    boxes?.overwrite,
+    ['ivan@staraya.ru'],
+    'имя перезаписываемого ящика обязано быть видно',
+  );
   assert.deepEqual(boxes?.create, ['petr@staraya.ru']);
   const aliases = plan.sections.find((s) => s.id === 'aliases');
   assert.deepEqual(aliases?.overwrite, ['info@staraya.ru → ivan@staraya.ru']);

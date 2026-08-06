@@ -55,9 +55,9 @@ describe('sameMessageList', () => {
 
 describe('sameMessage', () => {
   it('то же письмо с картинками и без — можно показывать прежнее тело', () => {
-    expect(sameMessage(queryKeys.message('inbox:209', false), queryKeys.message('inbox:209', true))).toBe(
-      true,
-    );
+    expect(
+      sameMessage(queryKeys.message('inbox:209', false), queryKeys.message('inbox:209', true)),
+    ).toBe(true);
   });
 
   it('другое письмо — прежнее тело показывать нельзя', () => {

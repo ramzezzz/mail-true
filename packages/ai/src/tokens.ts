@@ -35,9 +35,7 @@ export function estimateTokens(text: string): number {
     }
   }
   const tokens =
-    cyrillic / CYRILLIC_CHARS_PER_TOKEN +
-    cjk / CJK_CHARS_PER_TOKEN +
-    other / LATIN_CHARS_PER_TOKEN;
+    cyrillic / CYRILLIC_CHARS_PER_TOKEN + cjk / CJK_CHARS_PER_TOKEN + other / LATIN_CHARS_PER_TOKEN;
   return Math.max(1, Math.ceil(tokens));
 }
 

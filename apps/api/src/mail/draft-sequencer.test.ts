@@ -44,7 +44,7 @@ test('пять одновременных сохранений одного че
   assert.equal(folder.uids.size, 1);
 
   const results = await Promise.all(
-    Array.from({ length: 5 }, () => sequencer.save('ящик', first, false, saveOp(folder)))
+    Array.from({ length: 5 }, () => sequencer.save('ящик', first, false, saveOp(folder))),
   );
 
   assert.equal(folder.uids.size, 1, `в папке осталось: ${[...folder.uids].join(', ')}`);
@@ -64,8 +64,8 @@ test('сохранения одного черновика не выполняю
         await new Promise((r) => setTimeout(r, 2));
         inside -= 1;
         return { uid: 11, result: null };
-      })
-    )
+      }),
+    ),
   );
   assert.equal(maxInside, 1);
 });
@@ -77,9 +77,7 @@ test('автосохранение нового письма с ключом о�
   // Ни у одного из пяти сохранений ещё нет UID — так и выглядит автосохранение
   // только что открытого окна написания
   await Promise.all(
-    Array.from({ length: 5 }, () =>
-      sequencer.save('ящик:окно-1', undefined, true, saveOp(folder))
-    )
+    Array.from({ length: 5 }, () => sequencer.save('ящик:окно-1', undefined, true, saveOp(folder))),
   );
   assert.equal(folder.uids.size, 1);
 });

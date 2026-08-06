@@ -88,7 +88,9 @@ export function emlFileName(
   subject: string | null | undefined,
   date: Date | string | null | undefined,
 ): string {
-  const cleaned = safeEntryName(subject ?? '').slice(0, SUBJECT_LIMIT).trim();
+  const cleaned = safeEntryName(subject ?? '')
+    .slice(0, SUBJECT_LIMIT)
+    .trim();
   // safeEntryName на пустой строке возвращает «без имени» — здесь у этого
   // случая своё, более точное название: файл-то не безымянный, это письмо.
   const head = cleaned === '' || cleaned === 'без имени' ? 'Письмо без темы' : cleaned;

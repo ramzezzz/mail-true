@@ -19,8 +19,8 @@
 services:
   postfix:
     ports: !override
-      - "${BIND_ADDRESS:-0.0.0.0}:25:25"       # приём почты от чужих серверов
-      - "${BIND_ADDRESS:-0.0.0.0}:587:587"     # отправка: submission, STARTTLS + SASL
+      - '${BIND_ADDRESS:-0.0.0.0}:25:25' # приём почты от чужих серверов
+      - '${BIND_ADDRESS:-0.0.0.0}:587:587' # отправка: submission, STARTTLS + SASL
       # Порт 465 (submissions, TLS сразу) — НЕ «на всякий случай».
       #
       # Его слушает Postfix (infra/postfix/conf/master.cf), его отдаёт
@@ -34,27 +34,27 @@ services:
       # Apple и Thunderbird получали от нас настройку с портом 465, шли на
       # него и упирались в «соединение отклонено». Причём по НАШЕЙ же выдаче.
       # Единственный дефект, который проявляется исключительно в бою.
-      - "${BIND_ADDRESS:-0.0.0.0}:465:465"     # отправка: submissions, TLS сразу
+      - '${BIND_ADDRESS:-0.0.0.0}:465:465' # отправка: submissions, TLS сразу
     logging: &prod-logging
       driver: json-file
       options:
         # Ограничение лога: на VPS с маленьким диском разросшийся json-лог
         # контейнера — вторая по частоте причина «сервер встал» после почты.
-        max-size: "10m"
-        max-file: "5"
+        max-size: '10m'
+        max-file: '5'
 
   dovecot:
     ports: !override
-      - "${BIND_ADDRESS:-0.0.0.0}:143:143"     # IMAP + STARTTLS
-      - "${BIND_ADDRESS:-0.0.0.0}:993:993"     # IMAPS
-      - "${BIND_ADDRESS:-0.0.0.0}:110:110"     # POP3 + STARTTLS
-      - "${BIND_ADDRESS:-0.0.0.0}:995:995"     # POP3S
+      - '${BIND_ADDRESS:-0.0.0.0}:143:143' # IMAP + STARTTLS
+      - '${BIND_ADDRESS:-0.0.0.0}:993:993' # IMAPS
+      - '${BIND_ADDRESS:-0.0.0.0}:110:110' # POP3 + STARTTLS
+      - '${BIND_ADDRESS:-0.0.0.0}:995:995' # POP3S
     logging: *prod-logging
 
   nginx:
     ports: !override
-      - "${BIND_ADDRESS:-0.0.0.0}:80:80"       # ACME + autoconfig/autodiscover
-      - "${BIND_ADDRESS:-0.0.0.0}:443:443"     # то же по HTTPS (нужно Outlook)
+      - '${BIND_ADDRESS:-0.0.0.0}:80:80' # ACME + autoconfig/autodiscover
+      - '${BIND_ADDRESS:-0.0.0.0}:443:443' # то же по HTTPS (нужно Outlook)
     logging: *prod-logging
 
   # Сервер приложения. Наружу не публикуется вовсе: весь HTTP приходит
@@ -64,12 +64,12 @@ services:
     environment:
       # Cookie сессии не должна уходить по открытому HTTP: на боевом
       # сервере вход в почту и админку идёт только по HTTPS.
-      COOKIE_SECURE: "true"
+      COOKIE_SECURE: 'true'
       # Почта, API и админка живут на одном имени хоста каждый —
       # межсайтовые запросы не нужны, и разрешать их незачем.
-      CORS_ORIGIN: "https://${MAIL_DOMAIN},https://mail.${MAIL_DOMAIN},https://admin.${MAIL_DOMAIN}"
+      CORS_ORIGIN: 'https://${MAIL_DOMAIN},https://mail.${MAIL_DOMAIN},https://admin.${MAIL_DOMAIN}'
       # В журнал попадает адрес клиента из X-Forwarded-For от nginx
-      MAIL_PUBLIC_IPV4: "${MAIL_PUBLIC_IPV4:-}"
+      MAIL_PUBLIC_IPV4: '${MAIL_PUBLIC_IPV4:-}'
     logging: *prod-logging
 
   # Остальные сервисы наружу не публикуются — только ограничиваем логи.

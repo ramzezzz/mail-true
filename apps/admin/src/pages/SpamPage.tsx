@@ -53,7 +53,8 @@ export function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86_400);
   const hours = Math.floor((seconds % 86_400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${String(days)} ${plural(days, 'сутки', 'суток', 'суток')} ${String(hours)} ч`;
+  if (days > 0)
+    return `${String(days)} ${plural(days, 'сутки', 'суток', 'суток')} ${String(hours)} ч`;
   if (hours > 0) return `${String(hours)} ч ${String(minutes)} мин`;
   return `${String(minutes)} мин`;
 }
@@ -231,9 +232,9 @@ function MessageTools({ canLearn }: { canLearn: boolean }) {
   return (
     <Panel title="Разобрать письмо">
       <p className={styles.hint}>
-        Вставьте письмо целиком — вместе с заголовками (в веб-интерфейсе это «Показать
-        оригинал», в почтовой программе — «Показать исходный текст»). Проверка ничего не
-        меняет: письмо никуда не доставляется и ничему не обучает.
+        Вставьте письмо целиком — вместе с заголовками (в веб-интерфейсе это «Показать оригинал», в
+        почтовой программе — «Показать исходный текст»). Проверка ничего не меняет: письмо никуда не
+        доставляется и ничему не обучает.
       </p>
 
       <textarea
@@ -386,10 +387,7 @@ export function SpamPage() {
 
   return (
     <>
-      <PageTitle
-        title="Спам"
-        subtitle="Что отсеял фильтр, по каким правилам и как это изменить"
-      />
+      <PageTitle title="Спам" subtitle="Что отсеял фильтр, по каким правилам и как это изменить" />
 
       <Toolbar>
         <select
@@ -429,15 +427,14 @@ export function SpamPage() {
             <Tile value={data.period.scanned} label="писем проверено" />
             <Tile value={data.period.spam} label="признано спамом" />
             <Tile
-              value={data.period.spamPercent === null ? '—' : `${String(data.period.spamPercent)} %`}
+              value={
+                data.period.spamPercent === null ? '—' : `${String(data.period.spamPercent)} %`
+              }
               label="доля спама"
             />
             <Tile value={data.period.reject} label="отклонено при приёме" />
             <Tile value={data.period.addHeader} label="уехало в папку «Спам»" />
-            <Tile
-              value={data.manualLearns.spam + data.manualLearns.ham}
-              label="обучений вручную"
-            />
+            <Tile value={data.manualLearns.spam + data.manualLearns.ham} label="обучений вручную" />
           </Tiles>
           <p className={styles.note}>
             {data.periodNote}
@@ -445,8 +442,8 @@ export function SpamPage() {
               <>
                 {' '}
                 За это время антиспам перезапускали {data.period.restarts}{' '}
-                {plural(data.period.restarts, 'раз', 'раза', 'раз')} — счётчики при этом
-                начинались заново, и числа выше могут быть занижены.
+                {plural(data.period.restarts, 'раз', 'раза', 'раз')} — счётчики при этом начинались
+                заново, и числа выше могут быть занижены.
               </>
             )}
             {data.period.samples === 0 && ' Снимков за это окно ещё нет.'}
@@ -504,8 +501,8 @@ export function SpamPage() {
           )}
           {data.collectingSince && (
             <p className={styles.note}>
-              Снимки счётчиков ведутся с {formatDateTime(data.collectingSince)} — за более
-              ранний период чисел нет.
+              Снимки счётчиков ведутся с {formatDateTime(data.collectingSince)} — за более ранний
+              период чисел нет.
             </p>
           )}
         </Panel>

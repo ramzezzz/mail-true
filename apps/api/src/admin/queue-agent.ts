@@ -103,10 +103,7 @@ export class QueueAgent {
     if (!this.configured) throw new QueueUnavailableError(NOT_CONFIGURED);
   }
 
-  private async call(
-    path: string,
-    method: 'GET' | 'POST',
-  ): Promise<Record<string, unknown>> {
+  private async call(path: string, method: 'GET' | 'POST'): Promise<Record<string, unknown>> {
     this.assertConfigured();
     let response: Response;
     try {

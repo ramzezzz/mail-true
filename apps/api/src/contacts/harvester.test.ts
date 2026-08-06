@@ -162,7 +162,13 @@ test('«Отправленные» находятся по флагу, а не �
 test('русское название «Отправленные» тоже опознаётся', async () => {
   const client = fakeClient([
     { path: 'INBOX', name: 'INBOX', delimiter: '/', parentPath: '', flags: new Set() },
-    { path: 'Отправленные', name: 'Отправленные', delimiter: '/', parentPath: '', flags: new Set() },
+    {
+      path: 'Отправленные',
+      name: 'Отправленные',
+      delimiter: '/',
+      parentPath: '',
+      flags: new Set(),
+    },
   ]);
   assert.equal(await folderPathForRole(client, 'sent'), 'Отправленные');
 });

@@ -33,7 +33,6 @@ import { resetSenderLogos } from '../src/mail/senderLogos';
  */
 vi.mock('../src/api/mockFlag', () => ({ useMocks: false }));
 
-
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
 const avatarCss = readFileSync(join(SRC, 'mail/SenderAvatar.module.css'), 'utf8');
 
@@ -190,11 +189,7 @@ describe('кружок отправителя рисуется ОДНИМ ком
    * четвёртом месте логотип снова оказывается буквой, — поэтому проверяем
    * не поведение каждого места, а то, что мест-реализаций больше нет.
    */
-  const places = [
-    'mail/MessageList.tsx',
-    'mail/MessageThread.tsx',
-    'pages/MessagePage.tsx',
-  ];
+  const places = ['mail/MessageList.tsx', 'mail/MessageThread.tsx', 'pages/MessagePage.tsx'];
 
   for (const place of places) {
     it(`${place} использует SenderAvatar и не рисует букву сам`, () => {

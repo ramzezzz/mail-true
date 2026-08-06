@@ -18,12 +18,7 @@ import {
   type HealthPart,
 } from './health.js';
 
-function part(
-  id: string,
-  critical: boolean,
-  ok: boolean,
-  onProbe?: () => void,
-): HealthPart {
+function part(id: string, critical: boolean, ok: boolean, onProbe?: () => void): HealthPart {
   return {
     id,
     title: id,
@@ -137,11 +132,17 @@ test('часть, добавленная позже, попадает в бли�
   const clock = 0;
   const monitor = new HealthMonitor({ ttlMs: 60_000, now: () => clock });
   monitor.register(part('redis', true, true));
-  assert.deepEqual((await monitor.report()).parts.map((p) => p.id), ['redis']);
+  assert.deepEqual(
+    (await monitor.report()).parts.map((p) => p.id),
+    ['redis'],
+  );
 
   monitor.register(part('postgres', true, false));
   const report = await monitor.report();
-  assert.deepEqual(report.parts.map((p) => p.id), ['redis', 'postgres']);
+  assert.deepEqual(
+    report.parts.map((p) => p.id),
+    ['redis', 'postgres'],
+  );
   assert.equal(report.status, 'fail');
 });
 

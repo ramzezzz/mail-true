@@ -246,7 +246,8 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
     const store = requireStore();
 
     const name = patch.name === undefined ? undefined : normalizeTemplateName(patch.name);
-    if (name !== undefined && name === '') throw new BadRequestError('У шаблона должно быть название');
+    if (name !== undefined && name === '')
+      throw new BadRequestError('У шаблона должно быть название');
 
     /*
      * Вложения трогаются, ТОЛЬКО если о них сказали. Отсутствие поля и

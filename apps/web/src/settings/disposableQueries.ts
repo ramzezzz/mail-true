@@ -48,8 +48,7 @@ export function useCreateDisposable() {
       invalidate();
       showNotice(`Адрес ${alias.address} заведён`);
     },
-    onError: (error: unknown) =>
-      showNotice(actionErrorText('Не удалось завести адрес', error)),
+    onError: (error: unknown) => showNotice(actionErrorText('Не удалось завести адрес', error)),
   });
 }
 
@@ -71,8 +70,7 @@ export function useSetDisposableActive() {
           : `Адрес ${alias.address} выключен: письма на него больше не принимаются, отправитель получает отказ`,
       );
     },
-    onError: (error: unknown) =>
-      showNotice(actionErrorText('Не удалось переключить адрес', error)),
+    onError: (error: unknown) => showNotice(actionErrorText('Не удалось переключить адрес', error)),
   });
 }
 
@@ -82,8 +80,7 @@ export function useSetDisposableNote() {
   return useMutation<DisposableAlias, Error, { id: number; note: string }>({
     mutationFn: ({ id, note }) => disposableApi.setNote(id, note),
     onSuccess: () => invalidate(),
-    onError: (error: unknown) =>
-      showNotice(actionErrorText('Не удалось сохранить пометку', error)),
+    onError: (error: unknown) => showNotice(actionErrorText('Не удалось сохранить пометку', error)),
   });
 }
 

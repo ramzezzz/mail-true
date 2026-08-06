@@ -66,7 +66,10 @@ function textOf(err: unknown): string {
  * Готовит объект для pino: `logger.warn(errorInfo(err), 'Что случилось')`.
  * Дополнительные поля добавляются вторым аргументом.
  */
-export function errorInfo(err: unknown, extra: Record<string, unknown> = {}): Record<string, unknown> {
+export function errorInfo(
+  err: unknown,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   const info: ErrorInfo = { err: clamp(textOf(err)) };
 
   const source = err && typeof err === 'object' ? (err as Record<string, unknown>) : {};

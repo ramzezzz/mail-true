@@ -107,7 +107,9 @@ test('подсказка отдаёт адрес, имя и пометку «п�
     rows: [row('ivan@example.com', 'Иван', 2), row('igor@example.com', null, 0)],
   });
   const response = await app.inject({ method: 'GET', url: '/api/contacts/suggest?q=и' });
-  const body = response.json() as { items: Array<{ address: string; name: string | null; own: boolean }> };
+  const body = response.json() as {
+    items: Array<{ address: string; name: string | null; own: boolean }>;
+  };
   assert.equal(body.items.length, 2);
   assert.equal(body.items.find((i) => i.address === 'ivan@example.com')?.own, true);
   assert.equal(body.items.find((i) => i.address === 'igor@example.com')?.own, false);

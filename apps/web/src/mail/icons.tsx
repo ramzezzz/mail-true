@@ -60,10 +60,7 @@ export const IconCompose = (p: IconProps = {}) => <BrandIcon name="compose" {...
 export const IconSettings = (p: IconProps = {}) => <BrandIcon name="settings" {...p} />;
 
 /** Значок папки по её роли (для левого меню и списков папок). */
-export function IconFolderRole({
-  role,
-  size = 16,
-}: IconProps & { role: string }) {
+export function IconFolderRole({ role, size = 16 }: IconProps & { role: string }) {
   // «Отложенные» — единственная роль, которой в фирменном спрайте нет:
   // папка появилась позже него. Рисуем часы — тот же значок, что стоит
   // на кнопке «Отложить» и на вернувшемся письме, чтобы человек связал
@@ -143,7 +140,10 @@ export const IconUnsubscribe = (p: IconProps = {}) =>
 
 /** Выход из ящика — пункт «Выйти» в меню. */
 export const IconExit = (p: IconProps = {}) =>
-  stroke(['M14 5.5H6.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1H14', 'M11.5 12h8', 'M16.5 8.5 20 12l-3.5 3.5'], p);
+  stroke(
+    ['M14 5.5H6.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1H14', 'M11.5 12h8', 'M16.5 8.5 20 12l-3.5 3.5'],
+    p,
+  );
 
 export const IconChevronDown = (p: IconProps = {}) => stroke(['M6 9.5l6 6 6-6'], p);
 
@@ -160,13 +160,7 @@ export const IconPlus = (p: IconProps = {}) => stroke(['M12 5v14', 'M5 12h14'], 
  * и у мыши с клавиатурой его нет вовсе — поэтому у него обязана быть кнопка.
  */
 export const IconRefresh = (p: IconProps = {}) =>
-  stroke(
-    [
-      'M19.5 12a7.5 7.5 0 1 1-2.2-5.3',
-      'M19.5 4.5V9H15',
-    ],
-    p,
-  );
+  stroke(['M19.5 12a7.5 7.5 0 1 1-2.2-5.3', 'M19.5 4.5V9H15'], p);
 
 /** Карандаш — переименовать папку, изменить правило. */
 export const IconPencil = (p: IconProps = {}) =>
@@ -178,13 +172,22 @@ export const IconBroom = (p: IconProps = {}) =>
 
 export const IconNewTab = (p: IconProps = {}) =>
   stroke(
-    ['M10 5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V14', 'M14 4.5h5.5V10', 'M19 5 11.5 12.5'],
+    [
+      'M10 5H6.5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V14',
+      'M14 4.5h5.5V10',
+      'M19 5 11.5 12.5',
+    ],
     p,
   );
 
 export const IconEvent = (p: IconProps = {}) =>
   stroke(
-    ['M5 6.5h14a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1Z', 'M8 4v3.5', 'M16 4v3.5', 'M4 10.5h16'],
+    [
+      'M5 6.5h14a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7.5a1 1 0 0 1 1-1Z',
+      'M8 4v3.5',
+      'M16 4v3.5',
+      'M4 10.5h16',
+    ],
     p,
   );
 
@@ -289,7 +292,14 @@ export const IconEmoji = (p: IconProps = {}) => (
 
 /** Очистить форматирование — ластик (был комбинирующий символ «A̶»). */
 export const IconClearFormat = (p: IconProps = {}) =>
-  stroke(['M9.4 19.5 4.6 14.7a1.4 1.4 0 0 1 0-2l7.7-7.7a1.4 1.4 0 0 1 2 0l4.8 4.8a1.4 1.4 0 0 1 0 2l-8.4 8.4', 'M8.5 9.5l6.8 6.8', 'M9.4 19.5H20'], p);
+  stroke(
+    [
+      'M9.4 19.5 4.6 14.7a1.4 1.4 0 0 1 0-2l7.7-7.7a1.4 1.4 0 0 1 2 0l4.8 4.8a1.4 1.4 0 0 1 0 2l-8.4 8.4',
+      'M8.5 9.5l6.8 6.8',
+      'M9.4 19.5H20',
+    ],
+    p,
+  );
 
 /** Начертание («Tt» у mail.ru) — выбор гарнитуры. */
 export const IconFontFamily = (p: IconProps = {}) => (

@@ -28,8 +28,7 @@ const DOCS = resolve(HERE, '..');
 const ROOT = resolve(DOCS, '..');
 const BRAND = join(ROOT, 'apps/web/public/brand');
 
-const CHROME =
-  process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+const CHROME = process.env.CHROME_PATH ?? 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 
 const OUT_PDF = join(DOCS, 'Mail.True — руководство.pdf');
 const OUT_HTML = join(HERE, 'build', 'manual.html');

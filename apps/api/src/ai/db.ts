@@ -532,7 +532,10 @@ export class PgAiAuditLog implements AiAuditLog {
         ],
       );
     } catch (err) {
-      this.#logger.warn(errorInfo(err, { feature: entry.feature }), 'Не удалось записать журнал ИИ');
+      this.#logger.warn(
+        errorInfo(err, { feature: entry.feature }),
+        'Не удалось записать журнал ИИ',
+      );
     }
   }
 

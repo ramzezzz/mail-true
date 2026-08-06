@@ -1,4 +1,3 @@
-
 ## Две копии спрайта
 
 `brand/icons/sprite.svg` — исходник, `apps/web/public/brand/icons/sprite.svg` —

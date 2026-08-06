@@ -94,7 +94,9 @@ export function NotificationsPage() {
     return (
       <>
         <SettingsTitle>Уведомления</SettingsTitle>
-        <SettingsError>Не удалось загрузить настройки уведомлений. Обновите страницу.</SettingsError>
+        <SettingsError>
+          Не удалось загрузить настройки уведомлений. Обновите страницу.
+        </SettingsError>
       </>
     );
   }
@@ -243,7 +245,9 @@ export function NotificationsPage() {
           label="Показывать уведомления о новых письмах"
           description="Окно операционной системы, когда вкладка почты свёрнута или закрыта."
           checked={enabled}
-          disabled={busy || capabilities.support === 'unsupported' || capabilities.support === 'insecure'}
+          disabled={
+            busy || capabilities.support === 'unsupported' || capabilities.support === 'insecure'
+          }
           onChange={(e) => void toggleEnabled(e.target.checked)}
         />
       </SettingsSection>
@@ -280,7 +284,11 @@ export function NotificationsPage() {
                         настоящий вопрос — что из этого прочтёт случайный взгляд.
                       */}
                       <span className={styles.preview} aria-label="Так будет выглядеть уведомление">
-                        <img className={styles.previewIcon} src="/brand/notification-icon.png" alt="" />
+                        <img
+                          className={styles.previewIcon}
+                          src="/brand/notification-icon.png"
+                          alt=""
+                        />
                         <span className={styles.previewText}>
                           <span className={styles.previewTitle}>{info.example.title}</span>
                           {info.example.body.split('\n').map((line) => (
@@ -335,11 +343,11 @@ export function NotificationsPage() {
                 />
                 <SettingsHint>
                   Содержимое push-сообщения зашифровано, и служба доставки прочитать его не может.
-                  Но шифротекст остаётся у неё, а показанное будет снимком прошлого: письмо
-                  могли уже прочитать с другого устройства. Включать это стоит в одном случае —
-                  когда ваш почтовый сервер недоступен с устройства в момент показа (телефон вне
-                  сети предприятия): без содержимого в сообщении уведомление останется
-                  безымянным «Новое письмо».
+                  Но шифротекст остаётся у неё, а показанное будет снимком прошлого: письмо могли
+                  уже прочитать с другого устройства. Включать это стоит в одном случае — когда ваш
+                  почтовый сервер недоступен с устройства в момент показа (телефон вне сети
+                  предприятия): без содержимого в сообщении уведомление останется безымянным «Новое
+                  письмо».
                 </SettingsHint>
 
                 <div className={styles.devices}>
@@ -351,9 +359,13 @@ export function NotificationsPage() {
                       {state.data.devices.map((device) => (
                         <li key={device.id} className={styles.device}>
                           <span>{device.browser}</span>
-                          {device.current && <span className={styles.deviceCurrent}>этот браузер</span>}
+                          {device.current && (
+                            <span className={styles.deviceCurrent}>этот браузер</span>
+                          )}
                           {device.lastError && (
-                            <span className={styles.deviceError}>не доставлено: {device.lastError}</span>
+                            <span className={styles.deviceError}>
+                              не доставлено: {device.lastError}
+                            </span>
                           )}
                         </li>
                       ))}
@@ -426,10 +438,9 @@ export function NotificationsPage() {
                         о котором не сообщили, и есть то, ради чего
                         уведомления включали.
                       */
-                      'Часовой пояс браузера определить не удалось, поэтому тихие часы пока не действуют. Откройте почту ещё раз — пояс определится сам.'}
-                  {' '}
-                  Накопившиеся за это время уведомления потом не всплывают все разом: пятьдесят
-                  окон в восемь утра — не то, ради чего заводят тихие часы.
+                      'Часовой пояс браузера определить не удалось, поэтому тихие часы пока не действуют. Откройте почту ещё раз — пояс определится сам.'}{' '}
+                  Накопившиеся за это время уведомления потом не всплывают все разом: пятьдесят окон
+                  в восемь утра — не то, ради чего заводят тихие часы.
                 </SettingsHint>
               </>
             )}

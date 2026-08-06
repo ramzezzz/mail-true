@@ -21,13 +21,13 @@ export interface AutodiscoverRequest {
 export function parseAutodiscoverRequest(body: string): AutodiscoverRequest {
   const email = /<EMailAddress>\s*([^<]+?)\s*<\/EMailAddress>/i.exec(body)?.[1] ?? null;
   const schema =
-    /<AcceptableResponseSchema>\s*([^<]+?)\s*<\/AcceptableResponseSchema>/i.exec(body)?.[1] ??
-    null;
+    /<AcceptableResponseSchema>\s*([^<]+?)\s*<\/AcceptableResponseSchema>/i.exec(body)?.[1] ?? null;
   return { email, schema };
 }
 
 const RESPONSE_NS = 'http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006';
-const OUTLOOK_NS = 'http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a';
+const OUTLOOK_NS =
+  'http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a';
 
 interface ProtocolBlock {
   type: 'IMAP' | 'POP3' | 'SMTP';

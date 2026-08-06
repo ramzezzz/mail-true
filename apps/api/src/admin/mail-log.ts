@@ -66,8 +66,18 @@ export interface LogEntry {
 }
 
 const MONTHS: Readonly<Record<string, number>> = {
-  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11,
 };
 
 /**
@@ -456,7 +466,8 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
     return {
       occurredAt: entry.at,
       queueId: entry.queueId,
-      direction: inboundDirectionOf(entry.component, text) === 'out' ? 'out' : (meta?.direction ?? 'in'),
+      direction:
+        inboundDirectionOf(entry.component, text) === 'out' ? 'out' : (meta?.direction ?? 'in'),
       status: 'held',
       sender: from ?? meta?.sender ?? null,
       recipient: to,

@@ -69,9 +69,8 @@ function summary(uid: number): MessageSummary {
 
 function serverPages() {
   return vi.fn(async (query: MessageListQuery) => {
-    const items = Array.from(
-      { length: Math.min(query.limit, TOTAL - query.offset) },
-      (_, i) => summary(query.offset + i + 1),
+    const items = Array.from({ length: Math.min(query.limit, TOTAL - query.offset) }, (_, i) =>
+      summary(query.offset + i + 1),
     );
     return { items, total: TOTAL, offset: query.offset, limit: query.limit };
   });
@@ -85,8 +84,14 @@ function stubLayout() {
       disconnect() {}
     };
   }
-  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 1200 });
-  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 800 });
+  Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {
+    configurable: true,
+    get: () => 1200,
+  });
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get: () => 800,
+  });
 }
 
 /**
@@ -177,7 +182,13 @@ describe('куда ставить прокрутку', () => {
     const index = rowIndexOf(rows, 'inbox:40');
     const top = rowOffsetTop(rows, index, METRICS) - 100;
     expect(
-      restoreScrollTop({ savedTop: top, highlightIndex: index, rows, metrics: METRICS, viewportHeight: 800 }),
+      restoreScrollTop({
+        savedTop: top,
+        highlightIndex: index,
+        rows,
+        metrics: METRICS,
+        viewportHeight: 800,
+      }),
     ).toBe(top);
   });
 
@@ -203,7 +214,13 @@ describe('куда ставить прокрутку', () => {
   it('в список пришли впервые — восстанавливать нечего', () => {
     const rows = flattenRows([summary(1)]);
     expect(
-      restoreScrollTop({ savedTop: undefined, highlightIndex: -1, rows, metrics: METRICS, viewportHeight: 800 }),
+      restoreScrollTop({
+        savedTop: undefined,
+        highlightIndex: -1,
+        rows,
+        metrics: METRICS,
+        viewportHeight: 800,
+      }),
     ).toBeNull();
   });
 });

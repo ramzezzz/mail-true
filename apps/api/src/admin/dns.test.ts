@@ -164,8 +164,14 @@ test('SPF: наш сервер разрешён через mx, через a: и 
 test('SPF: чужая запись через include — «убедиться нельзя», а не «разрешено»', () => {
   // Молчаливое «всё хорошо» здесь опаснее прямой ошибки: отправка идёт
   // с нашего сервера, а разрешение выдано чужому.
-  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 include:_spf.mail.ru -all'), 'mail.example.ru'), 'unclear');
-  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 ip4:198.51.100.7 -all'), 'mail.example.ru'), 'no');
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 include:_spf.mail.ru -all'), 'mail.example.ru'),
+    'unclear',
+  );
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 ip4:198.51.100.7 -all'), 'mail.example.ru'),
+    'no',
+  );
 });
 
 test('DMARC: теги читаются, значение с «mailto:» не ломает разбор', () => {
@@ -274,10 +280,7 @@ test('MX на чужой сервер — ошибка, и видно оба з�
 
 test('SPF: наш сервер не разрешён — ошибка; посторонние TXT домена не мешают', async () => {
   const zone = goodZone();
-  zone['TXT example.ru'] = [
-    'google-site-verification=abcdef',
-    'v=spf1 ip4:198.51.100.7 -all',
-  ];
+  zone['TXT example.ru'] = ['google-site-verification=abcdef', 'v=spf1 ip4:198.51.100.7 -all'];
   const report = await checkDomainDns('example.ru', { ...OPTIONS, querier: fakeQuerier(zone) });
   const spf = by(report.checks, 'spf');
   assert.equal(spf.verdict, 'mismatch');
@@ -308,7 +311,11 @@ test('недоступный резольвер — «не удалось спр
   assert.equal(report.resolver.reachable, false);
   assert.equal(report.overall, 'unknown');
   const wrong = report.checks.filter((c) => c.verdict === 'missing' || c.verdict === 'mismatch');
-  assert.deepEqual(wrong.map((c) => c.id), [], 'молчащий резольвер — не повод обвинять DNS домена');
+  assert.deepEqual(
+    wrong.map((c) => c.id),
+    [],
+    'молчащий резольвер — не повод обвинять DNS домена',
+  );
   for (const check of report.checks) {
     assert.equal(check.verdict, 'unreachable');
     assert.equal(check.status, 'unknown');
@@ -519,7 +526,10 @@ test('отчёта ещё не было — вклеивать некуда, б�
     querier: fakeQuerier(goodZone()),
     only: ['spf'],
   });
-  assert.deepEqual(mergeDnsCheck(null, one).checks.map((c) => c.id), ['spf']);
+  assert.deepEqual(
+    mergeDnsCheck(null, one).checks.map((c) => c.id),
+    ['spf'],
+  );
 });
 
 test('молчащий резольвер при точечной проверке — «не удалось», а не «нет записи»', async () => {
@@ -538,7 +548,17 @@ test('каждая проверка объясняет, зачем запись 
     querier: fakeQuerier(goodZone()),
   });
   const ids = report.checks.map((c) => c.id);
-  for (const id of ['a', 'mx', 'spf', 'dkim', 'dmarc', 'ptr', 'web-apex', 'web-admin', 'autoconfig']) {
+  for (const id of [
+    'a',
+    'mx',
+    'spf',
+    'dkim',
+    'dmarc',
+    'ptr',
+    'web-apex',
+    'web-admin',
+    'autoconfig',
+  ]) {
     assert.ok(ids.includes(id as never), `в отчёте нет проверки ${id}`);
   }
   for (const check of report.checks) {

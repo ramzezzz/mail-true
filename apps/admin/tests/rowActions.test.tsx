@@ -106,7 +106,13 @@ describe('доступные имена', () => {
 describe('порядок и опасные действия', () => {
   it('опасное действие уходит в конец и отделяется промежутком', () => {
     render([
-      { id: 'delete', icon: <IconTrash />, label: 'Удалить', danger: true, onClick: () => undefined },
+      {
+        id: 'delete',
+        icon: <IconTrash />,
+        label: 'Удалить',
+        danger: true,
+        onClick: () => undefined,
+      },
       { id: 'edit', icon: <IconPencil />, label: 'Изменить', onClick: () => undefined },
     ]);
     const names = controls().map((c) => c.getAttribute('aria-label'));

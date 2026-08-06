@@ -96,9 +96,7 @@ export function FilterDialog({
       // Последнее условие не удаляем, а очищаем: окно без единой строки
       // выглядит сломанным.
       conditions:
-        d.conditions.length === 1
-          ? [emptyCondition()]
-          : d.conditions.filter((_, i) => i !== index),
+        d.conditions.length === 1 ? [emptyCondition()] : d.conditions.filter((_, i) => i !== index),
     }));
 
   /*
@@ -107,11 +105,16 @@ export function FilterDialog({
    * нельзя, и предлагать такое сочетание значило бы обещать несбыточное.
    */
   const actionMode: ActionMode =
-    draft.actions.deleteMode !== null ? 'delete' : draft.actions.moveToFolderId === null ? 'none' : 'move';
+    draft.actions.deleteMode !== null
+      ? 'delete'
+      : draft.actions.moveToFolderId === null
+        ? 'none'
+        : 'move';
 
   const setActionMode = (mode: ActionMode) =>
     patchActions({
-      moveToFolderId: mode === 'move' ? (draft.actions.moveToFolderId ?? folders[0]?.id ?? null) : null,
+      moveToFolderId:
+        mode === 'move' ? (draft.actions.moveToFolderId ?? folders[0]?.id ?? null) : null,
       // Умолчание удаления — корзина: правило, стирающее почту насовсем,
       // человек должен выбрать сам, а не получить по невнимательности.
       deleteMode: mode === 'delete' ? (draft.actions.deleteMode ?? 'trash') : null,

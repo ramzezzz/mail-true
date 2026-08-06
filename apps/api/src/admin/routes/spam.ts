@@ -49,7 +49,12 @@ import { checkEntry, findSpamList, matchMapId, SPAM_LISTS } from '../spam-lists.
 import { spamOf, SpamStore } from '../spam-store.js';
 
 const windowSchema = z.object({
-  hours: z.coerce.number().int().min(1).max(24 * 30).default(24),
+  hours: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(24 * 30)
+    .default(24),
 });
 
 const entrySchema = z.object({
@@ -64,11 +69,17 @@ const learnSchema = z.object({
    * Письмо целиком, с заголовками. Предел в мегабайт: обучение смотрит на
    * текст и заголовки, а не на вложения, и мегабайта хватает с запасом.
    */
-  message: z.string().min(20).max(1024 * 1024),
+  message: z
+    .string()
+    .min(20)
+    .max(1024 * 1024),
 });
 
 const checkSchema = z.object({
-  message: z.string().min(20).max(1024 * 1024),
+  message: z
+    .string()
+    .min(20)
+    .max(1024 * 1024),
   /**
    * От чьего имени проверять. «Свой» означает аутентифицированного
    * отправителя: у него и пороги, и набор проверок другие
@@ -218,8 +229,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
           .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0)),
       );
     } catch (err) {
-      unavailable =
-        err instanceof RspamdUnavailableError ? err.message : (err as Error).message;
+      unavailable = err instanceof RspamdUnavailableError ? err.message : (err as Error).message;
     }
 
     return {
@@ -235,9 +245,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
             spam: spamOf(period),
             /** Доля спама от проверенного, проценты с одним знаком. */
             spamPercent:
-              period.scanned > 0
-                ? Math.round((spamOf(period) / period.scanned) * 1000) / 10
-                : null,
+              period.scanned > 0 ? Math.round((spamOf(period) / period.scanned) * 1000) / 10 : null,
           }
         : null,
       periodNote: schemaReady
@@ -397,9 +405,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       const spec = findSpamList(id);
       if (!spec) throw new NotFoundError(`Списка «${id}» нет`);
       if (!spec.editable) {
-        throw new BadRequestError(
-          `Список «${spec.title}» правится не из панели: ${spec.hint}`,
-        );
+        throw new BadRequestError(`Список «${spec.title}» правится не из панели: ${spec.hint}`);
       }
       const check = checkEntry(spec.value, body.value);
       if (!check.ok) throw new BadRequestError(check.problem);
@@ -444,9 +450,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin(app, 'domains.write') },
     async (request) => {
       const { id } = z.object({ id: z.string().trim().max(64) }).parse(request.params);
-      const { value } = z
-        .object({ value: z.string().trim().min(1).max(320) })
-        .parse(request.query);
+      const { value } = z.object({ value: z.string().trim().min(1).max(320) }).parse(request.query);
       const spec = findSpamList(id);
       if (!spec) throw new NotFoundError(`Списка «${id}» нет`);
       if (!spec.editable) {

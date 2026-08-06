@@ -13,7 +13,11 @@ const loginSchema = z.object({
   password: z.string().min(1).max(1024),
 });
 
-export function setSessionCookie(app: FastifyInstance, reply: FastifyReply, sessionId: string): void {
+export function setSessionCookie(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  sessionId: string,
+): void {
   const { config } = app.deps;
   reply.setCookie(config.SESSION_COOKIE_NAME, sessionId, {
     httpOnly: true,
@@ -70,7 +74,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       await sessions.set(
         sessionId,
         { email, passwordEnc: secretBox.encrypt(password), createdAt: Date.now() },
-        config.SESSION_TTL_SECONDS
+        config.SESSION_TTL_SECONDS,
       );
       setSessionCookie(app, reply, sessionId);
       app.deps.accessLog?.record({
@@ -80,7 +84,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         ...origin,
       });
       return { ok: true, email };
-    }
+    },
   );
 
   // Выход: удаляем сессию и закрываем IMAP-соединения пользователя

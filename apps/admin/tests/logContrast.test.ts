@@ -34,8 +34,7 @@ function ratio(foreground: string, background: string): number {
 
 /** Значение переменной из блока темы в logLevels.css. */
 function cssVar(theme: 'light' | 'dark', name: string): string {
-  const start =
-    theme === 'dark' ? css.indexOf(":root[data-theme='dark']") : css.indexOf(':root {');
+  const start = theme === 'dark' ? css.indexOf(":root[data-theme='dark']") : css.indexOf(':root {');
   expect(start, `в logLevels.css нет блока темы ${theme}`).toBeGreaterThanOrEqual(0);
   const open = css.indexOf('{', start);
   const close = css.indexOf('}', open);

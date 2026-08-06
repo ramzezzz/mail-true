@@ -178,7 +178,7 @@ test('отказ поиска — это ошибка, а не пустая па
         withSnippets: false,
       }),
     (err: unknown) =>
-      err instanceof ApiError && err.statusCode === 503 && err.code === 'UPSTREAM_UNAVAILABLE'
+      err instanceof ApiError && err.statusCode === 503 && err.code === 'UPSTREAM_UNAVAILABLE',
   );
 });
 
@@ -230,7 +230,7 @@ test('existingUids не выдаёт отказ поиска за отсутст
   const mailbox = new FakeMailbox({ searchFails: true });
   await assert.rejects(
     () => existingUids(mailbox.client, [1, 2, 3]),
-    (err: unknown) => err instanceof ApiError && err.statusCode === 503
+    (err: unknown) => err instanceof ApiError && err.statusCode === 503,
   );
 });
 
@@ -251,7 +251,7 @@ test('chunkUidSets: разрозненные номера режутся на к
   for (const chunk of chunks) {
     assert.ok(
       chunk.length <= UID_SET_MAX_CHARS,
-      `набор длиной ${String(chunk.length)} превышает предел ${String(UID_SET_MAX_CHARS)}`
+      `набор длиной ${String(chunk.length)} превышает предел ${String(UID_SET_MAX_CHARS)}`,
     );
   }
   // Ни один номер не потерян и не задвоен
@@ -288,7 +288,7 @@ test('фильтр «с вложениями» на 20 000 писем не шл�
   for (const range of mailbox.fetchRanges) {
     assert.ok(
       range.length <= UID_SET_MAX_CHARS,
-      `команда FETCH длиной ${String(range.length)} символов — Dovecot ответит «Too long argument»`
+      `команда FETCH длиной ${String(range.length)} символов — Dovecot ответит «Too long argument»`,
     );
   }
   assert.equal(page.total, uids.filter((uid) => uid % 1001 === 0).length);

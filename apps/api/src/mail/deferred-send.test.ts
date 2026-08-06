@@ -42,7 +42,10 @@ function entry(sendAt: string): Omit<DeferredEntry, 'id' | 'attempts' | 'created
 test('письмо лежит на диске и переживает перезапуск процесса', async () => {
   const { spool, dir } = await tempSpool();
   try {
-    const added = await spool.add(entry('2026-08-06T09:00:00.000Z'), Buffer.from('Subject: X\r\n\r\nтело'));
+    const added = await spool.add(
+      entry('2026-08-06T09:00:00.000Z'),
+      Buffer.from('Subject: X\r\n\r\nтело'),
+    );
 
     // Новый экземпляр — ровно то, что происходит после перезапуска сервера:
     // ничего в памяти не осталось, всё берётся из каталога очереди
@@ -205,8 +208,7 @@ test('дальний край отсрочки — тридцать суток, 
   // дальше край, тем дольше он лежит — а письмо, отложенное на год, почти
   // наверняка не уйдёт: за год пароль сменят, а то и ящик закроют.
   const now = new Date('2026-08-06T09:00:00.000Z');
-  const at = (days: number) =>
-    new Date(now.getTime() + days * 24 * 3600 * 1000).toISOString();
+  const at = (days: number) => new Date(now.getTime() + days * 24 * 3600 * 1000).toISOString();
 
   assert.equal(checkSendAt(at(29), now).kind, 'later', '29 суток — в пределах');
   assert.equal(checkSendAt(at(31), now).kind, 'invalid', '31 сутки — уже нет');
@@ -421,9 +423,7 @@ test('причина едет с черновиком заголовком и ч
   assert.equal(readFailureFromRaw(raw), null);
   // И тело письма со словом-двойником в тексте её не подделывает
   assert.equal(
-    readFailureFromRaw(
-      Buffer.from('Subject: X\r\n\r\nX-Mail-True-Send-Failure: подделка', 'utf8'),
-    ),
+    readFailureFromRaw(Buffer.from('Subject: X\r\n\r\nX-Mail-True-Send-Failure: подделка', 'utf8')),
     null,
     'заголовок ищется только в блоке заголовков, а не в теле',
   );

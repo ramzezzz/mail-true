@@ -293,9 +293,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
       flow.start();
     })
-    .catch((err: unknown) =>
-      logger.error({ err }, 'Не удалось проверить схему истории доставки'),
-    );
+    .catch((err: unknown) => logger.error({ err }, 'Не удалось проверить схему истории доставки'));
 
   // Съёмка показателей. Запускается только при применённой миграции 0011_metrics.sql:
   // без таблицы каждый проход писал бы в журнал ошибку раз в минуту, а
@@ -370,9 +368,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       }
       spamCollector.start();
     })
-    .catch((err: unknown) =>
-      logger.error({ err }, 'Не удалось проверить схему снимков антиспама'),
-    );
+    .catch((err: unknown) => logger.error({ err }, 'Не удалось проверить схему снимков антиспама'));
 
   app.addHook('onClose', async () => {
     janitor.stop();

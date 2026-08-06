@@ -61,7 +61,11 @@ export function paddingFor(width: number): ChartPadding {
   };
 }
 
-export function geometry(width: number, height: number, padding = paddingFor(width)): ChartGeometry {
+export function geometry(
+  width: number,
+  height: number,
+  padding = paddingFor(width),
+): ChartGeometry {
   return {
     width,
     height,
@@ -88,7 +92,8 @@ export function niceCeil(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return 1;
   const magnitude = 10 ** Math.floor(Math.log10(value));
   const normalized = value / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
+  const step =
+    normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 2.5 ? 2.5 : normalized <= 5 ? 5 : 10;
   return step * magnitude;
 }
 
@@ -137,7 +142,9 @@ export function yAt(value: number, max: number, geo: ChartGeometry): number {
  * линию по ней не построить, но кружок поставить можно и нужно — иначе
  * единственное измерение за час просто исчезло бы с графика.
  */
-export function segments<T>(values: readonly (T | null)[]): Array<Array<{ index: number; value: T }>> {
+export function segments<T>(
+  values: readonly (T | null)[],
+): Array<Array<{ index: number; value: T }>> {
   const result: Array<Array<{ index: number; value: T }>> = [];
   let current: Array<{ index: number; value: T }> = [];
   values.forEach((value, index) => {
@@ -244,9 +251,10 @@ export interface DonutSlice {
  * рисуется как невидимая чёрточка, но продолжает занимать место в легенде
  * и мешать наведению мыши.
  */
-export function donutSlices(
-  items: ReadonlyArray<{ id: string; value: number }>,
-): { slices: DonutSlice[]; total: number } {
+export function donutSlices(items: ReadonlyArray<{ id: string; value: number }>): {
+  slices: DonutSlice[];
+  total: number;
+} {
   const total = items.reduce((sum, item) => sum + Math.max(0, item.value), 0);
   if (total <= 0) return { slices: [], total: 0 };
   let angle = -Math.PI / 2;
@@ -316,7 +324,12 @@ export interface BarLayout {
  * при двух десятках столбцов от них оставались бы волоски. Минимальная
  * ширина в одну точку — чтобы столбец не исчез совсем.
  */
-export function barLayout(index: number, count: number, geo: ChartGeometry, gapShare = 0.25): BarLayout {
+export function barLayout(
+  index: number,
+  count: number,
+  geo: ChartGeometry,
+  gapShare = 0.25,
+): BarLayout {
   const step = count > 0 ? geo.plotWidth / count : geo.plotWidth;
   const width = Math.max(1, step * (1 - gapShare));
   return { x: geo.plotLeft + step * index + (step - width) / 2, width };

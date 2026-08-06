@@ -51,7 +51,10 @@ test('без ссылок ответ узнаётся по собеседник�
 test('приставки ответа и регистр теме не мешают', () => {
   assert.equal(normalizeSubject('Re: Fwd: RE: Квартальный ОТЧЁТ'), 'квартальный отчёт');
   assert.equal(normalizeSubject('Ответ: Смета'), 'смета');
-  assert.equal(matchReply(letter, candidate({ subject: 'RE: СОГЛАСУЕМ СМЕТУ ДО ПЯТНИЦЫ' })), 'subject');
+  assert.equal(
+    matchReply(letter, candidate({ subject: 'RE: СОГЛАСУЕМ СМЕТУ ДО ПЯТНИЦЫ' })),
+    'subject',
+  );
 });
 
 test('чужое письмо с той же темой ответом не считается', () => {
@@ -72,19 +75,13 @@ test('автоответ об отпуске ответом не считает�
    * Самый обидный ложный ответ: собеседник в отпуске, отвечать будет
    * через две недели, а напоминание мы бы сняли.
    */
-  assert.equal(
-    matchReply(letter, candidate({ autoSubmitted: 'auto-replied' })),
-    null,
-  );
+  assert.equal(matchReply(letter, candidate({ autoSubmitted: 'auto-replied' })), null);
   // RFC 3834: «no» означает, что письмо написал человек.
   assert.equal(matchReply(letter, candidate({ autoSubmitted: 'no' })), 'subject');
 });
 
 test('отчёт о недоставке ответом не считается', () => {
-  assert.equal(
-    matchReply(letter, candidate({ fromAddress: 'MAILER-DAEMON@example.com' })),
-    null,
-  );
+  assert.equal(matchReply(letter, candidate({ fromAddress: 'MAILER-DAEMON@example.com' })), null);
   assert.equal(matchReply(letter, candidate({ fromAddress: '' })), null);
 });
 

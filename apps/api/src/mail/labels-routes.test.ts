@@ -106,7 +106,9 @@ interface Harness {
   store: MemoryLabelStore;
 }
 
-async function buildHarness(store: MemoryLabelStore | null = new MemoryLabelStore()): Promise<Harness> {
+async function buildHarness(
+  store: MemoryLabelStore | null = new MemoryLabelStore(),
+): Promise<Harness> {
   const client = new FakeClient([
     { path: 'INBOX', specialUse: '\\Inbox', uids: [1, 2, 3] },
     { path: 'Archive', specialUse: '\\Archive', uids: [10, 11] },
@@ -254,10 +256,13 @@ test('метка ставится и снимается, не трогая ос�
     });
     assert.equal(unset.statusCode, 200, unset.body);
     assert.equal(client.flagsOf('INBOX', 1).has(key), false);
-    assert.deepEqual(
-      [...client.flagsOf('INBOX', 1)].sort(),
-      ['$MDNSent', '$Pinned', '$Snoozed', 'finance', 'reliable'],
-    );
+    assert.deepEqual([...client.flagsOf('INBOX', 1)].sort(), [
+      '$MDNSent',
+      '$Pinned',
+      '$Snoozed',
+      'finance',
+      'reliable',
+    ]);
     // А со второго письма метку не снимали — она осталась
     assert.ok(client.flagsOf('INBOX', 2).has(key));
   } finally {
@@ -427,7 +432,10 @@ test('удалять и править можно только свои метк
   const { app } = await buildHarness();
   try {
     for (const key of ['$Snoozed', 'reliable', 'finance', 'mt-net-takoy']) {
-      const del = await app.inject({ method: 'DELETE', url: `/api/labels/${encodeURIComponent(key)}?purge=1` });
+      const del = await app.inject({
+        method: 'DELETE',
+        url: `/api/labels/${encodeURIComponent(key)}?purge=1`,
+      });
       assert.equal(del.statusCode, 404, `${key}: ${del.body}`);
       const patch = await app.inject({
         method: 'PATCH',

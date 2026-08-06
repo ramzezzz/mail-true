@@ -26,7 +26,6 @@ import { forgetAppearance, syncAppearance } from '../src/appearance/sync';
  */
 vi.mock('../src/api/mockFlag', () => ({ useMocks: false }));
 
-
 /** Запросы к /api/settings/appearance, перехваченные подделкой fetch. */
 interface Call {
   method: string;

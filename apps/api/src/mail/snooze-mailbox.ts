@@ -114,7 +114,10 @@ export async function readSourceInfo(
   const out = new Map<number, SnoozeSourceInfo>();
   if (uids.length === 0) return out;
   const fetched = (await client.fetchAll(uids, { uid: true, envelope: true }, { uid: true })) as
-    | Array<{ uid: number; envelope?: { subject?: string; messageId?: string; from?: Array<{ address?: string }> } }>
+    | Array<{
+        uid: number;
+        envelope?: { subject?: string; messageId?: string; from?: Array<{ address?: string }> };
+      }>
     | undefined;
   for (const msg of fetched ?? []) {
     out.set(msg.uid, {
@@ -182,7 +185,9 @@ export async function locateSnoozed(
   currentUidValidity: number,
 ): Promise<number | null> {
   const sameFolderGeneration =
-    row.snoozeUidValidity === 0 || currentUidValidity === 0 || row.snoozeUidValidity === currentUidValidity;
+    row.snoozeUidValidity === 0 ||
+    currentUidValidity === 0 ||
+    row.snoozeUidValidity === currentUidValidity;
 
   if (sameFolderGeneration) {
     const present = await existingUids(client, [row.snoozeUid]);
@@ -212,10 +217,7 @@ export type ReturnOutcome =
  * найдёт письма в «Отложенных» и закроет её как 'gone'. Лишнего возврата
  * при этом не происходит — возвращать уже нечего.
  */
-export async function returnSnoozed(
-  client: ImapFlow,
-  row: SnoozedRow,
-): Promise<ReturnOutcome> {
+export async function returnSnoozed(client: ImapFlow, row: SnoozedRow): Promise<ReturnOutcome> {
   const target = await resolveReturnPath(client, row.originPath);
 
   const lock = await client.getMailboxLock(row.snoozePath);
@@ -247,11 +249,9 @@ export async function returnSnoozed(
     if (destLock) {
       try {
         await client.messageFlagsRemove([newUid], ['\\Seen'], { uid: true });
-        await client.messageFlagsAdd(
-          [newUid],
-          [SNOOZE_RETURNED_KEYWORD, SNOOZE_PINNED_KEYWORD],
-          { uid: true },
-        );
+        await client.messageFlagsAdd([newUid], [SNOOZE_RETURNED_KEYWORD, SNOOZE_PINNED_KEYWORD], {
+          uid: true,
+        });
       } catch {
         /* см. пояснение выше */
       } finally {
@@ -290,8 +290,7 @@ export async function copyToSnooze(
 ): Promise<SnoozePlacement[]> {
   if (uids.length === 0) return [];
   const result = (await client.messageCopy(uids, snooze.path, { uid: true })) as
-    | CopyResult
-    | boolean;
+    CopyResult | boolean;
   const map = uidMapOf(result);
   const uidValidity = uidValidityOf(result);
 

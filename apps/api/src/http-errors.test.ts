@@ -76,7 +76,7 @@ test('ошибки zod дают VALIDATION с подробностями', () =>
 
 test('наши ошибки проходят как есть, вместе с подробностями', () => {
   const mapped = mapFrameworkError(
-    new SendRejectedError('Получатель отклонён', { rejected: ['нет@mail.local'] })
+    new SendRejectedError('Получатель отклонён', { rejected: ['нет@mail.local'] }),
   );
   assert.equal(mapped.status, 400);
   assert.equal(mapped.body.error, 'SEND_REJECTED');
@@ -135,7 +135,11 @@ test('ожидание в ограничении частоты пишется �
   assert.equal(retryAfterRu(15 * 60_000), '15 минут');
   // Ни одного английского слова
   for (const ms of [1000, 32_000, 125_000]) {
-    assert.equal(/[a-z]/i.test(retryAfterRu(ms)), false, `в тексте осталась латиница: ${retryAfterRu(ms)}`);
+    assert.equal(
+      /[a-z]/i.test(retryAfterRu(ms)),
+      false,
+      `в тексте осталась латиница: ${retryAfterRu(ms)}`,
+    );
   }
 });
 
@@ -163,7 +167,7 @@ test('ответ 429 приходит целиком по-русски', async (
     assert.equal(
       /[a-z]/i.test(body.message),
       false,
-      `в сообщении осталась латиница: ${body.message}`
+      `в сообщении осталась латиница: ${body.message}`,
     );
   } finally {
     await app.close();

@@ -64,7 +64,10 @@ export class RedisSessionStore implements SessionStore {
     // проба висела бы вместо того, чтобы честно покраснеть.
     const status = this.redis.status;
     if (status !== 'ready') {
-      return { ok: false, detail: `Соединение с Redis в состоянии «${status}» — сессии недоступны` };
+      return {
+        ok: false,
+        detail: `Соединение с Redis в состоянии «${status}» — сессии недоступны`,
+      };
     }
     const answer = await this.redis.ping();
     return answer === 'PONG'

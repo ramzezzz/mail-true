@@ -254,7 +254,7 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       // Версия сервера для нижней строки состояния в почте
       await versionRoutes(api);
     },
-    { prefix: '/api' }
+    { prefix: '/api' },
   );
 
   // Помощник на основе ИИ (см. src/ai/). Регистрируется ДО админки:

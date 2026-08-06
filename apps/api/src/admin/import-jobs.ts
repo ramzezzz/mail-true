@@ -74,7 +74,10 @@ export function packResult(box: ImportSecretBox | null, result: ImportJobResult)
 }
 
 /** Разбирает шифротекст обратно. Непрочитанный результат — не авария. */
-export function unpackResult(box: ImportSecretBox | null, boxed: string | null): ImportJobResult | null {
+export function unpackResult(
+  box: ImportSecretBox | null,
+  boxed: string | null,
+): ImportJobResult | null {
   if (!box || !boxed) return null;
   try {
     const parsed = JSON.parse(box.decrypt(boxed)) as ImportJobResult;

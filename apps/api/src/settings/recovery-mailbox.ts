@@ -155,8 +155,7 @@ export async function moveToRecovery(
 ): Promise<RecoveryPlacement[]> {
   if (uids.length === 0) return [];
   const result = (await client.messageMove(uids, target.path, { uid: true })) as
-    | UidMapResult
-    | undefined;
+    UidMapResult | undefined;
   const map = result?.uidMap;
   if (!map || map.size === 0) return [];
   const uidValidity = Number(result?.uidValidity ?? target.uidValidity ?? 0);

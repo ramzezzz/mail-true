@@ -36,9 +36,7 @@ export interface ReadReceiptRequest {
  * Всё, что не похоже на адрес, отбрасываем целиком: письмо пришло снаружи,
  * и подставлять в конверт что попало нельзя.
  */
-export function readReceiptRequest(
-  headers: Record<string, string>,
-): ReadReceiptRequest | null {
+export function readReceiptRequest(headers: Record<string, string>): ReadReceiptRequest | null {
   const raw = headers['disposition-notification-to'];
   if (!raw) return null;
 

@@ -145,7 +145,8 @@ export function applyFacets(
   return messages.filter((m) => {
     if (!selection.flags.every((f) => matchesFlagFacet(m, f))) return false;
     if (selection.folderId !== null && m.folderId !== selection.folderId) return false;
-    if (selection.period !== null && periodBucket(m.date, now).id !== selection.period) return false;
+    if (selection.period !== null && periodBucket(m.date, now).id !== selection.period)
+      return false;
     if (selection.label !== null && !hasLabel(m, selection.label)) return false;
     return true;
   });

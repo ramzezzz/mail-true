@@ -131,7 +131,11 @@ class FakeRedis implements AiRedis {
   }
 }
 
-async function fakeAiServer(): Promise<{ baseUrl: string; calls: number; close: () => Promise<void> }> {
+async function fakeAiServer(): Promise<{
+  baseUrl: string;
+  calls: number;
+  close: () => Promise<void>;
+}> {
   const state = { calls: 0 };
   const server = http.createServer((req, res) => {
     state.calls += 1;
@@ -166,9 +170,9 @@ async function fakeAiServer(): Promise<{ baseUrl: string; calls: number; close: 
   };
 }
 
-function letterFor(account: string): Parameters<
-  Awaited<ReturnType<AiService['forFeature']>>['assistant']['summarizeMessage']
->[0] {
+function letterFor(
+  account: string,
+): Parameters<Awaited<ReturnType<AiService['forFeature']>>['assistant']['summarizeMessage']>[0] {
   return {
     id: `inbox:${account}`,
     subject: 'Счёт на оплату',
@@ -229,7 +233,10 @@ void test('предел «два запроса на домен» исчерпы
           'mail.local',
           settingsFor('mail.local', { baseUrl: upstream.baseUrl, maxRequestsPerPeriod: 2 }),
         ],
-        ['other.local', settingsFor('other.local', { baseUrl: upstream.baseUrl, maxRequestsPerPeriod: 2 })],
+        [
+          'other.local',
+          settingsFor('other.local', { baseUrl: upstream.baseUrl, maxRequestsPerPeriod: 2 }),
+        ],
       ]),
     );
     const service = new AiService({

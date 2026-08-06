@@ -46,7 +46,11 @@ import type { ImapPool } from '../imap/pool.js';
 import { detectRole, isServiceFolder, type RawFolderInfo } from '../mail/folders.js';
 import type { MailSession } from '../types.js';
 import type { ContactCursor, ContactsDb, HarvestRole } from './db.js';
-import { foldObservations, observationsFromEnvelope, type ContactObservation } from './observations.js';
+import {
+  foldObservations,
+  observationsFromEnvelope,
+  type ContactObservation,
+} from './observations.js';
 import { normalizeAddress } from './tokens.js';
 
 export interface ContactHarvesterOptions {
@@ -384,9 +388,10 @@ export function planRanges(
 
   // Добор старой почты. Считаем от той границы, какой она станет ПОСЛЕ
   // первого диапазона: иначе первый заход разобрал бы хвост дважды.
-  let bottom = ranges.length > 0 && ranges[0]?.kind === 'forward' && cursor.bottomUid === 0
-    ? (ranges[0]?.from ?? 1)
-    : cursor.bottomUid;
+  let bottom =
+    ranges.length > 0 && ranges[0]?.kind === 'forward' && cursor.bottomUid === 0
+      ? (ranges[0]?.from ?? 1)
+      : cursor.bottomUid;
   if (bottom === 0) bottom = 1;
 
   for (let i = 0; i < chunksPerRun && bottom > 1; i += 1) {

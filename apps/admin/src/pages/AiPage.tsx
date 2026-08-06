@@ -61,8 +61,8 @@ export function AiPage() {
 
       {items.length === 0 && !domains.isLoading && !domains.error && (
         <Notice tone="info">
-          Доменов пока нет. Сначала добавьте домен в разделе «Домены и DNS» — настройки
-          помощника задаются отдельно для каждого домена.
+          Доменов пока нет. Сначала добавьте домен в разделе «Домены и DNS» — настройки помощника
+          задаются отдельно для каждого домена.
         </Notice>
       )}
 
@@ -82,7 +82,9 @@ export function AiPage() {
           </select>
           <ToolbarSpacer />
           {current && (
-            <span className={styles.muted}>Настройки изменены {formatDateTime(current.updatedAt)}</span>
+            <span className={styles.muted}>
+              Настройки изменены {formatDateTime(current.updatedAt)}
+            </span>
           )}
         </Toolbar>
       )}
@@ -140,8 +142,8 @@ function OutboundWarning({ domain }: { domain: AiDomain }) {
     <Notice tone="success">
       Помощник включён. Тексты писем домена <b>{domain.domain}</b> отправляются на{' '}
       <code className="mt-mono">{endpoint}</code> и, судя по настройке «модель внутри периметра»,
-      сервер не покидают. Проверьте, что этот адрес действительно ведёт внутрь вашей сети:
-      признак задаётся вручную, сам по себе он ничего не гарантирует.
+      сервер не покидают. Проверьте, что этот адрес действительно ведёт внутрь вашей сети: признак
+      задаётся вручную, сам по себе он ничего не гарантирует.
     </Notice>
   );
 }
@@ -375,7 +377,13 @@ function DomainSettings({
           </div>
 
           <p className={styles.muted} style={{ margin: 0 }}>
-            Полный адрес запроса: <code className="mt-mono">{endpointOf(draft.baseUrl.trim() === '' ? null : draft.baseUrl.trim(), draft.chatPath)}</code>
+            Полный адрес запроса:{' '}
+            <code className="mt-mono">
+              {endpointOf(
+                draft.baseUrl.trim() === '' ? null : draft.baseUrl.trim(),
+                draft.chatPath,
+              )}
+            </code>
           </p>
         </Panel>
       </div>
@@ -384,8 +392,8 @@ function DomainSettings({
       <div className={styles.panelGap}>
         <Panel title="Предел расходов">
           <p className={styles.muted} style={{ marginTop: 0 }}>
-            Пустое поле — без предела. Когда предел исчерпан, помощник отвечает понятным отказом,
-            а почта продолжает работать как обычно.
+            Пустое поле — без предела. Когда предел исчерпан, помощник отвечает понятным отказом, а
+            почта продолжает работать как обычно.
           </p>
           <div className={styles.grid}>
             <Field label="Окно учёта" hint={`Сейчас: ${periodLabel(draft.periodMs)}`}>
@@ -544,7 +552,9 @@ function DomainSettings({
             })}
           </div>
 
-          <p className={styles.muted} style={{ marginBottom: 4 }}>Что не отправляется никогда:</p>
+          <p className={styles.muted} style={{ marginBottom: 4 }}>
+            Что не отправляется никогда:
+          </p>
           <ul className={styles.list}>
             {reference.neverSent.map((line) => (
               <li key={line}>{line}</li>
@@ -617,9 +627,7 @@ function ApiKeyField({
       label="Ключ доступа к сервису"
       hint={
         reference.canStoreApiKey ? (
-          <>
-            {stored} Пустое поле — сохранённый ключ остаётся как есть.
-          </>
+          <>{stored} Пустое поле — сохранённый ключ остаётся как есть.</>
         ) : (
           <>{reference.apiKeyReason ?? 'Сохранить ключ сейчас нельзя.'}</>
         )
@@ -672,7 +680,9 @@ function TestResult({ result }: { result: AiTestResult }) {
             <Table>
               <tbody>
                 <tr>
-                  <td className={tableStyles.nowrap} style={{ width: 200 }}>Причина</td>
+                  <td className={tableStyles.nowrap} style={{ width: 200 }}>
+                    Причина
+                  </td>
                   <td>{errorLabel(result.reason)}</td>
                 </tr>
                 {result.status !== null && result.status !== undefined && (
@@ -702,8 +712,12 @@ function TestResult({ result }: { result: AiTestResult }) {
           <Table>
             <tbody>
               <tr>
-                <td className={tableStyles.nowrap} style={{ width: 200 }}>Адрес</td>
-                <td className="mt-mono" style={{ wordBreak: 'break-all' }}>{result.endpoint}</td>
+                <td className={tableStyles.nowrap} style={{ width: 200 }}>
+                  Адрес
+                </td>
+                <td className="mt-mono" style={{ wordBreak: 'break-all' }}>
+                  {result.endpoint}
+                </td>
               </tr>
               <tr>
                 <td className={tableStyles.nowrap}>Модель</td>
@@ -733,7 +747,9 @@ function TestResult({ result }: { result: AiTestResult }) {
             </tbody>
           </Table>
         </TableWrap>
-        <p className={styles.muted} style={{ marginBottom: 4 }}>Что ответила модель:</p>
+        <p className={styles.muted} style={{ marginBottom: 4 }}>
+          Что ответила модель:
+        </p>
         <p className={styles.summary}>{result.summary}</p>
       </Panel>
     </div>

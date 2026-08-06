@@ -86,7 +86,10 @@ export interface LoginGlobeProps {
   center?: LoginGlobeIcon;
 }
 
-export function LoginGlobe({ icons = MAIL_GLOBE_ICONS, center = MAIL_GLOBE_CENTER }: LoginGlobeProps = {}) {
+export function LoginGlobe({
+  icons = MAIL_GLOBE_ICONS,
+  center = MAIL_GLOBE_CENTER,
+}: LoginGlobeProps = {}) {
   const visible = usePageVisible();
 
   return (
@@ -171,7 +174,10 @@ export function LoginGlobe({ icons = MAIL_GLOBE_ICONS, center = MAIL_GLOBE_CENTE
               <div
                 key={icon.id}
                 className={styles.nodeWrap}
-                style={{ left: `calc(${String(x)}% - 1.55rem)`, top: `calc(${String(y)}% - 1.55rem)` }}
+                style={{
+                  left: `calc(${String(x)}% - 1.55rem)`,
+                  top: `calc(${String(y)}% - 1.55rem)`,
+                }}
               >
                 <div
                   className={styles.node}

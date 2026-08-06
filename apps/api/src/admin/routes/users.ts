@@ -66,7 +66,10 @@ const bulkSchema = z.object({
 });
 
 const importSchema = z.object({
-  csv: z.string().min(1).max(4 * 1024 * 1024),
+  csv: z
+    .string()
+    .min(1)
+    .max(4 * 1024 * 1024),
   defaultQuotaBytes: z.coerce.number().int().min(0).optional(),
   allowNewDomains: z.boolean().default(false),
 });
@@ -325,7 +328,9 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         });
       } catch (err) {
         if (!isUndefinedTable(err)) throw err;
-        request.log.warn('Нет таблицы mailbox_deletions: примените миграцию 0006_admin_cleanup.sql');
+        request.log.warn(
+          'Нет таблицы mailbox_deletions: примените миграцию 0006_admin_cleanup.sql',
+        );
       }
 
       // 3. Всё, что принадлежит ящику в базе.
@@ -460,11 +465,9 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
    * Интерфейс обязан показать это число ДО импорта: раньше оно жило только
    * в ADMIN_DEFAULT_QUOTA_BYTES и человеку было неоткуда о нём узнать.
    */
-  app.get(
-    '/users/import/defaults',
-    { preHandler: requireAdmin(app, 'users.write') },
-    async () => ({ defaultQuotaBytes: ctx.config.ADMIN_DEFAULT_QUOTA_BYTES }),
-  );
+  app.get('/users/import/defaults', { preHandler: requireAdmin(app, 'users.write') }, async () => ({
+    defaultQuotaBytes: ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+  }));
 
   /* --- импорт: предварительный показ ------------------------------- */
   app.post(
@@ -478,7 +481,11 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       // Пароли в предпросмотр не отдаём — только признак, задан ли он
       return {
         ...preview,
-        rows: preview.rows.map((r) => ({ ...r, password: undefined, hasPassword: r.password !== null })),
+        rows: preview.rows.map((r) => ({
+          ...r,
+          password: undefined,
+          hasPassword: r.password !== null,
+        })),
         /** Квота, доставшаяся строкам без своей, — ровно та, что применится. */
         defaultQuotaBytes: body.defaultQuotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
         /** Будут ли создаваться новые домены на самом деле. */
@@ -503,125 +510,129 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
    * паролей нет ни у кого и восстановить их неоткуда. Подробности —
    * в src/admin/import-jobs.ts.
    */
-  app.post('/users/import', { preHandler: requireAdmin(app, 'users.write') }, async (request, reply) => {
-    const body = importSchema.parse(request.body);
-    const admin = currentAdmin(request);
-    const allowNewDomains = effectiveAllowNewDomains(body.allowNewDomains, admin.role);
-    const preview = await parseImport(body.csv, allowNewDomains, body.defaultQuotaBytes);
+  app.post(
+    '/users/import',
+    { preHandler: requireAdmin(app, 'users.write') },
+    async (request, reply) => {
+      const body = importSchema.parse(request.body);
+      const admin = currentAdmin(request);
+      const allowNewDomains = effectiveAllowNewDomains(body.allowNewDomains, admin.role);
+      const preview = await parseImport(body.csv, allowNewDomains, body.defaultQuotaBytes);
 
-    const jobId = await ctx.db.createImportJob({
-      adminId: admin.adminId,
-      adminLogin: admin.login,
-      total: preview.rows.length,
-    });
-
-    const result: ImportJobResult = { created: [], failed: [] };
-    const box = ctx.importBox;
-    const origin = originOf(request);
-    const auditRow = (input: AuditInput): Promise<void> =>
-      ctx.db.writeAudit(
-        buildAuditRecord({ id: admin.adminId, login: admin.login }, origin, input),
-      );
-
-    const save = async (state: 'running' | 'done', processed: number): Promise<void> => {
-      await ctx.db.updateImportJob(jobId, {
-        state,
-        processed,
-        createdCount: result.created.length,
-        failedCount: result.failed.length,
-        resultEnc: packResult(box, result),
-        ...(state === 'done' ? { finished: true } : {}),
+      const jobId = await ctx.db.createImportJob({
+        adminId: admin.adminId,
+        adminLogin: admin.login,
+        total: preview.rows.length,
       });
-    };
 
-    // Сама работа. Запрос её не ждёт: обрыв связи больше ничего не значит.
-    const run = async (): Promise<void> => {
-      let processed = 0;
-      for (const row of preview.rows) {
-        processed += 1;
-        if (row.errors.length > 0) {
-          result.failed.push({ line: row.line, email: row.email, error: row.errors.join('; ') });
-        } else {
-          try {
-            const domainName = row.email.slice(row.email.indexOf('@') + 1);
-            const domain = await ctx.db.resolveDomain(domainName, allowNewDomains);
-            if (!domain) {
+      const result: ImportJobResult = { created: [], failed: [] };
+      const box = ctx.importBox;
+      const origin = originOf(request);
+      const auditRow = (input: AuditInput): Promise<void> =>
+        ctx.db.writeAudit(
+          buildAuditRecord({ id: admin.adminId, login: admin.login }, origin, input),
+        );
+
+      const save = async (state: 'running' | 'done', processed: number): Promise<void> => {
+        await ctx.db.updateImportJob(jobId, {
+          state,
+          processed,
+          createdCount: result.created.length,
+          failedCount: result.failed.length,
+          resultEnc: packResult(box, result),
+          ...(state === 'done' ? { finished: true } : {}),
+        });
+      };
+
+      // Сама работа. Запрос её не ждёт: обрыв связи больше ничего не значит.
+      const run = async (): Promise<void> => {
+        let processed = 0;
+        for (const row of preview.rows) {
+          processed += 1;
+          if (row.errors.length > 0) {
+            result.failed.push({ line: row.line, email: row.email, error: row.errors.join('; ') });
+          } else {
+            try {
+              const domainName = row.email.slice(row.email.indexOf('@') + 1);
+              const domain = await ctx.db.resolveDomain(domainName, allowNewDomains);
+              if (!domain) {
+                result.failed.push({
+                  line: row.line,
+                  email: row.email,
+                  error: `Домен «${domainName}» не заведён`,
+                });
+              } else {
+                const generated = row.password === null;
+                const password = row.password ?? generatePassword();
+                const user = await ctx.db.createMailUser({
+                  domainId: domain.id,
+                  email: row.email,
+                  passwordHash: dovecotHash(password),
+                  displayName: row.displayName,
+                  quotaBytes: row.quotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+                  active: true,
+                });
+                result.created.push({
+                  email: user.email,
+                  generatedPassword: generated ? password : null,
+                });
+                await auditRow({
+                  action: 'user.create',
+                  targetType: 'user',
+                  targetId: user.id,
+                  targetLabel: user.email,
+                  after: snapshot(user),
+                });
+              }
+            } catch (err) {
               result.failed.push({
                 line: row.line,
                 email: row.email,
-                error: `Домен «${domainName}» не заведён`,
-              });
-            } else {
-              const generated = row.password === null;
-              const password = row.password ?? generatePassword();
-              const user = await ctx.db.createMailUser({
-                domainId: domain.id,
-                email: row.email,
-                passwordHash: dovecotHash(password),
-                displayName: row.displayName,
-                quotaBytes: row.quotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
-                active: true,
-              });
-              result.created.push({
-                email: user.email,
-                generatedPassword: generated ? password : null,
-              });
-              await auditRow({
-                action: 'user.create',
-                targetType: 'user',
-                targetId: user.id,
-                targetLabel: user.email,
-                after: snapshot(user),
+                error: err instanceof Error ? err.message : String(err),
               });
             }
-          } catch (err) {
-            result.failed.push({
-              line: row.line,
-              email: row.email,
-              error: err instanceof Error ? err.message : String(err),
-            });
           }
+          // Промежуточное сохранение: падение процесса на середине не должно
+          // уносить с собой пароли уже созданных ящиков.
+          if (processed % 25 === 0) await save('running', processed);
         }
-        // Промежуточное сохранение: падение процесса на середине не должно
-        // уносить с собой пароли уже созданных ящиков.
-        if (processed % 25 === 0) await save('running', processed);
-      }
-      await save('done', processed);
-      await auditRow({
-        action: 'user.import',
-        targetType: 'user',
-        targetId: jobId,
-        targetLabel: `${String(result.created.length)} из ${String(preview.rows.length)}`,
-        after: { job_id: jobId, created: result.created.length, failed: result.failed.length },
+        await save('done', processed);
+        await auditRow({
+          action: 'user.import',
+          targetType: 'user',
+          targetId: jobId,
+          targetLabel: `${String(result.created.length)} из ${String(preview.rows.length)}`,
+          after: { job_id: jobId, created: result.created.length, failed: result.failed.length },
+        });
+      };
+
+      void run().catch(async (err: unknown) => {
+        request.log.error(errorInfo(err, { jobId }), 'Импорт ящиков упал');
+        await ctx.db
+          .updateImportJob(jobId, {
+            state: 'failed',
+            error: err instanceof Error ? err.message : String(err),
+            resultEnc: packResult(box, result),
+            createdCount: result.created.length,
+            failedCount: result.failed.length,
+            finished: true,
+          })
+          .catch(() => undefined);
       });
-    };
 
-    void run().catch(async (err: unknown) => {
-      request.log.error(errorInfo(err, { jobId }), 'Импорт ящиков упал');
-      await ctx.db
-        .updateImportJob(jobId, {
-          state: 'failed',
-          error: err instanceof Error ? err.message : String(err),
-          resultEnc: packResult(box, result),
-          createdCount: result.created.length,
-          failedCount: result.failed.length,
-          finished: true,
-        })
-        .catch(() => undefined);
-    });
-
-    reply.status(202);
-    return {
-      ok: true,
-      jobId,
-      state: 'running',
-      total: preview.rows.length,
-      allowNewDomains,
-      /** Где забрать результат — в том числе после обрыва связи. */
-      resultUrl: `/api/admin/users/import/jobs/${String(jobId)}`,
-      passwordsStored: box !== null,
-    };
-  });
+      reply.status(202);
+      return {
+        ok: true,
+        jobId,
+        state: 'running',
+        total: preview.rows.length,
+        allowNewDomains,
+        /** Где забрать результат — в том числе после обрыва связи. */
+        resultUrl: `/api/admin/users/import/jobs/${String(jobId)}`,
+        passwordsStored: box !== null,
+      };
+    },
+  );
 
   /* --- импорт: результат ------------------------------------------- */
   app.get('/users/import/jobs', { preHandler: requireAdmin(app, 'users.write') }, async () => {

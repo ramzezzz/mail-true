@@ -109,9 +109,9 @@ export function AiSettingsView({
       <div className={styles.inner}>
         <h1 className={styles.title}>Помощник на основе ИИ</h1>
         <p className={styles.lead}>
-          Помощник умеет пересказывать письма, подсказывать ответы, вытаскивать даты
-          и суммы и переводить текст. Чтобы это делать, он отправляет содержимое письма
-          сервису, указанному ниже. Пока вы не согласитесь, наружу не уходит ничего.
+          Помощник умеет пересказывать письма, подсказывать ответы, вытаскивать даты и суммы и
+          переводить текст. Чтобы это делать, он отправляет содержимое письма сервису, указанному
+          ниже. Пока вы не согласитесь, наружу не уходит ничего.
         </p>
 
         {error && <div className={styles.error}>{error}</div>}
@@ -128,8 +128,8 @@ export function AiSettingsView({
 
           {state.consent.given && !state.consent.matchesProvider && (
             <div className={styles.warning}>
-              Администратор сменил сервис. Раньше вы соглашались отправлять письма
-              на {state.consent.consentedEndpoint ?? 'другой адрес'}
+              Администратор сменил сервис. Раньше вы соглашались отправлять письма на{' '}
+              {state.consent.consentedEndpoint ?? 'другой адрес'}
               {state.consent.consentedModel ? `, модель ${state.consent.consentedModel}` : ''}.
               Согласие нужно дать заново — уже на новый сервис.
             </div>
@@ -138,30 +138,27 @@ export function AiSettingsView({
           {consentGiven ? (
             <>
               <p className={styles.text}>
-                Согласие дано{state.consent.at ? ` ${formatDate(state.consent.at)}` : ''}.
-                Помощник работает.
+                Согласие дано{state.consent.at ? ` ${formatDate(state.consent.at)}` : ''}. Помощник
+                работает.
               </p>
               <p className={`${styles.text} ${styles.muted}`}>
-                Отзыв согласия выключает помощника и удаляет всё, что он успел
-                насчитать: резюме, метки, извлечённые данные и переводы. Не помечает
-                удалёнными — удаляет.
+                Отзыв согласия выключает помощника и удаляет всё, что он успел насчитать: резюме,
+                метки, извлечённые данные и переводы. Не помечает удалёнными — удаляет.
               </p>
               <div className={styles.actions}>
                 <Button mode="outline" onClick={onRevoke} disabled={busy}>
                   Отозвать согласие и удалить созданное
                 </Button>
                 {removedCacheEntries !== null && (
-                  <span className={styles.muted}>
-                    Удалено записей: {removedCacheEntries}
-                  </span>
+                  <span className={styles.muted}>Удалено записей: {removedCacheEntries}</span>
                 )}
               </div>
             </>
           ) : (
             <>
               <p className={styles.text}>
-                Отметьте возможности, которые хотите включить, и нажмите «Включить
-                помощника». Каждую можно выключить потом по отдельности.
+                Отметьте возможности, которые хотите включить, и нажмите «Включить помощника».
+                Каждую можно выключить потом по отдельности.
               </p>
               <div className={styles.actions}>
                 <Button mode="primary" onClick={() => onAccept(selected)} disabled={busy}>
@@ -198,9 +195,7 @@ export function AiSettingsView({
               </div>
             ))}
             {allowed.length === 0 && (
-              <p className={styles.text}>
-                Администратор не разрешил ни одной возможности.
-              </p>
+              <p className={styles.text}>Администратор не разрешил ни одной возможности.</p>
             )}
           </div>
         </section>
@@ -215,8 +210,8 @@ export function AiSettingsView({
           </ul>
           {/* Обещания сверху проверяемы: точный состав виден у каждого ответа */}
           <p className={`${styles.text} ${styles.muted} ${styles.spacedNote}`}>
-            Это обещания. Точный состав отправленного показывается рядом с каждым
-            ответом помощника — там же, где сам ответ, под ссылкой «Что ушло наружу».
+            Это обещания. Точный состав отправленного показывается рядом с каждым ответом помощника
+            — там же, где сам ответ, под ссылкой «Что ушло наружу».
           </p>
         </section>
 
@@ -224,14 +219,13 @@ export function AiSettingsView({
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>Что хранится у нас</h2>
           <p className={styles.text}>
-            Ответы сервиса сохраняются на нашем сервере и привязываются к письму.
-            Второй раз за то же резюме или ту же метку мы не платим и наружу
-            повторно ничего не отправляем: ответ берётся из сохранённого.
+            Ответы сервиса сохраняются на нашем сервере и привязываются к письму. Второй раз за то
+            же резюме или ту же метку мы не платим и наружу повторно ничего не отправляем: ответ
+            берётся из сохранённого.
           </p>
           <p className={`${styles.text} ${styles.muted}`}>
-            Отдельное письмо можно «забыть» — тогда всё, что помощник по нему
-            насчитал, удаляется, а при следующем нажатии считается заново.
-            Отзыв согласия удаляет сохранённое целиком.
+            Отдельное письмо можно «забыть» — тогда всё, что помощник по нему насчитал, удаляется, а
+            при следующем нажатии считается заново. Отзыв согласия удаляет сохранённое целиком.
           </p>
         </section>
 
@@ -269,9 +263,8 @@ function ProviderBlock({ provider }: { provider: AiProviderInfo | null }) {
         </div>
       ) : (
         <div className={styles.remote}>
-          Это внешний сервис. Содержимое письма уйдёт за пределы вашего сервера —
-          на адрес, указанный ниже. Если так нельзя, попросите администратора
-          поднять модель рядом с почтой.
+          Это внешний сервис. Содержимое письма уйдёт за пределы вашего сервера — на адрес,
+          указанный ниже. Если так нельзя, попросите администратора поднять модель рядом с почтой.
         </div>
       )}
       <div className={styles.rows}>
@@ -312,8 +305,12 @@ function BudgetBlock({ budget }: { budget: AiBudget }) {
       <p className={`${styles.text} ${styles.muted} ${styles.spacedNote}`}>
         Период учёта — {formatPeriod(budget.periodMs)}, отсчёт с{' '}
         {formatDate(new Date(budget.windowStartedAt).toISOString())}.
-        {budget.tokensLeft !== null ? ` Осталось токенов: ${budget.tokensLeft.toLocaleString('ru-RU')}.` : ''}
-        {budget.requestsLeft !== null ? ` Осталось обращений: ${budget.requestsLeft.toLocaleString('ru-RU')}.` : ''}
+        {budget.tokensLeft !== null
+          ? ` Осталось токенов: ${budget.tokensLeft.toLocaleString('ru-RU')}.`
+          : ''}
+        {budget.requestsLeft !== null
+          ? ` Осталось обращений: ${budget.requestsLeft.toLocaleString('ru-RU')}.`
+          : ''}
       </p>
     </>
   );

@@ -52,56 +52,64 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
-  app.post('/aliases', { preHandler: requireAdmin(app, 'aliases.write') }, async (request, reply) => {
-    const body = createSchema.parse(request.body);
-    /*
-     * Связность проверяется ДО создания. Раньше проверялось ровно одно —
-     * что адрес не указывает сам на себя, — а самая тяжёлая беда пропускалась
-     * молча: алиас с адресом существующего ящика уводит всю его входящую
-     * почту, потому что перенаправления разбираются раньше ящиков.
-     * Подробности и остальные случаи — в admin/alias-check.ts.
-     */
-    const problem = await checkAlias(body.source, body.destination, {
-      mailboxExists: async (email) => (await ctx.db.findMailUserByEmail(email)) !== null,
-      aliasTarget: (source) => ctx.db.aliasTargetOf(source),
-    });
-    if (problem?.blocking) throw new BadRequestError(problem.message);
-    const domainName = body.source.slice(body.source.indexOf('@') + 1);
-    const domain = await ctx.db.resolveDomain(domainName, false);
-    if (!domain) {
-      throw new BadRequestError(
-        `Домен «${domainName}» не заведён. Алиас можно создать только в своём домене.`,
-      );
-    }
-    try {
-      const created = await ctx.db.createAlias(domain.id, body.source, body.destination);
-      await audit(ctx, request, {
-        action: 'alias.create',
-        targetType: 'alias',
-        targetId: created.id,
-        targetLabel: `${created.source} -> ${created.destination}`,
-        after: { source: created.source, destination: created.destination, active: created.active },
+  app.post(
+    '/aliases',
+    { preHandler: requireAdmin(app, 'aliases.write') },
+    async (request, reply) => {
+      const body = createSchema.parse(request.body);
+      /*
+       * Связность проверяется ДО создания. Раньше проверялось ровно одно —
+       * что адрес не указывает сам на себя, — а самая тяжёлая беда пропускалась
+       * молча: алиас с адресом существующего ящика уводит всю его входящую
+       * почту, потому что перенаправления разбираются раньше ящиков.
+       * Подробности и остальные случаи — в admin/alias-check.ts.
+       */
+      const problem = await checkAlias(body.source, body.destination, {
+        mailboxExists: async (email) => (await ctx.db.findMailUserByEmail(email)) !== null,
+        aliasTarget: (source) => ctx.db.aliasTargetOf(source),
       });
-      reply.status(201);
-      return {
-        id: created.id,
-        source: created.source,
-        destination: created.destination,
-        domain: created.domain,
-        domainId: created.domain_id,
-        active: created.active,
-        createdAt: created.created_at.toISOString(),
-        // Непреграждающее предупреждение: алиас создан, но человеку стоит
-        // знать, что путь ведёт на несуществующий адрес. Отказывать нельзя —
-        // ящик могут завести следующим действием, а пересылка на внешний
-        // адрес это вообще обычное дело.
-        ...(problem ? { warning: problem.message } : {}),
-      };
-    } catch (err) {
-      if (isUniqueViolation(err)) throw new ConflictError('Такой алиас уже есть');
-      throw err;
-    }
-  });
+      if (problem?.blocking) throw new BadRequestError(problem.message);
+      const domainName = body.source.slice(body.source.indexOf('@') + 1);
+      const domain = await ctx.db.resolveDomain(domainName, false);
+      if (!domain) {
+        throw new BadRequestError(
+          `Домен «${domainName}» не заведён. Алиас можно создать только в своём домене.`,
+        );
+      }
+      try {
+        const created = await ctx.db.createAlias(domain.id, body.source, body.destination);
+        await audit(ctx, request, {
+          action: 'alias.create',
+          targetType: 'alias',
+          targetId: created.id,
+          targetLabel: `${created.source} -> ${created.destination}`,
+          after: {
+            source: created.source,
+            destination: created.destination,
+            active: created.active,
+          },
+        });
+        reply.status(201);
+        return {
+          id: created.id,
+          source: created.source,
+          destination: created.destination,
+          domain: created.domain,
+          domainId: created.domain_id,
+          active: created.active,
+          createdAt: created.created_at.toISOString(),
+          // Непреграждающее предупреждение: алиас создан, но человеку стоит
+          // знать, что путь ведёт на несуществующий адрес. Отказывать нельзя —
+          // ящик могут завести следующим действием, а пересылка на внешний
+          // адрес это вообще обычное дело.
+          ...(problem ? { warning: problem.message } : {}),
+        };
+      } catch (err) {
+        if (isUniqueViolation(err)) throw new ConflictError('Такой алиас уже есть');
+        throw err;
+      }
+    },
+  );
 
   app.patch<{ Params: { id: string } }>(
     '/aliases/:id',

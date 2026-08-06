@@ -52,7 +52,7 @@ test('запись об ошибке базы в разы легче, чем о�
 
   assert.ok(
     compact.size * 4 < whole.size,
-    `сжатая запись ${compact.size} Б против ${whole.size} Б — разница слишком мала`
+    `сжатая запись ${compact.size} Б против ${whole.size} Б — разница слишком мала`,
   );
   // Состояние соединения в журнал попадать не должно вовсе
   assert.equal(compact.line.includes('connectionParameters'), false);
@@ -112,7 +112,8 @@ test('не-ошибки тоже пригодны к записи', () => {
  * весь список номеров писем. Одна запись журнала — 225 КБ.
  */
 test('длинный текст ошибки обрезается, а не уходит в журнал целиком', () => {
-  const huge = 'Too long argument: FETCH ' + Array.from({ length: 20_000 }, (_, i) => i + 1).join(',');
+  const huge =
+    'Too long argument: FETCH ' + Array.from({ length: 20_000 }, (_, i) => i + 1).join(',');
   assert.ok(huge.length > 100_000, 'исходный текст должен быть заведомо огромным');
   const line = JSON.stringify(errorInfo(new Error(huge)));
   assert.ok(line.length < 1000, `запись журнала весит ${String(line.length)} символов`);

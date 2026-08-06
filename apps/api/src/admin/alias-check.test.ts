@@ -25,7 +25,11 @@ function world(mailboxes: string[], aliases: Record<string, string> = {}): Alias
  * в него можно войти, в нём лежит старая почта — просто новая не приходит.
  */
 test('алиас с адресом существующего ящика отвергается', async () => {
-  const problem = await checkAlias('ivanov@mail.local', 'petrov@mail.local', world(['ivanov@mail.local', 'petrov@mail.local']));
+  const problem = await checkAlias(
+    'ivanov@mail.local',
+    'petrov@mail.local',
+    world(['ivanov@mail.local', 'petrov@mail.local']),
+  );
   assert.ok(problem, 'такой алиас обязан отвергаться');
   assert.equal(problem.blocking, true);
   assert.match(problem.message, /существующий ящик/);
@@ -34,7 +38,11 @@ test('алиас с адресом существующего ящика отв�
 
 test('кольцо перенаправлений отвергается', async () => {
   // a → b уже есть; создаём b → a
-  const problem = await checkAlias('b@mail.local', 'a@mail.local', world([], { 'a@mail.local': 'b@mail.local' }));
+  const problem = await checkAlias(
+    'b@mail.local',
+    'a@mail.local',
+    world([], { 'a@mail.local': 'b@mail.local' }),
+  );
   assert.ok(problem);
   assert.equal(problem.blocking, true);
   assert.match(problem.message, /кольцо/);
@@ -71,14 +79,22 @@ test('путь на несуществующий адрес предупрежд
 });
 
 test('цепочка, ведущая в никуда, называет конечный адрес', async () => {
-  const problem = await checkAlias('a@mail.local', 'b@mail.local', world([], { 'b@mail.local': 'c@mail.local' }));
+  const problem = await checkAlias(
+    'a@mail.local',
+    'b@mail.local',
+    world([], { 'b@mail.local': 'c@mail.local' }),
+  );
   assert.ok(problem);
   assert.equal(problem.blocking, false);
   assert.match(problem.message, /c@mail\.local/, 'важен конец пути, а не первый шаг');
 });
 
 test('исправный алиас на живой ящик не вызывает возражений', async () => {
-  const problem = await checkAlias('sales@mail.local', 'ivanov@mail.local', world(['ivanov@mail.local']));
+  const problem = await checkAlias(
+    'sales@mail.local',
+    'ivanov@mail.local',
+    world(['ivanov@mail.local']),
+  );
   assert.equal(problem, null);
 });
 

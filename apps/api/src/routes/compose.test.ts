@@ -102,12 +102,18 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 async function buildTestApp(client: FakeClient, config: AppConfig): Promise<FastifyInstance> {
   // Общий предел тела запроса — как в бою (2 МБ). Маршруты написания
   // должны поднимать его для себя сами.
-  const app = Fastify({ logger: false, bodyLimit: GLOBAL_BODY_LIMIT }) as unknown as FastifyInstance;
+  const app = Fastify({
+    logger: false,
+    bodyLimit: GLOBAL_BODY_LIMIT,
+  }) as unknown as FastifyInstance;
   const pool = {
     withClient: async <T>(_e: string, _p: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> =>
       fn(client as unknown as ImapFlow),
   };
-  const uploads = { get: async () => null, delete: async () => undefined } as unknown as UploadStore;
+  const uploads = {
+    get: async () => null,
+    delete: async () => undefined,
+  } as unknown as UploadStore;
   app.decorate('deps', { pool, uploads, config } as unknown as AppDeps);
   app.decorateRequest('mailSession', null);
   app.decorate('requireSession', async function (request) {
@@ -244,8 +250,8 @@ test('пять одновременных сохранений черновик�
           method: 'POST',
           url: '/api/drafts',
           payload: { ...draftPayload(`версия ${i}`), draftUid: uid },
-        })
-      )
+        }),
+      ),
     );
 
     assert.equal(client.drafts.size, 1, `осталось черновиков: ${client.drafts.size}`);
@@ -264,8 +270,8 @@ test('автосохранение нового письма с ключом о�
           method: 'POST',
           url: '/api/drafts',
           payload: { ...draftPayload(`версия ${i}`), draftKey: 'окно-1' },
-        })
-      )
+        }),
+      ),
     );
     assert.equal(client.drafts.size, 1);
   } finally {

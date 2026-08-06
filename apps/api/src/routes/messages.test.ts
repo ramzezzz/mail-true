@@ -144,10 +144,13 @@ class FakeClient {
     if (!present.has(uid)) return false;
     return {
       uid,
-      source: Buffer.from(`Subject: Pismo ${String(uid)}
+      source: Buffer.from(
+        `Subject: Pismo ${String(uid)}
 
 Telo pisma.
-`, 'utf8'),
+`,
+        'utf8',
+      ),
       // Тема с косой чертой и датой — ровно то, из чего собирается имя файла
       envelope: { subject: 'Акт 12/2026', date: new Date('2026-07-31T09:15:00Z') },
       internalDate: new Date('2026-08-01T00:00:00Z'),
@@ -166,7 +169,7 @@ Telo pisma.
 
   async messageMove(
     uids: number[],
-    destination: string
+    destination: string,
   ): Promise<{ path: string; destination: string; uidMap: Map<number, number> }> {
     this.calls.push(`move ${this.selected}->${destination} ${uids.join(',')}`);
     const from = this.boxes.get(this.selected);
@@ -313,7 +316,7 @@ test('перемещение: заведомо неудачный запрос �
     assert.equal(
       client.calls.some((c) => c.startsWith('mailboxCreate')),
       false,
-      'папка «Архив» создана зря'
+      'папка «Архив» создана зря',
     );
   } finally {
     await app.close();
@@ -371,11 +374,14 @@ test('фильтр «с вложениями» находит письма с в
       url: '/api/messages?folderId=inbox&filter=with-attachments&snippets=0',
     });
     assert.equal(res.statusCode, 200);
-    const page = res.json() as { items: Array<{ uid: number; hasAttachments: boolean }>; total: number };
+    const page = res.json() as {
+      items: Array<{ uid: number; hasAttachments: boolean }>;
+      total: number;
+    };
     assert.equal(page.total, 1);
     assert.deepEqual(
       page.items.map((i) => i.uid),
-      [2]
+      [2],
     );
     assert.equal(page.items[0]?.hasAttachments, true);
   } finally {

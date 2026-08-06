@@ -83,8 +83,7 @@ export function UsersPage() {
   };
 
   const toggleActive = useMutation({
-    mutationFn: ({ id, active }: { id: number; active: boolean }) =>
-      api.updateUser(id, { active }),
+    mutationFn: ({ id, active }: { id: number; active: boolean }) => api.updateUser(id, { active }),
     onSuccess: (user) => {
       setFlash(`Ящик ${user.email} ${user.active ? 'разблокирован' : 'заблокирован'}`);
       invalidate();
@@ -208,7 +207,10 @@ export function UsersPage() {
           </thead>
           <tbody>
             {items.map((user) => (
-              <tr key={user.id} className={selected.has(user.id) ? tableStyles.selected : undefined}>
+              <tr
+                key={user.id}
+                className={selected.has(user.id) ? tableStyles.selected : undefined}
+              >
                 {can('users.write') && (
                   <td>
                     <Checkbox
@@ -225,9 +227,15 @@ export function UsersPage() {
                 <td className="mt-mono">{user.email}</td>
                 <td className={tableStyles.optionalNarrow}>{user.displayName ?? '—'}</td>
                 <td className={tableStyles.numeric}>{formatBytes(user.quotaBytes)}</td>
-                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>{user.aliasCount}</td>
-                <td><ActiveBadge active={user.active} /></td>
-                <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>{formatDateTime(user.createdAt)}</td>
+                <td className={`${tableStyles.numeric} ${tableStyles.optional}`}>
+                  {user.aliasCount}
+                </td>
+                <td>
+                  <ActiveBadge active={user.active} />
+                </td>
+                <td className={`${tableStyles.nowrap} ${tableStyles.optional}`}>
+                  {formatDateTime(user.createdAt)}
+                </td>
                 <td>
                   {/*
                     Значки, раскрывающиеся в подписи при наведении и фокусе
@@ -323,12 +331,7 @@ export function UsersPage() {
         </Table>
       </TableWrap>
 
-      <Pager
-        total={users.data?.total ?? 0}
-        limit={LIMIT}
-        offset={offset}
-        onChange={setOffset}
-      />
+      <Pager total={users.data?.total ?? 0} limit={LIMIT} offset={offset} onChange={setOffset} />
 
       {createOpen && (
         <CreateUserModal
@@ -361,9 +364,7 @@ export function UsersPage() {
           }}
         />
       )}
-      {enterFor && (
-        <EnterMailboxModal user={enterFor} onClose={() => setEnterFor(null)} />
-      )}
+      {enterFor && <EnterMailboxModal user={enterFor} onClose={() => setEnterFor(null)} />}
       {deleting && (
         <DeleteUserModal
           user={deleting}
@@ -479,10 +480,7 @@ function CreateUserModal({
       }
     >
       <ErrorNotice error={create.error} />
-      <Field
-        label="Адрес"
-        hint={emailProblem ?? 'Домен должен быть заведён в разделе «Домены»'}
-      >
+      <Field label="Адрес" hint={emailProblem ?? 'Домен должен быть заведён в разделе «Домены»'}>
         <input
           className="mt-input mt-mono"
           autoFocus
@@ -902,8 +900,8 @@ function EnterMailboxModal({ user, onClose }: { user: MailUser; onClose: () => v
         />
       </Field>
       <Notice tone="info">
-        Отправлять письма от имени владельца нельзя. Флаг «прочитано» при просмотре не
-        ставится — следов в ящике не остаётся.
+        Отправлять письма от имени владельца нельзя. Флаг «прочитано» при просмотре не ставится —
+        следов в ящике не остаётся.
       </Notice>
     </Modal>
   );
@@ -959,7 +957,11 @@ function DeleteUserModal({
   if (result) {
     const done = (): void => onDone(`Ящик ${user.email} удалён`);
     return (
-      <Modal title={`Ящик ${user.email} удалён`} onClose={done} footer={<Button onClick={done}>Понятно</Button>}>
+      <Modal
+        title={`Ящик ${user.email} удалён`}
+        onClose={done}
+        footer={<Button onClick={done}>Понятно</Button>}
+      >
         <Notice tone="success">Ящик удалён, войти в него больше нельзя.</Notice>
         <ul style={{ margin: 0, paddingLeft: 18 }}>
           <li>

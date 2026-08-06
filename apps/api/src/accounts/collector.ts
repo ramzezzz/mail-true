@@ -191,8 +191,7 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
   const source = sourceEndpoint(account, password);
   // Остаток времени. Ноль означает «без предела», поэтому исчерпанный
   // остаток отдаём как 1 мс, а не как 0: иначе предел бы просто исчезал.
-  const deadline = () =>
-    timeoutMs <= 0 ? 0 : Math.max(1, timeoutMs - (Date.now() - started));
+  const deadline = () => (timeoutMs <= 0 ? 0 : Math.max(1, timeoutMs - (Date.now() - started)));
 
   let state: StateStore | null = null;
   try {
@@ -231,7 +230,10 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logger.warn(errorInfo(err, { account: account.address }), 'Сбор почты с внешнего ящика не удался');
+    logger.warn(
+      errorInfo(err, { account: account.address }),
+      'Сбор почты с внешнего ящика не удался',
+    );
     return {
       status: 'error',
       copied: 0,

@@ -70,9 +70,7 @@ export function SearchResults({ items, stems, folders }: SearchResultsProps) {
               stems={stems}
               folders={folders}
               labels={labels}
-              onOpen={() =>
-                void navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`)
-              }
+              onOpen={() => void navigate(`/${message.folderId}/${encodeURIComponent(message.id)}`)}
             />
           ))}
         </section>

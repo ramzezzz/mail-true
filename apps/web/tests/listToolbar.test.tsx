@@ -102,8 +102,7 @@ function render(p: ListToolbarProps) {
 /** Кнопка по видимому тексту. */
 function button(text: string): HTMLButtonElement | undefined {
   return [...host.querySelectorAll('button')].find((b) => b.textContent?.includes(text)) as
-    | HTMLButtonElement
-    | undefined;
+    HTMLButtonElement | undefined;
 }
 
 beforeEach(() => {

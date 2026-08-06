@@ -68,8 +68,8 @@ export function DisposablePage() {
     <>
       <SettingsTitle>Одноразовые адреса</SettingsTitle>
       <SettingsLead>
-        Адрес, который можно отдать сайту вместо основного. Письма приходят в этот же ящик, а
-        когда на адрес начинает идти спам — выключите его, и основная почта останется нетронутой.
+        Адрес, который можно отдать сайту вместо основного. Письма приходят в этот же ящик, а когда
+        на адрес начинает идти спам — выключите его, и основная почта останется нетронутой.
       </SettingsLead>
 
       {!available && (
@@ -128,9 +128,9 @@ export function DisposablePage() {
           <SettingsHint>
             Выключенный адрес не пропадает молча: сервер отвечает отправителю отказом сразу, на
             этапе приёма, — письмо не теряется и не лежит неделю в неизвестности. При этом отказ
-            дословно совпадает с ответом на несуществующий адрес, поэтому по нему нельзя понять,
-            что адрес когда-то был. Имя за выключенным адресом остаётся занятым: освободить его
-            значило бы отдать другому человеку почту, которую на него ещё шлют.
+            дословно совпадает с ответом на несуществующий адрес, поэтому по нему нельзя понять, что
+            адрес когда-то был. Имя за выключенным адресом остаётся занятым: освободить его значило
+            бы отдать другому человеку почту, которую на него ещё шлют.
           </SettingsHint>
         </>
       )}
@@ -169,7 +169,11 @@ export function DisposablePage() {
               >
                 {remove.isPending ? 'Удаляем…' : 'Удалить'}
               </Button>
-              <Button mode="secondary" disabled={remove.isPending} onClick={() => setConfirmDelete(null)}>
+              <Button
+                mode="secondary"
+                disabled={remove.isPending}
+                onClick={() => setConfirmDelete(null)}
+              >
                 Отменить
               </Button>
             </>
@@ -177,8 +181,8 @@ export function DisposablePage() {
         >
           <p className={styles.dialogText}>
             Адрес <b>{confirmDelete.address}</b> перестанет существовать, а его имя снова станет
-            свободным — и его сможет занять другой человек этого сервера. Почта, которую на него
-            ещё шлют, попадёт тогда не вам.
+            свободным — и его сможет занять другой человек этого сервера. Почта, которую на него ещё
+            шлют, попадёт тогда не вам.
           </p>
           <p className={styles.dialogText}>
             Если нужно просто перестать получать письма, <b>выключите</b> адрес: имя останется за
@@ -225,16 +229,15 @@ function Row({
           <div className={styles.traffic}>
             {traffic.received === 0 && traffic.rejected === 0 ? (
               <span className={styles.quiet}>
-                За {traffic.windowDays}{' '}
-                {plural(traffic.windowDays, 'сутки', 'суток', 'суток')} писем не было
+                За {traffic.windowDays} {plural(traffic.windowDays, 'сутки', 'суток', 'суток')}{' '}
+                писем не было
               </span>
             ) : (
               <>
                 {traffic.received > 0 && (
                   <span>
-                    {traffic.received}{' '}
-                    {plural(traffic.received, 'письмо', 'письма', 'писем')} за {traffic.windowDays}{' '}
-                    {plural(traffic.windowDays, 'сутки', 'суток', 'суток')}
+                    {traffic.received} {plural(traffic.received, 'письмо', 'письма', 'писем')} за{' '}
+                    {traffic.windowDays} {plural(traffic.windowDays, 'сутки', 'суток', 'суток')}
                     {traffic.lastAt && `, последнее ${formatMoment(traffic.lastAt)}`}
                   </span>
                 )}

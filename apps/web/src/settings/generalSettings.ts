@@ -10,7 +10,11 @@
  */
 
 import { useGeneralSettings } from '../api/settingsQueries';
-import { DEFAULT_UNDO_SEND_SECONDS, type GeneralSettings, type Signature } from '../api/settingsTypes';
+import {
+  DEFAULT_UNDO_SEND_SECONDS,
+  type GeneralSettings,
+  type Signature,
+} from '../api/settingsTypes';
 
 /**
  * Чем пользуемся, пока настройки не загрузились или не загрузились вовсе.

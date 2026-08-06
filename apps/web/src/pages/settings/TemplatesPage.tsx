@@ -30,11 +30,7 @@ import {
   IconTrash,
 } from '../../mail/icons';
 import { fileSizeText, templatePreview } from '../../compose/TemplateMenu';
-import {
-  moveTemplate,
-  TEMPLATE_PLACEHOLDERS,
-  type MailTemplate,
-} from '../../mail/templatesApi';
+import { moveTemplate, TEMPLATE_PLACEHOLDERS, type MailTemplate } from '../../mail/templatesApi';
 import {
   useCreateTemplate,
   useDeleteTemplate,
@@ -73,9 +69,9 @@ export function TemplatesPage() {
     <>
       <SettingsTitle>Шаблоны писем</SettingsTitle>
       <SettingsLead>
-        Шаблон — это заготовленные тема и текст, которые вставляются в письмо одним нажатием:
-        кнопка «Шаблоны» стоит в панели написания. Вставка идёт в позицию курсора и не затирает
-        уже набранное.
+        Шаблон — это заготовленные тема и текст, которые вставляются в письмо одним нажатием: кнопка
+        «Шаблоны» стоит в панели написания. Вставка идёт в позицию курсора и не затирает уже
+        набранное.
       </SettingsLead>
 
       {!available && (
@@ -94,8 +90,8 @@ export function TemplatesPage() {
 
           {items.length === 0 && (
             <SettingsEmpty>
-              Шаблонов пока нет. Проще всего завести первый прямо из письма: напишите обычный
-              ответ и выберите «Шаблоны → Сохранить как шаблон».
+              Шаблонов пока нет. Проще всего завести первый прямо из письма: напишите обычный ответ
+              и выберите «Шаблоны → Сохранить как шаблон».
             </SettingsEmpty>
           )}
 
@@ -170,9 +166,9 @@ export function TemplatesPage() {
 
           <SettingsHint>
             Получатели в шаблон не сохраняются: одну и ту же заготовку отправляют разным людям, и
-            запомненный адрес однажды ушёл бы не тому. Вложения, наоборот, сохраняются копией —
-            они живут вместе с шаблоном и прикрепляются при каждой вставке. Шаблоны видны только
-            в этом интерфейсе: по IMAP сторонняя почтовая программа их не покажет.
+            запомненный адрес однажды ушёл бы не тому. Вложения, наоборот, сохраняются копией — они
+            живут вместе с шаблоном и прикрепляются при каждой вставке. Шаблоны видны только в этом
+            интерфейсе: по IMAP сторонняя почтовая программа их не покажет.
           </SettingsHint>
         </>
       )}
@@ -185,10 +181,7 @@ export function TemplatesPage() {
           error={create.isError ? create.error.message : null}
           onClose={() => setDialog(null)}
           onSubmit={(draft) =>
-            create.mutate(
-              { ...draft, attachmentIds: [] },
-              { onSuccess: () => setDialog(null) },
-            )
+            create.mutate({ ...draft, attachmentIds: [] }, { onSuccess: () => setDialog(null) })
           }
         />
       )}
@@ -248,9 +241,9 @@ export function TemplatesPage() {
           }
         >
           <p className={styles.deleteNote}>
-            Шаблон исчезнет из меню в окне написания вместе с сохранёнными в нём вложениями.
-            Письма, отправленные по нему раньше, останутся как были — шаблон в них не ссылка,
-            а копия текста.
+            Шаблон исчезнет из меню в окне написания вместе с сохранёнными в нём вложениями. Письма,
+            отправленные по нему раньше, останутся как были — шаблон в них не ссылка, а копия
+            текста.
           </p>
           {remove.isError && <SettingsError>{remove.error.message}</SettingsError>}
         </Modal>
@@ -342,13 +335,28 @@ function TemplateDialog({
       {/* Кнопок ровно столько, сколько нужно для правки готового текста.
           Оформление письма делают в самом письме — и сохраняют оттуда. */}
       <div className={styles.editorBar} onMouseDown={(e) => e.preventDefault()}>
-        <button type="button" className={styles.editorButton} title="Жирный" onClick={() => exec('bold')}>
+        <button
+          type="button"
+          className={styles.editorButton}
+          title="Жирный"
+          onClick={() => exec('bold')}
+        >
           <b>Ж</b>
         </button>
-        <button type="button" className={styles.editorButton} title="Наклонный" onClick={() => exec('italic')}>
+        <button
+          type="button"
+          className={styles.editorButton}
+          title="Наклонный"
+          onClick={() => exec('italic')}
+        >
           <i>К</i>
         </button>
-        <button type="button" className={styles.editorButton} title="Подчёркнутый" onClick={() => exec('underline')}>
+        <button
+          type="button"
+          className={styles.editorButton}
+          title="Подчёркнутый"
+          onClick={() => exec('underline')}
+        >
           <u>Ч</u>
         </button>
         <button
@@ -392,9 +400,9 @@ function TemplateDialog({
       />
 
       <p className={styles.placeholders}>
-        Подстановки: {TEMPLATE_PLACEHOLDERS.map((p) => `{{${p.key}}}`).join(', ')} — при вставке
-        они заменятся на данные получателя, если он уже указан. Незаполненную подстановку
-        письмо не даст отправить молча.
+        Подстановки: {TEMPLATE_PLACEHOLDERS.map((p) => `{{${p.key}}}`).join(', ')} — при вставке они
+        заменятся на данные получателя, если он уже указан. Незаполненную подстановку письмо не даст
+        отправить молча.
       </p>
 
       {attachments.length > 0 && (

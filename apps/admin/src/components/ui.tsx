@@ -125,7 +125,9 @@ function focusableIn(root: HTMLElement): HTMLElement[] {
 
 /** Переносит в копию то, чего нет в разметке: набранное в полях. */
 function copyFieldValues(from: HTMLElement, to: HTMLElement): void {
-  const originals = from.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
+  const originals = from.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+    'input, textarea',
+  );
   const copies = to.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea');
   originals.forEach((field, index) => {
     const copy = copies[index];

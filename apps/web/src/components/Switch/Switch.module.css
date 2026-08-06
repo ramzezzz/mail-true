@@ -38,8 +38,7 @@
   height: var(--mt-switch-height, 20px);
   border-radius: 999px;
   background: var(--mt-switch-track-off);
-  transition: background-color var(--mt-anim-duration-m, 0.2s)
-    var(--mt-anim-easing-default, ease);
+  transition: background-color var(--mt-anim-duration-m, 0.2s) var(--mt-anim-easing-default, ease);
 }
 
 .thumb {
@@ -61,8 +60,7 @@
 .input:checked + .track .thumb {
   transform: translateX(
     calc(
-      var(--mt-switch-width, 32px) - var(--mt-switch-pin, 16px) - 2 *
-        var(--mt-switch-inset, 2px)
+      var(--mt-switch-width, 32px) - var(--mt-switch-pin, 16px) - 2 * var(--mt-switch-inset, 2px)
     )
   );
 }

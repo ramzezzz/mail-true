@@ -7,17 +7,17 @@ Apple Mail только адрес ящика и пароль — остальн
 
 ## Точки сервиса
 
-| Метод | Путь | Кто ходит | Что отдаёт |
-|-------|------|-----------|------------|
-| GET | `/mail/config-v1.1.xml?emailaddress=…` | Thunderbird, K-9, FairEmail, Evolution | XML `clientConfig` 1.1: IMAP 993/143, POP3 995/110, SMTP 587 |
-| GET | `/.well-known/autoconfig/mail/config-v1.1.xml` | Thunderbird (запасной путь) | то же |
-| POST | `/autodiscover/autodiscover.xml` | Outlook (XML-запрос с `EMailAddress`) | XML со схемой Outlook: Protocol IMAP/POP3/SMTP |
-| GET | `/autodiscover/autodiscover.xml?Email=…` | некоторые клиенты/проверялки | то же |
-| GET | `/mobileconfig?email=…` | iPhone / macOS | `.mobileconfig` (XML plist, `application/x-apple-aspen-config`) — идентификаторы профиля и полезной нагрузки выводятся из адреса ящика |
-| GET | `/api/dns-records?domain=…` | администратор | JSON + фрагмент зонного файла со всеми записями для публикации |
-| GET | `/api/dns-check?domain=…` | администратор | живой резолв каждой записи: ok / mismatch / missing |
-| GET | `/` | человек | страница помощи с таблицей серверов и портов |
-| GET | `/healthz` | docker healthcheck | `{"ok":true}` |
+| Метод | Путь                                           | Кто ходит                              | Что отдаёт                                                                                                                             |
+| ----- | ---------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| GET   | `/mail/config-v1.1.xml?emailaddress=…`         | Thunderbird, K-9, FairEmail, Evolution | XML `clientConfig` 1.1: IMAP 993/143, POP3 995/110, SMTP 587                                                                           |
+| GET   | `/.well-known/autoconfig/mail/config-v1.1.xml` | Thunderbird (запасной путь)            | то же                                                                                                                                  |
+| POST  | `/autodiscover/autodiscover.xml`               | Outlook (XML-запрос с `EMailAddress`)  | XML со схемой Outlook: Protocol IMAP/POP3/SMTP                                                                                         |
+| GET   | `/autodiscover/autodiscover.xml?Email=…`       | некоторые клиенты/проверялки           | то же                                                                                                                                  |
+| GET   | `/mobileconfig?email=…`                        | iPhone / macOS                         | `.mobileconfig` (XML plist, `application/x-apple-aspen-config`) — идентификаторы профиля и полезной нагрузки выводятся из адреса ящика |
+| GET   | `/api/dns-records?domain=…`                    | администратор                          | JSON + фрагмент зонного файла со всеми записями для публикации                                                                         |
+| GET   | `/api/dns-check?domain=…`                      | администратор                          | живой резолв каждой записи: ok / mismatch / missing                                                                                    |
+| GET   | `/`                                            | человек                                | страница помощи с таблицей серверов и портов                                                                                           |
+| GET   | `/healthz`                                     | docker healthcheck                     | `{"ok":true}`                                                                                                                          |
 
 Роутер нечувствителен к регистру пути: Outlook запрашивает и
 `/Autodiscover/Autodiscover.xml` — оба варианта работают, XML-тело
@@ -42,20 +42,20 @@ Nginx (infra/nginx/templates/autoconfig.conf.template) разводит хост
 
 Ничего не зашито; значения по умолчанию — для dev-домена `mail.local`.
 
-| Переменная | По умолчанию | Смысл |
-|------------|--------------|-------|
-| `HOST` / `PORT` | `127.0.0.1` / `8080` | адрес HTTP-сервера (в docker — `0.0.0.0`) |
-| `MAIL_DOMAIN` | `mail.local` | почтовый домен (часть адреса после `@`) |
-| `MAIL_HOSTNAME` | `mail.local` | анонсируемый хост IMAP/POP3/SMTP |
-| `PROVIDER_NAME` / `PROVIDER_SHORT_NAME` | `Mail.True` | имя в мастерах настройки |
-| `IMAPS_PORT` / `IMAP_STARTTLS_PORT` | `993` / `143` | анонсируемые порты IMAP |
-| `POP3S_PORT` / `POP3_STARTTLS_PORT` | `995` / `110` | анонсируемые порты POP3 |
-| `SUBMISSION_PORT` | `587` | анонсируемый порт SMTP (STARTTLS) |
-| `SUBMISSIONS_PORT` | `465` | анонсируемый порт SMTP («TLS сразу») |
-| `DKIM_SELECTOR` | `mail` | селектор DKIM (как у rspamd) |
-| `DKIM_DNS_DIR` | `/rspamd/dkim` | каталог с `<домен>.<селектор>.dns.txt` от rspamd |
-| `DMARC_RUA` | `postmaster@<домен>` | адрес отчётов DMARC |
-| `DNS_TTL` | `3600` | TTL в рекомендуемых записях |
+| Переменная                              | По умолчанию         | Смысл                                            |
+| --------------------------------------- | -------------------- | ------------------------------------------------ |
+| `HOST` / `PORT`                         | `127.0.0.1` / `8080` | адрес HTTP-сервера (в docker — `0.0.0.0`)        |
+| `MAIL_DOMAIN`                           | `mail.local`         | почтовый домен (часть адреса после `@`)          |
+| `MAIL_HOSTNAME`                         | `mail.local`         | анонсируемый хост IMAP/POP3/SMTP                 |
+| `PROVIDER_NAME` / `PROVIDER_SHORT_NAME` | `Mail.True`          | имя в мастерах настройки                         |
+| `IMAPS_PORT` / `IMAP_STARTTLS_PORT`     | `993` / `143`        | анонсируемые порты IMAP                          |
+| `POP3S_PORT` / `POP3_STARTTLS_PORT`     | `995` / `110`        | анонсируемые порты POP3                          |
+| `SUBMISSION_PORT`                       | `587`                | анонсируемый порт SMTP (STARTTLS)                |
+| `SUBMISSIONS_PORT`                      | `465`                | анонсируемый порт SMTP («TLS сразу»)             |
+| `DKIM_SELECTOR`                         | `mail`               | селектор DKIM (как у rspamd)                     |
+| `DKIM_DNS_DIR`                          | `/rspamd/dkim`       | каталог с `<домен>.<селектор>.dns.txt` от rspamd |
+| `DMARC_RUA`                             | `postmaster@<домен>` | адрес отчётов DMARC                              |
+| `DNS_TTL`                               | `3600`               | TTL в рекомендуемых записях                      |
 
 **Как эти значения задаются на установке.** В таблице — имена внутри
 контейнера. В `infra/.env` порты называются с приставкой `AUTOCONFIG_`

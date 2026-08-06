@@ -188,8 +188,10 @@ export class BrandingStore {
   }): Promise<BrandingState> {
     const state = await this.read();
     const next = { ...state };
-    if (patch.companyName !== undefined) next.companyName = normalizeName(patch.companyName, 'компании');
-    if (patch.productName !== undefined) next.productName = normalizeName(patch.productName, 'сервиса');
+    if (patch.companyName !== undefined)
+      next.companyName = normalizeName(patch.companyName, 'компании');
+    if (patch.productName !== undefined)
+      next.productName = normalizeName(patch.productName, 'сервиса');
     return this.writeState(next);
   }
 

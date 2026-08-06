@@ -61,9 +61,17 @@ test('пакет: до ящиков, стоявших в очереди, не д
     { source: nowhere, dest: nowhere },
   ];
 
-  const report = await migrateBatch({ accounts, concurrency: 1, migrate: { signal: control.signal } });
+  const report = await migrateBatch({
+    accounts,
+    concurrency: 1,
+    migrate: { signal: control.signal },
+  });
 
-  assert.deepEqual(report.accounts, [], 'ящик без отчёта читается как сломанный, а он не начинался');
+  assert.deepEqual(
+    report.accounts,
+    [],
+    'ящик без отчёта читается как сломанный, а он не начинался',
+  );
   assert.equal(report.failed, 0, 'нетронутые ящики не должны считаться неудавшимися');
   assert.equal(report.ok, 0);
   assert.equal(report.stopped, 0);

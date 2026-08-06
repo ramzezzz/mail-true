@@ -45,8 +45,16 @@ test('ради уведомлений наблюдение переживает 
   const now = Date.now();
   const kept = { sockets: { size: 0 }, keepAliveUntil: now + WATCH_KEEP_ALIVE_MS };
   assert.equal(watchExpired(kept, now), false, 'сразу после закрытия вкладки — живёт');
-  assert.equal(watchExpired(kept, now + WATCH_KEEP_ALIVE_MS - 1), false, 'через почти сутки — живёт');
-  assert.equal(watchExpired(kept, now + WATCH_KEEP_ALIVE_MS), true, 'ровно через сутки — закрываем');
+  assert.equal(
+    watchExpired(kept, now + WATCH_KEEP_ALIVE_MS - 1),
+    false,
+    'через почти сутки — живёт',
+  );
+  assert.equal(
+    watchExpired(kept, now + WATCH_KEEP_ALIVE_MS),
+    true,
+    'ровно через сутки — закрываем',
+  );
   assert.equal(watchExpired(kept, now + 2 * WATCH_KEEP_ALIVE_MS), true);
 });
 

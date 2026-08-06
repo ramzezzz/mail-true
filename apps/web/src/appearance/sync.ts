@@ -25,12 +25,7 @@
 import { normalizeThemeSetting, type AppearanceSettings } from '@mail-true/shared';
 import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
-import {
-  cachedAccount,
-  clearAppearanceCache,
-  writeCachedAccount,
-  writeCachedTheme,
-} from './cache';
+import { cachedAccount, clearAppearanceCache, writeCachedAccount, writeCachedTheme } from './cache';
 import { setAppearanceSink, type AppearancePatch } from './persist';
 import { adoptWallpaperChoice, applyWallpaper, readWallpaperSelection } from './wallpapers';
 import { applyTheme, resolveTheme, useUiStore } from '../app/store';

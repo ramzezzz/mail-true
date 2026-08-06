@@ -143,7 +143,9 @@ describe('длительности не задерживают работу', ()
   /** Все объявления движения по всем файлам админки. */
   const motionRules = (): string[] =>
     MOTION_FILES.flatMap((file) =>
-      [...read(file).matchAll(/(?:transition|animation):[^;]+;/g)].map(([rule]) => `${file}: ${rule}`),
+      [...read(file).matchAll(/(?:transition|animation):[^;]+;/g)].map(
+        ([rule]) => `${file}: ${rule}`,
+      ),
     );
 
   it('нигде не заведено движения длиннее 0.4s', () => {

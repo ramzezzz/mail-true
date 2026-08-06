@@ -8,13 +8,7 @@
  */
 
 /** Роль (служебное назначение) папки — совпадает с FolderRole в @mail-true/shared. */
-export type SpecialRole =
-  | 'inbox'
-  | 'sent'
-  | 'drafts'
-  | 'trash'
-  | 'junk'
-  | 'archive';
+export type SpecialRole = 'inbox' | 'sent' | 'drafts' | 'trash' | 'junk' | 'archive';
 
 /** Параметры подключения к IMAP-серверу. */
 export interface ImapEndpoint {
@@ -168,7 +162,14 @@ export type ProgressEvent =
       failed: number;
       total: number;
     }
-  | { type: 'folder-done'; sourcePath: string; destPath: string; copied: number; skipped: number; failed: number }
+  | {
+      type: 'folder-done';
+      sourcePath: string;
+      destPath: string;
+      copied: number;
+      skipped: number;
+      failed: number;
+    }
   | {
       type: 'retry';
       attempt: number;

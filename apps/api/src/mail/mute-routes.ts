@@ -63,26 +63,30 @@ export interface MutedState {
 export async function muteRoutes(app: FastifyInstance, mute: MuteService): Promise<void> {
   const { pool } = app.deps;
 
-  app.get('/threads/muted', { preHandler: app.requireSession }, async (request): Promise<MutedState> => {
-    const session = requireMailSession(request.mailSession);
-    if (!mute.available) {
+  app.get(
+    '/threads/muted',
+    { preHandler: app.requireSession },
+    async (request): Promise<MutedState> => {
+      const session = requireMailSession(request.mailSession);
+      if (!mute.available) {
+        return {
+          available: false,
+          delivery: false,
+          reason: mute.unavailableReason,
+          items: [],
+        };
+      }
       return {
-        available: false,
-        delivery: false,
-        reason: mute.unavailableReason,
-        items: [],
+        available: true,
+        delivery: mute.deliveryAvailable,
+        reason: mute.deliveryAvailable
+          ? null
+          : 'Нет доступа к хранилищу правил Dovecot: заглушённые переписки будут ' +
+            'видны в подборке, но новые письма всё равно пойдут во «Входящие»',
+        items: await mute.list(session.email),
       };
-    }
-    return {
-      available: true,
-      delivery: mute.deliveryAvailable,
-      reason: mute.deliveryAvailable
-        ? null
-        : 'Нет доступа к хранилищу правил Dovecot: заглушённые переписки будут ' +
-          'видны в подборке, но новые письма всё равно пойдут во «Входящие»',
-      items: await mute.list(session.email),
-    };
-  });
+    },
+  );
 
   app.post('/threads/mute', { preHandler: app.requireSession }, async (request) => {
     const session = requireMailSession(request.mailSession);

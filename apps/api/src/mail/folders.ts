@@ -179,7 +179,7 @@ export function decodePathId(id: string): string | null {
 export function mapFolders(list: RawFolderInfo[]): Folder[] {
   // Отбрасываем невыбираемые контейнеры и служебные каталоги Dovecot
   const selectable = list.filter(
-    (f) => !f.flags?.has('\\Noselect') && !f.flags?.has('\\NonExistent') && !isServiceFolder(f)
+    (f) => !f.flags?.has('\\Noselect') && !f.flags?.has('\\NonExistent') && !isServiceFolder(f),
   );
 
   const withRoles = selectable.map((info) => ({ info, role: detectRole(info) }));

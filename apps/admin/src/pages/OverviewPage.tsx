@@ -223,17 +223,18 @@ function ResourcesSection({ hours, poll }: { hours: number; poll: number | false
 
   const disk = data?.volumes[0] ?? null;
   const diskPercent =
-    disk && disk.totalBytes > 0 ? ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100 : null;
+    disk && disk.totalBytes > 0
+      ? ((disk.totalBytes - disk.freeBytes) / disk.totalBytes) * 100
+      : null;
   const memPercent = memoryPercent(data);
 
   return (
     <>
       <h2 className={styles.section}>Ресурсы сервера</h2>
       <p className={styles.sectionHint}>
-        Числа сняты{' '}
-        {data?.takenAt ? formatRelative(data.takenAt) : 'ещё не снимались'}
-        {data ? `, съёмка раз в ${data.intervalSeconds} с` : ''}. Под каждым показателем
-        написано, из какого файла он прочитан.
+        Числа сняты {data?.takenAt ? formatRelative(data.takenAt) : 'ещё не снимались'}
+        {data ? `, съёмка раз в ${data.intervalSeconds} с` : ''}. Под каждым показателем написано,
+        из какого файла он прочитан.
       </p>
 
       {resources.error && <ErrorNotice error={resources.error} />}
@@ -375,8 +376,8 @@ function ResourcesSection({ hours, poll }: { hours: number; poll: number | false
           */}
           {data?.singleDevice && (
             <p className={styles.source}>
-              Письма, индексы и журналы лежат на ОДНОМ устройстве: свободное место у них
-              общее, и переполнение журналами остановит приём почты.
+              Письма, индексы и журналы лежат на ОДНОМ устройстве: свободное место у них общее, и
+              переполнение журналами остановит приём почты.
             </p>
           )}
         </Panel>
@@ -427,7 +428,11 @@ function Gauge({
         <span className={styles.gaugeTitle}>{title}</span>
         <span className={styles.gaugeNumber}>{text}</span>
       </div>
-      <Meter percent={percent} hue={hue} label={percent === null ? '—' : `${Math.round(percent)}%`} />
+      <Meter
+        percent={percent}
+        hue={hue}
+        label={percent === null ? '—' : `${Math.round(percent)}%`}
+      />
       {/* Источник числа стоит рядом с числом. Иначе «занято 42 %» не
           отвечает на вопрос «чего именно и по чьим данным» — а на
           дашборде это первый же вопрос. */}
@@ -457,7 +462,11 @@ function DiskBreakdown({
    */
   const items = slices
     .filter((s) => s.bytes !== null && s.bytes > 0)
-    .map((s) => ({ series: seriesOf(DISK_SERIES, s.id), value: s.bytes!, label: formatBytes(s.bytes!) }));
+    .map((s) => ({
+      series: seriesOf(DISK_SERIES, s.id),
+      value: s.bytes!,
+      label: formatBytes(s.bytes!),
+    }));
   const measured = items.reduce((sum, i) => sum + i.value, 0);
   /*
    * Занятое, которое мы не разложили по статьям: чужие файлы на том же
@@ -628,9 +637,7 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
       <h2 className={styles.section}>Почтовый поток</h2>
       <p className={styles.sectionHint}>
         Разобранный журнал Postfix: одна запись — одна попытка доставки одному адресату.
-        {data?.historyStartsAt
-          ? ` История ведётся с ${formatDateTime(data.historyStartsAt)}.`
-          : ''}
+        {data?.historyStartsAt ? ` История ведётся с ${formatDateTime(data.historyStartsAt)}.` : ''}
       </p>
       {mail.error && <ErrorNotice error={mail.error} />}
       {/*
@@ -675,9 +682,9 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
               {/* Расхождение среднего и медианы само по себе полезно:
                   оно говорит, что объём делают редкие тяжёлые письма. */}
               <p className={styles.source}>
-                Считается по различным письмам ({data.sizes.messages}), а не по попыткам
-                доставки: письмо на трёх адресатов — одно письмо. Среднее выше медианы
-                означает, что объём делают редкие тяжёлые вложения.
+                Считается по различным письмам ({data.sizes.messages}), а не по попыткам доставки:
+                письмо на трёх адресатов — одно письмо. Среднее выше медианы означает, что объём
+                делают редкие тяжёлые вложения.
               </p>
             </>
           ) : (
@@ -688,22 +695,22 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
         <Panel title="Пиковые часы">
           {data ? (
             <>
-            <BarChart
-              ariaLabel="Распределение писем по часам суток"
-              labels={data.hourly.map((h) => String(h.hour).padStart(2, '0'))}
-              series={[
-                {
-                  // Ряд СВОЙ, а не 'sent' из потока: здесь считаются письма
-                  // всех состояний, и подпись «Доставлено» в подсказке
-                  // называла бы это число чужим именем.
-                  series: seriesOf(HOURLY_SERIES, 'hourlyTotal'),
-                  values: data.hourly.map((h) => h.count),
-                },
-              ]}
-              height={130}
-              emptyText="За этот период писем не было"
-            />
-            {/*
+              <BarChart
+                ariaLabel="Распределение писем по часам суток"
+                labels={data.hourly.map((h) => String(h.hour).padStart(2, '0'))}
+                series={[
+                  {
+                    // Ряд СВОЙ, а не 'sent' из потока: здесь считаются письма
+                    // всех состояний, и подпись «Доставлено» в подсказке
+                    // называла бы это число чужим именем.
+                    series: seriesOf(HOURLY_SERIES, 'hourlyTotal'),
+                    values: data.hourly.map((h) => h.count),
+                  },
+                ]}
+                height={130}
+                emptyText="За этот период писем не было"
+              />
+              {/*
               Пояс подписан ЯВНО. Часы считает запрос по всему окну, и
               раньше он брал их в поясе сервера (UTC), тогда как соседний
               график на этой же странице подписан временем браузера: в
@@ -711,10 +718,10 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
               местах. Теперь считается в поясе смотрящего — а подпись
               нужна затем, чтобы это было видно, а не подразумевалось.
             */}
-            <p className={styles.source}>
-              Часы — по вашему часовому поясу ({data.hourlyTimeZone}), тому же, в котором
-              подписан график «Что происходило с письмами».
-            </p>
+              <p className={styles.source}>
+                Часы — по вашему часовому поясу ({data.hourlyTimeZone}), тому же, в котором подписан
+                график «Что происходило с письмами».
+              </p>
             </>
           ) : (
             <CenteredSpinner />
@@ -861,8 +868,8 @@ function UsersSection({ hours, poll }: { hours: number; poll: number | false }) 
     <>
       <h2 className={styles.section}>Ящики</h2>
       <p className={styles.sectionHint}>
-        Слева — кто сколько отправил и получил за выбранный период. Справа — сколько места
-        занято и насколько близко до квоты; ради этого списка дашборд и открывают.
+        Слева — кто сколько отправил и получил за выбранный период. Справа — сколько места занято и
+        насколько близко до квоты; ради этого списка дашборд и открывают.
       </p>
 
       <div className={styles.gridWide}>
@@ -922,9 +929,9 @@ function UsersSection({ hours, poll }: { hours: number; poll: number | false }) 
               </TableWrap>
               <p className={styles.source}>
                 Показано {users.data?.items.length ?? 0} из {users.data?.total ?? 0}{' '}
-                {plural(users.data?.total ?? 0, 'ящика', 'ящиков', 'ящиков')}. Молчали за
-                период: {silent}. «Отправил» считается по различным письмам, «получил» — по
-                доставленным конвертам.
+                {plural(users.data?.total ?? 0, 'ящика', 'ящиков', 'ящиков')}. Молчали за период:{' '}
+                {silent}. «Отправил» считается по различным письмам, «получил» — по доставленным
+                конвертам.
               </p>
             </>
           )}
@@ -978,13 +985,16 @@ function UsersSection({ hours, poll }: { hours: number; poll: number | false }) 
                       </tr>
                     ))}
                     {(mailboxes.data?.items ?? []).length === 0 && (
-                      <EmptyRow colSpan={4}>Учёт занятости ещё не заведён ни у одного ящика</EmptyRow>
+                      <EmptyRow colSpan={4}>
+                        Учёт занятости ещё не заведён ни у одного ящика
+                      </EmptyRow>
                     )}
                   </tbody>
                 </Table>
               </TableWrap>
               <p className={styles.source}>
-                {mailboxes.data?.note}. Всего занято {formatBytes(mailboxes.data?.totalBytes ?? 0, '0')}
+                {mailboxes.data?.note}. Всего занято{' '}
+                {formatBytes(mailboxes.data?.totalBytes ?? 0, '0')}
                 {mailboxes.data?.withoutAccounting
                   ? `; без учёта — ${mailboxes.data.withoutAccounting} ${plural(
                       mailboxes.data.withoutAccounting,
@@ -993,8 +1003,8 @@ function UsersSection({ hours, poll }: { hours: number; poll: number | false }) 
                       'ящиков',
                     )}`
                   : ''}
-                . Список отсортирован по близости к квоте: ящик на 900 МБ из гигабайта
-                важнее пустого ящика на пять.
+                . Список отсортирован по близости к квоте: ящик на 900 МБ из гигабайта важнее
+                пустого ящика на пять.
               </p>
             </>
           )}
@@ -1022,9 +1032,8 @@ function SecuritySection({ poll }: { poll: number | false }) {
     <>
       <h2 className={styles.section}>Сертификаты и DNS</h2>
       <p className={styles.sectionHint}>
-        Истёкший сертификат ломает всё разом: почтовые программы перестают подключаться,
-        чужие серверы — принимать почту. Узнают об этом обычно последними, поэтому срок
-        стоит здесь.
+        Истёкший сертификат ломает всё разом: почтовые программы перестают подключаться, чужие
+        серверы — принимать почту. Узнают об этом обычно последними, поэтому срок стоит здесь.
       </p>
       {security.error && <ErrorNotice error={security.error} />}
 
@@ -1117,7 +1126,9 @@ function SecuritySection({ poll }: { poll: number | false }) {
                       <td className={tableStyles.nowrap}>{formatRelative(domain.dnsCheckedAt)}</td>
                     </tr>
                   ))}
-                  {(data?.domains ?? []).length === 0 && <EmptyRow colSpan={4}>Доменов нет</EmptyRow>}
+                  {(data?.domains ?? []).length === 0 && (
+                    <EmptyRow colSpan={4}>Доменов нет</EmptyRow>
+                  )}
                 </tbody>
               </Table>
             </TableWrap>

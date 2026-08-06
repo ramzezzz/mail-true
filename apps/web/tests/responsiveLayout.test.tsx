@@ -129,7 +129,9 @@ describe('вызов колонки папок', () => {
     render();
     act(() => navButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
-    const scrim = host.querySelector<HTMLButtonElement>('button[aria-label="Закрыть список папок"]');
+    const scrim = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Закрыть список папок"]',
+    );
     expect(scrim, 'закрыть ящик нажатием мимо нечем').not.toBeNull();
 
     act(() => scrim!.dispatchEvent(new MouseEvent('click', { bubbles: true })));

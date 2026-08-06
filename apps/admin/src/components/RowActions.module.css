@@ -42,8 +42,7 @@
    */
   width: calc(
     var(--mt-row-action-count, 1) * var(--mt-row-action-size) +
-      (var(--mt-row-action-count, 1) - 1) * var(--mt-row-action-gap) +
-      var(--mt-row-action-reveal)
+      (var(--mt-row-action-count, 1) - 1) * var(--mt-row-action-gap) + var(--mt-row-action-reveal)
   );
   /* Раскрытие не имеет права менять высоту строки. */
   height: var(--mt-row-action-size);

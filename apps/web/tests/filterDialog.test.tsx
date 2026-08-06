@@ -104,7 +104,10 @@ describe('условия', () => {
 
     setSelect('Поле письма', 'attachment');
     expect(host.querySelector('input[aria-label="Значение"]')).toBeNull();
-    expect([...selectByLabel('Условие').options].map((o) => o.textContent)).toEqual(['есть', 'нет']);
+    expect([...selectByLabel('Условие').options].map((o) => o.textContent)).toEqual([
+      'есть',
+      'нет',
+    ]);
 
     setSelect('Поле письма', 'body');
     expect(host.querySelector('input[aria-label="Значение"]')).not.toBeNull();

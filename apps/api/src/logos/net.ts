@@ -196,7 +196,11 @@ function requestOnce(
   url: URL,
   limits: FetchLimits,
   accept: string,
-): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: Buffer }> {
+): Promise<{
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: Buffer;
+}> {
   return new Promise((resolve, reject) => {
     const req = httpsRequest(
       url,
@@ -317,7 +321,8 @@ export async function fetchSafe(
     return {
       url: url.toString(),
       status: res.status,
-      contentType: (Array.isArray(type) ? type[0] : type)?.split(';')[0]?.trim().toLowerCase() ?? null,
+      contentType:
+        (Array.isArray(type) ? type[0] : type)?.split(';')[0]?.trim().toLowerCase() ?? null,
       body: res.body,
     };
   }

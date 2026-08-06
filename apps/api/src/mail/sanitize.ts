@@ -61,12 +61,17 @@ const FORBID_TAGS = [
 const FORBID_ATTR = ['srcset', 'ping', 'formaction', 'action', 'xlink:href', 'poster'];
 
 /** Разрешённые схемы URI в атрибутах. */
-const ALLOWED_URI = /^(?:(?:https?|mailto|tel|callto):|cid:|data:image\/(?:png|gif|jpe?g|webp|bmp);)/i;
+const ALLOWED_URI =
+  /^(?:(?:https?|mailto|tel|callto):|cid:|data:image\/(?:png|gif|jpe?g|webp|bmp);)/i;
 
 const REMOTE_URL = /^https?:\/\//i;
 
 /** Контекст текущего вызова sanitize (модуль однопоточный). */
-let ctx: { allowRemote: boolean; resolveCid: ((cid: string) => string | null) | null; blocked: number } = {
+let ctx: {
+  allowRemote: boolean;
+  resolveCid: ((cid: string) => string | null) | null;
+  blocked: number;
+} = {
   allowRemote: false,
   resolveCid: null,
   blocked: 0,

@@ -83,7 +83,10 @@ const sendSchema = z.object({
   cc: z.array(addressSchema).max(100).default([]),
   bcc: z.array(addressSchema).max(100).default([]),
   subject: z.string().max(1000).default(''),
-  bodyHtml: z.string().max(10 * 1024 * 1024).default(''),
+  bodyHtml: z
+    .string()
+    .max(10 * 1024 * 1024)
+    .default(''),
   attachmentIds: z.array(z.string().min(1).max(100)).max(50).default([]),
   fromName: z.string().max(200).nullable().default(null),
   inReplyTo: z.string().max(1000).optional(),
@@ -375,12 +378,8 @@ export async function accountsUserRoutes(
     const db = service.requireDb();
 
     const passwordEnc =
-      patch.password !== undefined
-        ? service.requireSecretBox().encrypt(patch.password)
-        : undefined;
-    const account = await guard(() =>
-      db.updateExternal(session.email, id, patch, passwordEnc),
-    );
+      patch.password !== undefined ? service.requireSecretBox().encrypt(patch.password) : undefined;
+    const account = await guard(() => db.updateExternal(session.email, id, patch, passwordEnc));
     if (!account) throw new NotFoundError('Подключение не найдено');
     // Настройки изменились — старое соединение больше не подходит.
     await service.externalPool.close(session.email, id);

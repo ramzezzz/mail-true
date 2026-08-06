@@ -75,9 +75,7 @@ export function useSnoozeMessages() {
       const when = formatWakeAt(result.wakeAt);
       const count = request.ids.length;
       showNotice(
-        count > 1
-          ? `Письма (${String(count)}) вернутся ${when}`
-          : `Письмо вернётся ${when}`,
+        count > 1 ? `Письма (${String(count)}) вернутся ${when}` : `Письмо вернётся ${when}`,
       );
     },
     onError: (error: unknown) => showNotice(actionErrorText('Не удалось отложить письмо', error)),

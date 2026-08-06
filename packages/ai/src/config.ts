@@ -59,7 +59,11 @@ export type ProviderConfig = z.output<typeof providerConfigSchema>;
 
 export const budgetLimitsSchema = z.object({
   /** Длительность окна учёта в миллисекундах. По умолчанию сутки. */
-  periodMs: z.number().int().positive().default(24 * 60 * 60 * 1000),
+  periodMs: z
+    .number()
+    .int()
+    .positive()
+    .default(24 * 60 * 60 * 1000),
   /** Предел суммарных токенов за окно. null — без предела. */
   maxTokensPerPeriod: z.number().int().positive().nullable().default(null),
   /** Предел числа вызовов за окно. null — без предела. */
@@ -73,7 +77,11 @@ export type BudgetLimits = z.output<typeof budgetLimitsSchema>;
 
 export const assistantOptionsSchema = z.object({
   /** Время жизни записи кэша в секундах. */
-  cacheTtlSeconds: z.number().int().positive().default(30 * 24 * 60 * 60),
+  cacheTtlSeconds: z
+    .number()
+    .int()
+    .positive()
+    .default(30 * 24 * 60 * 60),
   /** Язык ответов помощника по умолчанию. */
   defaultLanguage: z.string().min(2).default('ru'),
 });
@@ -98,9 +106,7 @@ export interface ConfigParseFail {
 export function parseProviderConfig(input: unknown): ConfigParseOk | ConfigParseFail {
   const result = providerConfigSchema.safeParse(input);
   if (result.success) return { ok: true, config: result.data };
-  const issues = result.error.issues.map(
-    (i) => `${i.path.join('.') || '(корень)'}: ${i.message}`,
-  );
+  const issues = result.error.issues.map((i) => `${i.path.join('.') || '(корень)'}: ${i.message}`);
   return {
     ok: false,
     message: 'Настройки помощника заполнены неверно',

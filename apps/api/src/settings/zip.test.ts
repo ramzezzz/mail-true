@@ -75,9 +75,7 @@ test('архив открывается и содержимое совпадае
     // Три разных случая сразу: обычный текст, кириллица в имени и данные,
     // которые от сжатия только вырастут (уже сжатое вложение).
     const text = Buffer.from('Здравствуйте!\r\nЭто письмо.\r\n', 'utf8');
-    const random = Buffer.from(
-      Array.from({ length: 4096 }, (_, i) => (i * 2654435761) % 256),
-    );
+    const random = Buffer.from(Array.from({ length: 4096 }, (_, i) => (i * 2654435761) % 256));
     await zip.add('Входящие/000001 Привет.eml', text, new Date('2026-08-06T12:34:56Z'));
     await zip.add('Спам/000002 без темы.eml', random, new Date('2026-08-06T12:34:56Z'));
     await zip.add('ЧИТАТЬ.txt', Buffer.from('пусто', 'utf8'), new Date());

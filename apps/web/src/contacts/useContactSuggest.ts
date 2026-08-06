@@ -161,7 +161,6 @@ export function useContactSuggest(options: UseContactSuggestOptions): ContactSug
     // options.exclude намеренно не в зависимостях: его заменяет
     // excludeKey — иначе новый массив с тем же содержимым перезапускал бы
     // запрос на каждое нажатие клавиши.
-     
   }, [query, excludeKey, enabled]);
 
   return state;

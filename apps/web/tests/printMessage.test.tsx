@@ -279,10 +279,7 @@ describe('адреса ссылок на бумаге', () => {
   it('размечаются прямо в теле письма', async () => {
     vi.spyOn(api, 'getMessage').mockResolvedValue(serverMessage());
     render();
-    await waitFor(
-      () => Boolean(host.querySelector(`a[${PRINT_HREF_ATTR}]`)),
-      'размеченную ссылку',
-    );
+    await waitFor(() => Boolean(host.querySelector(`a[${PRINT_HREF_ATTR}]`)), 'размеченную ссылку');
     expect(host.querySelector(`a[${PRINT_HREF_ATTR}]`)?.getAttribute(PRINT_HREF_ATTR)).toBe(
       'https://example.com/very/long/path?id=42',
     );
@@ -290,8 +287,7 @@ describe('адреса ссылок на бумаге', () => {
 
   it('разметка снимается со ссылок, которым адрес не нужен', () => {
     const root_ = document.createElement('div');
-    root_.innerHTML =
-      '<a href="mailto:a@b.ru">a@b.ru</a><a href="https://example.com/x">тут</a>';
+    root_.innerHTML = '<a href="mailto:a@b.ru">a@b.ru</a><a href="https://example.com/x">тут</a>';
     expect(annotatePrintLinks(root_)).toBe(1);
     expect(root_.querySelector('a[href^="mailto"]')?.hasAttribute(PRINT_HREF_ATTR)).toBe(false);
   });

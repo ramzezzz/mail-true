@@ -382,7 +382,9 @@ export class AdminDb {
     const values: unknown[] = [];
     if (filters.search) {
       values.push(`%${filters.search.toLowerCase()}%`);
-      where.push(`(lower(u.email) LIKE $${values.length} OR lower(coalesce(u.display_name,'')) LIKE $${values.length})`);
+      where.push(
+        `(lower(u.email) LIKE $${values.length} OR lower(coalesce(u.display_name,'')) LIKE $${values.length})`,
+      );
     }
     if (filters.domainId !== undefined) {
       values.push(filters.domainId);
@@ -436,7 +438,10 @@ export class AdminDb {
   }
 
   /** Находит домен по имени; при allowCreate создаёт отсутствующий. */
-  async resolveDomain(name: string, allowCreate: boolean): Promise<{ id: number; name: string } | null> {
+  async resolveDomain(
+    name: string,
+    allowCreate: boolean,
+  ): Promise<{ id: number; name: string } | null> {
     const existing = await this.one<{ id: number; name: string }>(
       `SELECT id, name FROM virtual_domains WHERE lower(name) = lower($1)`,
       [name],
@@ -526,10 +531,10 @@ export class AdminDb {
   }
 
   async setMailUserPassword(id: number, passwordHash: string): Promise<void> {
-    await this.query(
-      `UPDATE virtual_users SET password = $2, updated_at = now() WHERE id = $1`,
-      [id, passwordHash],
-    );
+    await this.query(`UPDATE virtual_users SET password = $2, updated_at = now() WHERE id = $1`, [
+      id,
+      passwordHash,
+    ]);
   }
 
   async deleteMailUser(id: number): Promise<void> {
@@ -553,9 +558,18 @@ export class AdminDb {
    */
   async purgeMailboxData(email: string): Promise<number> {
     const statements: Array<{ sql: string; values: unknown[] }> = [
-      { sql: `DELETE FROM ai_user_settings WHERE lower(account_email) = lower($1)`, values: [email] },
-      { sql: `DELETE FROM mail_user_settings WHERE lower(account_email) = lower($1)`, values: [email] },
-      { sql: `DELETE FROM mail_signatures WHERE lower(account_email) = lower($1)`, values: [email] },
+      {
+        sql: `DELETE FROM ai_user_settings WHERE lower(account_email) = lower($1)`,
+        values: [email],
+      },
+      {
+        sql: `DELETE FROM mail_user_settings WHERE lower(account_email) = lower($1)`,
+        values: [email],
+      },
+      {
+        sql: `DELETE FROM mail_signatures WHERE lower(account_email) = lower($1)`,
+        values: [email],
+      },
       { sql: `DELETE FROM mail_filters WHERE lower(account_email) = lower($1)`, values: [email] },
       // Связанные ящики — с обеих сторон: и наши ссылки, и ссылки на нас.
       {
@@ -563,7 +577,10 @@ export class AdminDb {
                WHERE lower(owner_email) = lower($1) OR lower(linked_email) = lower($1)`,
         values: [email],
       },
-      { sql: `DELETE FROM external_accounts WHERE lower(owner_email) = lower($1)`, values: [email] },
+      {
+        sql: `DELETE FROM external_accounts WHERE lower(owner_email) = lower($1)`,
+        values: [email],
+      },
       // Состояние переноса и сборщика: ключи дедупликации и точки докачки.
       { sql: `DELETE FROM migrate_messages WHERE lower(account) = lower($1)`, values: [email] },
       { sql: `DELETE FROM migrate_cursors WHERE lower(account) = lower($1)`, values: [email] },
@@ -654,9 +671,9 @@ export class AdminDb {
   }
 
   /** Что пора убрать с диска: карантин отлежал положенное. */
-  async listDeletionsToPurge(limit: number): Promise<
-    Array<{ id: number; email: string; quarantinePath: string | null }>
-  > {
+  async listDeletionsToPurge(
+    limit: number,
+  ): Promise<Array<{ id: number; email: string; quarantinePath: string | null }>> {
     const rows = await this.query<{ id: string; email: string; quarantine_path: string | null }>(
       `SELECT id::text, email, quarantine_path
          FROM mailbox_deletions
@@ -799,11 +816,7 @@ export class AdminDb {
     await this.query(`DELETE FROM virtual_domains WHERE id = $1`, [id]);
   }
 
-  async saveDnsStatus(
-    domainId: number,
-    status: unknown,
-    overall: string,
-  ): Promise<void> {
+  async saveDnsStatus(domainId: number, status: unknown, overall: string): Promise<void> {
     await this.query(
       `INSERT INTO domain_settings (domain_id, dns_status, dns_checked_at, dns_overall)
        VALUES ($1, $2::jsonb, now(), $3)
@@ -818,7 +831,12 @@ export class AdminDb {
 
   async saveDomainSettings(
     domainId: number,
-    patch: { dkimSelector?: string; dkimPublicKey?: string | null; dkimDnsRecord?: string | null; notes?: string | null },
+    patch: {
+      dkimSelector?: string;
+      dkimPublicKey?: string | null;
+      dkimDnsRecord?: string | null;
+      notes?: string | null;
+    },
   ): Promise<void> {
     await this.query(
       `INSERT INTO domain_settings (domain_id, dkim_selector, dkim_public_key, dkim_dns_record, notes)
@@ -861,7 +879,9 @@ export class AdminDb {
     const values: unknown[] = [];
     if (filters.search) {
       values.push(`%${filters.search.toLowerCase()}%`);
-      where.push(`(lower(a.source) LIKE $${values.length} OR lower(a.destination) LIKE $${values.length})`);
+      where.push(
+        `(lower(a.source) LIKE $${values.length} OR lower(a.destination) LIKE $${values.length})`,
+      );
     }
     if (filters.domainId !== undefined) {
       values.push(filters.domainId);
@@ -940,7 +960,10 @@ export class AdminDb {
         ],
       );
     } catch (err) {
-      this.opts.logger.error(errorInfo(err, { action: record.action }), 'Не удалось записать аудит');
+      this.opts.logger.error(
+        errorInfo(err, { action: record.action }),
+        'Не удалось записать аудит',
+      );
     }
   }
 

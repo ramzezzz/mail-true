@@ -8,7 +8,11 @@
  */
 
 import type { Folder } from '@mail-true/shared';
-import { EMPTY_SELECTION, type SearchFacetSelection, type SearchFlagFacet } from '../lib/searchFacets';
+import {
+  EMPTY_SELECTION,
+  type SearchFacetSelection,
+  type SearchFlagFacet,
+} from '../lib/searchFacets';
 
 export const SEARCH_PATH = '/search/';
 

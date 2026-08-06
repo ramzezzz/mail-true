@@ -501,9 +501,9 @@ describe('свободное место', () => {
 
     // Флажок строки письма — тот, у которого нет подписи: подписанные
     // флажки в этом окне принадлежат условиям уборки.
-    const checkbox = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(
-      (input) => (input.closest('label')?.textContent ?? '') === '',
-    );
+    const checkbox = [
+      ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((input) => (input.closest('label')?.textContent ?? '') === '');
     expect(checkbox).toBeTruthy();
     act(() => checkbox!.click());
     await waitFor(() => Boolean(button('Убрать в корзину')), 'кнопка с числом');

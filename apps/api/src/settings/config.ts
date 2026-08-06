@@ -169,8 +169,7 @@ export function loadSettingsConfig(env: NodeJS.ProcessEnv = process.env): Settin
   const data = parsed.data;
   return {
     ...data,
-    databaseUrl:
-      data.SETTINGS_DATABASE_URL || data.ADMIN_DATABASE_URL || data.DATABASE_URL || null,
+    databaseUrl: data.SETTINGS_DATABASE_URL || data.ADMIN_DATABASE_URL || data.DATABASE_URL || null,
     transport: data.SIEVE_TRANSPORT,
   };
 }

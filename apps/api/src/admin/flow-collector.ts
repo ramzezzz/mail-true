@@ -114,11 +114,7 @@ export class FlowCollector {
     try {
       await this.collect();
       await this.maybePrune();
-      noteRecovered(
-        this.failures,
-        this.opts.logger,
-        'Сборщик истории доставки снова работает',
-      );
+      noteRecovered(this.failures, this.opts.logger, 'Сборщик истории доставки снова работает');
     } catch (err) {
       warnOnce(this.failures, this.opts.logger, err, 'Сборщик истории доставки: заход не удался');
     } finally {

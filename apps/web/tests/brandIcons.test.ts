@@ -48,7 +48,9 @@ describe('«Важное» — закладка-лента, а не кружок
   });
 
   it('строка списка берёт сплошной значок, меню — контурный', () => {
-    expect(iconsTsx).toContain("IconFlagFilled = (p: IconProps = {}) => <BrandIcon name=\"important-filled\"");
+    expect(iconsTsx).toContain(
+      'IconFlagFilled = (p: IconProps = {}) => <BrandIcon name="important-filled"',
+    );
     const listTsx = readFileSync(join(WEB, '../src/mail/MessageList.tsx'), 'utf8');
     expect(listTsx).toContain('<IconFlagFilled />');
     // В панели и меню «Пометить флажком» — контурная лента

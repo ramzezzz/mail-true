@@ -15,7 +15,11 @@ import { loadPushConfig } from './config.js';
 import { toBase64Url, generateVapidKeys } from './crypto.js';
 import { accountKey, browserName, PushService, type PushEnvironment } from './service.js';
 import type { ArrivedMessage } from './policy.js';
-import { defaultNotificationPrefs, type NotificationPrefs, type PushSubscriptionRecord } from './types.js';
+import {
+  defaultNotificationPrefs,
+  type NotificationPrefs,
+  type PushSubscriptionRecord,
+} from './types.js';
 import type { MailSession } from '../types.js';
 
 const logger = pino({ level: 'silent' });

@@ -35,7 +35,9 @@ export interface DestDefaults {
 
 const boolish = z
   .union([z.boolean(), z.string()])
-  .transform((v) => (typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'да'].includes(v.trim().toLowerCase())));
+  .transform((v) =>
+    typeof v === 'boolean' ? v : ['1', 'true', 'yes', 'да'].includes(v.trim().toLowerCase()),
+  );
 
 const portish = z
   .union([z.number(), z.string()])
@@ -84,7 +86,9 @@ export function parseAccountsList(
   format: 'csv' | 'json' | 'auto' = 'auto',
 ): BatchAccount[] {
   const trimmed = text.trim();
-  const isJson = format === 'json' || (format === 'auto' && (trimmed.startsWith('[') || trimmed.startsWith('{')));
+  const isJson =
+    format === 'json' ||
+    (format === 'auto' && (trimmed.startsWith('[') || trimmed.startsWith('{')));
 
   const rows: Array<Record<string, unknown>> = isJson
     ? (JSON.parse(trimmed) as Array<Record<string, unknown>>)
@@ -100,7 +104,9 @@ export function parseAccountsList(
     }
     const parsed = flatAccountSchema.safeParse(row);
     if (!parsed.success) {
-      const problems = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      const problems = parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
       throw new Error(`строка ${index + 1} списка ящиков: ${problems}`);
     }
     const a = parsed.data;

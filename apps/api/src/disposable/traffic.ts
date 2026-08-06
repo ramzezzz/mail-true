@@ -110,12 +110,7 @@ export async function readTraffic(opts: {
   for (let page = 0; page < MAX_PAGES; page += 1) {
     let result;
     try {
-      result = await readLogPage(
-        opts.dir,
-        'postfix',
-        { limit: PAGE_LINES, before, fileId },
-        now,
-      );
+      result = await readLogPage(opts.dir, 'postfix', { limit: PAGE_LINES, before, fileId }, now);
     } catch {
       // Журнала нет или он недоступен — источника просто не будет.
       break;
@@ -207,8 +202,7 @@ export async function readTraffic(opts: {
   return out;
 }
 
-const maxAt = (list: readonly Hit[]): Date =>
-  list.reduce((a, b) => (a.at > b.at ? a : b)).at;
+const maxAt = (list: readonly Hit[]): Date => list.reduce((a, b) => (a.at > b.at ? a : b)).at;
 
 /**
  * Кто писал на адрес.

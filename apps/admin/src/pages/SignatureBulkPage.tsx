@@ -80,7 +80,18 @@ export function SignatureBulkPage() {
       extras,
       ...(previewEmail.trim() !== '' ? { previewEmail: previewEmail.trim() } : {}),
     }),
-    [scope, preselected, domainId, template, name, mode, makeDefault, skipIncomplete, extras, previewEmail],
+    [
+      scope,
+      preselected,
+      domainId,
+      template,
+      name,
+      mode,
+      makeDefault,
+      skipIncomplete,
+      extras,
+      previewEmail,
+    ],
   );
 
   const runPreview = useMutation({
@@ -193,7 +204,9 @@ export function SignatureBulkPage() {
               style={{ width: 220 }}
               value={domainId ?? ''}
               disabled={scope !== 'domain'}
-              onChange={(e) => setDomainId(e.target.value === '' ? undefined : Number(e.target.value))}
+              onChange={(e) =>
+                setDomainId(e.target.value === '' ? undefined : Number(e.target.value))
+              }
             >
               <option value="">— выберите домен —</option>
               {(domains.data?.items ?? []).map((d) => (
@@ -283,8 +296,8 @@ export function SignatureBulkPage() {
               onChange={(e) => setSkipIncomplete(e.target.checked)}
             />
             <span>
-              Пропускать ящики, у которых не хватает данных для подстановки (иначе подпись выйдет
-              с пустой строкой вместо имени)
+              Пропускать ящики, у которых не хватает данных для подстановки (иначе подпись выйдет с
+              пустой строкой вместо имени)
             </span>
           </label>
         </div>
@@ -311,7 +324,9 @@ export function SignatureBulkPage() {
         {preview && (
           <>
             <div className={styles.counts}>
-              <div className={`${styles.count} ${preview.signaturesReplaced > 0 ? styles.countDanger : ''}`}>
+              <div
+                className={`${styles.count} ${preview.signaturesReplaced > 0 ? styles.countDanger : ''}`}
+              >
                 <span className={styles.countValue}>{preview.signaturesReplaced}</span>
                 <span className={styles.countLabel}>чужих подписей будет затёрто</span>
               </div>
@@ -391,8 +406,8 @@ export function SignatureBulkPage() {
           <div className={styles.grid}>
             {stale && (
               <Notice tone="error">
-                Условия изменились после предпросмотра. Посчитайте его заново — иначе применится
-                не то, что вам показали.
+                Условия изменились после предпросмотра. Посчитайте его заново — иначе применится не
+                то, что вам показали.
               </Notice>
             )}
             {needsConfirmation && (

@@ -15,48 +15,48 @@ bash infra/test-delivery.sh           # сквозная проверка дос
 
 ## Состав стека
 
-| Сервис   | Образ                | Назначение                                             |
-|----------|----------------------|--------------------------------------------------------|
-| unbound  | сборка `infra/unbound` (alpine) | Свой рекурсивный DNS-резольвер (`172.28.0.53`). Без него бесплатные списки Spamhaus/URIBL отказываются отвечать — см. `docs/antispam.md` |
-| postgres | postgres:16-alpine   | Виртуальные домены/ящики/алиасы (схема в `infra/postgres/migrations/`) |
-| redis    | redis:7-alpine       | Сессии, кэш, очереди веб-приложения; статистика rspamd |
-| dovecot  | сборка `infra/dovecot` (debian bookworm) | IMAP 143/993, LMTP :24, SASL-auth :12345, quota-status :12340, Maildir, полнотекстовый поиск (FTS Xapian) и квоты — см. `docs/search.md` |
-| postfix  | сборка `infra/postfix` (debian bookworm) | SMTP :25 (приём), submission :587 (STARTTLS+SASL) |
-| rspamd   | сборка `infra/rspamd` (rspamd/rspamd)    | Антиспам (milter :11332), DKIM-подпись, веб-UI :11334 |
-| autoconfig | сборка `apps/autoconfig/Dockerfile` (node:24-alpine) | Автоопределение настроек клиентов: Mozilla Autoconfig, MS Autodiscover, .mobileconfig, DNS-записи (см. `docs/autoconfig.md`) |
-| api      | сборка `apps/api/Dockerfile` (alpine + node) | Сервер приложения: HTTP API `/api/*` и WebSocket `/ws`. Ходит в Dovecot по IMAP от имени пользователя, отправляет через submission Postfix, сессии в Redis, настройки в Postgres |
-| web      | сборка `apps/web/Dockerfile` (nginx:1.27-alpine) | Собранный Vite веб-интерфейс почты (статика) |
-| admin    | сборка `apps/admin/Dockerfile` (nginx:1.27-alpine) | Собранная Vite админка (статика) |
-| nginx    | nginx:1.27-alpine    | Единственный вход HTTP/HTTPS: почта (`<домен>`, `mail.<домен>`), админка (`admin.<домен>`), автонастройка (`autoconfig.<домен>`, `autodiscover.<домен>`, `/.well-known/`) |
-| clamav   | clamav/clamav:1.4_base | Антивирус. **Выключен по умолчанию** (профиль `clamav`): с базами занимает ~1 ГБ памяти. Включение — `CLAMAV_ENABLED=true` + `--profile clamav`, см. `docs/antispam.md` |
+| Сервис     | Образ                                                | Назначение                                                                                                                                                                       |
+| ---------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unbound    | сборка `infra/unbound` (alpine)                      | Свой рекурсивный DNS-резольвер (`172.28.0.53`). Без него бесплатные списки Spamhaus/URIBL отказываются отвечать — см. `docs/antispam.md`                                         |
+| postgres   | postgres:16-alpine                                   | Виртуальные домены/ящики/алиасы (схема в `infra/postgres/migrations/`)                                                                                                           |
+| redis      | redis:7-alpine                                       | Сессии, кэш, очереди веб-приложения; статистика rspamd                                                                                                                           |
+| dovecot    | сборка `infra/dovecot` (debian bookworm)             | IMAP 143/993, LMTP :24, SASL-auth :12345, quota-status :12340, Maildir, полнотекстовый поиск (FTS Xapian) и квоты — см. `docs/search.md`                                         |
+| postfix    | сборка `infra/postfix` (debian bookworm)             | SMTP :25 (приём), submission :587 (STARTTLS+SASL)                                                                                                                                |
+| rspamd     | сборка `infra/rspamd` (rspamd/rspamd)                | Антиспам (milter :11332), DKIM-подпись, веб-UI :11334                                                                                                                            |
+| autoconfig | сборка `apps/autoconfig/Dockerfile` (node:24-alpine) | Автоопределение настроек клиентов: Mozilla Autoconfig, MS Autodiscover, .mobileconfig, DNS-записи (см. `docs/autoconfig.md`)                                                     |
+| api        | сборка `apps/api/Dockerfile` (alpine + node)         | Сервер приложения: HTTP API `/api/*` и WebSocket `/ws`. Ходит в Dovecot по IMAP от имени пользователя, отправляет через submission Postfix, сессии в Redis, настройки в Postgres |
+| web        | сборка `apps/web/Dockerfile` (nginx:1.27-alpine)     | Собранный Vite веб-интерфейс почты (статика)                                                                                                                                     |
+| admin      | сборка `apps/admin/Dockerfile` (nginx:1.27-alpine)   | Собранная Vite админка (статика)                                                                                                                                                 |
+| nginx      | nginx:1.27-alpine                                    | Единственный вход HTTP/HTTPS: почта (`<домен>`, `mail.<домен>`), админка (`admin.<домен>`), автонастройка (`autoconfig.<домен>`, `autodiscover.<домен>`, `/.well-known/`)        |
+| clamav     | clamav/clamav:1.4_base                               | Антивирус. **Выключен по умолчанию** (профиль `clamav`): с базами занимает ~1 ГБ памяти. Включение — `CLAMAV_ENABLED=true` + `--profile clamav`, см. `docs/antispam.md`          |
 
 ## Порты на хосте (все на 127.0.0.1)
 
-| Порт | Сервис  | Протокол                                   |
-|------|---------|--------------------------------------------|
-| 25   | postfix | SMTP (приём входящей почты)                |
-| 587  | postfix | Submission: STARTTLS + SASL (PLAIN/LOGIN)  |
-| 143  | dovecot | IMAP (STARTTLS; в dev разрешён PLAIN)      |
-| 993  | dovecot | IMAPS                                      |
-| 110  | dovecot | POP3 (STARTTLS; в dev разрешён PLAIN)      |
-| 995  | dovecot | POP3S                                      |
-| 8025 | autoconfig | Сервис автонастройки напрямую (отладка) |
-| 3000 | api     | Сервер приложения напрямую (отладка). На боевом сервере не публикуется вовсе |
-| 8080 | nginx   | HTTP: почта, админка, autoconfig/autodiscover/.well-known |
-| 8443 | nginx   | HTTPS (self-signed dev-сертификат)         |
-| 5432 | postgres| PostgreSQL (для веб-приложения)            |
-| 6380 | redis   | Redis (**6380**, т.к. 6379 на dev-машине занят чужим Redis; внутри docker-сети — `redis:6379`) |
-| 11334| rspamd  | Веб-интерфейс/API rspamd (пароль `RSPAMD_PASSWORD`) |
+| Порт  | Сервис     | Протокол                                                                                       |
+| ----- | ---------- | ---------------------------------------------------------------------------------------------- |
+| 25    | postfix    | SMTP (приём входящей почты)                                                                    |
+| 587   | postfix    | Submission: STARTTLS + SASL (PLAIN/LOGIN)                                                      |
+| 143   | dovecot    | IMAP (STARTTLS; в dev разрешён PLAIN)                                                          |
+| 993   | dovecot    | IMAPS                                                                                          |
+| 110   | dovecot    | POP3 (STARTTLS; в dev разрешён PLAIN)                                                          |
+| 995   | dovecot    | POP3S                                                                                          |
+| 8025  | autoconfig | Сервис автонастройки напрямую (отладка)                                                        |
+| 3000  | api        | Сервер приложения напрямую (отладка). На боевом сервере не публикуется вовсе                   |
+| 8080  | nginx      | HTTP: почта, админка, autoconfig/autodiscover/.well-known                                      |
+| 8443  | nginx      | HTTPS (self-signed dev-сертификат)                                                             |
+| 5432  | postgres   | PostgreSQL (для веб-приложения)                                                                |
+| 6380  | redis      | Redis (**6380**, т.к. 6379 на dev-машине занят чужим Redis; внутри docker-сети — `redis:6379`) |
+| 11334 | rspamd     | Веб-интерфейс/API rspamd (пароль `RSPAMD_PASSWORD`)                                            |
 
 ## Веб-интерфейс: кто что отдаёт
 
 Разделение по именам хостов, а не по путям:
 
-| Имя хоста | Что отдаётся |
-|---|---|
+| Имя хоста                                    | Что отдаётся                                                                                                            |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `<домен>`, `mail.<домен>` (и default_server) | статика почты из `web`; `/api/*` и `/ws` — в `api`; `/.well-known/` и `/autodiscover/autodiscover.xml` — в `autoconfig` |
-| `admin.<домен>` | статика админки из `admin`; `/api/admin/*` — в `api`, всё остальное из `/api/` отвечает 404 |
-| `autoconfig.<домен>`, `autodiscover.<домен>` | целиком в `autoconfig` |
+| `admin.<домен>`                              | статика админки из `admin`; `/api/admin/*` — в `api`, всё остальное из `/api/` отвечает 404                             |
+| `autoconfig.<домен>`, `autodiscover.<домен>` | целиком в `autoconfig`                                                                                                  |
 
 Почему по именам, а не по путям: оба приложения собраны Vite с базой «/»
 (ссылки на файлы сборки абсолютные) и используют `createBrowserRouter`
@@ -68,7 +68,7 @@ bash infra/test-delivery.sh           # сквозная проверка дос
 Заголовки и кэширование:
 
 - Файлы с хешем в имени (`/assets/index-*.js`) — `Cache-Control: public,
-  max-age=31536000, immutable`; `index.html` — `no-cache`. Заголовки ставит
+max-age=31536000, immutable`; `index.html` — `no-cache`. Заголовки ставит
   тот nginx, что лежит внутри образа `web`/`admin`: он знает, у какого
   файла хеш в имени есть, а у какого нет.
 - Сжатие статики — там же, внутри образа; фронтовый nginx передаёт уже

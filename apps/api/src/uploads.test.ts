@@ -50,7 +50,7 @@ test('отклонённая загрузка не оставляет файл �
     });
     await assert.rejects(
       store.save('big.bin', 'application/octet-stream', failingStream(Buffer.alloc(4096), err)),
-      /too large/i
+      /too large/i,
     );
     assert.deepEqual(await readdir(dir), [], 'каталог загрузок должен остаться пустым');
   } finally {
@@ -68,7 +68,7 @@ test('обрезанная по лимиту загрузка отклоняет
         assert.equal(e.statusCode, 413);
         assert.equal(e.code, 'FILE_TOO_LARGE');
         return true;
-      }
+      },
     );
     assert.deepEqual(await readdir(dir), []);
   } finally {

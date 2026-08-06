@@ -116,9 +116,11 @@ class FakeMailbox {
     return { exists: box.messages.length, uidValidity: BigInt(box.uidValidity) };
   }
 
-  async search(
-    query: { uid?: string; all?: boolean; header?: Record<string, string> },
-  ): Promise<number[]> {
+  async search(query: {
+    uid?: string;
+    all?: boolean;
+    header?: Record<string, string>;
+  }): Promise<number[]> {
     const box = this.current;
     if (query.header) {
       const needle = Object.values(query.header)[0] ?? '';
@@ -376,7 +378,10 @@ test('откладывание: копия, потом запись срока, 
   assert.ok(deleteAt > copyAt, `удаление раньше копии: ${box.calls.join(' | ')}`);
 
   // Письмо ушло из «Входящих» и лежит в «Отложенных».
-  assert.deepEqual(box.box('INBOX').messages.map((m) => m.uid), [2, 3]);
+  assert.deepEqual(
+    box.box('INBOX').messages.map((m) => m.uid),
+    [2, 3],
+  );
   assert.equal(box.box('Snoozed').messages.length, 1);
 
   // В записи есть всё, чем письмо потом ищут: номер, поколение папки,
@@ -401,7 +406,10 @@ test('откладывание: недоступная база не даёт у
 
   // Оригинал НА МЕСТЕ — это главное. И копии-сироты в «Отложенных» нет:
   // письмо, которое лежит там без срока, не вернулось бы никогда.
-  assert.deepEqual(box.box('INBOX').messages.map((m) => m.uid), [1, 2, 3]);
+  assert.deepEqual(
+    box.box('INBOX').messages.map((m) => m.uid),
+    [1, 2, 3],
+  );
   assert.deepEqual(box.box('Snoozed').messages, []);
   assert.deepEqual(store.rows, []);
 });
@@ -418,7 +426,10 @@ test('откладывание: сервер без UIDPLUS не даёт уда
     service(store).snooze(box.asClient(), ACCOUNT, ['inbox:1'], { until: inAMinute(now) }, now),
     /не подтвердил/i,
   );
-  assert.deepEqual(box.box('INBOX').messages.map((m) => m.uid), [1, 2, 3]);
+  assert.deepEqual(
+    box.box('INBOX').messages.map((m) => m.uid),
+    [1, 2, 3],
+  );
   assert.deepEqual(store.rows, []);
 });
 
@@ -437,7 +448,10 @@ test('откладывание: письмо из несуществующей �
     ),
   );
   assert.deepEqual(box.calls, [], `ящик тронули: ${box.calls.join(' | ')}`);
-  assert.deepEqual(box.box('INBOX').messages.map((m) => m.uid), [1, 2, 3]);
+  assert.deepEqual(
+    box.box('INBOX').messages.map((m) => m.uid),
+    [1, 2, 3],
+  );
 });
 
 test('откладывание невозможно без базы — и об этом сказано, а не промолчано', async () => {
@@ -622,7 +636,9 @@ test('«вернуть сейчас» возвращает письмо в ис�
   const { box, store } = await withSnoozed('2026-08-06T08:00:00Z');
   const uid = store.rows[0]!.snoozeUid;
 
-  const result = await service(store).returnNow(box.asClient(), ACCOUNT, [`snoozed:${String(uid)}`]);
+  const result = await service(store).returnNow(box.asClient(), ACCOUNT, [
+    `snoozed:${String(uid)}`,
+  ]);
   assert.equal(result.returned, 1);
   assert.equal(store.rows[0]!.state, 'cancelled');
   assert.ok(box.box('INBOX').messages.some((m) => m.messageId === 'pismo-1@example.com'));

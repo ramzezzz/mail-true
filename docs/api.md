@@ -33,11 +33,11 @@ npm run start --workspace @mail-true/api # node dist/server.js
 для открытия IMAP/SMTP-соединений от имени пользователя. Каждый авторизованный
 запрос скользяще продлевает сессию на `SESSION_TTL_SECONDS`.
 
-| Метод | Путь | Описание |
-|---|---|---|
-| POST | `/api/auth/login` | `{email, password}` -> `{ok, email}` + cookie. Лимит 10 попыток/мин с IP |
-| POST | `/api/auth/logout` | Удаляет сессию, закрывает IMAP-соединения пользователя. **Тела нет** — заголовок `Content-Type` на этот запрос ставить нельзя |
-| GET | `/api/auth/session` | При действующей сессии — `{authenticated: true, email}` и продление сессии; без сессии — `401 UNAUTHORIZED`, а не `{authenticated: false}` |
+| Метод | Путь                | Описание                                                                                                                                   |
+| ----- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| POST  | `/api/auth/login`   | `{email, password}` -> `{ok, email}` + cookie. Лимит 10 попыток/мин с IP                                                                   |
+| POST  | `/api/auth/logout`  | Удаляет сессию, закрывает IMAP-соединения пользователя. **Тела нет** — заголовок `Content-Type` на этот запрос ставить нельзя              |
+| GET   | `/api/auth/session` | При действующей сессии — `{authenticated: true, email}` и продление сессии; без сессии — `401 UNAUTHORIZED`, а не `{authenticated: false}` |
 
 ## Форма ошибки
 
@@ -52,22 +52,22 @@ npm run start --workspace @mail-true/api # node dist/server.js
 полей, `SEND_REJECTED` — отклонённые получатели). Поле `error` — это КОД из
 таблицы ниже, а не человеческий текст: интерфейс разбирает именно его.
 
-| Код | Статус | Когда |
-| --- | --- | --- |
-| `UNAUTHORIZED` | 401 | Нет сессии или она истекла |
-| `AUTH_FAILED` | 401 | Неверные логин или пароль (именно отказ Dovecot по учётным данным) |
-| `FORBIDDEN` | 403 | Сессия есть, прав не хватает (админка) |
-| `NOT_FOUND` | 404 | Нет письма, папки или маршрута |
-| `VALIDATION` | 400 | Не прошла проверка схемы; `details` — список полей |
-| `BAD_REQUEST` | 400 | Прочие некорректные запросы (в т. ч. битый адрес и слишком длинный параметр) |
-| `SEND_REJECTED` | 400 | Почтовый сервер отказался принять письмо навсегда (например, `550`) |
-| `UNSUPPORTED_MEDIA_TYPE` | 415 | Не тот `Content-Type` |
-| `PAYLOAD_TOO_LARGE` | 413 | Тело запроса больше предела |
-| `FILE_TOO_LARGE` | 413 | Файл больше предела вложения |
-| `MESSAGE_TOO_LARGE` | 413 | Собранное письмо не пройдёт через почтовый сервер |
-| `RATE_LIMITED` | 429 | Превышена частота запросов |
-| `UPSTREAM_UNAVAILABLE` | 503 | Почтовый стек недоступен: нет соединения, оно оборвалось, упёрлись в предел соединений |
-| `INTERNAL` | 500 | Внутренняя ошибка; подробности только в журнале |
+| Код                      | Статус | Когда                                                                                  |
+| ------------------------ | ------ | -------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`           | 401    | Нет сессии или она истекла                                                             |
+| `AUTH_FAILED`            | 401    | Неверные логин или пароль (именно отказ Dovecot по учётным данным)                     |
+| `FORBIDDEN`              | 403    | Сессия есть, прав не хватает (админка)                                                 |
+| `NOT_FOUND`              | 404    | Нет письма, папки или маршрута                                                         |
+| `VALIDATION`             | 400    | Не прошла проверка схемы; `details` — список полей                                     |
+| `BAD_REQUEST`            | 400    | Прочие некорректные запросы (в т. ч. битый адрес и слишком длинный параметр)           |
+| `SEND_REJECTED`          | 400    | Почтовый сервер отказался принять письмо навсегда (например, `550`)                    |
+| `UNSUPPORTED_MEDIA_TYPE` | 415    | Не тот `Content-Type`                                                                  |
+| `PAYLOAD_TOO_LARGE`      | 413    | Тело запроса больше предела                                                            |
+| `FILE_TOO_LARGE`         | 413    | Файл больше предела вложения                                                           |
+| `MESSAGE_TOO_LARGE`      | 413    | Собранное письмо не пройдёт через почтовый сервер                                      |
+| `RATE_LIMITED`           | 429    | Превышена частота запросов                                                             |
+| `UPSTREAM_UNAVAILABLE`   | 503    | Почтовый стек недоступен: нет соединения, оно оборвалось, упёрлись в предел соединений |
+| `INTERNAL`               | 500    | Внутренняя ошибка; подробности только в журнале                                        |
 
 **Ошибки обратного прокси.** Когда сервер приложения недоступен целиком
 (обновление, падение, ещё не поднялся), отвечает не он, а nginx. Такой ответ
@@ -100,29 +100,29 @@ user+IP exceeded`), — это 503. Иначе при упоре в предел
 идентификаторы папок: `inbox|sent|drafts|spam|trash|archive` либо
 `f-<base64url(IMAP-путь)>` для пользовательских.
 
-| Метод | Путь | Описание |
-|---|---|---|
-| GET | `/healthz` | Проба для контейнера и прокси (без сессии): `200 {ok:true,status,uptime}` либо `503 {ok:false,status,uptime,failed:[…]}` |
-| GET | `/health` | То же состояние для человека (без сессии): `{status, uptimeSeconds, checkedAt, parts[]}`; всегда `200` |
-| GET | `/api/account` | `Account`: профиль + квота из IMAP QUOTA. `createdAt` — из `virtual_users`, `null` если базы нет |
-| GET | `/api/folders` | `{folders: Folder[]}` — роли, счётчики, дерево. Служебные каталоги Dovecot (`dovecot/...`) не показываются |
-| GET | `/api/messages` | `MessageListPage`. Параметры: `folderId`, `offset`, `limit` (<=100), `filter` (`all/unread/flagged/with-attachments`), `search`, `label` (ключ своей метки), `snippets=0/1` |
-| GET | `/api/messages/:id` | Полное `Message` + `blockedRemote`. `?images=1` — разрешить внешние картинки. `bodyRecovered: true` означает, что разбор не дал ни одной части и текст взят из исходника как есть |
-| GET | `/api/messages/:id/parts/:partId` | Вложение/встроенная картинка (inline для картинок, attachment для остального) |
-| GET | `/api/messages/:id/source` | Исходник письма целиком, файлом `.eml` (`message/rfc822`, всегда `attachment`). Нужен там, где разбор не помогает: письмо с испорченным разделителем частей иначе недостижимо |
-| POST | `/api/messages/:id/unsubscribe` | Отписка от рассылки (RFC 8058) -> `{ok, method, …}` |
-| POST | `/api/messages/flags` | `{ids[], seen?, flagged?, deleted?}` (true — установить, false — снять) -> `{updated}` |
-| POST | `/api/messages/move` | `{ids[], targetFolderId}` -> `{moved}`. Отсутствующая системная папка (архив) создаётся автоматически |
-| POST | `/api/messages/send` | `DraftPayload` -> отправка через submission + копия в Отправленные -> `{ok, sentMessageId, accepted[], rejected[], savedToSent, warning}` |
-| POST | `/api/drafts` | `DraftPayload` -> IMAP APPEND в Черновики -> `{ok, draftId, draftUid}`; предыдущая версия удаляется |
-| POST | `/api/uploads` | multipart/form-data -> `{files: [{id, filename, mimeType, size}]}`; id подставляются в `attachmentIds` |
-| GET | `/api/searches` | Сохранённые запросы: `{available, reason, items[]}`. `available:false` — базы нет или не применена миграция 0027; интерфейс тогда прячет и кнопку, и группу в колонке |
-| POST | `/api/searches` | `{name, query, includeJunk?}` -> сохранённый запрос. Занятое имя (без учёта регистра) и пустой запрос — 400 |
-| DELETE | `/api/searches/:id` | Убрать сохранённый запрос -> `{ok, id, name}`. Писем не касается вовсе |
-| GET | `/api/mailings` | Разбор «кто вам пишет»: `{at, scanned, total, truncated, limit, quota, folders[], groups[]}`. Группа — по `List-Id`, а без него по адресу отправителя; в ней число писем, занятое место, непрочитанные, доля ящика и можно ли отписаться. `?refresh=1` — осмотреть ящик заново |
-| POST | `/api/mailings/unsubscribe` | `{key}` — отписка от группы целиком тем же механизмом RFC 8058, что и у одного письма (по самому свежему письму с адресом отписки) -> `{ok, method, key, title, …}`. Писем не касается: удаление — отдельное действие |
-| GET | `/api/cleanup` | Куда делось место: `{quota, folders[], heaviest[], staleMailings[]}`. Квота — настоящая, из IMAP QUOTA, а не сумма размеров писем |
-| POST | `/api/cleanup/sweep` | Массовая уборка. `{folderId?, olderThanDays?, keepUnread, keepFlagged, groupKey?, largerThanBytes?, keepLatest?, targetFolderId='trash', dryRun=true, scanAt?}` -> `{count, bytes, oldest, newest, unread, flagged, moved, targetFolderId}` |
+| Метод  | Путь                              | Описание                                                                                                                                                                                                                                                                       |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/healthz`                        | Проба для контейнера и прокси (без сессии): `200 {ok:true,status,uptime}` либо `503 {ok:false,status,uptime,failed:[…]}`                                                                                                                                                       |
+| GET    | `/health`                         | То же состояние для человека (без сессии): `{status, uptimeSeconds, checkedAt, parts[]}`; всегда `200`                                                                                                                                                                         |
+| GET    | `/api/account`                    | `Account`: профиль + квота из IMAP QUOTA. `createdAt` — из `virtual_users`, `null` если базы нет                                                                                                                                                                               |
+| GET    | `/api/folders`                    | `{folders: Folder[]}` — роли, счётчики, дерево. Служебные каталоги Dovecot (`dovecot/...`) не показываются                                                                                                                                                                     |
+| GET    | `/api/messages`                   | `MessageListPage`. Параметры: `folderId`, `offset`, `limit` (<=100), `filter` (`all/unread/flagged/with-attachments`), `search`, `label` (ключ своей метки), `snippets=0/1`                                                                                                    |
+| GET    | `/api/messages/:id`               | Полное `Message` + `blockedRemote`. `?images=1` — разрешить внешние картинки. `bodyRecovered: true` означает, что разбор не дал ни одной части и текст взят из исходника как есть                                                                                              |
+| GET    | `/api/messages/:id/parts/:partId` | Вложение/встроенная картинка (inline для картинок, attachment для остального)                                                                                                                                                                                                  |
+| GET    | `/api/messages/:id/source`        | Исходник письма целиком, файлом `.eml` (`message/rfc822`, всегда `attachment`). Нужен там, где разбор не помогает: письмо с испорченным разделителем частей иначе недостижимо                                                                                                  |
+| POST   | `/api/messages/:id/unsubscribe`   | Отписка от рассылки (RFC 8058) -> `{ok, method, …}`                                                                                                                                                                                                                            |
+| POST   | `/api/messages/flags`             | `{ids[], seen?, flagged?, deleted?}` (true — установить, false — снять) -> `{updated}`                                                                                                                                                                                         |
+| POST   | `/api/messages/move`              | `{ids[], targetFolderId}` -> `{moved}`. Отсутствующая системная папка (архив) создаётся автоматически                                                                                                                                                                          |
+| POST   | `/api/messages/send`              | `DraftPayload` -> отправка через submission + копия в Отправленные -> `{ok, sentMessageId, accepted[], rejected[], savedToSent, warning}`                                                                                                                                      |
+| POST   | `/api/drafts`                     | `DraftPayload` -> IMAP APPEND в Черновики -> `{ok, draftId, draftUid}`; предыдущая версия удаляется                                                                                                                                                                            |
+| POST   | `/api/uploads`                    | multipart/form-data -> `{files: [{id, filename, mimeType, size}]}`; id подставляются в `attachmentIds`                                                                                                                                                                         |
+| GET    | `/api/searches`                   | Сохранённые запросы: `{available, reason, items[]}`. `available:false` — базы нет или не применена миграция 0027; интерфейс тогда прячет и кнопку, и группу в колонке                                                                                                          |
+| POST   | `/api/searches`                   | `{name, query, includeJunk?}` -> сохранённый запрос. Занятое имя (без учёта регистра) и пустой запрос — 400                                                                                                                                                                    |
+| DELETE | `/api/searches/:id`               | Убрать сохранённый запрос -> `{ok, id, name}`. Писем не касается вовсе                                                                                                                                                                                                         |
+| GET    | `/api/mailings`                   | Разбор «кто вам пишет»: `{at, scanned, total, truncated, limit, quota, folders[], groups[]}`. Группа — по `List-Id`, а без него по адресу отправителя; в ней число писем, занятое место, непрочитанные, доля ящика и можно ли отписаться. `?refresh=1` — осмотреть ящик заново |
+| POST   | `/api/mailings/unsubscribe`       | `{key}` — отписка от группы целиком тем же механизмом RFC 8058, что и у одного письма (по самому свежему письму с адресом отписки) -> `{ok, method, key, title, …}`. Писем не касается: удаление — отдельное действие                                                          |
+| GET    | `/api/cleanup`                    | Куда делось место: `{quota, folders[], heaviest[], staleMailings[]}`. Квота — настоящая, из IMAP QUOTA, а не сумма размеров писем                                                                                                                                              |
+| POST   | `/api/cleanup/sweep`              | Массовая уборка. `{folderId?, olderThanDays?, keepUnread, keepFlagged, groupKey?, largerThanBytes?, keepLatest?, targetFolderId='trash', dryRun=true, scanAt?}` -> `{count, bytes, oldest, newest, unread, flagged, moved, targetFolderId}`                                    |
 
 ### Что важно знать про эти маршруты
 
@@ -227,7 +227,7 @@ SMTP и его текст. Если письмо отвергнуто целик
 
 - отправитель разрешил отписку в один запрос (RFC 8058) и дал `https`-ссылку
   -> сервер сам шлёт `POST … List-Unsubscribe=One-Click` -> `{ok: true,
-  method: "one-click"}`. Запрос идёт с сервера намеренно: служба отписки не
+method: "one-click"}`. Запрос идёт с сервера намеренно: служба отписки не
   должна узнавать ни адрес читающего, ни его cookie;
 - есть только `mailto:` -> сервер отправляет письмо отписки от имени
   пользователя -> `{ok: true, method: "mailto", address}`;
@@ -268,7 +268,7 @@ SMTP и его текст. Если письмо отвергнуто целик
 - корзина, черновики и «Отложенные» не убираются ни при каких условиях;
 - `moved` считается по ящику (UIDPLUS), а не по длине отбора: письмо, которое
   успели убрать с телефона, в «перенесено» не попадает.
-| WS | `/ws` | Уведомления: `{type: 'ready'}` при подключении, `{type: 'new-message', folderId, id, uid, from, subject, date}` по IMAP IDLE |
+  | WS | `/ws` | Уведомления: `{type: 'ready'}` при подключении, `{type: 'new-message', folderId, id, uid, from, subject, date}` по IMAP IDLE |
 
 ## Помощник на основе ИИ
 
@@ -289,24 +289,24 @@ SMTP и его текст. Если письмо отвергнуто целик
 `{enabled: false}` с пустыми полями — интерфейсу нечем нарисовать кнопки.
 Это осознанно: пользователь не должен видеть кнопку, которая откажет.
 
-| Метод | Путь | Описание |
-|---|---|---|
-| GET | `/api/ai/state` | Главный маршрут. `{enabled, provider, consent, features[], neverSent[], budget}` |
-| GET | `/api/ai/outbound/:id` | Опись того, что уйдёт наружу для письма, **без отправки** |
-| POST | `/api/ai/consent` | `{accept: true, features?}` -> состояние. Согласие пишется вместе с адресом и моделью, на которые соглашались |
-| DELETE | `/api/ai/consent` | Отзыв + удаление всех созданных резюме и меток -> состояние + `{removedCacheEntries}` |
-| PUT | `/api/ai/features` | `{features[]}` — что пользователь оставляет включённым |
-| GET | `/api/ai/usage` | Расход за период, итоги и последние записи журнала |
-| DELETE | `/api/ai/messages/:id` | Забыть, что помощник насчитал по письму -> `{removed}` |
-| POST | `/api/ai/summarize` | `{messageId}` либо `{messageIds[]}` (цепочка) -> `Summary` |
-| POST | `/api/ai/classify` | `{messageId}` -> категория и метки |
-| POST | `/api/ai/replies` | `{messageId, tones?, instruction?}` -> варианты ответа |
-| POST | `/api/ai/continue` | `{draft, messageId?}` -> продолжение начатой фразы |
-| POST | `/api/ai/rewrite` | `{text, mode: shorten\|soften\|fix}` -> правленый текст и список изменений |
-| POST | `/api/ai/extract` | `{messageId}` -> даты, суммы, реквизиты, задачи, номера отслеживания |
-| POST | `/api/ai/translate` | `{messageId\|text, targetLanguage}` -> перевод |
-| POST | `/api/ai/search-query` | `{query}` -> параметры поиска и `explanation` (её обязательно показать) |
-| POST | `/api/ai/reply/stream` | SSE: сначала `disclosure`, затем `delta`, в конце `done`/`error` |
+| Метод  | Путь                   | Описание                                                                                                      |
+| ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/ai/state`        | Главный маршрут. `{enabled, provider, consent, features[], neverSent[], budget}`                              |
+| GET    | `/api/ai/outbound/:id` | Опись того, что уйдёт наружу для письма, **без отправки**                                                     |
+| POST   | `/api/ai/consent`      | `{accept: true, features?}` -> состояние. Согласие пишется вместе с адресом и моделью, на которые соглашались |
+| DELETE | `/api/ai/consent`      | Отзыв + удаление всех созданных резюме и меток -> состояние + `{removedCacheEntries}`                         |
+| PUT    | `/api/ai/features`     | `{features[]}` — что пользователь оставляет включённым                                                        |
+| GET    | `/api/ai/usage`        | Расход за период, итоги и последние записи журнала                                                            |
+| DELETE | `/api/ai/messages/:id` | Забыть, что помощник насчитал по письму -> `{removed}`                                                        |
+| POST   | `/api/ai/summarize`    | `{messageId}` либо `{messageIds[]}` (цепочка) -> `Summary`                                                    |
+| POST   | `/api/ai/classify`     | `{messageId}` -> категория и метки                                                                            |
+| POST   | `/api/ai/replies`      | `{messageId, tones?, instruction?}` -> варианты ответа                                                        |
+| POST   | `/api/ai/continue`     | `{draft, messageId?}` -> продолжение начатой фразы                                                            |
+| POST   | `/api/ai/rewrite`      | `{text, mode: shorten\|soften\|fix}` -> правленый текст и список изменений                                    |
+| POST   | `/api/ai/extract`      | `{messageId}` -> даты, суммы, реквизиты, задачи, номера отслеживания                                          |
+| POST   | `/api/ai/translate`    | `{messageId\|text, targetLanguage}` -> перевод                                                                |
+| POST   | `/api/ai/search-query` | `{query}` -> параметры поиска и `explanation` (её обязательно показать)                                       |
+| POST   | `/api/ai/reply/stream` | SSE: сначала `disclosure`, затем `delta`, в конце `done`/`error`                                              |
 
 Ответ любой возможности — конверт `{value, cached, usage, disclosure, durationMs}`.
 `disclosure` — опись того, что реально ушло наружу: поля с их значениями,
@@ -329,22 +329,22 @@ SMTP и его текст. Если письмо отвергнуто целик
 (`apps/web/src/api/settingsApi.ts`). Все маршруты требуют почтовую сессию
 и работают только со своим ящиком: адрес берётся из сессии.
 
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET | `/api/settings/general` | `GeneralSettings`: имя отправителя, подписи, автоответчик, уведомления, поведение после удаления |
-| PUT | `/api/settings/general` | Тот же объект целиком; подписи согласуются списком (что пропало — удаляется) |
-| GET | `/api/settings/filters` | `FilterRule[]` — массив, порядок = порядок применения |
-| POST | `/api/settings/filters` | `FilterRule` -> созданное правило |
-| PUT | `/api/settings/filters/:id` | `FilterRule` -> изменённое правило |
-| DELETE | `/api/settings/filters/:id` | `{ok}` |
-| PUT | `/api/settings/filters/order` | `{ids: string[]}` -> `FilterRule[]` |
-| POST | `/api/settings/filters/:id/apply` | `{folders?: string[]}` — прогнать правило по уже полученной почте -> `{result}` |
-| GET | `/api/settings/sieve` | Текст действующего файла правил в ящике и путь к нему |
-| POST | `/api/settings/sieve/sync` | Пересобрать файл правил из базы -> состояние синхронизации |
-| POST | `/api/folders` | `{name, parentId}` -> `Folder` |
-| PATCH | `/api/folders/:id` | `{name}` -> `Folder` (системные папки не переименовываются) |
-| DELETE | `/api/folders/:id` | `{ok}` (системные папки не удаляются) |
-| POST | `/api/folders/:id/clear` | Удалить письма, папку оставить -> `{removed}` |
+| Метод  | Путь                              | Описание                                                                                         |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------------------------ |
+| GET    | `/api/settings/general`           | `GeneralSettings`: имя отправителя, подписи, автоответчик, уведомления, поведение после удаления |
+| PUT    | `/api/settings/general`           | Тот же объект целиком; подписи согласуются списком (что пропало — удаляется)                     |
+| GET    | `/api/settings/filters`           | `FilterRule[]` — массив, порядок = порядок применения                                            |
+| POST   | `/api/settings/filters`           | `FilterRule` -> созданное правило                                                                |
+| PUT    | `/api/settings/filters/:id`       | `FilterRule` -> изменённое правило                                                               |
+| DELETE | `/api/settings/filters/:id`       | `{ok}`                                                                                           |
+| PUT    | `/api/settings/filters/order`     | `{ids: string[]}` -> `FilterRule[]`                                                              |
+| POST   | `/api/settings/filters/:id/apply` | `{folders?: string[]}` — прогнать правило по уже полученной почте -> `{result}`                  |
+| GET    | `/api/settings/sieve`             | Текст действующего файла правил в ящике и путь к нему                                            |
+| POST   | `/api/settings/sieve/sync`        | Пересобрать файл правил из базы -> состояние синхронизации                                       |
+| POST   | `/api/folders`                    | `{name, parentId}` -> `Folder`                                                                   |
+| PATCH  | `/api/folders/:id`                | `{name}` -> `Folder` (системные папки не переименовываются)                                      |
+| DELETE | `/api/folders/:id`                | `{ok}` (системные папки не удаляются)                                                            |
+| POST   | `/api/folders/:id/clear`          | Удалить письма, папку оставить -> `{removed}`                                                    |
 
 Правила транслируются в **Sieve** и кладутся в личный файл пользователя
 `/var/mail/vhosts/<домен>/<ящик>/.dovecot.sieve` (плюс исходник в
@@ -379,31 +379,31 @@ SMTP и его текст. Если письмо отвергнуто целик
 
 ## Свои и чужие ящики
 
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET | `/api/accounts` | Текущий ящик, связанные свои, подключённые чужие, состояние сборщика |
-| POST | `/api/accounts/link` | `{email, password, label?}` — связать свой второй ящик (пароль проверяется IMAP-логином, дальше хранится зашифрованным) |
-| DELETE | `/api/accounts/link/:email` | Разорвать связь (в обе стороны) |
-| POST | `/api/accounts/switch` | `{email}` — переключиться на связанный ящик без ввода пароля: заводится новая сессия, старая удаляется |
-| GET | `/api/accounts/unread` | Общий счётчик непрочитанных: текущий, связанные свои, чужие в режиме прямого доступа |
-| POST | `/api/accounts/external/detect` | `{email}` -> предполагаемые настройки чужого сервера и источник (`known`/`local`/`autoconfig`/`srv`/`guess`) |
-| GET/POST | `/api/accounts/external` | Список и создание подключения (подключение проверяется логином ДО сохранения) |
-| PUT/DELETE | `/api/accounts/external/:id` | Изменение и удаление |
-| GET | `/api/accounts/external/:id/state` | Состояние сборщика: когда забирал, сколько писем, ошибки |
-| POST | `/api/accounts/external/:id/collect` | Забрать почту сейчас -> `{result: {status, copied, skipped, failed, durationMs}}` |
-| GET | `/api/accounts/external/:id/folders` | Прямое подключение: дерево папок чужого ящика (id с приставкой `ext<id>:`) |
-| GET | `/api/accounts/external/:id/messages` | Прямое подключение: список писем чужого ящика на лету |
-| POST | `/api/accounts/external/:id/send` | Отправка «от имени» внешнего адреса через ЕГО SMTP + копия в его «Отправленные» |
+| Метод      | Путь                                  | Описание                                                                                                                |
+| ---------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| GET        | `/api/accounts`                       | Текущий ящик, связанные свои, подключённые чужие, состояние сборщика                                                    |
+| POST       | `/api/accounts/link`                  | `{email, password, label?}` — связать свой второй ящик (пароль проверяется IMAP-логином, дальше хранится зашифрованным) |
+| DELETE     | `/api/accounts/link/:email`           | Разорвать связь (в обе стороны)                                                                                         |
+| POST       | `/api/accounts/switch`                | `{email}` — переключиться на связанный ящик без ввода пароля: заводится новая сессия, старая удаляется                  |
+| GET        | `/api/accounts/unread`                | Общий счётчик непрочитанных: текущий, связанные свои, чужие в режиме прямого доступа                                    |
+| POST       | `/api/accounts/external/detect`       | `{email}` -> предполагаемые настройки чужого сервера и источник (`known`/`local`/`autoconfig`/`srv`/`guess`)            |
+| GET/POST   | `/api/accounts/external`              | Список и создание подключения (подключение проверяется логином ДО сохранения)                                           |
+| PUT/DELETE | `/api/accounts/external/:id`          | Изменение и удаление                                                                                                    |
+| GET        | `/api/accounts/external/:id/state`    | Состояние сборщика: когда забирал, сколько писем, ошибки                                                                |
+| POST       | `/api/accounts/external/:id/collect`  | Забрать почту сейчас -> `{result: {status, copied, skipped, failed, durationMs}}`                                       |
+| GET        | `/api/accounts/external/:id/folders`  | Прямое подключение: дерево папок чужого ящика (id с приставкой `ext<id>:`)                                              |
+| GET        | `/api/accounts/external/:id/messages` | Прямое подключение: список писем чужого ящика на лету                                                                   |
+| POST       | `/api/accounts/external/:id/send`     | Отправка «от имени» внешнего адреса через ЕГО SMTP + копия в его «Отправленные»                                         |
 
 Тот же сбор в форме контракта веб-интерфейса:
 
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET | `/api/settings/collectors` | `CollectorAccount[]` |
-| POST | `/api/settings/collectors` | `CollectorDraft` -> `CollectorAccount` |
-| PATCH | `/api/settings/collectors/:id` | Частичное изменение -> `CollectorAccount` |
-| DELETE | `/api/settings/collectors/:id` | `{ok}` |
-| POST | `/api/settings/collectors/:id/sync` | Забрать почту сейчас -> `CollectorAccount` |
+| Метод  | Путь                                | Описание                                   |
+| ------ | ----------------------------------- | ------------------------------------------ |
+| GET    | `/api/settings/collectors`          | `CollectorAccount[]`                       |
+| POST   | `/api/settings/collectors`          | `CollectorDraft` -> `CollectorAccount`     |
+| PATCH  | `/api/settings/collectors/:id`      | Частичное изменение -> `CollectorAccount`  |
+| DELETE | `/api/settings/collectors/:id`      | `{ok}`                                     |
+| POST   | `/api/settings/collectors/:id/sync` | Забрать почту сейчас -> `CollectorAccount` |
 
 Два режима подключения чужого ящика (docs/plan.md, этап 9):
 
@@ -426,11 +426,11 @@ SMTP и его текст. Если письмо отвергнуто целик
 
 ## Подсказка адреса
 
-| Метод | Путь | Описание |
-| --- | --- | --- |
-| GET | `/api/contacts/suggest?q=&exclude=` | Подсказка по началу слова: до восьми адресов, `exclude` — уже введённые через запятую |
-| POST | `/api/contacts/hide` | `{address}` — убрать адрес из подсказок навсегда |
-| POST | `/api/contacts/restore` | `{address}` — вернуть убранный адрес |
+| Метод | Путь                                | Описание                                                                              |
+| ----- | ----------------------------------- | ------------------------------------------------------------------------------------- |
+| GET   | `/api/contacts/suggest?q=&exclude=` | Подсказка по началу слова: до восьми адресов, `exclude` — уже введённые через запятую |
+| POST  | `/api/contacts/hide`                | `{address}` — убрать адрес из подсказок навсегда                                      |
+| POST  | `/api/contacts/restore`             | `{address}` — вернуть убранный адрес                                                  |
 
 Ответ подсказки: `{items: [{address, name, own}], complete}`. `own` — человек
 писал по этому адресу сам; `complete` — указатель переписки разобран целиком
@@ -487,12 +487,12 @@ SMTP и его текст. Если письмо отвергнуто целик
 
 Три предела связаны друг с другом, и связь эта неочевидна:
 
-| Настройка | Значение | Смысл |
-| --- | --- | --- |
-| `MESSAGE_MAX_BYTES` | 26214400 | Предел письма на почтовом сервере. Обязан совпадать с `message_size_limit` Postfix |
-| `UPLOAD_MAX_BYTES` | 26214400 | Заявленный предел загрузки |
-| `ATTACHMENT_MAX_BYTES` | вычисляется | Действующий предел вложения: `min(UPLOAD_MAX_BYTES, MESSAGE_MAX_BYTES / 1.4)` ≈ 17,9 МБ |
-| `COMPOSE_BODY_MAX_BYTES` | 12582912 | Предел тела запроса на `/api/messages/send` и `/api/drafts` |
+| Настройка                | Значение    | Смысл                                                                                   |
+| ------------------------ | ----------- | --------------------------------------------------------------------------------------- |
+| `MESSAGE_MAX_BYTES`      | 26214400    | Предел письма на почтовом сервере. Обязан совпадать с `message_size_limit` Postfix      |
+| `UPLOAD_MAX_BYTES`       | 26214400    | Заявленный предел загрузки                                                              |
+| `ATTACHMENT_MAX_BYTES`   | вычисляется | Действующий предел вложения: `min(UPLOAD_MAX_BYTES, MESSAGE_MAX_BYTES / 1.4)` ≈ 17,9 МБ |
+| `COMPOSE_BODY_MAX_BYTES` | 12582912    | Предел тела запроса на `/api/messages/send` и `/api/drafts`                             |
 
 Почему предел вложения ниже предела письма: в письме вложение едет в base64,
 а это +33% плюс переносы строк — итого около 1,37 раза, и ещё заголовки

@@ -87,9 +87,17 @@ const FASTIFY_CODES: Record<string, { status: number; code: string; message: str
     code: 'FILE_TOO_LARGE',
     message: 'Файл слишком большой',
   },
-  FST_PARTS_LIMIT: { status: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Слишком много частей формы' },
+  FST_PARTS_LIMIT: {
+    status: 413,
+    code: 'PAYLOAD_TOO_LARGE',
+    message: 'Слишком много частей формы',
+  },
   FST_FILES_LIMIT: { status: 413, code: 'FILE_TOO_LARGE', message: 'Слишком много файлов' },
-  FST_FIELDS_LIMIT: { status: 413, code: 'PAYLOAD_TOO_LARGE', message: 'Слишком много полей формы' },
+  FST_FIELDS_LIMIT: {
+    status: 413,
+    code: 'PAYLOAD_TOO_LARGE',
+    message: 'Слишком много полей формы',
+  },
   FST_INVALID_MULTIPART_CONTENT_TYPE: {
     status: 415,
     code: 'UNSUPPORTED_MEDIA_TYPE',
@@ -133,7 +141,7 @@ export function retryAfterRu(ttlMs: number): string {
  */
 export function rateLimitedError(context: { ttl: number }): RateLimitedError {
   return new RateLimitedError(
-    `Слишком много запросов, попробуйте через ${retryAfterRu(context.ttl)}`
+    `Слишком много запросов, попробуйте через ${retryAfterRu(context.ttl)}`,
   );
 }
 
