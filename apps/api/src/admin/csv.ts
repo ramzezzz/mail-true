@@ -42,7 +42,10 @@ export function nulByteProblem(text: string): string | null {
 
 /** Разбор CSV по RFC 4180 с автоопределением разделителя (`,` или `;`). */
 export function parseCsv(text: string): string[][] {
-  const source = text.replace(/^﻿/, ''); // отрезаем BOM из Excel
+  // BOM записан кодом, а не самим символом: живой U+FEFF в исходнике
+  // невидим, и правка строки убила бы его молча (тот же случай уже был
+  // в packages/shared и в csvPreview админки).
+  const source = text.replace(/^\uFEFF/u, '');
   const delimiter = detectDelimiter(source);
   const rows: string[][] = [];
   let row: string[] = [];

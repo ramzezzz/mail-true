@@ -867,7 +867,9 @@ function EnterMailboxModal({ user, onClose }: { user: MailUser; onClose: () => v
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['mailbox-session'] });
       onClose();
-      navigate('/mailbox');
+      // navigate возвращает обещание: без void его отказ (а он бывает,
+      // если уход со страницы отменён) не ловит никто.
+      void navigate('/mailbox');
     },
   });
 

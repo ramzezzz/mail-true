@@ -128,7 +128,12 @@ export class RepeatGuard {
  */
 export function failureKey(err: unknown): string {
   const info = errorInfo(err);
-  return `${info.code ?? ''}|${info.err}`;
+  // Код отказа бывает и числом (errno), и объектом (вложенная ошибка):
+  // «[object Object]» в ключе склеил бы разные причины в одну, и глушение
+  // повторов промолчало бы о новой.
+  const code =
+    typeof info.code === 'string' || typeof info.code === 'number' ? String(info.code) : '';
+  return `${code}|${info.err}`;
 }
 
 /**

@@ -405,6 +405,9 @@ test('исправный ящик-приёмник по-прежнему пер�
 
   await runnerWith(db, box).runJob(job);
 
-  const errors = String(db.itemPatches.find((p) => p.position === 0)?.patch['errors'] ?? '');
+  const errorsRaw = db.itemPatches.find((p) => p.position === 0)?.patch['errors'];
+  // Только строка: «[object Object]» не совпал бы ни с одним словом из
+  // проверки ниже, и она молча зеленела бы при любой ошибке.
+  const errors = typeof errorsRaw === 'string' ? errorsRaw : '';
   assert.doesNotMatch(errors, /отключ|нет на сервере/iu, 'исправный ящик не должен отказывать');
 });

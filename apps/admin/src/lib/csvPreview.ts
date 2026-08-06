@@ -8,7 +8,9 @@
 
 /** Разбор CSV по RFC 4180 с автоопределением разделителя. */
 export function splitCsv(text: string): string[][] {
-  const source = text.replace(/^﻿/u, '');
+  // Метка порядка байтов записана кодом, а не самим символом: живой U+FEFF
+  // в исходнике невидим, и следующая правка строки убила бы его молча.
+  const source = text.replace(/^\uFEFF/u, '');
   const delimiter = detectDelimiter(source);
   const rows: string[][] = [];
   let row: string[] = [];

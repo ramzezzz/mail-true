@@ -75,7 +75,14 @@ export function Notice({
 /** Ошибка запроса человеческим языком. */
 export function ErrorNotice({ error }: { error: unknown }) {
   if (!error) return null;
-  const message = error instanceof Error ? error.message : String(error);
+  // Не Error и не строка — обычно это разобранное тело ответа. String()
+  // показал бы человеку «[object Object]» вместо причины отказа.
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : JSON.stringify(error);
   return <Notice tone="error">{message}</Notice>;
 }
 

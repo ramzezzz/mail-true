@@ -86,7 +86,12 @@ async function readBackupFile(request: {
 /** Разбирает список разделов из поля формы. Пусто — все. */
 function parseSections(raw: unknown): BackupSection[] {
   if (raw === undefined || raw === null || raw === '') return [...BACKUP_SECTIONS];
-  const list = String(raw)
+  // Поле формы бывает и массивом (повторённое имя), и объектом при
+  // подделке запроса. String() на них дал бы разделы вида «[object Object]»,
+  // то есть молча пустую копию вместо отказа.
+  if (Array.isArray(raw)) return parseSections(raw.join(','));
+  if (typeof raw !== 'string') return [...BACKUP_SECTIONS];
+  const list = raw
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s !== '');

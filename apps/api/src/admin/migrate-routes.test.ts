@@ -190,7 +190,10 @@ test('запуск задания не возвращает ни паролей,
   assert.equal(response.statusCode, 202, response.body);
   assert.doesNotMatch(response.body, /OchenSekretnyjParol1/);
   // Шифротекст — тоже утечка: его можно унести и ждать компрометации ключа.
-  const secretEnc = String(db.createdJobs[0]?.['secretEnc'] ?? '');
+  // Только строка: приведи мы сюда объект, получилась бы длина «15» у
+  // «[object Object]», и проверка «пароль сохранён» проходила бы впустую.
+  const secretRaw = db.createdJobs[0]?.['secretEnc'];
+  const secretEnc = typeof secretRaw === 'string' ? secretRaw : '';
   assert.ok(secretEnc.length > 0, 'пароли обязаны сохраниться — иначе переносить нечем');
   assert.doesNotMatch(response.body, new RegExp(secretEnc.slice(0, 24)), 'шифротекст в ответе');
 });

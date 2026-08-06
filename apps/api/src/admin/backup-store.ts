@@ -215,7 +215,10 @@ async function exportUserSettings(db: AdminDb): Promise<UserSettingsEntry[]> {
   };
 
   for (const row of settings) {
-    const email = String(row.account_email ?? '');
+    // Колонка текстовая, но строка приходит из базы как unknown: String()
+    // на объекте дал бы «[object Object]» — адрес, которого не бывает,
+    // и запись молча уехала бы в копию.
+    const email = typeof row.account_email === 'string' ? row.account_email : '';
     if (email === '') continue;
     // Строку кладём как есть: набор колонок задаёт миграция 0005, и
     // перечислять их здесь — значит забыть новую при следующей правке.

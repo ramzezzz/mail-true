@@ -263,6 +263,10 @@ function isLogo(value: unknown): value is BrandingLogo {
  */
 function normalizeName(value: string | null, what: string): string | null {
   if (value === null) return null;
+  // Управляющие символы здесь — сам предмет разговора: строка чистится
+  // именно от них, поэтому запрет на них в регулярном выражении снят
+  // осознанно, а не потому, что мешал.
+  // eslint-disable-next-line no-control-regex
   const clean = value.replace(/[\u0000-\u001f\u007f]/gu, '').trim();
   if (clean === '') return null;
   if (clean.length > BRANDING_NAME_MAX) {
