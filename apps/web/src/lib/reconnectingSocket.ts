@@ -84,8 +84,14 @@ export function connectWithRetry(options: ReconnectingOptions): () => void {
     });
     current.addEventListener('message', (event) => {
       const data = (event as { data?: unknown } | null)?.data;
+      /*
+       * Только строка. Наш протокол текстовый, но сокет по стандарту может
+       * принести Blob или ArrayBuffer — и прежний String() превращал их в
+       * «[object Object]», который дальше молча не разбирался как JSON.
+       * Такое сообщение лучше не заметить вовсе, чем принять за пустое
+       * обновление.
+       */
       if (typeof data === 'string') onMessage(data);
-      else if (data != null) onMessage(String(data));
     });
     current.addEventListener('close', () => {
       if (stopped) return;

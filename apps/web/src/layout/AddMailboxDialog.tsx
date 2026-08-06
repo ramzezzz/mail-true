@@ -71,7 +71,15 @@ export function AddMailboxDialog({ onClose, onAdded }: AddMailboxDialogProps) {
 
   return (
     <Modal title="Добавить ящик" onClose={onClose} className={styles.card}>
-      <form className={styles.form} onSubmit={submit}>
+      {/* Обещание не отдаём наружу: onSubmit ждёт обычную функцию, и его
+          отказ никто бы не поймал. Все отказы submit ловит сам и кладёт
+          в сообщение над формой. */}
+      <form
+        className={styles.form}
+        onSubmit={(event) => {
+          void submit(event);
+        }}
+      >
         <p className={styles.lead}>
           Второй ваш ящик на этом сервере. Пароль спросим один раз — дальше переключение будет без
           него.

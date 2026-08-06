@@ -74,11 +74,16 @@ function MailboxRow({ item, entry, busy, onSwitch, onAskUnlink }: MailboxRowProp
         role="menuitem"
         className={styles.mailbox}
         disabled={busy}
-        onClick={async () => {
+        onClick={() => {
           // Меню закрываем после переключения, а не до: пока сервер заводит
           // новую сессию, в строке видно, что что-то происходит.
-          await onSwitch(item.email);
-          close();
+          //
+          // Обещание намеренно не возвращается наружу: onClick ждёт обычную
+          // функцию, и обещание, отданное ему, при отказе никем не ловится —
+          // человек видел бы застывшую строку без объяснения. Отказ
+          // обрабатывает сам onSwitch (он показывает сообщение), а здесь
+          // остаётся только не закрыть меню.
+          void onSwitch(item.email).then(close);
         }}
       >
         <span className={styles.mailboxAvatar} aria-hidden="true">

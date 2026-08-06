@@ -11,7 +11,8 @@ class FakeClient extends EventEmitter {
   closed = false;
   connectCalls = 0;
   connectDelayMs = 0;
-  connectError: unknown = null;
+  /** Только Error: подделка обязана вести себя как настоящий отказ. */
+  connectError: Error | null = null;
 
   async connect(): Promise<void> {
     this.connectCalls += 1;

@@ -240,10 +240,12 @@ const DOMAIN_FROM = `FROM virtual_domains d
 
 export class AiDb implements AiSettingsStore {
   readonly #pool: Pool;
-  readonly #logger: Logger;
 
   constructor(opts: AiDbOptions) {
-    this.#logger = opts.logger;
+    // Своего поля под logger здесь нет намеренно: журналом этого класса
+    // занимается один обработчик отказов пула (ниже), а хранить ссылку
+    // «на всякий случай» — значит через полгода не понять, пользуется ею
+    // кто-нибудь или нет.
     this.#pool = new Pool({
       connectionString: opts.connectionString,
       max: opts.max ?? 4,

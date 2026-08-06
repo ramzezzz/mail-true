@@ -96,7 +96,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
+  // Здесь именно console: логгер поднимается вместе с приложением, а этот
+  // отказ означает, что оно как раз и не поднялось.
   console.error('Не удалось запустить сервер:', err);
   process.exit(1);
 });
