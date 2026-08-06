@@ -102,3 +102,121 @@ void test('без раздела «оформление» логотип не т
   const outcome = await applyRestore(emptyDb(), forbidden, backupWithBranding(), []);
   assert.equal(outcome.brandingError, null);
 });
+
+/* ------------------------------------------------------------------ */
+/* Нарушенное правило базы — отказ человеку, а не «внутренняя ошибка»   */
+/* ------------------------------------------------------------------ */
+
+/** Копия с одним администратором: роль подставляется проверкой. */
+function backupWithAdmin(role: string): SettingsBackupFile {
+  return buildSettingsBackup({
+    source: { hostname: 'mail.staraya.ru', domain: 'staraya.ru' },
+    data: {
+      domains: [],
+      mailboxes: [],
+      aliases: [],
+      admins: [
+        {
+          login: 'petrov',
+          displayName: 'Пётр Петров',
+          role,
+          active: true,
+          passwordHash: '$2y$10$нечитаемыйхэш',
+        },
+      ],
+      userSettings: [],
+      ai: [],
+      branding: null,
+    },
+  });
+}
+
+/**
+ * База, отвечающая тем же, чем ответил бы Postgres на запрещённое
+ * значение: код 23514 и имя нарушенного ограничения.
+ */
+function checkViolatingDb(constraint: string): AdminDb {
+  return {
+    transaction: async <T>(fn: (client: unknown) => Promise<T>): Promise<T> =>
+      fn({
+        query: async () => {
+          const err = new Error(
+            `new row for relation "admin_users" violates check constraint "${constraint}"`,
+          ) as Error & { code: string; constraint: string };
+          err.code = '23514';
+          err.constraint = constraint;
+          throw err;
+        },
+      }),
+  } as unknown as AdminDb;
+}
+
+void test('запрещённая роль в копии — понятный отказ, а не «внутренняя ошибка»', async () => {
+  const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
+
+  await assert.rejects(
+    applyRestore(checkViolatingDb('admin_users_role_check'), branding, backupWithAdmin('hacker'), [
+      'admins',
+    ]),
+    (err: unknown) => {
+      // Именно 400: файл принесли не тот, сервер цел. С 500 человек имел
+      // полное право считать, что сломан сервер, и файл не проверял.
+      assert.ok(err instanceof BadRequestError, `ожидался BadRequestError, пришло ${String(err)}`);
+      assert.equal(err.statusCode, 400);
+      // Сказано, ГДЕ именно: раздел и запись. Без этого в копии на тысячу
+      // ящиков неверную строку пришлось бы искать глазами.
+      assert.match(err.message, /Администраторы/u);
+      assert.match(err.message, /petrov/u);
+      // И сказано, что допустимо, — иначе отказ не отвечает «что делать».
+      assert.match(err.message, /owner/u);
+      assert.match(err.message, /user_manager/u);
+      assert.match(err.message, /readonly/u);
+      return true;
+    },
+  );
+});
+
+void test('незнакомое ограничение тоже объясняется, а не выпадает пятисоткой', async () => {
+  const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
+
+  await assert.rejects(
+    applyRestore(
+      checkViolatingDb('nekoe_novoe_ogranichenie'),
+      branding,
+      backupWithAdmin('owner'),
+      ['admins'],
+    ),
+    (err: unknown) => {
+      assert.ok(err instanceof BadRequestError);
+      // Названия ограничения хватает, чтобы найти правило в схеме; главное
+      // — что это по-прежнему отказ по файлу, а не «внутренняя ошибка».
+      assert.match(err.message, /nekoe_novoe_ogranichenie/u);
+      return true;
+    },
+  );
+});
+
+void test('поломка сервера остаётся поломкой сервера, а не отказом по файлу', async () => {
+  // Обратный ход: не всякая ошибка базы — вина принесённого файла.
+  // Выдать обрыв соединения за 400 значило бы заставить человека править
+  // копию, тогда как чинить надо сервер.
+  const brokenDb = {
+    transaction: async <T>(fn: (client: unknown) => Promise<T>): Promise<T> =>
+      fn({
+        query: async () => {
+          const err = new Error('connection terminated unexpectedly') as Error & { code: string };
+          err.code = '08006';
+          throw err;
+        },
+      }),
+  } as unknown as AdminDb;
+  const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
+
+  await assert.rejects(
+    applyRestore(brokenDb, branding, backupWithAdmin('owner'), ['admins']),
+    (err: unknown) => {
+      assert.ok(!(err instanceof BadRequestError), 'обрыв связи с базой — не ошибка файла');
+      return true;
+    },
+  );
+});

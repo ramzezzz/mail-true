@@ -10,6 +10,7 @@
  * чем отсутствие копии.
  */
 import type { PoolClient } from 'pg';
+import { BadRequestError } from '../errors.js';
 import type { AdminDb } from './db.js';
 import { isUndefinedTable } from './db.js';
 import type { BrandingStore } from './branding.js';
@@ -322,6 +323,109 @@ export interface RestoreOutcome {
   brandingError: string | null;
 }
 
+/* ------------------------------------------------------------------ */
+/* Отказ базы -> внятный отказ человеку                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Что именно в файле копии нарушает правило базы.
+ *
+ * ------------------------------------------------------------------
+ * ЗАЧЕМ ЭТА ТАБЛИЦА
+ * ------------------------------------------------------------------
+ * Разбор файла (backup-format.ts) проверяет ФОРМУ: что поле есть и что
+ * оно строка. Он не может проверить СОДЕРЖИМОЕ: список допустимых ролей
+ * администратора, пределы полей помощника ИИ и прочие правила живут в
+ * базе, в ограничениях CHECK, и дублировать их в разборе значило бы
+ * завести второй список, который разойдётся с первым при первой правке
+ * схемы.
+ *
+ * Поэтому правило по-прежнему проверяет база — но её отказ переводится
+ * человеку. Раньше он не переводился никак: Postgres бросал ошибку 23514,
+ * та шла общим путём и превращалась в 500 «Внутренняя ошибка сервера».
+ * Файл при этом был не «сломан» целиком: в нём одно неверное значение в
+ * одной записи, и назвать надо именно его — иначе человек ищет ошибку
+ * во всей копии, а с 500 на руках имеет полное право считать, что сломан
+ * не файл, а сервер.
+ *
+ * Ключ — имя ограничения из pg_constraint; оно приходит в поле
+ * `constraint` ошибки узла pg и не зависит ни от языка, ни от версии
+ * сообщения.
+ */
+const CONSTRAINT_HINTS: Readonly<Record<string, string>> = {
+  admin_users_role_check:
+    'недопустимая роль администратора. Допустимы owner (полный доступ), ' +
+    'user_manager (ящики и алиасы) и readonly (только чтение)',
+  mail_filters_match_mode_check:
+    'у правила фильтрации недопустимый режим совпадения: допустимы all (все условия) и any (любое)',
+  mail_user_settings_after_delete_check:
+    'недопустимое поведение после удаления письма: допустимы list (вернуться к списку) и next (открыть следующее)',
+  mail_user_settings_autoreply_days_check:
+    'недопустимый срок автоответа: от 1 до 365 дней',
+  ai_domain_settings_body_chars_check:
+    'недопустимый предел размера письма для помощника ИИ: от 200 до 200 000 символов',
+  ai_domain_settings_timeout_check:
+    'недопустимое время ожидания помощника ИИ: от 1 000 до 600 000 мс',
+  ai_domain_settings_output_check:
+    'недопустимый предел ответа помощника ИИ: от 64 до 32 000 лексем',
+  ai_domain_settings_enabled_needs_provider:
+    'помощник ИИ включён, но в копии нет ни адреса службы, ни модели — включать нечего',
+  domain_settings_overall_check:
+    'недопустимый итог проверки DNS у домена: допустимы ok, warn, fail и unknown',
+};
+
+/** Раздел копии, который сейчас применяется, — для текста отказа. */
+interface RestoreWhere {
+  section: string;
+  label: string;
+}
+
+/**
+ * Переводит отказ базы в отказ человеку.
+ *
+ * Берутся только те коды, которые может вызвать СОДЕРЖИМОЕ ЧУЖОГО ФАЙЛА.
+ * Всё прочее (нет таблицы, оборвалось соединение) — не вина принесённого
+ * файла, и выдавать это за 400 значило бы врать в другую сторону: человек
+ * правил бы копию, а чинить надо сервер.
+ */
+function restoreDbError(err: unknown, where: RestoreWhere): unknown {
+  if (!err || typeof err !== 'object') return err;
+  const pg = err as { code?: string; constraint?: string; column?: string; detail?: string };
+  const at = `Раздел «${where.section}», запись «${where.label}»`;
+  switch (pg.code) {
+    case '23514': {
+      const hint = pg.constraint ? CONSTRAINT_HINTS[pg.constraint] : undefined;
+      return new BadRequestError(
+        `${at}: ${hint ?? `значение не проходит проверку базы (${pg.constraint ?? 'CHECK'})`}. ` +
+          'Копия не применена целиком — поправьте файл и повторите.',
+      );
+    }
+    case '23502':
+      return new BadRequestError(
+        `${at}: в копии нет обязательного поля${pg.column ? ` «${pg.column}»` : ''}. ` +
+          'Копия не применена целиком — поправьте файл и повторите.',
+      );
+    case '22001':
+      return new BadRequestError(
+        `${at}: значение длиннее, чем разрешает база. ` +
+          'Копия не применена целиком — поправьте файл и повторите.',
+      );
+    case '22P02':
+    case '22003':
+      return new BadRequestError(
+        `${at}: значение не того типа или вне допустимого диапазона. ` +
+          'Копия не применена целиком — поправьте файл и повторите.',
+      );
+    case '23505':
+      return new BadRequestError(
+        `${at}: в копии эта запись встречается дважды${pg.detail ? ` (${pg.detail})` : ''}. ` +
+          'Копия не применена целиком — поправьте файл и повторите.',
+      );
+    default:
+      return err;
+  }
+}
+
 /**
  * Применяет копию.
  *
@@ -347,10 +451,23 @@ export async function applyRestore(
     row[key] += 1;
   };
 
+  /*
+   * Где мы сейчас. Ошибку базы отдаёт Postgres, и в ней нет ни раздела
+   * копии, ни адреса записи — только имя ограничения. Без этой пометки
+   * отказ звучал бы «значение не проходит проверку», и человек искал бы
+   * неверную строку в файле на тысячу ящиков вручную.
+   */
+  const where: RestoreWhere = { section: 'копия', label: '—' };
+
+  // Перевод отказа базы навешивается на транзакцию целиком (а не
+  // оборачивает каждый запрос): отказ откатывает её всю, и место, где
+  // он случился, уже записано в `where`.
   await db.transaction(async (client) => {
     /* --- домены --- */
     if (want.has('domains')) {
       for (const domain of file.data.domains) {
+        where.section = 'Домены';
+        where.label = domain.name;
         const created = await upsertDomain(client, domain);
         note('domains', created ? 'created' : 'updated');
       }
@@ -359,6 +476,8 @@ export async function applyRestore(
     /* --- ящики --- */
     if (want.has('mailboxes')) {
       for (const box of file.data.mailboxes) {
+        where.section = 'Ящики';
+        where.label = box.email;
         const domainName = box.email.split('@')[1] ?? '';
         if (domainName === '') continue;
         // Домен под ящик заводим молча только потому, что план уже
@@ -398,6 +517,8 @@ export async function applyRestore(
     /* --- алиасы --- */
     if (want.has('aliases')) {
       for (const alias of file.data.aliases) {
+        where.section = 'Алиасы';
+        where.label = `${alias.source} → ${alias.destination}`;
         const domainName = alias.source.split('@')[1] ?? '';
         if (domainName === '') continue;
         const domainId = await ensureDomain(client, domainName);
@@ -422,6 +543,8 @@ export async function applyRestore(
     /* --- администраторы --- */
     if (want.has('admins')) {
       for (const admin of file.data.admins) {
+        where.section = 'Администраторы';
+        where.label = admin.login;
         const updated = await client.query(
           `UPDATE admin_users
               SET password_hash = $2, display_name = $3, role = $4, active = $5, updated_at = now()
@@ -444,6 +567,8 @@ export async function applyRestore(
     /* --- настройки, подписи и правила пользователей --- */
     if (want.has('userSettings')) {
       for (const entry of file.data.userSettings) {
+        where.section = 'Настройки ящиков';
+        where.label = entry.accountEmail;
         await restoreUserSettings(client, entry);
         note('userSettings', 'updated');
         resyncSieve.push(entry.accountEmail);
@@ -453,6 +578,8 @@ export async function applyRestore(
     /* --- помощник ИИ --- */
     if (want.has('ai')) {
       for (const item of file.data.ai) {
+        where.section = 'Помощник ИИ';
+        where.label = item.domain;
         const domain = await client.query<{ id: number }>(
           `SELECT id FROM virtual_domains WHERE lower(name) = lower($1)`,
           [item.domain],
@@ -505,6 +632,8 @@ export async function applyRestore(
         }
       }
     }
+  }).catch((err: unknown) => {
+    throw restoreDbError(err, where);
   });
 
   /* --- оформление --- */

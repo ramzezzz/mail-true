@@ -91,9 +91,16 @@ export function useElementWidth(fallback = 640): [React.RefObject<HTMLDivElement
  * различить. Узор решает ту же задачу: понять, какой ряд перед тобой,
  * не различая цветов. Узоры сделаны разреженными (штрих на четыре точки),
  * чтобы не превращать заливку в шум.
+ *
+ * ЦВЕТ ШТРИХА — из темы, а не белый. Раньше здесь стояло прибитое
+ * `rgb(255 255 255 / 55%)`, и в тёмной теме с графитом штриховка ложилась
+ * белым по светлому: контраст 1,31–1,76:1 при пороге 3:1. То есть второй
+ * признак ряда, ради которого узоры и заведены, был не виден ровно тем,
+ * кому он предназначен. Теперь берётся --mt-chart-pattern — цвет карточки,
+ * см. lib/chartSeries.ts (chartPatternInk) и styles/charts.css.
  */
 function PatternDefs({ prefix }: { prefix: string }) {
-  const stroke = { stroke: 'rgb(255 255 255 / 55%)', strokeWidth: 1.2 };
+  const stroke = { stroke: 'var(--mt-chart-pattern)', strokeWidth: 1.2 };
   return (
     <defs>
       <pattern id={`${prefix}-diagonal`} width="6" height="6" patternUnits="userSpaceOnUse">
@@ -106,7 +113,7 @@ function PatternDefs({ prefix }: { prefix: string }) {
         <path d="M0 0 L6 6 M0 6 L6 0" {...stroke} />
       </pattern>
       <pattern id={`${prefix}-dots`} width="6" height="6" patternUnits="userSpaceOnUse">
-        <circle cx="3" cy="3" r="1.3" fill="rgb(255 255 255 / 60%)" />
+        <circle cx="3" cy="3" r="1.3" fill="var(--mt-chart-pattern)" />
       </pattern>
       <pattern id={`${prefix}-dense`} width="4" height="4" patternUnits="userSpaceOnUse">
         <path d="M0 4 L4 0" {...stroke} />

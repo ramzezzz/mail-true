@@ -979,6 +979,14 @@ export interface OverviewMail {
   totals: Record<string, number>;
   byDirection: Record<string, number>;
   spamRejected: number;
+  /**
+   * Различных ПИСЕМ за окно — знаменатель доли спама.
+   *
+   * Не сумма totals: там строки журнала, то есть попытки доставки, и
+   * письмо, отложенное трижды, даёт четыре строки. Доля спама, посчитанная
+   * от них, тем сильнее занижена, чем хуже работала связь.
+   */
+  messages: number;
   spamNote: string;
   rejectReasons: Array<{ reason: string; count: number }>;
   deferReasons: Array<{ reason: string; count: number }>;
@@ -990,6 +998,8 @@ export interface OverviewMail {
     maxBytes: number | null;
   };
   hourly: Array<{ hour: number; count: number }>;
+  /** В каком часовом поясе посчитаны часы: без подписи график сдвинут молча. */
+  hourlyTimeZone: string;
   historyStartsAt: string | null;
   historyEndsAt: string | null;
   mailboxesTotal: number;

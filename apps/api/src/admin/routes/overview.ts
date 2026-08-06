@@ -239,6 +239,20 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     return { from: new Date(to.getTime() - hours * 3600_000), to, hours };
   };
 
+  /**
+   * Часовой пояс смотрящего из строки запроса (`?tz=Europe/Moscow`).
+   *
+   * Здесь только достаётся значение; знает ли Postgres такой пояс — решает
+   * metrics-store (там же и запасной вариант UTC). Пустое и слишком
+   * длинное отбрасывается сразу, чтобы мусор не доезжал до базы.
+   */
+  const timeZoneOf = (query: unknown): string | undefined => {
+    const raw = (query as Record<string, unknown> | null)?.tz;
+    if (typeof raw !== 'string') return undefined;
+    const value = raw.trim();
+    return value === '' || value.length > 64 ? undefined : value;
+  };
+
   /* --- Ресурсы «прямо сейчас» ---------------------------------------- */
   app.get('/overview/resources', { preHandler: requireAdmin(app, 'overview.read') }, async () => {
     // Снимок берётся у сборщика, а не снимается здесь: см. пояснение
@@ -332,11 +346,13 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
         totals: {},
         byDirection: { in: 0, out: 0, unknown: 0 },
         spamRejected: 0,
+        messages: 0,
         spamNote: '',
         rejectReasons: [],
         deferReasons: [],
         sizes: { messages: 0, totalBytes: 0, avgBytes: null, medianBytes: null, maxBytes: null },
         hourly: Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0 })),
+        hourlyTimeZone: 'UTC',
         historyStartsAt: null,
         historyEndsAt: null,
         mailboxesTotal: 0,
@@ -353,7 +369,10 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
         store.topReasons(from, to, ['rejected', 'bounced', 'expired']),
         store.topReasons(from, to, ['deferred']),
         store.sizeSummary(from, to),
-        store.hourlyProfile(from, to),
+        // Часовой пояс — тот, в котором СМОТРЯТ. Браузер присылает своё
+        // IANA-имя; неизвестное имя не роняет раздел, а честно даёт UTC
+        // (см. hourlyProfile).
+        store.hourlyProfile(from, to, timeZoneOf(req.query)),
         store.flowEdges(),
         store.activityCounts(from, to),
       ]);
@@ -368,13 +387,23 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
       totals: totals.byStatus,
       byDirection: totals.byDirection,
       spamRejected: totals.spamRejected,
+      /**
+       * Различных писем за окно — знаменатель доли спама. Именно писем,
+       * а не строк журнала: письмо, отложенное трижды, — одно письмо,
+       * а не четыре (подробно — в metrics-store.ts, flowTotals).
+       */
+      messages: totals.messages,
       spamNote:
         'Отдельного поля «спам» в журнале Postfix нет: rspamd отвечает обычным отказом ' +
-        'SMTP. Здесь считаются отказы, в тексте которых виден след антиспама',
+        'SMTP. Здесь считаются отказы, в тексте которых виден след антиспама. ' +
+        'Доля считается от РАЗЛИЧНЫХ писем, а не от попыток доставки: письмо, ' +
+        'отложенное трижды, — это одно письмо',
       rejectReasons,
       deferReasons,
       sizes,
-      hourly,
+      hourly: hourly.hours,
+      /** В каком поясе посчитаны часы: без подписи график сдвинут молча. */
+      hourlyTimeZone: hourly.timeZone,
       historyStartsAt: edges.oldest,
       historyEndsAt: edges.newest,
       mailboxesTotal: activity.total,

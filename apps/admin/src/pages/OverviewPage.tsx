@@ -687,6 +687,7 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
 
         <Panel title="Пиковые часы">
           {data ? (
+            <>
             <BarChart
               ariaLabel="Распределение писем по часам суток"
               labels={data.hourly.map((h) => String(h.hour).padStart(2, '0'))}
@@ -702,6 +703,19 @@ function MailSection({ hours, poll }: { hours: number; poll: number | false }) {
               height={130}
               emptyText="За этот период писем не было"
             />
+            {/*
+              Пояс подписан ЯВНО. Часы считает запрос по всему окну, и
+              раньше он брал их в поясе сервера (UTC), тогда как соседний
+              график на этой же странице подписан временем браузера: в
+              Москве вечерний пик стоял на трёх графиках в двух разных
+              местах. Теперь считается в поясе смотрящего — а подпись
+              нужна затем, чтобы это было видно, а не подразумевалось.
+            */}
+            <p className={styles.source}>
+              Часы — по вашему часовому поясу ({data.hourlyTimeZone}), тому же, в котором
+              подписан график «Что происходило с письмами».
+            </p>
+            </>
           ) : (
             <CenteredSpinner />
           )}
@@ -728,7 +742,21 @@ function FlowShares({ data }: { data: OverviewMail | undefined }) {
     label: String(data.totals[series.id] ?? 0),
   })).filter((i) => i.value > 0);
   const total = items.reduce((sum, i) => sum + i.value, 0);
-  const spamShare = total > 0 ? Math.round((data.spamRejected / total) * 1000) / 10 : 0;
+  /*
+   * ЗНАМЕНАТЕЛЬ ДОЛИ СПАМА — ПИСЬМА, А НЕ ЗАПИСИ.
+   *
+   * Кольцо выше показывает записи журнала, и это правильно: оно про
+   * состояния попыток доставки. Но доля спама, посчитанная от них, врёт:
+   * письмо, которое чужой сервер отложил трижды, даёт четыре записи, а
+   * отбитый спам — ровно одну (отказ на приёме не повторяется). То есть
+   * знаменатель рос от чужих неполадок связи, а числитель нет.
+   *
+   * На живом стенде: 20 записей, из них 4 отбитых спама и одно письмо,
+   * отложенное трижды. По записям — 6,7 %, по письмам — 20,0 %. Первое
+   * число говорит «спама почти нет» в день, когда его пятая часть.
+   */
+  const messages = data.messages;
+  const spamShare = messages > 0 ? Math.round((data.spamRejected / messages) * 1000) / 10 : 0;
 
   return (
     <>
@@ -755,7 +783,10 @@ function FlowShares({ data }: { data: OverviewMail | undefined }) {
       </div>
       <Tiles>
         <Tile value={data.spamRejected} label="отбито как спам" />
-        <Tile value={`${spamShare} %`} label="доля от всех записей" />
+        {/* Подпись называет знаменатель словом: «доля от всех записей»
+            обещала бы деление на число в середине кольца, а делим мы на
+            письма — и расхождение читалось бы как ошибка счёта. */}
+        <Tile value={`${spamShare} %`} label={`доля от писем (${messages})`} />
         <Tile
           value={`${data.mailboxesActive} из ${data.mailboxesTotal}`}
           label="ящиков подавали признаки жизни"

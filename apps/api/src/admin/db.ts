@@ -156,6 +156,16 @@ export interface MigrationItemRow {
   position: number;
   source_user: string;
   dest_user: string;
+  /** Ящик-приёмник в virtual_users; NULL — его нет (или удалён после). */
+  dest_user_id: number | null;
+  /**
+   * Включён ли ящик-приёмник ПРЯМО СЕЙЧАС; null — ящика нет.
+   *
+   * Берётся живым соединением, а не запоминается при создании задания:
+   * между постановкой в очередь и очередью до этой строки проходят часы,
+   * и за это время ящик успевают и отключить, и восстановить из копии.
+   */
+  dest_active: boolean | null;
   state: string;
   total: number;
   copied: number;
@@ -730,6 +740,29 @@ export class AdminDb {
     return rows.map((r) => r.email);
   }
 
+  /**
+   * Ящики по списку адресов: номер строки и признак «включён».
+   *
+   * Нужно там, где адрес пришёл извне и его нельзя принимать на веру, —
+   * прежде всего заданиям переноса почты. Одним запросом на весь список,
+   * а не по адресу за раз: в выгрузке Kerio их бывают сотни.
+   *
+   * Ключ карты — адрес в нижнем регистре: адреса ящиков нечувствительны к
+   * регистру, и «Ivan@» из чужой выгрузки обязан найти наш «ivan@».
+   */
+  async findMailboxStates(
+    emails: readonly string[],
+  ): Promise<Map<string, { id: number; email: string; active: boolean }>> {
+    const found = new Map<string, { id: number; email: string; active: boolean }>();
+    if (emails.length === 0) return found;
+    const rows = await this.query<{ id: number; email: string; active: boolean }>(
+      `SELECT id, email, active FROM virtual_users WHERE lower(email) = ANY($1::text[])`,
+      [[...new Set(emails.map((e) => e.trim().toLowerCase()))]],
+    );
+    for (const row of rows) found.set(row.email.toLowerCase(), row);
+    return found;
+  }
+
   /* ---------------------------------------------------------------- */
   /* Домены и алиасы                                                    */
   /* ---------------------------------------------------------------- */
@@ -1176,10 +1209,25 @@ export class AdminDb {
   /* Задания переноса почты (миграция 0011)                             */
   /* ---------------------------------------------------------------- */
 
-  /** Применена ли миграция 0011: без неё раздел переноса честно отвечает 503. */
+  /**
+   * Применены ли миграции переноса: 0013 (таблицы) и 0020 (связь строки
+   * ящика с virtual_users). Без них раздел переноса честно отвечает 503.
+   *
+   * Столбец проверяется вместе с таблицей намеренно. Без dest_user_id
+   * задание можно завести на несуществующий ящик, и узнаётся это уже
+   * посреди переноса — ровно тот дефект, ради которого 0020 и появилась.
+   * Работать «почти правильно» в этом месте хуже, чем не работать:
+   * ночной перенос чужой почты не то занятие, где уместны сюрпризы.
+   */
   async migrationSchemaReady(): Promise<boolean> {
     const row = await this.one<{ ok: boolean }>(
-      `SELECT to_regclass('public.mail_migration_jobs') IS NOT NULL AS ok`,
+      `SELECT to_regclass('public.mail_migration_jobs') IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name = 'mail_migration_items'
+                   AND column_name = 'dest_user_id'
+              ) AS ok`,
     );
     return row?.ok === true;
   }
@@ -1202,7 +1250,12 @@ export class AdminDb {
       masterSeparator: string | null;
     };
     secretEnc: string;
-    mailboxes: ReadonlyArray<{ sourceUser: string; destUser: string }>;
+    /**
+     * `destUserId` — строка ящика-приёмника в virtual_users (миграция 0020).
+     * Проставляется при создании задания и держит связь настоящей: адрес
+     * остаётся текстом ради отчёта, а существование проверяет база.
+     */
+    mailboxes: ReadonlyArray<{ sourceUser: string; destUser: string; destUserId?: number | null }>;
   }): Promise<number> {
     return this.transaction(async (client) => {
       const job = await client.query<{ id: string }>(
@@ -1228,13 +1281,41 @@ export class AdminDb {
       const id = Number(job.rows[0]?.id ?? 0);
       for (const [index, box] of input.mailboxes.entries()) {
         await client.query(
-          `INSERT INTO mail_migration_items (job_id, position, source_user, dest_user)
-           VALUES ($1, $2, $3, $4)`,
-          [id, index, box.sourceUser, box.destUser],
+          `INSERT INTO mail_migration_items (job_id, position, source_user, dest_user, dest_user_id)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [id, index, box.sourceUser, box.destUser, box.destUserId ?? null],
         );
       }
       return id;
     });
+  }
+
+  /**
+   * Адреса ящиков-приёмников, в которые ПРЯМО СЕЙЧАС идёт перенос.
+   *
+   * Нужны восстановлению настроек из копии: копия несёт признак «ящик
+   * включён», и применённая посреди ночного переноса она гасит ящик,
+   * в который в этот момент кладут письма. Само восстановление при этом
+   * не запрещается (объяснение — в routes/backup.ts), но человек обязан
+   * узнать об этом от нас, а не по остановившимся счётчикам.
+   *
+   * Отсутствие таблиц (миграция 0013 не применена) — не повод ронять
+   * восстановление: переноса тогда нет по определению.
+   */
+  async listActiveMigrationDestinations(): Promise<string[]> {
+    try {
+      const rows = await this.query<{ dest_user: string }>(
+        `SELECT DISTINCT i.dest_user
+           FROM mail_migration_items i
+           JOIN mail_migration_jobs j ON j.id = i.job_id
+          WHERE j.state IN ('queued', 'running')
+            AND i.state IN ('queued', 'running')`,
+      );
+      return rows.map((r) => r.dest_user.toLowerCase());
+    } catch (err) {
+      if (isUndefinedTable(err)) return [];
+      throw err;
+    }
   }
 
   /**
@@ -1397,9 +1478,18 @@ export class AdminDb {
 
   async listMigrationItems(jobId: number): Promise<MigrationItemRow[]> {
     return this.query<MigrationItemRow>(
-      `SELECT id::text, job_id::text, position, source_user, dest_user, state, total,
-              copied, skipped, failed, current_folder, errors, started_at, finished_at
-         FROM mail_migration_items WHERE job_id = $1 ORDER BY position`,
+      // Состояние ящика-приёмника подтягивается СВЕРКОЙ ПО АДРЕСУ, а не
+      // только по dest_user_id: у заданий, заведённых до миграции 0020,
+      // ссылки нет, и без сверки они выглядели бы как «ящик удалён».
+      `SELECT i.id::text, i.job_id::text, i.position, i.source_user, i.dest_user,
+              i.dest_user_id, u.active AS dest_active, i.state, i.total,
+              i.copied, i.skipped, i.failed, i.current_folder, i.errors,
+              i.started_at, i.finished_at
+         FROM mail_migration_items i
+         LEFT JOIN virtual_users u
+                ON u.id = i.dest_user_id
+                OR (i.dest_user_id IS NULL AND lower(u.email) = lower(i.dest_user))
+        WHERE i.job_id = $1 ORDER BY i.position`,
       [jobId],
     );
   }

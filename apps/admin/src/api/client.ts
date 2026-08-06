@@ -98,6 +98,23 @@ function query(params: Query): string {
   return text ? `?${text}` : '';
 }
 
+/**
+ * Часовой пояс браузера в виде имени IANA («Europe/Moscow»).
+ *
+ * Именем, а не смещением: смещение меняется дважды в год, и окно в
+ * тридцать суток может захватить перевод часов — тогда постоянная поправка
+ * сдвинула бы половину графика. Postgres знает историю переходов, ему
+ * достаточно имени. Не узнали имя — не шлём ничего, сервер честно считает
+ * по UTC и говорит об этом подписью.
+ */
+function browserTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Форму (загрузка логотипа, файл копии настроек) заголовком не помечаем:
   // границу multipart браузер выбирает сам, а заданный вручную
@@ -162,7 +179,16 @@ export const api = {
   overviewResources: () => get<OverviewResources>('/overview/resources'),
   overviewHistory: (hours: number) =>
     get<OverviewHistory>(`/overview/history${query({ hours })}`),
-  overviewMail: (hours: number) => get<OverviewMail>(`/overview/mail${query({ hours })}`),
+  /**
+   * Почтовый поток. Часовой пояс браузера уходит на сервер: график
+   * «Пиковые часы» считается запросом (по всему окну, а не по точкам),
+   * и без пояса он молча оказывался в UTC — на три часа мимо московского
+   * вечера, тогда как соседний график того же экрана подписан временем
+   * браузера. Пик обслуживания планируют по этому графику, и расхождение
+   * между двумя графиками одной страницы читается как ошибка данных.
+   */
+  overviewMail: (hours: number) =>
+    get<OverviewMail>(`/overview/mail${query({ hours, tz: browserTimeZone() })}`),
   overviewUsers: (params: {
     hours?: number | undefined;
     sort?: string | undefined;

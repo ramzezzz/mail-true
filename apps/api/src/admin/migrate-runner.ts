@@ -50,6 +50,7 @@ import type { AdminDb, MigrationJobRow } from './db.js';
 import {
   collectErrors,
   destEndpointFor,
+  destMailboxProblem,
   sourceEndpointFor,
   unpackSecrets,
   type DestSettings,
@@ -273,7 +274,27 @@ export class MigrationRunner {
       const accounts: BatchAccount[] = [];
       const positions: number[] = [];
       const noPassword: number[] = [];
+      /*
+       * Ящики, в которые писать некуда: их удалили или отключили между
+       * постановкой задания в очередь и очередью до этой строки.
+       *
+       * Проверка ЗДЕСЬ, а не только при создании задания, потому что
+       * ночной перенос идёт часами, а восстановление настроек из копии
+       * (POST /backup/restore) выключает ящики за секунды. Ровно так это
+       * и поймали: копия отключила ящик посреди переноса, Dovecot отказал
+       * во входе, а раздел переноса назвал причиной «неправильный пароль»
+       * — и человек пошёл проверять пароль служебного доступа.
+       */
+      const destProblems: Array<{ position: number; reason: string }> = [];
       for (const item of pending) {
+        const problem = destMailboxProblem({
+          exists: item.dest_active !== null,
+          active: item.dest_active === true,
+        });
+        if (problem !== null) {
+          destProblems.push({ position: item.position, reason: problem });
+          continue;
+        }
         const endpoint = sourceEndpointFor(source, secrets, {
           sourceUser: item.source_user,
           position: item.position,
@@ -293,7 +314,19 @@ export class MigrationRunner {
           finished: true,
         });
       }
+      for (const { position, reason } of destProblems) {
+        await db.updateMigrationItem(id, position, {
+          state: 'failed',
+          errors: JSON.stringify([reason]),
+          finished: true,
+        });
+      }
 
+      // Строки, отказавшие ДО начала переноса, идут в подсчёт уже
+      // отказавшими. Иначе задание, у которого все ящики-приёмники
+      // отключены, показало бы «выполнено» и ноль ошибок — то есть
+      // соврало бы ровно тем числом, ради которого отчёт и открывают.
+      const failedBeforeStart = new Set([...noPassword, ...destProblems.map((p) => p.position)]);
       const totals = await this.migrateAll({
         jobId: id,
         accounts,
@@ -305,9 +338,49 @@ export class MigrationRunner {
           copied: i.copied,
           skipped: i.skipped,
           failed: i.failed,
-          state: i.state,
+          state: failedBeforeStart.has(i.position) ? 'failed' : i.state,
         })),
       });
+
+      /*
+       * Ящик мог исчезнуть УЖЕ ВО ВРЕМЯ переноса.
+       *
+       * Проверка перед стартом ловит то, что было плохо к началу; эта —
+       * то, что стало плохо посреди работы. Восстановление настроек из
+       * копии выключает ящики за секунды, а перенос идёт часами, так что
+       * попасть между ними — не редкость, а обычный порядок вещей.
+       *
+       * По содержимому ответа IMAP отличить «пароль не тот» от «ящика для
+       * сервера больше нет» невозможно (Dovecot отвечает одинаково), зато
+       * наша же база знает это точно. Поэтому объяснение приписывается
+       * ПЕРВЫМ к ошибкам ящика — над «сервер не принял логин или пароль»,
+       * которое без него уводит проверять пароли.
+       */
+      const after = await db.listMigrationItems(id).catch(() => []);
+      for (const item of after) {
+        if (item.state !== 'failed' && item.state !== 'partial') continue;
+        if (failedBeforeStart.has(item.position)) continue;
+        const problem = destMailboxProblem({
+          exists: item.dest_active !== null,
+          active: item.dest_active === true,
+        });
+        if (problem === null) continue;
+        let errors: string[] = [];
+        if (item.errors !== null) {
+          try {
+            const parsed: unknown = JSON.parse(item.errors);
+            if (Array.isArray(parsed)) errors = parsed.map((e) => String(e));
+          } catch {
+            errors = [item.errors];
+          }
+        }
+        if (errors.includes(problem)) continue;
+        await db
+          .updateMigrationItem(id, item.position, {
+            errors: JSON.stringify([problem, ...errors]),
+          })
+          .catch(() => undefined);
+      }
 
       // Гасят процесс, а не задание. Задание не завершаем: завершение
       // стирает пароли, и обновление образа посреди ночного переноса
@@ -342,7 +415,17 @@ export class MigrationRunner {
                 'Перенос остановлен. Уже перенесённые письма повторно не поедут: ' +
                 'запустите новое задание с тем же списком, чтобы докачать остальное.',
             }
-          : {}),
+          : // Причина отказа — на самом задании, а не только в строке ящика:
+            // в списке заданий видно состояние, но не содержимое отчёта, и
+            // «не выполнено» без причины отправляет искать поломку наугад.
+            destProblems.length > 0 && accounts.length === 0
+            ? {
+                error:
+                  `Переносить некуда: ${String(destProblems.length)} ящик(ов)-приёмник(ов) ` +
+                  'удалены или отключены (подробности — в строках ящиков). ' +
+                  'Восстановите их и повторите задание: уже перенесённые письма повторно не поедут.',
+              }
+            : {}),
       });
       logger.info(
         {

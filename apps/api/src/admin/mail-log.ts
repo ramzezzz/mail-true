@@ -319,6 +319,34 @@ const STATUS_MAP: Readonly<Record<string, FlowStatus>> = {
 };
 
 /**
+ * Удержанное письмо: `hold:` от cleanup/smtpd и `postsuper -h` от человека.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ЭТО ВООБЩЕ НАДО РАЗБИРАТЬ
+ * ------------------------------------------------------------------
+ * Состояние `held` было в схеме (0007_mail_flow.sql), в наборе состояний
+ * FlowStatus, в фильтре истории («придержано») и в графике долей — а
+ * ставить его было некому: STATUS_MAP переводит слово из `status=…`, а
+ * удержание Postfix словом `status=` не записывает вовсе. Фильтр честно
+ * работал и всегда возвращал ноль строк, то есть предлагал искать то,
+ * чего в базе не бывает по построению.
+ *
+ * Удержание записывается двумя способами, и оба нужны:
+ *
+ *   1. `postfix/cleanup[…]: 3F2A1B: hold: header Subject: … from …;
+ *      from=<a@b> to=<c@d>` — сработало правило header_checks/body_checks
+ *      с действием HOLD; так же выглядит HOLD из smtpd-ограничений;
+ *   2. `postfix/postsuper[…]: 3F2A1B: placed on hold` — письмо придержал
+ *      человек руками (`postsuper -h`), обычно разбирая всплеск рассылки.
+ *
+ * Второй способ адресата не называет: postsuper знает только очередь.
+ * Адресат тогда берётся из того, что уже известно об этом письме, — как
+ * и отправитель у обычных строк доставки.
+ */
+const HOLD_ACTION = /(?:^|\s)hold:\s/;
+const HOLD_BY_HAND = /\bplaced on hold\b/;
+
+/**
  * Достаёт значение поля `key=…` из хвоста строки Postfix.
  *
  * Разделитель полей у Postfix разный в разных строках, и это не мелочь:
@@ -362,6 +390,45 @@ export function directionOf(component: string, relay: string | null): FlowDirect
 }
 
 /**
+ * Направление письма, которое отклонили или придержали НА ПРИЁМЕ.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ОТДЕЛЬНО ОТ directionOf
+ * ------------------------------------------------------------------
+ * У отклонённого письма нет ни транспорта, ни узла-получателя: до
+ * доставки оно не дошло. Раньше в этом месте стояло `direction: 'in'`
+ * без единой проверки — и это неверно ровно там, где важнее всего.
+ * Отклонить можно и ИСХОДЯЩЕЕ письмо, и таких отказов на живом сервере
+ * не меньше: не прошла проверка отправителя, письмо крупнее предела,
+ * сработало правило header_checks на подаче, ящик исчерпал разрешённую
+ * частоту. Все они писались как входящие, и на графике «отклонено на
+ * приёме» в столбце «входящие» стояли собственные сотрудники — то есть
+ * фильтр по направлению уводил в противоположную сторону.
+ *
+ * Различается по двум признакам, оба надёжны:
+ *
+ *   * имя службы. Подача пользователями поднята отдельными службами с
+ *     собственными именами в журнале: `postfix/submission/smtpd` (587) и
+ *     `postfix/submissions/smtpd` (465) — см. infra/postfix/conf/master.cf.
+ *     Приём чужой почты идёт службой без приставки (`postfix/smtpd`, 25);
+ *   * `sasl_username=` в строке. Он значит, что клиент ПРЕДСТАВИЛСЯ, а
+ *     представляются только свои и только при отправке. Признак нужен
+ *     отдельно от имени службы: подать письмо можно и в порт 25, если
+ *     разрешена аутентификация на нём.
+ *
+ * Всё, что не подошло, — «входящее», и это не догадка: на порт 25 идёт
+ * чужая почта, и отказ там по определению входящий.
+ */
+export function inboundDirectionOf(component: string, text: string): FlowDirection {
+  const parts = component.split('/');
+  // Приставка службы стоит ПЕРЕД smtpd: «submission/smtpd».
+  const service = parts.length > 1 ? parts[parts.length - 2] : parts[0];
+  if (service === 'submission' || service === 'submissions' || service === 'smtps') return 'out';
+  if (/\bsasl_username=\S/.test(text)) return 'out';
+  return 'in';
+}
+
+/**
  * Достаёт событие доставки из разобранной строки Postfix.
  *
  * `meta` — то, что запомнено по этому письму из более ранней строки
@@ -374,6 +441,36 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
   if (entry.source !== 'postfix' || entry.at === null) return null;
   const text = entry.text;
 
+  // Придержанное письмо. Проверяется ДО отказа: у строки cleanup с
+  // действием HOLD слова «reject» нет, а у отказа нет слова «hold», —
+  // но порядок всё равно задан явно, чтобы правило не зависело от того,
+  // как Postfix однажды перепишет формулировку.
+  if (HOLD_ACTION.test(text) || HOLD_BY_HAND.test(text)) {
+    const to = address(field(text, 'to'));
+    const from = address(field(text, 'from'));
+    // `postsuper: … placed on hold` не называет ни адресата, ни
+    // отправителя — только очередь. Тогда берём то, что уже известно
+    // об этом письме из строки его приёма.
+    if (to === null && from === null && entry.queueId === null) return null;
+    const reasonMatch = /hold:\s*(.*?)(?:;\s*from=|$)/.exec(text);
+    return {
+      occurredAt: entry.at,
+      queueId: entry.queueId,
+      direction: inboundDirectionOf(entry.component, text) === 'out' ? 'out' : (meta?.direction ?? 'in'),
+      status: 'held',
+      sender: from ?? meta?.sender ?? null,
+      recipient: to,
+      relay: null,
+      delaySeconds: null,
+      sizeBytes: meta?.sizeBytes ?? null,
+      dsn: null,
+      reason:
+        reasonMatch?.[1]?.trim().slice(0, 500) ??
+        (HOLD_BY_HAND.test(text) ? 'придержано вручную (postsuper -h)' : text.slice(0, 500)),
+      component: entry.component,
+    };
+  }
+
   // Отказ на приёме: очереди у такого письма нет вовсе.
   if (/\breject:\s/.test(text)) {
     const to = address(field(text, 'to'));
@@ -383,7 +480,8 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
     return {
       occurredAt: entry.at,
       queueId: entry.queueId,
-      direction: 'in',
+      // Отклонить можно и исходящее: см. inboundDirectionOf.
+      direction: inboundDirectionOf(entry.component, text),
       status: 'rejected',
       sender: from,
       recipient: to,
@@ -435,6 +533,17 @@ export function toFlowEvent(entry: LogEntry, meta: QueueMeta | undefined): FlowE
  */
 export function toQueueMeta(entry: LogEntry): QueueMeta | null {
   if (entry.source !== 'postfix' || entry.queueId === null) return null;
+  /*
+   * Строка ДЕЙСТВИЯ — не сведения о письме, а событие, и путать их нельзя.
+   *
+   * У cleanup с правилом HOLD (и с правилом REJECT) поля `from=` и `to=`
+   * стоят в конце той же строки, что и само действие. Сборщик, увидев
+   * `from=`, считал такую строку описанием письма и прекращал её разбор
+   * (`continue` в flow-collector.ts) — то есть событие удержания терялось
+   * ровно там, где появлялось. Событие важнее сведений: отправителя и
+   * размер того же письма всё равно принесёт строка его приёма.
+   */
+  if (HOLD_ACTION.test(entry.text) || /(?:^|\s)reject:\s/.test(entry.text)) return null;
   const from = field(entry.text, 'from');
   if (from === null) return null;
   const size = field(entry.text, 'size');

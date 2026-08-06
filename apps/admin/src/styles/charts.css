@@ -37,6 +37,10 @@
   --mt-chart-axis: rgb(0 0 0 / 22%);
   /* Заливка площади под линией — тот же цвет ряда, но еле заметный. */
   --mt-chart-area-alpha: 12%;
+  /* Штриховка поверх заливки — цвет самой карточки: узор «прорезает»
+     столбец до фона. Почему именно так и почему не белым — в
+     src/lib/chartSeries.ts, chartPatternInk. */
+  --mt-chart-pattern: #ffffff;
 }
 
 :root[data-theme='dark'] {
@@ -52,6 +56,8 @@
   --mt-chart-grid: rgb(255 255 255 / 12%);
   --mt-chart-axis: rgb(255 255 255 / 26%);
   --mt-chart-area-alpha: 16%;
+  /* Карточка тёмной темы. Белая штриховка здесь давала 1,32–1,76:1. */
+  --mt-chart-pattern: #232324;
 }
 
 :root[data-theme='graphite'] {
@@ -67,4 +73,6 @@
   --mt-chart-grid: rgb(224 240 245 / 12%);
   --mt-chart-axis: rgb(224 240 245 / 26%);
   --mt-chart-area-alpha: 16%;
+  /* Карточка графита. Белая штриховка здесь давала 1,31–1,57:1. */
+  --mt-chart-pattern: #16222a;
 }

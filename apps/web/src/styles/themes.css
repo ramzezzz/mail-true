@@ -71,6 +71,23 @@
   --mt-color-text-link: var(--mt-accent);
   --mt-color-text-accent: var(--mt-accent);
   --mt-color-icon-accent: var(--mt-accent);
+  /*
+   * «Themed» в имени означает «зависит от темы» — а зависимости не было:
+   * токен стоял со значением #0077ff из выгрузки mail.ru и не менялся ни в
+   * одной теме, включая тёмную. То есть имя обещало одно, а цвет вёл себя
+   * ровно наоборот, и опереться на него было нельзя: полоса хода переноса
+   * (pages/MigratePage.module.css) и рамка фокуса строки таблицы
+   * (components/RowActions.module.css) оставались мейловским синим и в
+   * «Изумруде», и в «Графите».
+   *
+   * Замыкается на акцент темы — там же, где и его непарный сосед
+   * --mt-color-icon-accent, и по той же причине: весь синий кластер
+   * токенов держится на --mt-accent-*, и цветной теме достаточно
+   * переопределить только его. Проверка — tests/themes.test.ts.
+   */
+  --mt-color-icon-accent-themed: var(--mt-accent);
+  --mt-color-icon-accent-themed-hover: var(--mt-accent-hover);
+  --mt-color-icon-accent-themed-press: var(--mt-accent-press);
   --mt-color-button-text: var(--mt-accent);
   --mt-color-button-icon: var(--mt-accent);
   --mt-color-button-stroke: var(--mt-accent);

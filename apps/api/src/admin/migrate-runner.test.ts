@@ -82,6 +82,11 @@ function itemRow(position: number, patch: Partial<MigrationItemRow> = {}): Migra
     position,
     source_user: `user${String(position)}@staraya.ru`,
     dest_user: `user${String(position)}@novaya.ru`,
+    // По умолчанию ящик-приёмник существует и включён: иначе работник
+    // (справедливо) откажется в него писать, и проверка проверяла бы
+    // не то, ради чего написана.
+    dest_user_id: 500 + position,
+    dest_active: true,
     state: 'queued',
     total: 0,
     copied: 0,
@@ -334,4 +339,72 @@ test('проход работника ищет брошенные задания
   assert.equal(db.claimed.length, 1);
   assert.equal(db.claimed[0]?.runner, runner.runnerId);
   assert.ok((db.claimed[0]?.stale ?? 0) > 0, 'без срока молчания задание никто бы не подхватил');
+});
+
+/* ------------------------------------------------------------------ */
+/* Ящик-приёмник исчез или отключён — причина называется честно          */
+/* ------------------------------------------------------------------ */
+
+test('отключённый ящик-приёмник объясняется отключением, а не «неверным паролем»', async () => {
+  /*
+   * Ровно тот случай, который поймали на живом стенде: восстановление
+   * настроек из копии выключило ящик посреди переноса. Dovecot отбирает
+   * ящики запросом `... WHERE email = '%u' AND active`, поэтому вход в
+   * отключённый ящик отклоняется так же, как при неверном пароле, — и
+   * раздел переноса звал проверять пароль служебного доступа.
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0, { dest_active: false })];
+  const job = jobRow({
+    total: 1,
+    secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol-ishodnogo' } }),
+  });
+
+  await runnerWith(db, box).runJob(job);
+
+  const patch = db.itemPatches.find((p) => p.position === 0)?.patch;
+  assert.ok(patch, 'строка ящика обязана получить объяснение');
+  assert.equal(patch['state'], 'failed');
+  const errors = String(patch['errors']);
+  assert.match(errors, /отключ/iu, 'причина обязана называться словом «отключён»');
+  assert.doesNotMatch(errors, /невер/iu, 'про неверный пароль здесь не должно быть ни слова');
+
+  // Причина видна и на самом задании: в списке заданий отчёт не открыт.
+  const finished = db.jobPatches.filter((p) => p['finished'] === true).pop();
+  assert.equal(finished?.['state'], 'failed');
+  assert.match(String(finished?.['error']), /удалены или отключены/u);
+});
+
+test('удалённый ящик-приёмник объясняется отсутствием ящика', async () => {
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  // dest_active === null означает «ящика в базе нет вовсе».
+  db.items = [itemRow(0, { dest_user_id: null, dest_active: null })];
+  const job = jobRow({
+    total: 1,
+    secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol-ishodnogo' } }),
+  });
+
+  await runnerWith(db, box).runJob(job);
+
+  const errors = String(db.itemPatches.find((p) => p.position === 0)?.patch['errors']);
+  assert.match(errors, /нет на сервере/u);
+  assert.doesNotMatch(errors, /парол/iu);
+});
+
+test('исправный ящик-приёмник по-прежнему переносится', async () => {
+  // Обратный ход: проверка выше должна ловить сломанное, а не всё подряд.
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0, { dest_active: true })];
+  const job = jobRow({
+    total: 1,
+    secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol-ishodnogo' } }),
+  });
+
+  await runnerWith(db, box).runJob(job);
+
+  const errors = String(db.itemPatches.find((p) => p.position === 0)?.patch['errors'] ?? '');
+  assert.doesNotMatch(errors, /отключ|нет на сервере/iu, 'исправный ящик не должен отказывать');
 });

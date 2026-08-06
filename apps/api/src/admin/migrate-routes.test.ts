@@ -49,9 +49,27 @@ class FakeDb {
   schemaReady = true;
   job: Record<string, unknown> | null = null;
   items: Array<Record<string, unknown>> = [];
+  /**
+   * Ящики-приёмники, которые «есть» на сервере: адрес -> включён ли.
+   * null вместо карты — считать существующими и включёнными все, чтобы
+   * проверки про пароли и права не переписывались из-за этой проверки.
+   */
+  mailboxes: Map<string, boolean> | null = null;
 
   async migrationSchemaReady(): Promise<boolean> {
     return this.schemaReady;
+  }
+  async findMailboxStates(
+    emails: readonly string[],
+  ): Promise<Map<string, { id: number; email: string; active: boolean }>> {
+    const out = new Map<string, { id: number; email: string; active: boolean }>();
+    emails.forEach((raw, index) => {
+      const email = raw.trim().toLowerCase();
+      const known = this.mailboxes?.get(email);
+      if (this.mailboxes !== null && known === undefined) return;
+      out.set(email, { id: 900 + index, email, active: known ?? true });
+    });
+    return out;
   }
   async writeAudit(record: Record<string, unknown>): Promise<void> {
     this.audits.push(record);
@@ -411,4 +429,83 @@ test('подробности задания не содержат столбца
   assert.equal(response.statusCode, 200);
   assert.doesNotMatch(response.body, /SHIFROTEKST/);
   assert.match(response.body, /"copied":500/, 'числа хода работы показывать надо');
+});
+
+/* ------------------------------------------------------------------ */
+/* Ящик-приёмник проверяется ДО постановки задания в очередь            */
+/* ------------------------------------------------------------------ */
+
+test('задание на несуществующий ящик отклоняется с перечислением адресов', async () => {
+  const { app, db, cookie } = await harness();
+  // На сервере есть только один из двух ящиков выгрузки.
+  db.mailboxes = new Map([['abird@novaya.ru', true]]);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs',
+    headers: { cookie },
+    payload: {
+      source: { host: 'kerio.staraya.ru', port: 993, secure: true },
+      list: { text: KERIO_CSV, destDomain: 'novaya.ru' },
+    },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  const body = response.json() as { error: string; message: string };
+  assert.equal(body.error, 'BAD_REQUEST', 'это ошибка принесённого списка, а не сервера');
+  // Назван ИМЕННО тот адрес, которого нет: без него человеку пришлось бы
+  // сверять сотню строк выгрузки со списком ящиков вручную.
+  assert.match(body.message, /ivanov@novaya\.ru/);
+  assert.doesNotMatch(body.message, /abird@novaya\.ru/, 'существующий ящик в отказе не при чём');
+  assert.equal(db.createdJobs.length, 0, 'задание не должно было завестись');
+});
+
+test('задание на отключённый ящик называет причиной отключение, а не пароль', async () => {
+  const { app, db, cookie } = await harness();
+  db.mailboxes = new Map([
+    ['abird@novaya.ru', true],
+    ['ivanov@novaya.ru', false],
+  ]);
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs',
+    headers: { cookie },
+    payload: {
+      source: { host: 'kerio.staraya.ru', port: 993, secure: true },
+      list: { text: KERIO_CSV, destDomain: 'novaya.ru' },
+    },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  const message = (response.json() as { message: string }).message;
+  assert.match(message, /отключ/iu, 'причина обязана называться словом «отключено»');
+  assert.match(message, /ivanov@novaya\.ru/);
+  // Обратный ход: про пароль в этом отказе не должно быть ни слова —
+  // именно за ним и уходили искать несуществующую неисправность.
+  assert.doesNotMatch(message, /парол/iu);
+  assert.equal(db.createdJobs.length, 0);
+});
+
+test('существующие включённые ящики попадают в задание вместе с номером строки', async () => {
+  const { app, db, cookie } = await harness();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs',
+    headers: { cookie },
+    payload: {
+      source: { host: 'kerio.staraya.ru', port: 993, secure: true },
+      list: { text: KERIO_CSV, destDomain: 'novaya.ru' },
+    },
+  });
+
+  assert.equal(response.statusCode, 202, response.body);
+  const mailboxes = db.createdJobs[0]?.['mailboxes'] as Array<Record<string, unknown>>;
+  assert.equal(mailboxes.length, 2);
+  for (const box of mailboxes) {
+    assert.ok(
+      typeof box['destUserId'] === 'number',
+      'без номера строки связь с базой не заводится и проверка остаётся на словах',
+    );
+  }
 });

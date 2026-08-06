@@ -47,6 +47,7 @@ import {
   QUEUE_SERIES,
   RESOURCE_SERIES,
   chartColor,
+  chartPatternInk,
   seriesOf,
   type ChartHue,
   type ChartSurface,
@@ -218,6 +219,52 @@ describe('цвет — не единственное отличие ряда', (
       const patterns = list.map((s) => s.pattern);
       expect(new Set(patterns).size, `повтор узора: ${patterns.join(' | ')}`).toBe(patterns.length);
     }
+  });
+});
+
+describe('штриховка видна на заливке своего ряда', () => {
+  /*
+   * Узор поверх столбца и сектора — второй, НЕЦВЕТОВОЙ признак ряда: он
+   * для тех, кто не различает красный и зелёный, и для чёрно-белой печати.
+   * Значит, к нему применима та же норма, что к любому нетекстовому
+   * различию, — 3:1 (WCAG 2.1, 1.4.11), и меряется она не к карточке, а
+   * к ЗАЛИВКЕ, поверх которой узор лежит.
+   *
+   * На старом коде эта проверка падает во всех темах: штриховка была
+   * прибита белым (rgb(255 255 255 / 55%)) и давала 1,31–3,10:1 —
+   * в тёмной теме и в графите её попросту не было видно.
+   */
+  const PATTERN_MIN = 3;
+
+  for (const family of ['light', 'dark', 'graphite'] as const) {
+    for (const hue of CHART_HUES) {
+      it(`${family}/${hue}: штрих к заливке ≥ 3:1`, () => {
+        const ink = chartPatternInk(family);
+        const fill = chartColor(family, hue);
+        const value = ratio(ink, fill);
+        expect(
+          value,
+          `штрих ${ink} на заливке ${fill} = ${value.toFixed(2)}:1`,
+        ).toBeGreaterThanOrEqual(PATTERN_MIN);
+      });
+    }
+  }
+
+  it('цвет штриховки в charts.css тот же, что в реестре', () => {
+    for (const family of ['light', 'dark', 'graphite'] as const) {
+      expect(cssVar(family, '--mt-chart-pattern'), family).toBe(
+        chartPatternInk(family).toLowerCase(),
+      );
+    }
+  });
+
+  it('штриховка не задана одним цветом на все темы', () => {
+    // Ровно то, чем был старый белый: одно значение на светлую карточку
+    // и на тёмную. Тёмным темам оно достаётся невидимым.
+    expect(cssVar('dark', '--mt-chart-pattern')).not.toBe(cssVar('light', '--mt-chart-pattern'));
+    expect(cssVar('graphite', '--mt-chart-pattern')).not.toBe(
+      cssVar('light', '--mt-chart-pattern'),
+    );
   });
 });
 

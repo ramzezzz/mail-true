@@ -59,6 +59,20 @@ const settingsSchema = z.object({
   notes: z.string().trim().max(4000).nullable().optional(),
 });
 
+/**
+ * «a@b, c@d и ещё 5» — перечисление для отказа.
+ *
+ * Список приходит уже урезанным запросом; `total` — сколько их всего.
+ * Показать десяток и назвать остаток честнее, чем и то, и другое по
+ * отдельности: первое без второго врёт о размере, второе без первого
+ * не помогает ничем.
+ */
+function listNames(names: readonly string[], total: number): string {
+  const shown = names.slice(0, 10);
+  const rest = total - shown.length;
+  return rest > 0 ? `${shown.join(', ')} и ещё ${String(rest)}` : shown.join(', ');
+}
+
 function toDto(row: DomainRow, mailHostname: string): Record<string, unknown> {
   return {
     id: row.id,
@@ -181,18 +195,46 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       const force = request.query.force === 'true' || request.query.force === '1';
       const row = await ctx.db.findDomainById(id);
       if (!row) throw new NotFoundError('Домен не найден');
-      if (Number(row.user_count) > 0) {
+
+      const userCount = Number(row.user_count);
+      if (userCount > 0) {
+        /*
+         * Отказ ПЕРЕЧИСЛЯЕТ ящики, а не просто называет их число.
+         *
+         * «В домене ещё 7 ящиков» — это тупик: человек знает, что нельзя,
+         * и не знает, что делать. Дальше он уходит в раздел ящиков,
+         * выставляет фильтр по домену и переписывает адреса руками —
+         * при том что сервер их только что посчитал и держит перед собой.
+         * Особенно обидно это на домене с двумя забытыми ящиками, ради
+         * которых и затевалось удаление.
+         *
+         * Список ограничен: домен на тысячу ящиков не должен превращать
+         * отказ в выгрузку, а хвост всё равно виден числом.
+         */
+        const boxes = await ctx.db.listMailUsers({ domainId: id, limit: 20, offset: 0 });
         throw new BadRequestError(
-          `В домене ещё ${row.user_count} ящик(ов). Удаление домена уничтожит их записи — сначала перенесите или удалите ящики.`,
+          `Домен ${row.name} удалить нельзя: в нём ${String(userCount)} ящик(ов) — ` +
+            `${listNames(boxes.rows.map((u) => u.email), userCount)}. ` +
+            'Удаление домена уничтожило бы их записи вместе с настройками и правилами. ' +
+            'Сначала перенесите ящики на другой домен или удалите их.',
         );
       }
 
       const aliasCount = Number(row.alias_count);
       if (aliasCount > 0 && !force) {
+        // Алиасы уносит каскад в схеме (0001_init.sql), поэтому здесь их
+        // тоже показываем поимённо: «нельзя» без ответа на вопрос «что
+        // именно мешает» стоит человеку похода в соседний раздел.
+        const doomed = await ctx.db.listAliases({ domainId: id, limit: 20, offset: 0 });
         throw new BadRequestError(
-          `В домене ещё ${String(aliasCount)} алиас(ов). Удаление домена уничтожит их вместе с ним — ` +
-            'сначала удалите алиасы или повторите запрос с параметром force=true, ' +
-            'тогда список удалённых алиасов попадёт в журнал аудита.',
+          `Домен ${row.name} удалить нельзя: в нём ${String(aliasCount)} алиас(ов) — ` +
+            `${listNames(
+              doomed.rows.map((a) => `${a.source} → ${a.destination}`),
+              aliasCount,
+            )}. ` +
+            'Удаление домена уничтожит их вместе с ним. Удалите алиасы сами или ' +
+            'повторите запрос с параметром force=true — тогда полный список ' +
+            'удалённых алиасов попадёт в журнал аудита.',
         );
       }
 

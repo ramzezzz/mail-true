@@ -827,3 +827,104 @@ test('известное направление не перебивает то, 
   const event = toFlowEvent(entry, { sender: 'a@b', sizeBytes: 1, direction: 'out' });
   assert.equal(event?.direction, 'in');
 });
+
+/* ------------------------------------------------------------------ */
+/* Отклонить можно и исходящее                                         */
+/* ------------------------------------------------------------------ */
+
+test('отказ на подаче письма пользователем — исходящий, а не входящий', () => {
+  // Служба подачи поднята с собственным именем в журнале
+  // (infra/postfix/conf/master.cf: syslog_name=postfix/submission).
+  const event = toFlowEvent(
+    postfixEvent(
+      'postfix/submission/smtpd[42]: NOQUEUE: reject: RCPT from mail-api[172.28.0.10]: ' +
+        '550 5.7.1 <chuzhoj@example.net>: Recipient address rejected: Access denied; ' +
+        'from=<test@mail.local> to=<chuzhoj@example.net> proto=ESMTP helo=<api>',
+    ),
+    undefined,
+  );
+  assert.ok(event);
+  assert.equal(event.status, 'rejected');
+  assert.equal(event.direction, 'out', 'письмо отклонили при ОТПРАВКЕ, а не при приёме');
+});
+
+test('представившийся клиент делает отказ исходящим даже на порту 25', () => {
+  const event = toFlowEvent(
+    postfixEvent(
+      'postfix/smtpd[42]: NOQUEUE: reject: RCPT from svoj[172.28.0.10]: 552 5.3.4 ' +
+        'Message size exceeds fixed limit; from=<test@mail.local> to=<a@example.net> ' +
+        'proto=ESMTP helo=<svoj> sasl_method=PLAIN sasl_username=test@mail.local',
+    ),
+    undefined,
+  );
+  assert.equal(event?.direction, 'out', 'sasl_username значит «свой и отправляет»');
+});
+
+test('отказ чужому на порту 25 остаётся входящим', () => {
+  const event = toFlowEvent(
+    postfixEvent(
+      'postfix/smtpd[3]: NOQUEUE: reject: RCPT from unknown[203.0.113.9]: 550 5.1.1 ' +
+        '<нет@mail.local>: Recipient address rejected; from=<spam@example.net> ' +
+        'to=<нет@mail.local> proto=ESMTP helo=<x>',
+    ),
+    undefined,
+  );
+  assert.equal(event?.direction, 'in');
+});
+
+/* ------------------------------------------------------------------ */
+/* Удержанные письма                                                   */
+/* ------------------------------------------------------------------ */
+
+test('правило HOLD в cleanup записывается состоянием «придержано»', () => {
+  const event = toFlowEvent(
+    postfixEvent(
+      'postfix/cleanup[7788]: 3F2A1B4C: hold: header Subject: Срочно переведите деньги ' +
+        'from unknown[203.0.113.9]; from=<obman@example.net> to=<buhgalter@mail.local> ' +
+        'proto=ESMTP helo=<x>',
+    ),
+    undefined,
+  );
+  assert.ok(event, 'строка с действием HOLD обязана стать событием');
+  assert.equal(event.status, 'held');
+  assert.equal(event.queueId, '3F2A1B4C');
+  assert.equal(event.recipient, 'buhgalter@mail.local');
+  assert.equal(event.sender, 'obman@example.net');
+  assert.ok(event.reason?.includes('header Subject'), 'причина удержания — это правило');
+});
+
+test('строка с действием HOLD не съедается разбором сведений о письме', () => {
+  // Обратный ход к дефекту: `from=` в этой строке ЕСТЬ, и сборщик прежде
+  // принимал её за описание письма, обрывая разбор до создания события.
+  const entry = postfixEvent(
+    'postfix/cleanup[7788]: 3F2A1B4C: hold: header Subject: Срочно; ' +
+      'from=<obman@example.net> to=<buhgalter@mail.local>',
+  );
+  assert.equal(toQueueMeta(entry), null, 'действие — не сведения о письме');
+});
+
+test('придержанное руками письмо (postsuper -h) тоже попадает в историю', () => {
+  const event = toFlowEvent(
+    postfixEvent('postfix/postsuper[9012]: 3F2A1B4C: placed on hold'),
+    { sender: 'rassylka@mail.local', sizeBytes: 4096, direction: 'out' },
+  );
+  assert.ok(event);
+  assert.equal(event.status, 'held');
+  assert.equal(event.queueId, '3F2A1B4C');
+  // Адресата postsuper не называет — и выдумывать его нельзя.
+  assert.equal(event.recipient, null);
+  assert.equal(event.sender, 'rassylka@mail.local', 'отправитель известен из строки приёма');
+  assert.equal(event.direction, 'out', 'направление письма известно из его приёма');
+});
+
+test('состояние «придержано» действительно бывает: фильтр не обещает пустоты', () => {
+  // Проверка ровно того, из-за чего пункт и появился: состояние held
+  // существовало в схеме и в фильтре, а поставить его было некому.
+  const lines = [
+    'postfix/cleanup[7788]: AAAABBBB: hold: header Subject: x; from=<a@b.ru> to=<c@mail.local>',
+    'postfix/postsuper[9012]: AAAABBBB: placed on hold',
+  ];
+  for (const line of lines) {
+    assert.equal(toFlowEvent(postfixEvent(line), { sender: 'a@b.ru', sizeBytes: 1 })?.status, 'held', line);
+  }
+});

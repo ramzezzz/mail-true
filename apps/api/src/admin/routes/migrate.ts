@@ -38,7 +38,7 @@ import {
   type MigrationSecrets,
   type SourceSettings,
 } from '../migrate-jobs.js';
-import type { MigrationItemRow, MigrationJobRow } from '../db.js';
+import type { AdminDb, MigrationItemRow, MigrationJobRow } from '../db.js';
 
 /** Настройки исходного сервера, которые вводит человек. Секретов здесь нет. */
 const sourceSchema = z.object({
@@ -107,6 +107,76 @@ function num(value: string | number): number {
   return typeof value === 'number' ? value : Number(value);
 }
 
+/** Сколько адресов показать в отказе, прежде чем свернуть остаток в «и ещё N». */
+const LIST_IN_ERROR = 10;
+
+/** «a@b, c@d и ещё 7» — перечисление, которое не превращает отказ в простыню. */
+function listSome(items: readonly string[]): string {
+  if (items.length <= LIST_IN_ERROR) return items.join(', ');
+  return `${items.slice(0, LIST_IN_ERROR).join(', ')} и ещё ${String(items.length - LIST_IN_ERROR)}`;
+}
+
+/**
+ * Проверить ящики-приёмники ДО постановки задания в очередь.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ЗДЕСЬ, А НЕ ВО ВРЕМЯ ПЕРЕНОСА
+ * ------------------------------------------------------------------
+ * Раньше адрес приёмника не проверялся вовсе: столбец dest_user был
+ * простой строкой, ни с чем не связанной. Опечатка в столбце «куда»
+ * выгрузки принималась молча, задание вставало в очередь на ночь, и
+ * обнаруживалось это утром — по строке, до которой работник дошёл в
+ * три часа. Список ящиков человек приносит ЦЕЛИКОМ и правит его тоже
+ * целиком, поэтому и назвать ему надо все плохие адреса разом, а не
+ * первый попавшийся.
+ *
+ * Отключённые ящики отклоняются наравне с несуществующими: Dovecot не
+ * пускает в отключённый ящик даже служебным доступом (см. пояснение
+ * у destMailboxProblem), то есть перенос в него заведомо не состоится.
+ *
+ * Возвращает номера строк ящиков, чтобы задание сохранило связь с базой.
+ */
+async function resolveDestinations(
+  db: AdminDb,
+  rows: ReadonlyArray<{ destUser: string }>,
+): Promise<Map<string, number>> {
+  const states = await db.findMailboxStates(rows.map((r) => r.destUser));
+  const missing: string[] = [];
+  const disabled: string[] = [];
+  const ids = new Map<string, number>();
+  for (const row of rows) {
+    const key = row.destUser.trim().toLowerCase();
+    const found = states.get(key);
+    if (!found) {
+      if (!missing.includes(row.destUser)) missing.push(row.destUser);
+      continue;
+    }
+    if (!found.active) {
+      if (!disabled.includes(row.destUser)) disabled.push(row.destUser);
+      continue;
+    }
+    ids.set(key, found.id);
+  }
+
+  const problems: string[] = [];
+  if (missing.length > 0) {
+    problems.push(
+      `на сервере нет ${String(missing.length)} ящик(ов)-приёмник(ов): ${listSome(missing)} — ` +
+        'заведите их (в том числе пакетно, разделом «Импорт») или поправьте столбец «куда» в списке',
+    );
+  }
+  if (disabled.length > 0) {
+    problems.push(
+      `отключено ${String(disabled.length)} ящик(ов)-приёмник(ов): ${listSome(disabled)} — ` +
+        'в отключённый ящик Dovecot не пускает даже служебным доступом, включите их',
+    );
+  }
+  if (problems.length > 0) {
+    throw new BadRequestError(`Перенос не начат: ${problems.join('; ')}.`);
+  }
+  return ids;
+}
+
 /** Строка задания для интерфейса. Столбца с секретом здесь нет по построению. */
 function jobForApi(row: MigrationJobRow): Record<string, unknown> {
   return {
@@ -151,6 +221,12 @@ function itemForApi(row: MigrationItemRow): Record<string, unknown> {
     position: row.position,
     sourceUser: row.source_user,
     destUser: row.dest_user,
+    /**
+     * Что с ящиком-приёмником ПРЯМО СЕЙЧАС: 'ok' | 'missing' | 'disabled'.
+     * Отчёт по завершённому заданию тоже читают, и «ящик с тех пор удалён»
+     * там объясняет расхождение чисел лучше, чем пустая строка.
+     */
+    destState: row.dest_active === null ? 'missing' : row.dest_active ? 'ok' : 'disabled',
     state: row.state,
     total: row.total,
     copied: row.copied,
@@ -299,6 +375,8 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
 
     const masterUser = body.source.masterUser ?? '';
     const secrets = buildSecrets(masterUser, body.masterPassword, parsed.rows);
+    // Ящики-приёмники проверяются ДО постановки в очередь: см. resolveDestinations.
+    const destIds = await resolveDestinations(ctx.db, parsed.rows);
 
     const jobId = await ctx.db.createMigrationJob({
       adminId: admin.adminId,
@@ -312,7 +390,11 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
         masterSeparator: masterUser === '' ? null : (body.source.masterSeparator ?? '*'),
       },
       secretEnc: packSecrets(box, secrets),
-      mailboxes: parsed.rows.map((r) => ({ sourceUser: r.sourceUser, destUser: r.destUser })),
+      mailboxes: parsed.rows.map((r) => ({
+        sourceUser: r.sourceUser,
+        destUser: r.destUser,
+        destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
+      })),
     });
 
     // В журнале — кто, откуда, сколько ящиков и каким доступом. Ни одного
@@ -425,6 +507,9 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
       password: byAddress.get(item.source_user.toLowerCase()),
     }));
     const secrets = buildSecrets(masterUser, body.masterPassword, rows);
+    // Повтор — такое же новое задание, и ящики для него проверяются заново:
+    // за время неудачного прогона приёмник могли и удалить, и отключить.
+    const destIds = await resolveDestinations(ctx.db, rows);
 
     const jobId = await ctx.db.createMigrationJob({
       adminId: admin.adminId,
@@ -438,7 +523,11 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
         masterSeparator: job.source_master_separator,
       },
       secretEnc: packSecrets(box, secrets),
-      mailboxes: rows.map((r) => ({ sourceUser: r.sourceUser, destUser: r.destUser })),
+      mailboxes: rows.map((r) => ({
+        sourceUser: r.sourceUser,
+        destUser: r.destUser,
+        destUserId: destIds.get(r.destUser.trim().toLowerCase()) ?? null,
+      })),
     });
 
     await audit(ctx, request, {

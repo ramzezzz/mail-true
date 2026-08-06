@@ -410,11 +410,17 @@ export class MetricsStore {
     return [...byBucket.values()];
   }
 
-  /** Сколько чего за окно: по состояниям и по направлениям. */
+  /** Сколько чего за окно: по состояниям, по направлениям и по письмам. */
   async flowTotals(
     from: Date,
     to: Date,
-  ): Promise<{ byStatus: Record<string, number>; byDirection: Record<string, number>; spamRejected: number }> {
+  ): Promise<{
+    byStatus: Record<string, number>;
+    byDirection: Record<string, number>;
+    spamRejected: number;
+    /** Различных писем за окно — знаменатель доли спама, см. ниже. */
+    messages: number;
+  }> {
     const rows = await this.db.query<{ status: string; direction: string; count: string }>(
       `SELECT status, direction, count(*)::text AS count
          FROM mail_flow_events
@@ -448,7 +454,44 @@ export class MetricsStore {
           AND status = 'rejected' AND ${SPAM_REASON_SQL}`,
       [from, to],
     );
-    return { byStatus, byDirection, spamRejected: Number(spam?.count ?? 0) };
+
+    /*
+     * РАЗЛИЧНЫЕ ПИСЬМА — знаменатель доли спама.
+     *
+     * ------------------------------------------------------------------
+     * ПОЧЕМУ НЕ count(*) ПО ВСЕМ СТРОКАМ
+     * ------------------------------------------------------------------
+     * Строка таблицы — это ПОПЫТКА доставки, а не письмо. Письмо, которое
+     * чужой сервер отложил трижды, оставляет четыре строки (три `deferred`
+     * и одну `sent`), и в знаменателе оно считалось за четыре письма.
+     * Отбитый спам при этом попыток не имеет вовсе: отказ на приёме
+     * случается один раз и повториться не может.
+     *
+     * То есть знаменатель рос от чужих неполадок связи, а числитель — нет,
+     * и доля спама тем сильнее занижалась, чем хуже работала сеть. На
+     * живом стенде это давало 6,7 % вместо 20,0 % — то есть говорило
+     * «спама почти нет» ровно в тот день, когда его была пятая часть.
+     *
+     * Письмо здесь — это (очередь, адресат): одна очередь на трёх адресатов
+     * — три доставки, и складывать их в одну нельзя, иначе исчезнут два
+     * настоящих письма. У отказа на приёме очереди нет (NOQUEUE), поэтому
+     * каждая такая строка — своё письмо, что и есть правда.
+     */
+    const messages = await this.db.one<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM (
+           SELECT DISTINCT coalesce(queue_id, '#' || id::text) AS envelope, recipient
+             FROM mail_flow_events
+            WHERE occurred_at >= $1 AND occurred_at <= $2
+         ) t`,
+      [from, to],
+    );
+    return {
+      byStatus,
+      byDirection,
+      spamRejected: Number(spam?.count ?? 0),
+      messages: Number(messages?.count ?? 0),
+    };
   }
 
   /**
@@ -535,22 +578,70 @@ export class MetricsStore {
   /**
    * Пиковые часы: сколько писем приходится на каждый час суток.
    *
-   * Час берётся в часовом поясе СЕРВЕРА (timestamptz сам приводит), потому
-   * что планируют по нему обслуживание и рассылки. Отдельная колонка
-   * «в среднем за сутки окна» не нужна: окно человек задаёт сам.
+   * ------------------------------------------------------------------
+   * ЧАС — В ПОЯСЕ СМОТРЯЩЕГО, А НЕ СЕРВЕРА
+   * ------------------------------------------------------------------
+   * Раньше час брался «в поясе сервера»: `extract(hour FROM occurred_at)`
+   * без указания пояса считает его по TimeZone сеанса, а у контейнера это
+   * UTC. Соседний график того же экрана («Что происходило с письмами»)
+   * подписан временем БРАУЗЕРА. То есть на одной странице два графика об
+   * одних и тех же письмах жили в разных поясах: в Москве вечерний пик
+   * рассылки стоял в 09 на одном и в 12 на другом, и «пиковый час»
+   * приходилось пересчитывать в уме — а обслуживание планируют как раз
+   * по нему.
+   *
+   * Пояс приходит от браузера (IANA-имя вроде Europe/Moscow) и уходит
+   * прямо в `AT TIME ZONE`: Postgres знает и переходы на летнее время, и
+   * их историю, а вычитание постоянного смещения — нет.
+   *
+   * Имя проверяется по pg_timezone_names ДО запроса. Не ради обхода
+   * подстановки (значение и так уходит параметром), а ради ответа:
+   * неизвестное имя иначе роняло бы весь раздел ошибкой SQL, тогда как
+   * правильное поведение — показать часы по UTC и сказать об этом.
+   *
+   * Возвращается и пояс, в котором посчитано: подпись «часы по Europe/Moscow»
+   * — единственное, что отличает верный график от сдвинутого на три часа.
    */
-  async hourlyProfile(from: Date, to: Date): Promise<Array<{ hour: number; count: number }>> {
+  async hourlyProfile(
+    from: Date,
+    to: Date,
+    timeZone?: string | undefined,
+  ): Promise<{ timeZone: string; hours: Array<{ hour: number; count: number }> }> {
+    const zone = (await this.resolveTimeZone(timeZone)) ?? 'UTC';
     const rows = await this.db.query<{ hour: string; count: string }>(
-      `SELECT extract(hour FROM occurred_at)::int::text AS hour, count(*)::text AS count
+      `SELECT extract(hour FROM occurred_at AT TIME ZONE $3)::int::text AS hour,
+              count(*)::text AS count
          FROM mail_flow_events
         WHERE occurred_at >= $1 AND occurred_at <= $2
         GROUP BY 1
         ORDER BY 1`,
-      [from, to],
+      [from, to, zone],
     );
     const byHour = new Map<number, number>();
     for (const row of rows) byHour.set(Number(row.hour), Number(row.count));
-    return Array.from({ length: 24 }, (_, hour) => ({ hour, count: byHour.get(hour) ?? 0 }));
+    return {
+      timeZone: zone,
+      hours: Array.from({ length: 24 }, (_, hour) => ({ hour, count: byHour.get(hour) ?? 0 })),
+    };
+  }
+
+  /**
+   * Знает ли Postgres такой пояс. null — не знает (или его не прислали).
+   *
+   * Список поясов у Postgres свой (pg_timezone_names) и от списка браузера
+   * отличается: устаревшие имена вроде «Asia/Calcutta» браузер шлёт, а
+   * сборка Postgres может не знать. Спросить дешевле, чем ловить ошибку
+   * запроса, который к тому же считает весь раздел.
+   */
+  private async resolveTimeZone(name: string | undefined): Promise<string | null> {
+    if (name === undefined || name === '' || name.length > 64) return null;
+    // Форма имени проверяется до похода в базу: остальное отсекает сам
+    // список поясов, но гонять в него мусор незачем.
+    if (!/^[A-Za-z][A-Za-z0-9_+\-/]*$/u.test(name)) return null;
+    const row = await this.db
+      .one<{ name: string }>(`SELECT name FROM pg_timezone_names WHERE name = $1`, [name])
+      .catch(() => null);
+    return row?.name ?? null;
   }
 
   /**

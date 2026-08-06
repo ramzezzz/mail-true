@@ -20,7 +20,7 @@ import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { RowActions } from '../components/RowActions';
-import { IconKey, IconShieldCheck } from '../components/icons';
+import { IconKey, IconShieldCheck, IconTrash } from '../components/icons';
 import {
   DnsBadge,
   ErrorNotice,
@@ -40,6 +40,7 @@ export function DomainsPage() {
   /** Открытый диалог: домен и последний известный отчёт (может быть null). */
   const [opened, setOpened] = useState<{ domain: Domain; report: DnsReport | null } | null>(null);
   const [dkimFor, setDkimFor] = useState<Domain | null>(null);
+  const [removing, setRemoving] = useState<Domain | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
   const domains = useQuery({ queryKey: ['domains'], queryFn: () => api.domains() });
@@ -163,6 +164,13 @@ export function DomainsPage() {
                               label: 'Ключ DKIM',
                               onClick: () => setDkimFor(domain),
                             },
+                            {
+                              id: 'delete',
+                              icon: <IconTrash />,
+                              label: 'Удалить домен',
+                              danger: true,
+                              onClick: () => setRemoving(domain),
+                            },
                           ]
                         : []),
                     ]}
@@ -217,7 +225,118 @@ export function DomainsPage() {
           }}
         />
       )}
+
+      {removing && (
+        <DeleteDomainModal
+          domain={removing}
+          onClose={() => setRemoving(null)}
+          onDeleted={(name, aliasesRemoved) => {
+            setFlash(
+              aliasesRemoved > 0
+                ? `Домен ${name} удалён вместе с ${String(aliasesRemoved)} алиас(ами). ` +
+                  'Список удалённых алиасов остался в журнале аудита.'
+                : `Домен ${name} удалён.`,
+            );
+            setRemoving(null);
+            void queryClient.invalidateQueries({ queryKey: ['domains'] });
+          }}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * Удаление домена.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ЭТО НЕ ПРОСТО «ЕЩЁ ОДНА КНОПКА УДАЛИТЬ»
+ * ------------------------------------------------------------------
+ * Домен можно было ЗАВЕСТИ из панели, но нельзя было убрать: ошибочно
+ * добавленный `exampl.ru` оставался в списке навсегда, портил сводку DNS
+ * красным и приучал не смотреть на неё вовсе. Убирать его приходилось
+ * из psql — то есть операция была, но пряталась за пределами инструмента.
+ *
+ * Сервер отвечает на отказ ПЕРЕЧНЕМ того, что мешает (routes/domains.ts):
+ * адреса ящиков или пары алиасов, а не одно лишь число. Здесь этот ответ
+ * показывается как есть — переписывать его в «нельзя» значило бы отнять
+ * у человека ровно ту часть, ради которой отказ и составлялся.
+ *
+ * Ящики не сносятся ни при каком согласии: их каталоги переживают строку
+ * в базе, а вернуть настройки и правила удалённого ящика неоткуда.
+ * Алиасы — уносятся, но только по отдельному подтверждению, и тогда их
+ * полный список остаётся в журнале аудита.
+ */
+function DeleteDomainModal({
+  domain,
+  onClose,
+  onDeleted,
+}: {
+  domain: Domain;
+  onClose: () => void;
+  onDeleted: (name: string, aliasesRemoved: number) => void;
+}) {
+  const [withAliases, setWithAliases] = useState(false);
+  const hasBoxes = domain.userCount > 0;
+  const hasAliases = domain.aliasCount > 0;
+
+  const remove = useMutation({
+    mutationFn: () => api.deleteDomain(domain.id, withAliases),
+    onSuccess: (data) => onDeleted(domain.name, data.aliasesRemoved),
+  });
+
+  return (
+    <Modal
+      title={`Удалить домен ${domain.name}`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button mode="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button
+            disabled={remove.isPending || hasBoxes || (hasAliases && !withAliases)}
+            onClick={() => remove.mutate()}
+          >
+            {remove.isPending ? 'Удаляем…' : 'Удалить домен'}
+          </Button>
+        </>
+      }
+    >
+      {/* Ответ сервера показывается целиком: в нём перечислено, ЧТО
+          именно мешает, и это и есть ответ на вопрос «что делать». */}
+      <ErrorNotice error={remove.error} />
+
+      {hasBoxes ? (
+        <Notice tone="error">
+          В домене {domain.userCount} ящик(ов) — удалить его нельзя. Удаление уничтожило бы их
+          записи вместе с настройками, подписями и правилами, а письма остались бы лежать в
+          хранилище без владельца. Сначала перенесите ящики на другой домен или удалите их в
+          разделе «Ящики»: там удаление ящика убирает и его почту.
+        </Notice>
+      ) : (
+        <Notice tone="error">
+          Домен исчезнет из списка вместе с настройками DKIM и последним отчётом о проверке DNS.
+          Почта на адреса этого домена приниматься перестанет.
+        </Notice>
+      )}
+
+      {!hasBoxes && hasAliases && (
+        <Field
+          label={`В домене ${domain.aliasCount} алиас(ов)`}
+          hint="Они удалятся вместе с доменом — в базе у них каскадное удаление. Полный список удалённых попадёт в журнал аудита."
+        >
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={withAliases}
+              onChange={(e) => setWithAliases(e.target.checked)}
+            />
+            <span>Да, удалить домен вместе с его алиасами</span>
+          </label>
+        </Field>
+      )}
+    </Modal>
   );
 }
 
