@@ -264,6 +264,23 @@ const SHOTS = [
   { name: '19-admin-backup', url: `${ADMIN}/backups`, wait: 'main', admin: true },
   { name: '12-admin-flow', url: `${ADMIN}/flow`, wait: 'main', admin: true },
   { name: '13-admin-logs', url: `${ADMIN}/logs`, wait: 'main', admin: true },
+  // Возможности, появившиеся после первой сборки руководства. Порядок
+  // номеров продолжает прежний: снимки подставляются в главы по имени, и
+  // перенумеровать старые значило бы переписать половину ссылок в тексте.
+  { name: '20-templates', url: `${WEB}/settings/templates`, wait: 'main' },
+  { name: '21-access-log', url: `${WEB}/settings/access-log`, wait: 'main' },
+  { name: '22-export', url: `${WEB}/settings/export`, wait: 'main' },
+  { name: '23-recovery', url: `${WEB}/settings/recovery`, wait: 'main' },
+  { name: '24-labels', url: `${WEB}/settings/labels`, wait: 'main' },
+  // Поиск снимается с настоящим запросом: пустая страница поиска показывает
+  // только подсказку, а объяснять надо как раз разбор запроса на условия.
+  {
+    name: '25-search',
+    url: `${WEB}/search/?q=${encodeURIComponent('от:волкова')}`,
+    wait: 'main',
+  },
+  { name: '26-admin-spam', url: `${ADMIN}/spam`, wait: 'main', admin: true },
+  { name: '27-admin-monitoring', url: `${ADMIN}/monitoring`, wait: 'main', admin: true },
 ];
 
 /**
