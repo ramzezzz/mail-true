@@ -61,4 +61,36 @@ if [ -n "${QUEUE_AGENT_TOKEN:-}" ]; then
     sh -c 'while true; do /usr/local/bin/queue-agent.pl; sleep 5; done' &
 fi
 
+# ------------------------------------------------------------------
+# Слежение за файлом сертификата.
+#
+# Сертификат меняют трижды за жизнь сервера: при установке, при продлении
+# Let's Encrypt и когда приносят свой (раздел «Сертификат» в панели).
+# Postfix читает его при старте процесса и сам об изменении не узнаёт —
+# до сих пор это лечили командой `docker compose restart postfix` с хоста.
+#
+# Из панели такой команды не отдать: сокета Docker у сервера приложения
+# нет и не будет — он равен правам root на всей машине, и платить эту цену
+# за перечитывание файла нельзя. Поэтому Postfix следит за файлом сам.
+#
+# `postfix reload` заставляет master перезапустить своих демонов: новые
+# соединения обслуживает уже свежий smtpd с новым сертификатом. Приём
+# почты при этом не прерывается — идущие сеансы дорабатывают до конца.
+# ------------------------------------------------------------------
+CERT_WATCH_INTERVAL="${CERT_WATCH_INTERVAL:-10}"
+if [ "$CERT_WATCH_INTERVAL" -gt 0 ] 2>/dev/null; then
+    (
+        prev=''
+        while true; do
+            now=$(cat /certs/mail.crt /certs/mail.key 2>/dev/null | md5sum)
+            if [ -n "$prev" ] && [ "$now" != "$prev" ]; then
+                echo "Сертификат изменился — перечитываем (postfix reload)"
+                postfix reload >/dev/null 2>&1 || true
+            fi
+            prev="$now"
+            sleep "$CERT_WATCH_INTERVAL"
+        done
+    ) &
+fi
+
 exec /usr/sbin/postfix start-fg

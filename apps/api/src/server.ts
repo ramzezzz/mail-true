@@ -11,8 +11,34 @@ import { UploadStore } from './uploads.js';
 import { buildApp } from './app.js';
 import { installProcessGuards } from './process-guards.js';
 import { createLogStreams } from './admin/app-log.js';
+import { applyStoredEnv } from './admin/server-settings.js';
 
 async function main(): Promise<void> {
+  /*
+   * Настройки, заданные в панели, подмешиваются в окружение ДО того, как
+   * его разберёт хоть одна схема (loadConfig здесь, loadAdminConfig,
+   * loadPushConfig, loadLogoConfig и остальные — дальше, внутри buildApp).
+   *
+   * Отсюда, а не из отдельного вызова в каждом модуле: разбор окружения
+   * происходит в дюжине мест, и подмешивание «по одному» означало бы, что
+   * половина настроек в панели молча не работает, — ровно та беда, ради
+   * которой всё это и затевалось.
+   *
+   * Отказ здесь не мешает старту НИКОГДА: настройки в базе — уточнение
+   * поверх infra/.env, и недоступная база означает «работаем по файлу»,
+   * а не «почтовый сервер не поднялся». Сообщения копятся в список, потому
+   * что логгера ещё нет: его уровень — LOG_LEVEL — сам из этих настроек.
+   */
+  const bootNotes: Array<{ level: 'info' | 'warn'; message: string }> = [];
+  const bootDatabaseUrl = process.env.ADMIN_DATABASE_URL ?? process.env.DATABASE_URL ?? '';
+  if (bootDatabaseUrl !== '') {
+    await applyStoredEnv({
+      connectionString: bootDatabaseUrl,
+      onInfo: (message) => bootNotes.push({ level: 'info', message }),
+      onWarn: (message) => bootNotes.push({ level: 'warn', message }),
+    });
+  }
+
   const config = loadConfig();
   // Журнал идёт в stdout контейнера (как и раньше) И, если задан
   // API_LOG_FILE, вторым потоком в файл общего тома. Файл нужен разделу
@@ -32,6 +58,9 @@ async function main(): Promise<void> {
   // Ставится первым делом: необработанное событие error на любом соединении
   // и необработанное отклонение обещания иначе убивают процесс целиком
   installProcessGuards(logger);
+
+  // Теперь есть чем сказать о том, что произошло до появления логгера.
+  for (const note of bootNotes) logger[note.level](note.message);
 
   if (config.ATTACHMENT_MAX_BYTES < config.UPLOAD_MAX_BYTES) {
     logger.warn(

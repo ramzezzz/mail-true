@@ -6,6 +6,7 @@
     { "path": "./packages/ai" },
     { "path": "./apps/api" },
     { "path": "./apps/autoconfig" },
+    { "path": "./apps/installer" },
     { "path": "./apps/web" }
   ]
 }

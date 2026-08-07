@@ -9,10 +9,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./tls-certificate": {
+      "types": "./dist/tls-certificate.d.ts",
+      "default": "./dist/tls-certificate.js"
     }
   },
   "scripts": {
     "build": "tsc -b",
-    "watch": "tsc -b --watch"
+    "watch": "tsc -b --watch",
+    "test": "npm run build && node --test \"dist/__tests__/*.test.js\""
   }
 }

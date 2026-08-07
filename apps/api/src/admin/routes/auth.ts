@@ -10,6 +10,7 @@ import { auditAnonymous, loadAdminSession, originOf, requireAdmin } from '../gua
 import { LockedError } from '../errors.js';
 import { verifyAdminPassword } from '../passwords.js';
 import { permissionsOf, ROLE_LABELS, isAdminRole } from '../permissions.js';
+import { settingsOf } from '../server-settings.js';
 import { closeMailboxSession, MAILBOX_COOKIE } from './mailbox.js';
 
 const loginSchema = z.object({
@@ -34,7 +35,12 @@ const themeSchema = z.object({
     .nullable(),
 });
 
-function setAdminCookie(app: FastifyInstance, reply: FastifyReply, sessionId: string): void {
+function setAdminCookie(
+  app: FastifyInstance,
+  reply: FastifyReply,
+  sessionId: string,
+  ttlSeconds: number,
+): void {
   const ctx = app.adminCtx;
   reply.setCookie(ctx.config.ADMIN_SESSION_COOKIE_NAME, sessionId, {
     httpOnly: true,
@@ -42,7 +48,7 @@ function setAdminCookie(app: FastifyInstance, reply: FastifyReply, sessionId: st
     secure: ctx.cookieSecure,
     signed: true,
     path: '/',
-    maxAge: ctx.config.ADMIN_SESSION_TTL_SECONDS,
+    maxAge: ttlSeconds,
   });
 }
 
@@ -74,10 +80,14 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
 
       if (!row || !passwordOk || !row.active) {
         if (row) {
+          // Порог и срок блокировки — настройки «действуют сразу»:
+          // администратор поднимает их в панели, когда идёт подбор пароля,
+          // и ждать перезапуска в этот момент ему негде.
+          const settings = settingsOf(ctx);
           const state = await ctx.db.markAdminLoginFailure(
             row.id,
-            ctx.config.ADMIN_LOGIN_MAX_FAILURES,
-            ctx.config.ADMIN_LOCKOUT_MINUTES,
+            await settings.int('ADMIN_LOGIN_MAX_FAILURES'),
+            await settings.int('ADMIN_LOCKOUT_MINUTES'),
           );
           await auditAnonymous(ctx, request, login, {
             action: 'admin.login.failed',
@@ -101,6 +111,7 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       await ctx.db.markAdminLoginSuccess(row.id, origin.ip);
 
       const sessionId = newSessionId();
+      const ttlSeconds = await settingsOf(ctx).int('ADMIN_SESSION_TTL_SECONDS');
       await ctx.sessions.set(
         sessionId,
         {
@@ -110,9 +121,9 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
           createdAt: Date.now(),
           ip: origin.ip,
         },
-        ctx.config.ADMIN_SESSION_TTL_SECONDS,
+        ttlSeconds,
       );
-      setAdminCookie(app, reply, sessionId);
+      setAdminCookie(app, reply, sessionId, ttlSeconds);
 
       await ctx.db.writeAudit({
         adminId: row.id,

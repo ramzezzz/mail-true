@@ -241,18 +241,34 @@ void test('посреднику не разрешён ни один ключ, к
   const path = new URL('../../../../infra/service-agent/agent.pl', import.meta.url);
   const source = await readFile(path, 'utf8');
   const table = source.slice(source.indexOf('my %ENV_KEYS'), source.indexOf('if ($TOKEN eq'));
-  const known = new Set(SETTING_SPECS.map((s) => s.key));
+  /*
+   * Сверка ОБРАТНАЯ предыдущей, и нужна она отдельно.
+   *
+   * Та проверяет, что обещанное панелью посредник умеет. Эта — что он не
+   * умеет НИЧЕГО СВЕРХ обещанного: у службы с сокетом Docker лишнее право
+   * записи в infra/.env — это не неаккуратность, а тихо расширенная
+   * поверхность. Сверяется ПАРА «служба + ключ», а не один ключ: право
+   * записать CLAMAV_ENABLED «через autoconfig» так же лишне, как право
+   * записать туда пароль базы, хотя сам ключ в перечне есть.
+   */
+  const promised = new Set<string>();
+  for (const spec of SETTING_SPECS) {
+    for (const apply of spec.applies ?? []) {
+      if (apply.action === 'recreate') promised.add(`${apply.target}:${spec.key}`);
+    }
+  }
   const stray: string[] = [];
   for (const block of table.matchAll(/(\w+)\s*=>\s*\{([^}]*)\}/gu)) {
+    const service = block[1] ?? '';
     for (const key of (block[2] ?? '').matchAll(/([A-Z][A-Z0-9_]+)\s*=>\s*1/gu)) {
       const name = key[1] ?? '';
-      if (!known.has(name)) stray.push(`${name} (служба ${String(block[1])})`);
+      if (!promised.has(`${service}:${name}`)) stray.push(`${name} (служба ${service})`);
     }
   }
   assert.deepEqual(
     stray,
     [],
-    'Посреднику разрешено писать в infra/.env ключи, которых нет в перечне настроек. ' +
+    'Посреднику разрешено писать в infra/.env то, чего перечень настроек ему не поручал. ' +
       `Это лишнее право у службы с сокетом Docker:\n${stray.join('\n')}`,
   );
 });

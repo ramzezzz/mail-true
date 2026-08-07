@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"],
+    /*
+     * Общий пакет подключается по СОБРАННОМУ описанию типов, а не по
+     * исходникам: исходники лежат вне rootDir, и tsc отказался бы их
+     * компилировать сюда. Порядок сборки задан ссылкой ниже.
+     *
+     * В образе установщика npm workspaces нет (он ставит только свои
+     * зависимости), поэтому связь node_modules/@mail-true/shared там
+     * создаётся вручную — см. apps/installer/Dockerfile.
+     */
+    "paths": {
+      "@mail-true/shared": ["../../packages/shared/dist/index.d.ts"],
+      "@mail-true/shared/tls-certificate": ["../../packages/shared/dist/tls-certificate.d.ts"]
+    }
+  },
+  "references": [{ "path": "../../packages/shared" }],
+  "include": ["src/**/*.ts"]
+}

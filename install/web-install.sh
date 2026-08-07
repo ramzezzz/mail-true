@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# ------------------------------------------------------------------
+# Установка Mail.True через браузер: поднять мастер первого запуска.
+#
+#   sudo bash install/web-install.sh
+#
+# Скрипт делает ровно три вещи и ничего не настраивает: проверяет, что
+# Docker на месте, заводит infra/.env из образца (если его ещё нет) и
+# поднимает службу installer под её профилем. Дальше всё происходит в
+# браузере — по адресу и ключу, которые он напечатает.
+#
+# ------------------------------------------------------------------
+# ЗАЧЕМ ОТДЕЛЬНЫЙ СКРИПТ, ЕСЛИ ЕСТЬ ПРОФИЛЬ
+# ------------------------------------------------------------------
+# Штатная команда — та же самая, и она работает:
+#
+#   docker compose -f infra/docker-compose.yml --profile installer up -d installer
+#
+# Но на СВЕЖЕЙ копии кода она падает ещё до запуска чего бы то ни было:
+#
+#   error while interpolating services.api.environment.SESSION_SECRET:
+#   required variable SESSION_SECRET is missing a value
+#
+# Docker Compose подставляет переменные во ВЕСЬ файл сразу, независимо от
+# профилей: чтобы поднять одну службу, ему нужны значения для всех. А
+# infra/.env на свежей копии ещё нет — его как раз и должен создать
+# установщик. Замкнутый круг, и разрывается он одной строкой: копией
+# образца. Скрипт делает это явно и говорит, что сделал, — вместо того
+# чтобы человек читал сообщение про SESSION_SECRET и гадал, откуда его брать.
+#
+# Значения в скопированном образце — заглушки (change-me-…). Настоящие
+# секреты сгенерирует install/install.sh, которую запустит мастер: ровно
+# так же, как при установке из консоли.
+# ------------------------------------------------------------------
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+. "$SCRIPT_DIR/lib/common.sh"
+
+PORT="${INSTALLER_PORT:-8099}"
+PROJECT="${COMPOSE_PROJECT_NAME:-$(env_get COMPOSE_PROJECT_NAME)}"
+PROJECT="${PROJECT:-mailtrue}"
+export COMPOSE_PROJECT_NAME="$PROJECT"
+export INSTALLER_PORT="$PORT"
+
+printf '%s\n' "$C_BOLD"
+cat <<'EOF'
+  Mail.True — мастер первого запуска в браузере
+EOF
+printf '%s' "$C_OFF"
+info "Каталог проекта: $REPO_DIR"
+
+# ==================================================================
+step "1. Docker"
+# ==================================================================
+have docker || die "Docker не установлен.
+       Мастер первого запуска работает внутри контейнера, поэтому Docker нужен
+       до него. Поставить его умеет консольный установщик:
+         sudo bash install/install.sh --prepare-only
+       либо вручную: https://docs.docker.com/engine/install/"
+
+docker info >/dev/null 2>&1 || die "демон Docker не отвечает — проверьте: systemctl status docker"
+ok "Docker работает ($(docker version --format '{{.Server.Version}}' 2>/dev/null))"
+
+COMPOSE_VER="$(docker compose version --short 2>/dev/null | tr -d 'v' || true)"
+[ -n "$COMPOSE_VER" ] || die "нет плагина docker compose (пакет docker-compose-plugin)"
+version_ge "$COMPOSE_VER" 2.24 || die "docker compose $COMPOSE_VER слишком старый, нужен от 2.24"
+ok "docker compose $COMPOSE_VER"
+
+# ==================================================================
+step "2. Заготовка infra/.env"
+# ==================================================================
+if [ -f "$ENV_FILE" ]; then
+    ok "файл $ENV_FILE уже есть — оставлен как есть"
+else
+    [ -f "$ENV_EXAMPLE" ] || die "нет образца $ENV_EXAMPLE"
+    # tr -d '\r' — по той же причине, что и в install.sh: образец однажды
+    # уехал в репозиторий с концами строк Windows, и тогда POSTGRES_USER
+    # в скриптах становился «mailserver» с невидимым хвостом.
+    tr -d '\r' < "$ENV_EXAMPLE" > "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
+    ok "создан $ENV_FILE из образца (все пароли в нём — заглушки, их заменит мастер)"
+fi
+
+MARK="$(install_mark_env)"
+if [ -n "$MARK" ]; then
+    warn "этот сервер уже отмечен как установленный ($MARK)"
+    hint "мастер откажется работать и объяснит, как снять отметку осознанно:"
+    hint "  sudo bash install/allow-reinstall.sh"
+fi
+
+# ==================================================================
+step "3. Запуск мастера"
+# ==================================================================
+if [ -n "$(port_listener "$PORT")" ]; then
+    die "порт $PORT занят. Задайте другой:  INSTALLER_PORT=8100 sudo bash install/web-install.sh"
+fi
+
+info "собираем образ установщика (первый раз — пара минут)"
+docker compose -f "$COMPOSE_FILE" --profile installer up -d --build installer \
+    || die "не удалось поднять установщик (подробности выше)"
+
+ok "установщик запущен"
+
+# Ключ печатается в журнал контейнера при старте — это и есть защита до
+# входа: администратора ещё нет, спрашивать пароль не у кого.
+sleep 2
+printf '\n'
+docker compose -f "$COMPOSE_FILE" logs installer 2>/dev/null | tail -25
+
+SERVER_IP="$(public_ip)"
+cat <<EOF
+
+  Откройте в браузере:  http://${SERVER_IP:-<адрес сервера>}:$PORT/
+  Ключ доступа — в строках выше (он же: docker compose -f infra/docker-compose.yml logs installer)
+
+  Закончив, мастер остановит себя сам вместе со своим доступом к Docker.
+  Остановить вручную:
+    docker compose -f infra/docker-compose.yml --profile installer down
+
+EOF
+exit 0

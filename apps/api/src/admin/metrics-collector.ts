@@ -42,6 +42,7 @@ import { HostMetricsReader, type HostSnapshot } from './metrics-host.js';
 import { MetricsStore, type MetricSampleInput } from './metrics-store.js';
 import type { QueueAgent } from './queue-agent.js';
 import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
+import type { RetentionLimitsReader } from './server-settings.js';
 
 /** Разрез занятого места: одна строка — одна статья расхода. */
 export interface DiskSlice {
@@ -99,6 +100,12 @@ export interface MetricsCollectorOptions {
   intervalSeconds: number;
   retentionDays: number;
   maxRows: number;
+  /**
+   * Живые пределы уборки из настроек сервера: спрашиваются перед каждой
+   * уборкой, поэтому смена срока хранения в панели действует без
+   * перезапуска (см. admin/server-settings.ts).
+   */
+  limits?: RetentionLimitsReader;
   /** Сколько времени отводится обходу одного каталога. */
   walkBudgetMs?: number;
 }
@@ -188,9 +195,11 @@ export class MetricsCollector {
         });
       this.#ticks += 1;
       if (this.#ticks % 100 === 1) {
-        await this.#store
-          .prune(this.#opts.retentionDays, this.#opts.maxRows)
-          .catch(() => undefined);
+        const limits = (await this.#opts.limits?.().catch(() => null)) ?? {
+          retentionDays: this.#opts.retentionDays,
+          maxRows: this.#opts.maxRows,
+        };
+        await this.#store.prune(limits.retentionDays, limits.maxRows).catch(() => undefined);
       }
       return snapshot;
     } finally {

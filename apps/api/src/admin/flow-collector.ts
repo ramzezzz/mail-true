@@ -30,6 +30,7 @@ import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { AdminDb } from './db.js';
 import { FlowStore } from './flow-store.js';
+import type { RetentionLimitsReader } from './server-settings.js';
 import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
 import { LOG_FILE_NAMES, describeLogFile, readNewLines } from './log-files.js';
 import {
@@ -52,6 +53,13 @@ export interface FlowCollectorOptions {
   retentionDays: number;
   /** Потолок числа строк истории. */
   maxRows: number;
+  /**
+   * Живые пределы уборки из настроек сервера. Спрашиваются перед каждой
+   * уборкой, поэтому изменение срока хранения в панели действует без
+   * перезапуска (см. admin/server-settings.ts). Нет — работают значения
+   * выше, снятые при сборке сборщика.
+   */
+  limits?: RetentionLimitsReader;
   /** Сколько байт журнала разбирать за один заход. */
   chunkBytes?: number;
 }
@@ -196,7 +204,11 @@ export class FlowCollector {
     const now = Date.now();
     if (now - this.lastPruneAt < 10 * 60 * 1000) return;
     this.lastPruneAt = now;
-    const removed = await this.store.prune(this.opts.retentionDays, this.opts.maxRows);
+    const { retentionDays, maxRows } = (await this.opts.limits?.()) ?? {
+      retentionDays: this.opts.retentionDays,
+      maxRows: this.opts.maxRows,
+    };
+    const removed = await this.store.prune(retentionDays, maxRows);
     if (removed > 0) {
       this.opts.logger.info({ removed }, 'История доставки: вытеснены старые записи');
     }

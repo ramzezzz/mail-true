@@ -19,6 +19,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { FlowStore } from '../flow-store.js';
 import { audit, requireAdmin } from '../guard.js';
+import { settingsOf } from '../server-settings.js';
 import { queueMatches, type QueueMessage } from '../queue-agent.js';
 
 const listSchema = z.object({
@@ -274,8 +275,10 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
         newest: stats.newest?.toISOString() ?? null,
         /** Когда разбор журнала увидел первую строку. */
         collectingSince: cursor?.startedAt.toISOString() ?? null,
-        retentionDays: ctx.config.MAIL_FLOW_RETENTION_DAYS,
-        maxRows: ctx.config.MAIL_FLOW_MAX_ROWS,
+        // Из настроек сервера: пределы объявлены «действуют сразу», и
+        // сводка обязана называть то же число, по которому чистит уборщик.
+        retentionDays: await settingsOf(ctx).int('MAIL_FLOW_RETENTION_DAYS'),
+        maxRows: await settingsOf(ctx).int('MAIL_FLOW_MAX_ROWS'),
         queueAgentConfigured: agent.configured,
       };
     },

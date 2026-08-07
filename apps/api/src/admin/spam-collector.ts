@@ -18,6 +18,7 @@ import type { Logger } from 'pino';
 import type { AdminDb } from './db.js';
 import { RepeatGuard, noteRecovered, warnOnce } from './repeat-log.js';
 import type { RspamdClient } from './rspamd.js';
+import type { RetentionLimitsReader } from './server-settings.js';
 import { sampleFromStat, SpamStore } from './spam-store.js';
 
 export interface SpamCollectorOptions {
@@ -28,6 +29,13 @@ export interface SpamCollectorOptions {
   intervalSeconds: number;
   retentionDays: number;
   maxRows: number;
+  /**
+   * Живые пределы уборки из настроек сервера. Сроки хранения снимков
+   * антиспама — те же ключи, что у показателей сервера, и вести себя они
+   * обязаны одинаково: изменил в панели — действует без перезапуска
+   * (см. admin/server-settings.ts).
+   */
+  limits?: RetentionLimitsReader;
 }
 
 export class SpamCollector {
@@ -37,6 +45,7 @@ export class SpamCollector {
   readonly #intervalSeconds: number;
   readonly #retentionDays: number;
   readonly #maxRows: number;
+  readonly #limits: RetentionLimitsReader | undefined;
   readonly #guard = new RepeatGuard();
   #timer: NodeJS.Timeout | null = null;
   /** Уборка не нужна на каждом проходе — раз в сотню снимков достаточно. */
@@ -49,6 +58,7 @@ export class SpamCollector {
     this.#intervalSeconds = options.intervalSeconds;
     this.#retentionDays = options.retentionDays;
     this.#maxRows = options.maxRows;
+    this.#limits = options.limits;
   }
 
   start(): void {
@@ -83,7 +93,11 @@ export class SpamCollector {
       this.#sinceCleanup += 1;
       if (this.#sinceCleanup >= 100) {
         this.#sinceCleanup = 0;
-        await this.#store.prune(this.#retentionDays, this.#maxRows).catch(() => 0);
+        const limits = (await this.#limits?.().catch(() => null)) ?? {
+          retentionDays: this.#retentionDays,
+          maxRows: this.#maxRows,
+        };
+        await this.#store.prune(limits.retentionDays, limits.maxRows).catch(() => 0);
       }
     } catch (err) {
       warnOnce(

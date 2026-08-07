@@ -12,6 +12,7 @@ import { BadRequestError, NotFoundError } from '../../errors.js';
 import { ConflictError } from '../errors.js';
 import { isUniqueViolation, type DomainRow } from '../db.js';
 import { audit, requireAdmin } from '../guard.js';
+import { settingsOf } from '../server-settings.js';
 import {
   buildDkimRecord,
   buildDmarcRecord,
@@ -285,12 +286,17 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
    * бы то, что мы сами себе прописали. См. admin/dns.ts.
    */
   const runCheck = async (row: DomainRow, only?: readonly DnsCheckId[]): Promise<DnsReport> => {
-    const servers = ctx.config.DNS_CHECK_RESOLVERS.split(',')
+    // И список резольверов, и ожидаемый адрес читаются на КАЖДУЮ проверку:
+    // их правят именно тогда, когда проверка показала не то, чего ждали, —
+    // и повторить её нужно сразу, а не после перезапуска контейнера.
+    const settings = settingsOf(ctx);
+    const servers = (await settings.text('DNS_CHECK_RESOLVERS'))
+      .split(',')
       .map((s) => s.trim())
       .filter((s) => s !== '');
     return checkDomainDns(row.name, {
       mailHostname: host,
-      publicIpv4: ctx.config.MAIL_PUBLIC_IPV4,
+      publicIpv4: await settings.text('MAIL_PUBLIC_IPV4'),
       dkimSelector: row.dkim_selector ?? 'mail',
       dkimPublicKey: row.dkim_public_key,
       imapsPort: ctx.config.IMAPS_PORT,

@@ -189,7 +189,7 @@ t_eq "ключ шифрования восстановлен из копии" \
 # ==================================================================
 step "6. Скрипты остаются синтаксически корректными"
 # ==================================================================
-for f in install.sh backup.sh restore.sh selfcheck.sh renew-certs.sh uninstall.sh lib/common.sh; do
+for f in install.sh backup.sh restore.sh selfcheck.sh renew-certs.sh uninstall.sh allow-reinstall.sh web-install.sh lib/common.sh; do
     t_ok "bash -n install/$f" bash -n "$INSTALL_DIR/$f"
 done
 # Проверка занятости портов обязана СПРАШИВАТЬ, а не просто предупреждать
@@ -321,7 +321,8 @@ while read -r key; do
 done < <(grep -rhoE '^[[:space:]]+[A-Z][A-Z_0-9]{2,}:' \
              "$REPO_DIR"/apps/api/src/config.ts \
              "$REPO_DIR"/apps/api/src/*/config.ts \
-             "$REPO_DIR"/apps/autoconfig/src/config.ts 2>/dev/null |
+             "$REPO_DIR"/apps/autoconfig/src/config.ts \
+             "$REPO_DIR"/apps/installer/src/config.ts 2>/dev/null |
          tr -d ' :' | sort -u)
 t_eq "переменные из схем окружения описаны в .env.example или заданы в compose" \
      "${UNDOC_ENV# }" ""
@@ -492,6 +493,174 @@ t_ok "причина отказа миграции печатается чело
     bash -c "grep -q \"sed -n '1,5p' \\\"\\\$errfile\\\"\" '$INSTALL_DIR/lib/common.sh'"
 t_ok "restore.sh подсказывает команду для ручного применения миграции" \
     bash -c "grep -q 'postgres/migrations/<файл>' '$INSTALL_DIR/restore.sh'"
+
+# ==================================================================
+step "10. Веб-установщик: доступ на время и отметка «установлено»"
+# ==================================================================
+# Установщик поднимается с сокетом Docker, то есть с правами root на всей
+# машине. Всё, что удерживает эту цену в рамках «только на время установки»,
+# держится на четырёх свойствах, и ни одно из них не видно глазами при
+# просмотре изменений. Поэтому они проверяются здесь.
+
+COMPOSE_INSTALLER="$(sed -n '/^  installer:/,/^  [a-z]/p' "$COMPOSE_FILE")"
+
+# 1. Службы нет в обычном запуске стека — она под своим профилем.
+t_ok "служба installer объявлена под профилем" \
+    bash -c "printf '%s' \"\$1\" | grep -q \"profiles: \\['installer'\\]\"" _ "$COMPOSE_INSTALLER"
+# Профиль работает, только если он единственный способ её поднять:
+# `docker compose up -d` без --profile не должен её видеть.
+t_no "обычный docker compose config не поднимает установщик" \
+    bash -c "grep -A2 '^  installer:' '$COMPOSE_FILE' | grep -q 'restart: unless-stopped'"
+
+# 2. Демон не поднимает её сам: ни после падения, ни после перезагрузки.
+#    unless-stopped вернул бы установщика в строй вместе с машиной — то есть
+#    вернул бы и открытый сокет Docker, и это никак бы не проявилось.
+t_ok "установщик не перезапускается сам (restart: 'no')" \
+    bash -c "printf '%s' \"\$1\" | grep -q \"restart: 'no'\"" _ "$COMPOSE_INSTALLER"
+
+# 3. Сокет Docker у установщика есть — иначе устанавливать нечем.
+#    А у СЕРВЕРА ПРИЛОЖЕНИЯ (api) его нет и быть не должно: он смотрит
+#    наружу, и сокет там означал бы права root на машине для всякого, кто
+#    найдёт в нём дыру. На этом держатся сразу два решения: журналы
+#    показываются из общего тома, а сертификат службы перечитывают сами.
+DOCKER_SOCK_SERVICES="$(awk '
+    /^  [a-z][a-z0-9_-]*:/ { svc = $1; sub(/:$/, "", svc) }
+    /\/var\/run\/docker\.sock/ { print svc }
+' "$COMPOSE_FILE" | sort -u | tr '\n' ' ')"
+t_ok "сокет Docker есть у установщика" \
+    bash -c "printf '%s' \"\$1\" | grep -qw installer" _ "$DOCKER_SOCK_SERVICES"
+t_no "сокета Docker нет у сервера приложения" \
+    bash -c "printf '%s' \"\$1\" | grep -qw api" _ "$DOCKER_SOCK_SERVICES"
+
+# 4. Каталог проекта монтируется на запись: установщик пишет infra/.env
+#    и сертификаты — теми же руками, что и install.sh.
+t_ok "каталог проекта примонтирован установщику" \
+    bash -c "printf '%s' \"\$1\" | grep -q '\\.\\.:/repo'" _ "$COMPOSE_INSTALLER"
+
+# --- Отметка «установлено» --------------------------------------------
+# Без неё мастер первого запуска, пройденный второй раз, заново сгенерирует
+# пароль Postgres — а том базы принимает пароль только при создании. База
+# останется «здоровой», а доступ к ней потеряют разом api, postfix и dovecot.
+t_ok "install.sh пишет отметку в infra/.env" \
+    bash -c "grep -q 'env_set INSTALL_COMPLETED_AT' '$INSTALL_DIR/install.sh'"
+t_ok "install.sh пишет отметку в базу" \
+    bash -c "grep -q 'INSERT INTO install_state' '$INSTALL_DIR/install.sh'"
+t_ok "есть миграция, заводящая таблицу install_state" \
+    bash -c "grep -q 'CREATE TABLE IF NOT EXISTS install_state' '$REPO_DIR/infra/postgres/migrations/'*.sql"
+t_ok "INSTALL_COMPLETED_AT описан в infra/.env.example" \
+    bash -c "grep -q '^INSTALL_COMPLETED_AT=' '$ENV_EXAMPLE'"
+
+# Отметка ставится ПОСЛЕ того, как всё получилось. Поставленная раньше,
+# она объявила бы установленным сервер, у которого не поднялся стек.
+MARK_LINE="$(grep -n 'env_set INSTALL_COMPLETED_AT' "$INSTALL_DIR/install.sh" | head -1 | cut -d: -f1)"
+ADMIN_LINE="$(grep -n 'INSERT INTO admin_users' "$INSTALL_DIR/install.sh" | head -1 | cut -d: -f1)"
+t_eq "отметка ставится после создания администратора" \
+     "$([ -n "$MARK_LINE" ] && [ -n "$ADMIN_LINE" ] && [ "$MARK_LINE" -gt "$ADMIN_LINE" ] && echo yes || echo no)" "yes"
+
+# Снять отметку можно только осознанно и только с сервера. Кнопка
+# «переустановить» внутри самого установщика означала бы, что защиты нет.
+t_ok "есть команда снятия отметки" test -f "$INSTALL_DIR/allow-reinstall.sh"
+t_ok "снятие отметки требует подтверждения" \
+    bash -c "grep -q 'confirm ' '$INSTALL_DIR/allow-reinstall.sh'"
+t_ok "снятие отметки чистит и файл, и базу" \
+    bash -c "grep -q 'install_mark_clear' '$INSTALL_DIR/allow-reinstall.sh' &&
+             grep -q 'DELETE FROM install_state' '$INSTALL_DIR/lib/common.sh'"
+
+# --- Установщик не заводит второй копии логики установки ----------------
+# Ровно эта ошибка развела бы консольную и браузерную установку: обе
+# работали бы, а расходились бы молча — на одно исправление за раз.
+t_ok "веб-установщик запускает install/install.sh, а не повторяет её" \
+    bash -c "grep -q 'install/install.sh' '$REPO_DIR/apps/installer/src/install.ts'"
+t_ok "веб-установщик пользуется функциями install/lib/common.sh" \
+    bash -c "grep -q 'install/lib/common.sh' '$REPO_DIR/apps/installer/src/shell.ts'"
+t_no "веб-установщик не пишет свои INSERT в таблицы продукта" \
+    bash -c "grep -rqE 'INSERT INTO (virtual_|admin_users|install_state)' '$REPO_DIR/apps/installer/src'"
+
+# --- Ключ доступа -------------------------------------------------------
+# Он существует, потому что администратора ещё нет: до входа установщик
+# нельзя закрыть паролем, а открытым его оставлять нельзя тем более.
+t_ok "ключ доступа печатается в журнал контейнера" \
+    bash -c "grep -q 'keyBanner' '$REPO_DIR/apps/installer/src/server.ts'"
+t_ok "ключ сверяется постоянным по времени сравнением" \
+    bash -c "grep -q 'timingSafeEqual' '$REPO_DIR/apps/installer/src/auth.ts'"
+t_no "ключ доступа нигде не сохраняется на диск" \
+    bash -c "grep -rqE 'writeFile|appendFile' '$REPO_DIR/apps/installer/src/auth.ts'"
+
+# ==================================================================
+step "11. Свой TLS-сертификат: одни правила на мастер и на панель"
+# ==================================================================
+# Свой сертификат ставят дважды: при установке и потом, когда старый
+# истекает. Два набора правил на одно действие разошлись бы молча — обе
+# стороны продолжали бы работать, а ловить перестала бы одна из них.
+SHARED_TLS="$REPO_DIR/packages/shared/src/tls-certificate.ts"
+t_ok "правила проверки живут в общем пакете" test -f "$SHARED_TLS"
+t_ok "мастер первого запуска берёт правила оттуда" \
+    bash -c "grep -q '@mail-true/shared/tls-certificate' '$REPO_DIR/apps/installer/src/tls.ts'"
+t_ok "панель берёт правила оттуда же" \
+    bash -c "grep -q '@mail-true/shared/tls-certificate' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+# Модуль НЕ должен торчать из общего ствола пакета: packages/shared попадает
+# и в браузерные сборки (почта, панель), а разбор сертификата опирается на
+# node:crypto. Один экспорт из ствола — и сборка почты падает с
+# «X509Certificate is not exported by __vite-browser-external», причём
+# падает целиком, независимо от того, кто что импортировал. Поймано живым
+# прогоном: собрать веб-интерфейс стало невозможно.
+t_no "разбор сертификата не переэкспортируется из ствола общего пакета" \
+    bash -c "grep -q \"export \\* from './tls-certificate\" '$REPO_DIR/packages/shared/src/index.ts'"
+t_ok "у модуля есть свой путь в exports пакета" \
+    bash -c "grep -q './tls-certificate' '$REPO_DIR/packages/shared/package.json'"
+
+# Своей копии разбора быть не должно ни там, ни там: X509Certificate в
+# обоих местах допустим только для чтения хранилища доверенных корней.
+t_no "у мастера нет своей копии проверки пары ключ/сертификат" \
+    bash -c "grep -q 'checkPrivateKey' '$REPO_DIR/apps/installer/src/tls.ts'"
+t_no "у панели нет своей копии проверки пары ключ/сертификат" \
+    bash -c "grep -q 'checkPrivateKey' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+
+# Что именно обязана ловить проверка — по одному пункту на способ сломать
+# установку сертификата вручную.
+for what in 'key-mismatch' 'chain-missing' 'expired' 'names'; do
+    t_ok "проверка знает про «$what»" bash -c "grep -q \"'$what'\" '$SHARED_TLS'"
+done
+t_ok "отказ по формату называет команду перевода из .pfx" \
+    bash -c "grep -q 'openssl pkcs12' '$SHARED_TLS'"
+t_ok "нехватка имён называет, что перестанет работать" \
+    bash -c "grep -q 'панель управления' '$SHARED_TLS'"
+
+# --- Приватный ключ наружу не уходит -----------------------------------
+t_no "панель не отдаёт приватный ключ в ответе" \
+    bash -c "grep -qE 'privateKey:|privateKeyPem:' '$REPO_DIR/apps/api/src/admin/routes/tls.ts' && grep -q 'return.*privateKey' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+t_ok "в аудит пишется отпечаток, а не содержимое ключа" \
+    bash -c "grep -q 'fingerprint256' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+
+# --- Свой сертификат не перезаписывается продлением --------------------
+# Иначе таймер systemd дважды в сутки однажды тихо положил бы на его место
+# сертификат Let's Encrypt, а узналось бы это по звонку через неделю.
+t_ok "продление отказывается трогать свой сертификат" \
+    bash -c "grep -q 'MT_REPLACE_CUSTOM_CERT' '$INSTALL_DIR/renew-certs.sh'"
+t_ok "install.sh не выпускает Let's Encrypt поверх своего сертификата" \
+    bash -c "grep -q 'на сервере стоит свой сертификат' '$INSTALL_DIR/install.sh'"
+t_ok "источник сертификата хранится рядом с ним" \
+    bash -c "grep -q 'CERT_SOURCE_FILE' '$INSTALL_DIR/install.sh'"
+
+# --- Замена доходит до служб без сокета Docker -------------------------
+# Сертификат читают nginx, Postfix и Dovecot, и все трое — при старте.
+# Сокета Docker у сервера приложения нет и не будет, поэтому каждая служба
+# следит за файлом сама.
+t_ok "nginx перечитывает сертификат сам" \
+    bash -c "grep -q 'nginx -s reload' '$INFRA_DIR/nginx/watch-certs.sh'"
+t_ok "postfix перечитывает сертификат сам" \
+    bash -c "grep -q 'postfix reload' '$INFRA_DIR/postfix/entrypoint.sh'"
+t_ok "dovecot перечитывает сертификат сам" \
+    bash -c "grep -q 'doveadm reload' '$INFRA_DIR/dovecot/entrypoint.sh'"
+t_ok "скрипт слежения примонтирован в nginx" \
+    bash -c "grep -q 'watch-certs.sh:/docker-entrypoint.d' '$COMPOSE_FILE'"
+# Ради замены сертификата сокет Docker серверу приложения так и не
+# понадобился — а это была самая заманчивая причина его туда добавить.
+# Ищем ЗАПУСК процессов, а не слово «docker»: в пояснениях этого файла оно
+# встречается ровно затем, чтобы объяснить, почему так не сделано, — и
+# первая версия проверки краснела от собственного комментария.
+t_no "перезапуск служб ради сертификата не делается запуском процессов" \
+    bash -c "grep -qE 'child_process|execFile|spawn\(' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
 
 # ==================================================================
 step "Итог"

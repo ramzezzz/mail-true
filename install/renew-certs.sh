@@ -22,11 +22,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 MODE=renew
 case "${1:-}" in
-    --force)       MODE=force ;;
-    --deploy-only) MODE=deploy ;;
-    '')            MODE=renew ;;
+    --force)         MODE=force ;;
+    --deploy-only)   MODE=deploy ;;
+    --install-timer) MODE=timer ;;
+    '')              MODE=renew ;;
     *) die "неизвестный ключ: ${1:-}" ;;
 esac
+
+# Включить автопродление и выйти. Нужно после установки из браузера:
+# веб-установщик работает в контейнере, а systemd живёт на хосте —
+# таймер оттуда завести нечем, и он честно просит выполнить это здесь.
+if [ "$MODE" = "timer" ]; then
+    step "Автопродление сертификата"
+    if install_cert_timer "$SCRIPT_DIR"; then
+        ok "таймер mailtrue-certs.timer включён (проверка дважды в сутки)"
+        info "посмотреть: systemctl status mailtrue-certs.timer"
+        exit 0
+    fi
+    if have systemctl; then
+        die "не удалось включить таймер: systemctl enable mailtrue-certs.timer вернул ошибку"
+    fi
+    die "systemd на этой машине нет. Добавьте в cron:
+       17 3 * * * /bin/bash $SCRIPT_DIR/renew-certs.sh"
+fi
 
 load_env
 CERT_NAME=mailtrue
@@ -39,6 +57,9 @@ deploy() {
     # символическая ссылка наружу внутри контейнера никуда не ведёт.
     install -m 644 "$LE_DIR/fullchain.pem" "$CERT_DIR/mail.crt"
     install -m 600 "$LE_DIR/privkey.pem"   "$CERT_DIR/mail.key"
+    # Отметка «откуда сертификат» — её читают панель и сам этот скрипт.
+    printf 'letsencrypt\n' > "$CERT_DIR/source"
+    chmod 644 "$CERT_DIR/source" 2>/dev/null || true
     ok "сертификат разложен в $CERT_DIR"
     # Postfix и Dovecot читают файл при старте процесса, nginx — по сигналу.
     dc restart postfix dovecot >/dev/null 2>&1 || warn "не удалось перезапустить postfix/dovecot"
@@ -49,6 +70,31 @@ deploy() {
 if [ "$MODE" = "deploy" ]; then
     deploy
     exit 0
+fi
+
+# ------------------------------------------------------------------
+# Свой сертификат продлением Let's Encrypt не перезаписывается.
+#
+# Этот скрипт запускает таймер systemd дважды в сутки. Если на сервере
+# поставили свой сертификат (раздел «Сертификат» в панели или руками), то
+# без этой проверки очередное продление тихо положило бы на его место
+# сертификат Let's Encrypt — а узналось бы это по звонку «Outlook опять
+# ругается на узел», через неделю и без единой записи о причине.
+#
+# Отметку ставит тот, кто ставил сертификат: файл source рядом с ним.
+# Снимается она осознанно — переменной в командной строке, а не молча.
+# ------------------------------------------------------------------
+CERT_SOURCE="$(cat "$CERT_DIR/source" 2>/dev/null | tr -d '[:space:]')"
+if [ "$CERT_SOURCE" = "custom" ] && [ "${MT_REPLACE_CUSTOM_CERT:-0}" != "1" ]; then
+    CURRENT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')"
+    die "на этом сервере стоит СВОЙ сертификат (CN=${CURRENT_CN:-?}), а не Let's Encrypt.
+       Продление заменило бы его — этого не делается молча.
+
+       Если сертификат действительно пора менять, поставьте новый в панели:
+         раздел «Сертификат» → «Поставить свой».
+
+       Если вы хотите вернуться к Let's Encrypt и перезаписать свой сертификат:
+         MT_REPLACE_CUSTOM_CERT=1 sudo bash $0 ${1:-}"
 fi
 
 have certbot || die "certbot не установлен: apt-get install -y certbot"

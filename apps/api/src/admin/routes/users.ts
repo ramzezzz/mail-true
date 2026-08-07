@@ -14,6 +14,7 @@ import { errorInfo } from '../../log.js';
 import { ConflictError } from '../errors.js';
 import { buildAuditRecord, type AuditInput } from '../audit.js';
 import { audit, currentAdmin, originOf, requireAdmin } from '../guard.js';
+import { settingsOf } from '../server-settings.js';
 import { dovecotHash, generatePassword } from '../passwords.js';
 import { nulByteProblem, parseUserImport } from '../csv.js';
 import { addressProblem, displayNameLengthProblem } from '@mail-true/shared';
@@ -185,7 +186,10 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       email: body.email,
       passwordHash: dovecotHash(password),
       displayName: body.displayName ?? null,
-      quotaBytes: body.quotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+      // Квота по умолчанию читается из настроек сервера, а не из
+      // окружения: она объявлена «действует сразу», и следующий заведённый
+      // ящик обязан получить то число, которое стоит в панели сейчас.
+      quotaBytes: body.quotaBytes ?? (await settingsOf(ctx).int('ADMIN_DEFAULT_QUOTA_BYTES')),
       active: body.active,
     });
 
@@ -324,7 +328,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           domain: row.domain,
           adminLogin: admin.login,
           reason,
-          purgeDelayMinutes: ctx.config.ADMIN_MAILBOX_PURGE_DELAY_MINUTES,
+          purgeDelayMinutes: await settingsOf(ctx).int('ADMIN_MAILBOX_PURGE_DELAY_MINUTES'),
         });
       } catch (err) {
         if (!isUndefinedTable(err)) throw err;
@@ -455,7 +459,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       knownDomains,
       existingEmails: existing,
       allowNewDomains,
-      defaultQuotaBytes: defaultQuotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+      defaultQuotaBytes:
+        defaultQuotaBytes ?? (await settingsOf(ctx).int('ADMIN_DEFAULT_QUOTA_BYTES')),
     });
   }
 
@@ -466,7 +471,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
    * в ADMIN_DEFAULT_QUOTA_BYTES и человеку было неоткуда о нём узнать.
    */
   app.get('/users/import/defaults', { preHandler: requireAdmin(app, 'users.write') }, async () => ({
-    defaultQuotaBytes: ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+    defaultQuotaBytes: await settingsOf(ctx).int('ADMIN_DEFAULT_QUOTA_BYTES'),
   }));
 
   /* --- импорт: предварительный показ ------------------------------- */
@@ -487,7 +492,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           hasPassword: r.password !== null,
         })),
         /** Квота, доставшаяся строкам без своей, — ровно та, что применится. */
-        defaultQuotaBytes: body.defaultQuotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+        defaultQuotaBytes:
+          body.defaultQuotaBytes ?? (await settingsOf(ctx).int('ADMIN_DEFAULT_QUOTA_BYTES')),
         /** Будут ли создаваться новые домены на самом деле. */
         allowNewDomains,
         /**
@@ -518,6 +524,15 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       const admin = currentAdmin(request);
       const allowNewDomains = effectiveAllowNewDomains(body.allowNewDomains, admin.role);
       const preview = await parseImport(body.csv, allowNewDomains, body.defaultQuotaBytes);
+      /*
+       * Квота для строк без своей колонки снимается ОДИН раз, до начала
+       * работы, а не спрашивается на каждый ящик. Импорт идёт долго и в
+       * фоне: изменись настройка посреди него, часть ящиков получила бы
+       * одну квоту, часть другую — и по отчёту было бы не понять, почему.
+       * Значение то же, что показал предпросмотр.
+       */
+      const importDefaultQuota =
+        body.defaultQuotaBytes ?? (await settingsOf(ctx).int('ADMIN_DEFAULT_QUOTA_BYTES'));
 
       const jobId = await ctx.db.createImportJob({
         adminId: admin.adminId,
@@ -569,7 +584,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
                   email: row.email,
                   passwordHash: dovecotHash(password),
                   displayName: row.displayName,
-                  quotaBytes: row.quotaBytes ?? ctx.config.ADMIN_DEFAULT_QUOTA_BYTES,
+                  quotaBytes: row.quotaBytes ?? importDefaultQuota,
                   active: true,
                 });
                 result.created.push({

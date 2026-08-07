@@ -16,11 +16,27 @@
 # что даёт «address already in use»). Требуется Docker Compose 2.24 и новее —
 # install/install.sh это проверяет.
 
+#
+# ------------------------------------------------------------------
+# НОМЕРА ПОРТОВ БЕРУТСЯ ИЗ infra/.env, А НЕ ЗАШИТЫ ЗДЕСЬ
+# ------------------------------------------------------------------
+# Умолчания — стандартные, и на боевом сервере менять их не нужно: чужие
+# почтовые серверы стучатся в 25-й, почтовые программы — в 587 и 993, и
+# наша же автонастройка называет им эти номера.
+#
+# Но зашитыми они быть не могут. Раньше были — и получалась ложь: человек
+# задавал другие порты (в infra/.env или на шаге «Порты» мастера первого
+# запуска), основной файл их слушался, а этот молча возвращал стандартные.
+# Второй стенд на той же машине не поднимался вовсе:
+#   «Bind for 127.0.0.1:110 failed: port is already allocated»
+# — при том, что в настройках стоял совсем другой номер. Поймано живым
+# прогоном веб-установщика рядом с работающим стендом.
+# ------------------------------------------------------------------
 services:
   postfix:
     ports: !override
-      - '${BIND_ADDRESS:-0.0.0.0}:25:25' # приём почты от чужих серверов
-      - '${BIND_ADDRESS:-0.0.0.0}:587:587' # отправка: submission, STARTTLS + SASL
+      - '${BIND_ADDRESS:-0.0.0.0}:${SMTP_PORT:-25}:25' # приём почты от чужих серверов
+      - '${BIND_ADDRESS:-0.0.0.0}:${SUBMISSION_PORT:-587}:587' # отправка: submission, STARTTLS + SASL
       # Порт 465 (submissions, TLS сразу) — НЕ «на всякий случай».
       #
       # Его слушает Postfix (infra/postfix/conf/master.cf), его отдаёт
@@ -34,7 +50,7 @@ services:
       # Apple и Thunderbird получали от нас настройку с портом 465, шли на
       # него и упирались в «соединение отклонено». Причём по НАШЕЙ же выдаче.
       # Единственный дефект, который проявляется исключительно в бою.
-      - '${BIND_ADDRESS:-0.0.0.0}:465:465' # отправка: submissions, TLS сразу
+      - '${BIND_ADDRESS:-0.0.0.0}:${SUBMISSIONS_PORT:-465}:465' # отправка: submissions, TLS сразу
     logging: &prod-logging
       driver: json-file
       options:
@@ -45,16 +61,16 @@ services:
 
   dovecot:
     ports: !override
-      - '${BIND_ADDRESS:-0.0.0.0}:143:143' # IMAP + STARTTLS
-      - '${BIND_ADDRESS:-0.0.0.0}:993:993' # IMAPS
-      - '${BIND_ADDRESS:-0.0.0.0}:110:110' # POP3 + STARTTLS
-      - '${BIND_ADDRESS:-0.0.0.0}:995:995' # POP3S
+      - '${BIND_ADDRESS:-0.0.0.0}:${IMAP_PORT:-143}:143' # IMAP + STARTTLS
+      - '${BIND_ADDRESS:-0.0.0.0}:${IMAPS_PORT:-993}:993' # IMAPS
+      - '${BIND_ADDRESS:-0.0.0.0}:${POP3_PORT:-110}:110' # POP3 + STARTTLS
+      - '${BIND_ADDRESS:-0.0.0.0}:${POP3S_PORT:-995}:995' # POP3S
     logging: *prod-logging
 
   nginx:
     ports: !override
-      - '${BIND_ADDRESS:-0.0.0.0}:80:80' # ACME + autoconfig/autodiscover
-      - '${BIND_ADDRESS:-0.0.0.0}:443:443' # то же по HTTPS (нужно Outlook)
+      - '${BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTP_PORT:-80}:80' # ACME + autoconfig/autodiscover
+      - '${BIND_ADDRESS:-0.0.0.0}:${NGINX_HTTPS_PORT:-443}:443' # то же по HTTPS (нужно Outlook)
     logging: *prod-logging
 
   # Сервер приложения. Наружу не публикуется вовсе: весь HTTP приходит

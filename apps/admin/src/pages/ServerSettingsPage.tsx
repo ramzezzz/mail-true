@@ -49,11 +49,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
 import { api, ApiError } from '../api/client';
-import type { ServerSetting, SettingValue } from '../api/types';
+import type { RestartTarget, ServerSetting, SettingValue } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { Badge, Field, Notice, Panel, Tile, Tiles, Toolbar } from '../components/ui';
 import { formatDateTime, plural, pluralize } from '../lib/format';
+import { ApplyButtons, useRestartState } from '../components/ServiceRestart';
+import { appliesSummary } from '../lib/restart';
 import {
   FILTER_LABELS,
   filterSections,
@@ -71,8 +73,6 @@ import {
 import styles from './ServerSettingsPage.module.css';
 
 /** Команда перезапуска — та же, что в docs/infra.md. */
-const RESTART_COMMAND = 'cd infra && docker compose restart api';
-
 const FILTERS: readonly SettingFilter[] = [
   'all',
   'live',
@@ -108,6 +108,8 @@ export function ServerSettingsPage() {
   /** Набранное, но не сохранённое. Ключ настройки → значение поля. */
   const [draft, setDraft] = useState<Record<string, SettingValue>>({});
   const [flash, setFlash] = useState<string | null>(null);
+  // Один запрос на весь раздел: строкам список служб отдаётся готовым.
+  const { data: restart } = useRestartState();
 
   const list = useQuery({
     queryKey: ['server-settings'],
@@ -216,10 +218,9 @@ export function ServerSettingsPage() {
               {pluralize(counts.pendingRestart, 'настройка', 'настройки', 'настроек')}{' '}
               {plural(counts.pendingRestart, 'ждёт', 'ждут', 'ждут')} его
             </span>
-            Значения уже сохранены, но сервер приложения работает по прежним: их он читает один раз
-            при старте. Выполните на машине сервера{' '}
-            <code className={styles.command}>{RESTART_COMMAND}</code> — почта при этом не
-            останавливается, перезапускается только контейнер панели и API.
+            Значения уже сохранены, но службы работают по прежним: такие настройки читаются один раз
+            при старте. Кнопка нужного действия стоит у самой настройки — там же написано, какую
+            службу она затронет и что на это время перестанет работать.
           </div>
           <Button
             mode="secondary"
@@ -342,6 +343,10 @@ export function ServerSettingsPage() {
                   setFlash(null);
                   reset.mutate(setting.key);
                 }}
+                restartTargets={restart?.targets ?? []}
+                onApplied={() => {
+                  void queryClient.invalidateQueries({ queryKey: ['server-settings'] });
+                }}
               />
             ))}
           </ul>
@@ -385,10 +390,36 @@ interface SettingRowProps {
   busy: boolean;
   onChange: (value: SettingValue) => void;
   onReset: () => void;
+  /** Службы, которыми включаются настройки: приходят со страницы одним запросом. */
+  restartTargets: readonly RestartTarget[];
+  /** Перезапуск прошёл: часть настроек перестала ждать, список надо перечитать. */
+  onApplied?: (() => void) | undefined;
 }
 
-export function SettingRow({ setting, draft, writable, busy, onChange, onReset }: SettingRowProps) {
+export function SettingRow({
+  setting,
+  draft,
+  writable,
+  busy,
+  onChange,
+  onReset,
+  restartTargets,
+  onApplied,
+}: SettingRowProps) {
   const state = stateLabel(setting);
+  /*
+   * Список служб приходит СВЕРХУ, а не запрашивается здесь. Строка рисуется
+   * полтораста раз, и полтораста подписок на один и тот же запрос — это
+   * не только лишняя работа: строка перестаёт быть отрисовкой готовых
+   * данных и начинает требовать вокруг себя целое окружение (проверки
+   * ломались именно на этом).
+   *
+   * Право на перезапуск здесь то же, что право менять настройки. Отдельного
+   * не заведено намеренно: тот, кто сохранил значение, требующее
+   * перезапуска, и не может его применить, остался бы с настройкой,
+   * которая «сохранена, но не работает», — и без объяснения, к кому идти.
+   */
+  const applyText = appliesSummary(setting, restartTargets);
   const current: SettingValue = draft ?? setting.value ?? (setting.kind === 'bool' ? false : '');
   const dirty = draft !== undefined && isDirty(setting, draft);
   const invalid = dirty ? validate(setting, current) : null;
@@ -422,9 +453,20 @@ export function SettingRow({ setting, draft, writable, busy, onChange, onReset }
 
         {setting.pendingRestart && (
           <p className={styles.reason}>
-            <b>Сохранено, но ещё не действует.</b> Сервер приложения работает по прежнему значению и
-            возьмёт новое при следующем перезапуске.
+            <b>Сохранено, но ещё не действует.</b> {applyText}
           </p>
+        )}
+
+        {/*
+          Кнопки стоят у самой настройки, а не общей «перезапустить всё»
+          наверху: у служб разные последствия. Перезапуск Postfix — несколько
+          секунд без приёма почты, Dovecot — обрыв сессий почтовых программ,
+          nginx — недоступный веб-вход. Одной кнопкой это не описать честно.
+        */}
+        {setting.applies.length > 0 && (
+          <div className={styles.applies}>
+            <ApplyButtons applies={setting.applies} allowed={writable} onApplied={onApplied} />
+          </div>
         )}
 
         <p className={styles.meta}>

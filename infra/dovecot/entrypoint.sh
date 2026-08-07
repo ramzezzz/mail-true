@@ -66,4 +66,28 @@ tail -n 0 -F "$DOVELOG" &
     done
 ) &
 
+# ------------------------------------------------------------------
+# Слежение за файлом сертификата — по той же причине, что у Postfix
+# (см. infra/postfix/entrypoint.sh): раздел «Сертификат» в панели меняет
+# файл, а сокета Docker у сервера приложения нет и не будет.
+#
+# `doveadm reload` перечитывает конфигурацию вместе с файлами сертификата.
+# Уже открытые сеансы IMAP не рвутся: новые настройки получают следующие.
+# ------------------------------------------------------------------
+CERT_WATCH_INTERVAL="${CERT_WATCH_INTERVAL:-10}"
+if [ "$CERT_WATCH_INTERVAL" -gt 0 ] 2>/dev/null; then
+    (
+        prev=''
+        while true; do
+            now=$(cat /certs/mail.crt /certs/mail.key 2>/dev/null | md5sum)
+            if [ -n "$prev" ] && [ "$now" != "$prev" ]; then
+                echo "Сертификат изменился — перечитываем (doveadm reload)"
+                doveadm reload >/dev/null 2>&1 || true
+            fi
+            prev="$now"
+            sleep "$CERT_WATCH_INTERVAL"
+        done
+    ) &
+fi
+
 exec dovecot -F

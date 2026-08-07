@@ -15,6 +15,7 @@ import { newSessionId } from '../../crypto.js';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../../errors.js';
 import { AdminUnavailableError, ForbiddenError } from '../errors.js';
 import { audit, currentAdmin, originOf, requireAdmin } from '../guard.js';
+import { settingsOf } from '../server-settings.js';
 import { hasPermission } from '../permissions.js';
 import type { MailboxSessionData } from '../session.js';
 import type { AdminContext } from '../types.js';
@@ -74,14 +75,14 @@ export async function adminMailboxRoutes(app: FastifyInstance): Promise<void> {
   ): Promise<{ mailboxEmail: string; accessId: number } | null> =>
     closeMailboxSession(ctx, request, reason);
 
-  function setMailboxCookie(reply: FastifyReply, id: string): void {
+  function setMailboxCookie(reply: FastifyReply, id: string, ttlSeconds: number): void {
     reply.setCookie(MAILBOX_COOKIE, id, {
       httpOnly: true,
       sameSite: 'lax',
       secure: ctx.cookieSecure,
       signed: true,
       path: '/',
-      maxAge: ctx.config.ADMIN_MAILBOX_TTL_SECONDS,
+      maxAge: ttlSeconds,
     });
   }
 
@@ -131,6 +132,11 @@ export async function adminMailboxRoutes(app: FastifyInstance): Promise<void> {
       // которого не было
       await ctx.mailbox.verify(user.email);
 
+      // Срок сеанса читается из настроек сервера на каждый вход: он
+      // объявлен «действует сразу», и сокращение срока обязано касаться
+      // ближайшего входа, а не следующего перезапуска контейнера.
+      const ttlSeconds = await settingsOf(ctx).int('ADMIN_MAILBOX_TTL_SECONDS');
+
       // Вход в другой ящик поверх текущего закрывает предыдущую запись.
       // Раньше она оставалась открытой навсегда, и по журналу выходило,
       // что администратор сидит сразу в двух чужих ящиках.
@@ -145,7 +151,7 @@ export async function adminMailboxRoutes(app: FastifyInstance): Promise<void> {
         ...originOf(request),
         // Срок сеанса пишется в запись: по нему уборщик закроет её, если
         // администратор просто ушёл, не нажав «выйти».
-        ttlSeconds: ctx.config.ADMIN_MAILBOX_TTL_SECONDS,
+        ttlSeconds,
       });
 
       const sessionId = newSessionId();
@@ -160,9 +166,9 @@ export async function adminMailboxRoutes(app: FastifyInstance): Promise<void> {
           createdAt: Date.now(),
           readOnly: true,
         },
-        ctx.config.ADMIN_MAILBOX_TTL_SECONDS,
+        ttlSeconds,
       );
-      setMailboxCookie(reply, sessionId);
+      setMailboxCookie(reply, sessionId, ttlSeconds);
 
       await audit(ctx, request, {
         action: 'mailbox.impersonate',
@@ -182,7 +188,7 @@ export async function adminMailboxRoutes(app: FastifyInstance): Promise<void> {
         adminSession: true,
         readOnly: true,
         canSend: false,
-        expiresInSeconds: ctx.config.ADMIN_MAILBOX_TTL_SECONDS,
+        expiresInSeconds: ttlSeconds,
       };
     },
   );

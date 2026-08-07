@@ -559,6 +559,109 @@ apply_migrations() {
 }
 
 # ------------------------------------------------------------------
+# Автопродление сертификата Let's Encrypt (таймер systemd).
+#
+# Сертификат живёт 90 дней. Без продления почта в один день просто
+# перестаёт приниматься чужими серверами, и причина («срок истёк»)
+# видна только в чужих журналах.
+#
+# Функция общая, потому что заводить таймер приходится из двух мест:
+# install/install.sh при установке из консоли и install/renew-certs.sh
+# --install-timer — после установки из браузера. Веб-установщик работает
+# в контейнере, а systemd живёт на хосте: изнутри контейнера таймер
+# завести нечем, и это единственное, что мастер первого запуска
+# договаривает словами вместо того, чтобы сделать сам.
+#
+# install_cert_timer <каталог install/> — 0, если таймер включён.
+# ------------------------------------------------------------------
+install_cert_timer() {
+    local dir="$1"
+    if ! have systemctl || [ ! -d /etc/systemd/system ]; then
+        return 1
+    fi
+    cat > /etc/systemd/system/mailtrue-certs.service <<EOF
+[Unit]
+Description=Mail.True: продление TLS-сертификата Let's Encrypt
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $dir/renew-certs.sh
+EOF
+    cat > /etc/systemd/system/mailtrue-certs.timer <<'EOF'
+[Unit]
+Description=Mail.True: проверка срока TLS-сертификата дважды в сутки
+
+[Timer]
+OnCalendar=*-*-* 03,15:17:00
+RandomizedDelaySec=30m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    systemctl enable --now mailtrue-certs.timer >/dev/null 2>&1
+}
+
+# ==================================================================
+# Отметка «сервер установлен»
+# ==================================================================
+#
+# Её ставит последним шагом install/install.sh, читает веб-установщик
+# (apps/installer), снимает install/allow-reinstall.sh.
+#
+# Отметок две, и обе нужны. INSTALL_COMPLETED_AT лежит в infra/.env —
+# то есть в каталоге проекта, который можно потерять целиком (или
+# развернуть заново рядом со СТАРЫМИ томами, где лежит вся почта).
+# Строка в install_state лежит в самой базе — ровно там, где живёт то,
+# что переустановка способна испортить, и потерять её, не потеряв заодно
+# повод для осторожности, невозможно.
+#
+# Правило чтения: установлено, если нашлась ЛЮБАЯ из двух. Ошибиться в
+# сторону «уже установлено» дёшево (человек снимет отметку одной
+# командой), в обратную — нет.
+
+# install_mark_env — время из infra/.env или пусто.
+install_mark_env() {
+    env_get INSTALL_COMPLETED_AT
+}
+
+# install_mark_db — время из таблицы install_state или пусто.
+# Молчит, если базы нет: отсутствие ответа — это не «не установлено»,
+# а «спросить не удалось», и решает по совокупности вызывающий.
+install_mark_db() {
+    dc exec -T postgres psql -U "${POSTGRES_USER:-}" -d "${POSTGRES_DB:-}" -qtA \
+        -c "SELECT completed_at FROM install_state WHERE id" 2>/dev/null | tr -d '\r' | head -1
+}
+
+# install_mark_clear — снять обе отметки. Печатает, что именно сняла.
+install_mark_clear() {
+    local had_env had_db
+    had_env="$(install_mark_env)"
+    if [ -n "$had_env" ]; then
+        env_set INSTALL_COMPLETED_AT ''
+        ok "отметка в infra/.env снята (была $had_env)"
+    else
+        info "в infra/.env отметки не было"
+    fi
+
+    had_db="$(install_mark_db)"
+    if [ -n "$had_db" ]; then
+        if dc exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+               -qtA -c "DELETE FROM install_state" >/dev/null 2>&1; then
+            ok "отметка в базе снята (была $had_db)"
+        else
+            fail "отметку в базе снять не удалось — веб-установщик по-прежнему откажется работать"
+            return 1
+        fi
+    else
+        info "в базе отметки не было (или база не отвечает)"
+    fi
+    return 0
+}
+
+# ------------------------------------------------------------------
 # Проверки системы
 # ------------------------------------------------------------------
 

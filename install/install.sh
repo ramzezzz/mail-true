@@ -516,7 +516,7 @@ env_set BIND_ADDRESS  "$BIND_ADDRESS"
 # Секреты: генерируются один раз и при повторной установке не меняются —
 # иначе пароль в .env разъехался бы с паролем внутри уже созданной базы.
 #
-# QUEUE_AGENT_TOKEN стоит в этом списке не для красоты. В infra/.env.example
+# QUEUE_AGENT_TOKEN и SERVICE_AGENT_TOKEN стоят в этом списке не для красоты. В infra/.env.example
 # он ПУСТОЙ, а пустое значение означает «посредника к очереди Postfix не
 # запускать вовсе» (infra/postfix/entrypoint.sh) и «раздел „Очередь“ в панели
 # недоступен». Установщик копирует образец как есть и раньше этот ключ не
@@ -532,7 +532,8 @@ for pair in \
     "SESSION_SECRET:48" \
     "ADMIN_SESSION_SECRET:48" \
     "EXTERNAL_ACCOUNTS_KEY:48" \
-    "QUEUE_AGENT_TOKEN:64"
+    "QUEUE_AGENT_TOKEN:64" \
+    "SERVICE_AGENT_TOKEN:64"
 do
     key="${pair%%:*}"; len="${pair##*:}"
     current="$(env_get "$key")"
@@ -553,17 +554,33 @@ env_ensure POSTGRES_DB          mailserver || true
 env_ensure POSTGRES_USER        mailserver || true
 env_ensure DKIM_SELECTOR        mail       || true
 env_ensure DOVECOT_MASTER_USER  mtadmin    || true
-env_set POSTGRES_PORT 5432
-env_set REDIS_PORT    6379
-env_set SMTP_PORT 25
-env_set SUBMISSION_PORT 587
-env_set IMAP_PORT 143
-env_set IMAPS_PORT 993
-env_set POP3_PORT 110
-env_set POP3S_PORT 995
-env_set AUTOCONFIG_PORT 8025
-env_set NGINX_HTTP_PORT 80
-env_set NGINX_HTTPS_PORT 443
+# ------------------------------------------------------------------
+# Публикуемые порты.
+#
+# По умолчанию — стандартные, и менять их на боевом сервере не нужно:
+# чужие почтовые серверы стучатся в 25-й, почтовые программы — в 587/993,
+# и наша же автонастройка называет им именно эти номера.
+#
+# Но значения ЖЁСТКО зашитыми быть не могут: на машине, где уже стоит
+# один стенд, второй не поднимется вовсе — docker откажет «port is already
+# allocated». Раньше единственным выходом было править infra/.env после
+# установщика и поднимать стек заново руками, потому что установщик
+# переписывал порты при каждом запуске. Теперь любой из них можно задать
+# заранее (MAILTRUE_SMTP_PORT и т.д.) — этим и пользуется веб-установщик,
+# у которого есть шаг «Порты».
+# ------------------------------------------------------------------
+env_set POSTGRES_PORT   "${MAILTRUE_POSTGRES_PORT:-5432}"
+env_set REDIS_PORT      "${MAILTRUE_REDIS_PORT:-6379}"
+env_set SMTP_PORT       "${MAILTRUE_SMTP_PORT:-25}"
+env_set SUBMISSION_PORT "${MAILTRUE_SUBMISSION_PORT:-587}"
+env_set SUBMISSIONS_PORT "${MAILTRUE_SUBMISSIONS_PORT:-465}"
+env_set IMAP_PORT       "${MAILTRUE_IMAP_PORT:-143}"
+env_set IMAPS_PORT      "${MAILTRUE_IMAPS_PORT:-993}"
+env_set POP3_PORT       "${MAILTRUE_POP3_PORT:-110}"
+env_set POP3S_PORT      "${MAILTRUE_POP3S_PORT:-995}"
+env_set AUTOCONFIG_PORT "${MAILTRUE_AUTOCONFIG_PORT:-8025}"
+env_set NGINX_HTTP_PORT "${MAILTRUE_NGINX_HTTP_PORT:-80}"
+env_set NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-443}"
 env_set API_LOG_LEVEL info
 # Веб-интерфейс: cookie сессии отдаётся только по HTTPS. Отладочный порт
 # сервера приложения наружу не публикуется (install/compose.prod.yml).
@@ -663,6 +680,34 @@ step "5. TLS-сертификат (временный)"
 # потом заменяем его настоящим.
 
 mkdir -p "$CERT_DIR"
+
+# ------------------------------------------------------------------
+# Каталог сертификатов доступен на запись серверу приложения (uid 5000,
+# тот же, что у почтового хранилища).
+#
+# Это нужно разделу «Сертификат» в панели: замена сертификата на живом
+# сервере не должна требовать доступа по SSH. Сокета Docker серверу
+# приложения при этом не дают — он равен правам root на всей машине;
+# службы перечитывают файл сами (infra/nginx/watch-certs.sh и entrypoint
+# почтовых служб).
+#
+# Права самих ФАЙЛОВ не меняются: mail.crt читаем всем, mail.key — только
+# владельцу. Открывается ровно каталог, и ровно одному пользователю.
+# ------------------------------------------------------------------
+if chgrp 5000 "$CERT_DIR" 2>/dev/null && chmod 2775 "$CERT_DIR" 2>/dev/null; then
+    ok "каталог сертификатов открыт панели на запись (замена сертификата без SSH)"
+else
+    warn "не удалось открыть каталог сертификатов серверу приложения"
+    hint "раздел «Сертификат» в панели сможет только показывать, но не менять"
+    hint "поправить: chgrp 5000 $CERT_DIR && chmod 2775 $CERT_DIR"
+fi
+
+# Откуда взялся сертификат. Файлом рядом с ним, а не ключом в infra/.env:
+# писать сюда должен и сервер приложения (у него нет доступа к .env), а
+# читать — и install/renew-certs.sh на хосте, и мастер первого запуска.
+CERT_SOURCE_FILE="$CERT_DIR/source"
+CERT_SOURCE="$(cat "$CERT_SOURCE_FILE" 2>/dev/null | tr -d '[:space:]')"
+
 if [ -f "$CERT_DIR/mail.crt" ] && [ -f "$CERT_DIR/mail.key" ]; then
     CERT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')"
     ok "сертификат уже есть (CN=${CERT_CN:-?})"
@@ -674,7 +719,31 @@ else
         >/dev/null 2>&1 || die "не удалось сгенерировать самоподписанный сертификат"
     chmod 644 "$CERT_DIR/mail.crt"; chmod 600 "$CERT_DIR/mail.key"
     ok "самоподписанный сертификат создан (CN=$MAIL_HOST)"
+    CERT_SOURCE=selfsigned
+    printf 'selfsigned\n' > "$CERT_SOURCE_FILE"
 fi
+
+# ------------------------------------------------------------------
+# Свой сертификат уважается и переустановкой.
+#
+# Если в панели поставили свой сертификат (или его положили сюда руками
+# и отметили файлом source), повторный запуск установщика НЕ пытается
+# выпустить Let's Encrypt поверх: продление стёрло бы чужой сертификат
+# молча, и узналось бы это по звонку «Outlook ругается».
+#
+# Настоять на возврате к Let's Encrypt можно явно: MAILTRUE_TLS=letsencrypt.
+# ------------------------------------------------------------------
+if [ "$CERT_SOURCE" = "custom" ] && [ -z "${MAILTRUE_TLS:-}" ]; then
+    info "на сервере стоит свой сертификат — оставляем его"
+    hint "вернуться к Let's Encrypt: MAILTRUE_TLS=letsencrypt sudo bash install/install.sh"
+    TLS_MODE=custom
+fi
+if [ -z "$CERT_SOURCE" ]; then
+    # Сертификат уже лежал, а отметки не было: так выглядит сервер,
+    # установленный до появления раздела «Сертификат».
+    printf '%s\n' "$TLS_MODE" > "$CERT_SOURCE_FILE"
+fi
+chmod 644 "$CERT_SOURCE_FILE" 2>/dev/null || true
 
 if [ "$PREPARE_ONLY" = "1" ]; then
     step "Готово (режим --prepare-only)"
@@ -918,41 +987,25 @@ issue_letsencrypt() {
     return 0
 }
 
-if [ "$TLS_MODE" = "letsencrypt" ]; then
+if [ "$TLS_MODE" = "custom" ]; then
+    info "на сервере стоит свой сертификат — установщик его не трогает"
+    info "заменить: раздел «Сертификат» в панели управления"
+elif [ "$TLS_MODE" = "letsencrypt" ]; then
     if issue_letsencrypt; then
         ok "сертификат Let's Encrypt выпущен и установлен"
-        # Автопродление: сертификат живёт 90 дней, продлевать надо заранее
-        if have systemctl && [ -d /etc/systemd/system ]; then
-            cat > /etc/systemd/system/mailtrue-certs.service <<EOF
-[Unit]
-Description=Mail.True: продление TLS-сертификата Let's Encrypt
-After=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash $INSTALL_DIR/renew-certs.sh
-EOF
-            cat > /etc/systemd/system/mailtrue-certs.timer <<'EOF'
-[Unit]
-Description=Mail.True: проверка срока TLS-сертификата дважды в сутки
-
-[Timer]
-OnCalendar=*-*-* 03,15:17:00
-RandomizedDelaySec=30m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-            systemctl daemon-reload >/dev/null 2>&1 || true
-            if systemctl enable --now mailtrue-certs.timer >/dev/null 2>&1; then
-                ok "автопродление сертификата включено (systemd-таймер)"
-            else
-                warn "не удалось включить таймер продления"
-            fi
+        printf 'letsencrypt\n' > "$CERT_SOURCE_FILE"
+        # Автопродление: сертификат живёт 90 дней, продлевать надо заранее.
+        # Сам таймер заводит install_cert_timer (lib/common.sh) — он же
+        # нужен renew-certs.sh --install-timer после установки из браузера,
+        # где systemd хоста контейнеру недоступен.
+        if install_cert_timer "$INSTALL_DIR"; then
+            ok "автопродление сертификата включено (systemd-таймер)"
+        elif have systemctl; then
+            warn "не удалось включить таймер продления"
         else
             warn "systemd недоступен — продление сертификата придётся запускать самому"
-            hint "добавьте в cron: 17 3 * * * /bin/bash $INSTALL_DIR/renew-certs.sh"
+            hint "на хосте: sudo bash $INSTALL_DIR/renew-certs.sh --install-timer"
+            hint "либо в cron: 17 3 * * * /bin/bash $INSTALL_DIR/renew-certs.sh"
         fi
     else
         warn "работаем с самоподписанным сертификатом"
@@ -1009,6 +1062,40 @@ printf '\n'
 cat "$DNS_OUT"
 printf '\n'
 info "эти же записи сохранены в $DNS_OUT"
+
+# ==================================================================
+step "Отметка «установлено»"
+# ==================================================================
+# Ставится ПОСЛЕДНИМ шагом и только здесь: до этой строки могли не
+# примениться миграции, не подняться сервисы, не создаться ящик — и
+# отметка «установлено» на таком сервере была бы ложью.
+#
+# Отметок две, и это не дублирование. INSTALL_COMPLETED_AT лежит в
+# infra/.env — рядом с каталогом проекта, который можно потерять или
+# развернуть заново поверх СТАРЫХ томов с почтой. Строка в install_state
+# лежит в самой базе, то есть ровно там, где живёт то, что переустановка
+# способна испортить. Веб-установщик считает сервер установленным, если
+# нашёл ЛЮБУЮ из них.
+#
+# Снимаются обе одной осознанной командой: install/allow-reinstall.sh
+env_set INSTALL_COMPLETED_AT "$(date -Iseconds)"
+
+if printf "INSERT INTO install_state (id, completed_at, installed_by, mail_domain, mail_hostname, admin_login)
+           VALUES (true, now(), '%s', '%s', '%s', '%s')
+           ON CONFLICT (id) DO UPDATE
+              SET completed_at = now(), installed_by = EXCLUDED.installed_by,
+                  mail_domain = EXCLUDED.mail_domain,
+                  mail_hostname = EXCLUDED.mail_hostname,
+                  admin_login = EXCLUDED.admin_login;\n" \
+        "${MT_INSTALL_SOURCE:-install.sh}" "$DOMAIN" "$MAIL_HOST" "$ADMIN_LOGIN" | psql_run >/dev/null 2>&1; then
+    ok "сервер отмечен как установленный (infra/.env и таблица install_state)"
+else
+    # Не повод ронять установку: почта уже работает. Но молчать нельзя —
+    # без отметки в базе веб-установщик, поднятый на этом сервере после
+    # потери infra/.env, счёл бы его чистым.
+    warn "отметка в базе не поставлена (таблица install_state недоступна)"
+    hint "проверьте: bash install/selfcheck.sh — и повторите установку, она идемпотентна"
+fi
 
 # ==================================================================
 step "Установка завершена"

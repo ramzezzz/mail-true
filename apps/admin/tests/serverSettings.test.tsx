@@ -248,6 +248,7 @@ function render(item: ServerSetting, writable = true): void {
         draft={undefined}
         writable={writable}
         busy={false}
+        restartTargets={[]}
         onChange={() => undefined}
         onReset={() => undefined}
       />,

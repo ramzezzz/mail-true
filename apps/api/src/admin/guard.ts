@@ -11,6 +11,7 @@ import type {
 import { UnauthorizedError } from '../errors.js';
 import { buildAuditRecord, type AuditInput, type AuditOrigin } from './audit.js';
 import { assertPermission, type Permission } from './permissions.js';
+import { settingsOf } from './server-settings.js';
 import type { AdminContext, CurrentAdmin } from './types.js';
 
 /**
@@ -53,9 +54,10 @@ export async function loadAdminSession(
     throw new UnauthorizedError('Учётная запись администратора отключена');
   }
 
-  void ctx.sessions
-    .touch(unsigned.value, ctx.config.ADMIN_SESSION_TTL_SECONDS)
-    .catch(() => undefined);
+  // Срок читается из настроек сервера, а не из окружения: он объявлен
+  // «действует сразу», и продление должно идти уже по новому значению.
+  const ttlSeconds = await settingsOf(ctx).int('ADMIN_SESSION_TTL_SECONDS');
+  void ctx.sessions.touch(unsigned.value, ttlSeconds).catch(() => undefined);
 
   return { ...data, role: row.role, login: row.login, sessionId: unsigned.value };
 }

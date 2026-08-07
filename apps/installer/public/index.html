@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Mail.True — первый запуск</title>
+    <!--
+      Значок вкладки встроен прямо сюда, а не отдан отдельным файлом:
+      иначе браузер просит /favicon.ico, установщик отвечает 404, и в
+      консоли появляется красная строка на пустом месте — первое, что
+      увидит тот, кто откроет инструменты разработчика при разборе
+      настоящей неполадки.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a5ce0'/%3E%3Cpath d='M6 11h20v10H6z' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Cpath d='M6 11l10 7 10-7' fill='none' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/installer.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="top__inner">
+        <span class="logo">Mail<span class="logo__dot">.</span>True</span>
+        <span class="top__caption">Мастер первого запуска</span>
+      </div>
+    </header>
+
+    <main id="root" class="shell">
+      <div class="card card--narrow">
+        <p class="muted">Загружается…</p>
+      </div>
+    </main>
+
+    <script src="/installer.js"></script>
+  </body>
+</html>
