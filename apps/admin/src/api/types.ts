@@ -28,6 +28,15 @@ export type Permission =
   /** Перенос почты с чужого сервера: смотреть ход отдельно от запуска. */
   | 'migration.read'
   | 'migration.run'
+  /**
+   * Настройки сервера: смотреть отдельно от «менять». Оба права — у
+   * владельца: в списке стоят адреса и порты внутренней сети и то, какие
+   * возможности на сервере выключены, то есть карта установки.
+   */
+  | 'serversettings.read'
+  | 'serversettings.write'
+  /** Смена основного домена сервера. Право одно и только у владельца. */
+  | 'domainchange.run'
   | 'admins.manage';
 
 export interface AdminSession {
@@ -1445,4 +1454,367 @@ export interface MonitoringFailures {
     reason: string | null;
   }>;
   rspamdErrors: Array<{ at: string; type: string; module: string; message: string }>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Смена основного домена                                               */
+/* ------------------------------------------------------------------ */
+
+/** Почему смену домена запускать нельзя. Пока список непуст — отказ. */
+export interface DomainChangeBlocker {
+  id: string;
+  message: string;
+  fix: string;
+}
+
+/** Запись DNS, которую надо опубликовать ДО начала. */
+export interface DomainChangeDnsRecord {
+  name: string;
+  type: string;
+  value: string;
+  required: boolean;
+  why: string;
+}
+
+/** Строк с адресом в одной таблице продукта. */
+export interface DomainChangeTableMove {
+  table: string;
+  column: string;
+  what: string;
+  rows: number;
+}
+
+export interface DomainChangePlan {
+  createdAt: string;
+  oldDomain: string;
+  newDomain: string;
+  oldHostname: string;
+  newHostname: string;
+  counts: {
+    mailboxes: number;
+    aliases: number;
+    disposableAliases: number;
+    messages: number;
+    bytes: number;
+    rows: number;
+    tables: DomainChangeTableMove[];
+    freeTextHits: Array<{ what: string; rows: number }>;
+  };
+  space: {
+    path: string;
+    freeBytes: number;
+    totalBytes: number;
+    requiredBytes: number;
+    renameOnly: boolean;
+    ok: boolean;
+  };
+  dkim: { selector: string; recordName: string; publicKey: string; record: string };
+  dnsToPublish: DomainChangeDnsRecord[];
+  dnsReady: boolean;
+  dnsSummary: string;
+  blockers: DomainChangeBlocker[];
+  breaks: string[];
+  manual: string[];
+  keeps: Array<{ what: string; why: string }>;
+  downtimeSeconds: { min: number; max: number };
+  warnings: string[];
+}
+
+export type DomainChangeState = 'planned' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** Шаг выполнения — строка в ходе работ. */
+export interface DomainChangeStep {
+  id: string;
+  title: string;
+  state: 'pending' | 'running' | 'ok' | 'failed' | 'skipped';
+  detail?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface DomainChangeJob {
+  id: number;
+  state: DomainChangeState;
+  adminLogin: string;
+  oldDomain: string;
+  newDomain: string;
+  oldHostname: string;
+  newHostname: string;
+  dkimSelector: string;
+  dkimPublicKey: string | null;
+  plan: DomainChangePlan | null;
+  steps: DomainChangeStep[];
+  pointOfNoReturnAt: string | null;
+  /** Можно ли ещё отказаться без последствий. */
+  cancellable: boolean;
+  mailboxes: number;
+  aliases: number;
+  messages: number;
+  bytes: number;
+  backupPath: string | null;
+  backupBytes: number;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface DomainChangeOverview {
+  ready: boolean;
+  reason: string | null;
+  currentDomain: string;
+  currentHostname: string;
+  /** Есть ли чем зашифровать приватный ключ DKIM. */
+  canStoreKey?: boolean;
+  live: DomainChangeJob | null;
+  history: DomainChangeJob[];
+}
+
+/* ================================================================== */
+/* Настройки сервера                                                   */
+/* ================================================================== */
+
+/** Когда изменение начинает действовать (apps/api server-settings-registry). */
+export type SettingGroup = 'live' | 'restart' | 'recreate' | 'locked';
+
+/** Тип значения — разбирается так же, как переменная окружения. */
+export type SettingKind = 'int' | 'bool' | 'string' | 'enum';
+
+/** Единица измерения: панели — чтобы подписать поле и перевести в часы. */
+export type SettingUnit =
+  'bytes' | 'ms' | 'seconds' | 'minutes' | 'hours' | 'days' | 'rows' | 'count' | 'perMinute';
+
+/** Откуда взято действующее значение. */
+export type SettingSource = 'db' | 'env' | 'default';
+
+export type SettingValue = string | number | boolean;
+
+export interface ServerSetting {
+  /** Имя переменной окружения — то же, что в infra/.env.example. */
+  key: string;
+  section: string;
+  group: SettingGroup;
+  kind: SettingKind;
+  unit: SettingUnit | null;
+  min: number | null;
+  max: number | null;
+  options: string[] | null;
+  /** Описание по-русски: зачем настройка и чем грозит её смена. */
+  description: string;
+  /** Почему не меняется из веба. Только у группы locked. */
+  reason: string | null;
+  editable: boolean;
+  /** Секрет: значение наружу не выходит, известно лишь «задан или нет». */
+  secret: boolean;
+  /**
+   * ОБЕЩАНИЕ: изменение подействует только после перезапуска api.
+   * Это свойство самой настройки, оно верно всегда.
+   */
+  requiresRestart: boolean;
+  /**
+   * ФАКТ: значение уже сохранено, а живой процесс работает по-старому.
+   * Не путать с requiresRestart — тот говорит «когда-нибудь понадобится
+   * перезапуск», этот — «перезапуск нужен прямо сейчас и вот из-за чего».
+   */
+  pendingRestart: boolean;
+  /**
+   * Что именно включит эту настройку — поимённо и в порядке выполнения.
+   *
+   * Общего «перезапустить всё» в продукте нет: остановка Postfix и
+   * остановка nginx означают для людей совсем разное. Панель обязана
+   * показать рядом с полем, ЧТО человек остановит, а подробности о
+   * каждой службе взять из GET /restart (RestartTarget ниже) — второй
+   * набор формулировок для одной службы однажды разошёлся бы с первым.
+   */
+  applies: SettingApply[];
+  /** null у секрета — значения нет ни в каком виде. */
+  value: SettingValue | null;
+  default: SettingValue | null;
+  /** Только у секретов: задан он или нет. У остальных null. */
+  configured: boolean | null;
+  source: SettingSource;
+  updatedBy: string | null;
+  updatedAt: string | null;
+}
+
+export interface ServerSettingsSection {
+  id: string;
+  title: string;
+  note: string | null;
+  settings: ServerSetting[];
+}
+
+export interface ServerSettingsCounts {
+  total: number;
+  live: number;
+  restart: number;
+  /** Настройки чужих контейнеров: им мало перезапуска, нужно пересоздание. */
+  recreate: number;
+  locked: number;
+  /** Сколько настроек задано в панели, а не взято из файла окружения. */
+  overridden: number;
+  /** Сколько уже сохранено, но ждёт перезапуска контейнера api. */
+  pendingRestart: number;
+}
+
+export interface ServerSettingsResponse {
+  sections: ServerSettingsSection[];
+  counts: ServerSettingsCounts;
+}
+
+export interface ServerSettingsBulkResult extends ServerSettingsResponse {
+  /** Сколько настроек действительно изменилось (совпавшие не в счёт). */
+  changed: number;
+}
+
+/* ================================================================== */
+/* Перезапуск служб                                                    */
+/* ================================================================== */
+
+/**
+ * Что делаем со службой.
+ *
+ *   restart  — перезапуск процесса в том же контейнере;
+ *   recreate — пересоздание контейнера. Нужно, когда служба читает
+ *              настройку из окружения: окружение задаётся при СОЗДАНИИ
+ *              контейнера, и перезапуск процесса его не меняет.
+ */
+export type RestartAction = 'restart' | 'recreate';
+
+/** Один шаг применения настройки: какую службу и как тронуть. */
+export interface SettingApply {
+  /** Имя из закрытого перечня RestartTarget.id. */
+  target: string;
+  action: RestartAction;
+}
+
+/** Служба, которую панель умеет перезапускать. Перечень задан на сервере. */
+export interface RestartTarget {
+  id: string;
+  title: string;
+  actions: RestartAction[];
+  /** Сервер приложения перезапускает сам себя — посредник ему не нужен. */
+  self: boolean;
+  /** Что именно перестанет работать. Своё у каждой службы. */
+  impact: string;
+  /** Насколько. Отдельно от impact: это первое, что ищут глазами. */
+  downtime: string;
+  /** Что НЕ пострадает: половина страха перед кнопкой — незнание границ. */
+  safe: string;
+  /** Можно ли нажать прямо сейчас. */
+  available: boolean;
+  /** Почему нельзя — словами. null, когда можно. */
+  unavailableReason: string | null;
+  /** Команда для консоли по каждому действию: на случай «посредника нет». */
+  commands: Partial<Record<RestartAction, string>>;
+}
+
+/** Заявка на перезапуск: что заказали и чем кончилось. */
+export interface RestartJob {
+  id: string;
+  service: string;
+  action: RestartAction | 'boot';
+  requestedBy: string | null;
+  requestedAt: string;
+  finishedAt: string | null;
+  status: 'pending' | 'ok' | 'failed';
+  /** Чем кончилось, человеческим текстом. У неудачи — с хвостом журнала. */
+  detail: string | null;
+}
+
+export interface RestartState {
+  /**
+   * Метка ЖИВОГО процесса сервера приложения.
+   *
+   * Ради неё всё и сделано: панель запоминает метку до нажатия и
+   * опрашивает сервер, пока не увидит другую. Только это доказывает, что
+   * перед ней уже новый процесс, а не тот же самый, который задумался.
+   */
+  bootId: string | null;
+  startedAt: string | null;
+  restartPending: boolean;
+  agent: { configured: boolean; ok: boolean; error: string | null };
+  /** Применена ли миграция журнала перезапусков. */
+  journal: boolean;
+  targets: RestartTarget[];
+  jobs: RestartJob[];
+}
+
+/** Ответ на заявку: 202 и номер, по которому спрашивают результат. */
+export interface RestartAccepted {
+  id: string;
+  service: string;
+  action: RestartAction;
+  self: boolean;
+  bootId: string | null;
+  status: 'pending';
+}
+
+/** Состояние заявки плюс метка процесса, отвечающего прямо сейчас. */
+export interface RestartJobState extends RestartJob {
+  bootId: string | null;
+}
+
+/* ------------------------------------------------------------------
+ * Раздел «Сертификат»
+ *
+ * Приватного ключа здесь нет ни в одном поле — и не появится: сервер его
+ * не отдаёт вовсе (apps/api/src/admin/routes/tls.ts). Наверх приезжают
+ * только сведения о сертификате и разбор того, что человек принёс.
+ * ------------------------------------------------------------------ */
+
+export type TlsIssueLevel = 'ok' | 'warn' | 'fail';
+
+export interface TlsIssue {
+  id: string;
+  level: TlsIssueLevel;
+  title: string;
+  detail: string;
+  hint?: string;
+}
+
+export interface TlsCertificateInfo {
+  commonName: string;
+  subject: string;
+  issuer: string;
+  names: string[];
+  validFrom: string;
+  validTo: string;
+  daysLeft: number;
+  serialNumber: string;
+  fingerprint256: string;
+  selfSigned: boolean;
+}
+
+export interface TlsCheckResult {
+  ok: boolean;
+  issues: TlsIssue[];
+  certificate: TlsCertificateInfo | null;
+  chain: TlsCertificateInfo[];
+  missingNames: string[];
+}
+
+export interface TlsOverview {
+  source: 'selfsigned' | 'letsencrypt' | 'custom' | 'unknown';
+  sourceLabel: string;
+  expectedNames: string[];
+  optionalNames: string[];
+  /** Пусто, если сертификат прочитался. Иначе — почему не прочитался. */
+  unreadable: string;
+  current: TlsCheckResult | null;
+}
+
+export interface TlsApplyResult {
+  ok: true;
+  applied: TlsCheckResult;
+  source: 'custom';
+  /** Через сколько секунд службы перечитают файл. */
+  reloadSeconds: number;
+}
+
+export interface TlsBundleInputDto {
+  certificate: string;
+  privateKey: string;
+  chain?: string;
 }

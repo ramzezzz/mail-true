@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Button, Spinner } from '@web/components';
 import { cx } from '@web/lib/cx';
-import { visibleNav, type NavItem } from '../lib/access';
+import { visibleNavGroups, type NavGroup } from '../lib/access';
 import { breadcrumbsFor } from '../lib/breadcrumbs';
 import { useSession } from './session';
 import { ThemeMenu } from './ThemeMenu';
@@ -11,7 +11,7 @@ import styles from './AdminLayout.module.css';
 
 export function AdminLayout() {
   const { session, logout } = useSession();
-  const items = visibleNav(session?.permissions);
+  const groups = visibleNavGroups(session?.permissions);
 
   return (
     <div className={styles.layout}>
@@ -48,7 +48,7 @@ export function AdminLayout() {
         </Button>
       </header>
 
-      <SidebarNav items={items} />
+      <SidebarNav groups={groups} />
 
       <main className={styles.content}>
         <Breadcrumbs />
@@ -73,7 +73,7 @@ interface PointerBox {
   height: number;
 }
 
-function SidebarNav({ items }: { items: readonly NavItem[] }) {
+export function SidebarNav({ groups }: { groups: readonly NavGroup[] }) {
   const navRef = useRef<HTMLElement>(null);
   const [pointer, setPointer] = useState<PointerBox | null>(null);
   const { pathname } = useLocation();
@@ -102,7 +102,7 @@ function SidebarNav({ items }: { items: readonly NavItem[] }) {
     const observer = new ResizeObserver(measure);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [pathname, items]);
+  }, [pathname, groups]);
 
   return (
     <nav ref={navRef} className={styles.sidebar}>
@@ -117,16 +117,26 @@ function SidebarNav({ items }: { items: readonly NavItem[] }) {
           }}
         />
       )}
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.to === '/'}
-          className={({ isActive }) => cx(styles.navLink, isActive && styles.navLinkActive)}
-        >
-          <span>{item.title}</span>
-          {item.stub && <span className={styles.navStub}>скоро</span>}
-        </NavLink>
+      {groups.map((group) => (
+        <div key={group.id} className={styles.navGroup}>
+          {/*
+            Подпись группы — заголовок, а не просто серый текст: так по
+            меню можно ходить и с клавиатуры чтеца, перескакивая между
+            группами, а не перечитывая четырнадцать пунктов подряд.
+          */}
+          <h2 className={styles.navGroupTitle}>{group.title}</h2>
+          {group.items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              className={({ isActive }) => cx(styles.navLink, isActive && styles.navLinkActive)}
+            >
+              <span>{item.title}</span>
+              {item.stub && <span className={styles.navStub}>скоро</span>}
+            </NavLink>
+          ))}
+        </div>
       ))}
     </nav>
   );

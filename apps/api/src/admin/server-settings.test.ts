@@ -1,0 +1,467 @@
+/**
+ * Проверки хранилища настроек сервера.
+ *
+ * Здесь закрыты те дефекты, которые в этой затее возможны и дорого стоят:
+ *
+ *   1. Панель показывает не то, чем сервер живёт. Перечень настроек хранит
+ *      собственные умолчания, и разойтись со схемами окружения им ничего
+ *      не мешает: одна правка zod-схемы — и человек читает в панели «14
+ *      дней», а история чистится по семи. Проверяется сверкой каждого
+ *      ключа с тем, что выдаёт настоящий загрузчик конфигурации.
+ *   2. Строка в базе подменяет то, что подменять нельзя. Хранилище обязано
+ *      читать ТОЛЬКО ключи из перечня и только не-locked: иначе доступ
+ *      к базе превращается в подмену строки подключения и секретов.
+ *   3. Негодное значение останавливает работу. Настройка обязана быть
+ *      безопасной в отказе: опечатка в базе не должна ронять создание
+ *      ящиков — берётся умолчание.
+ *   4. Пустая переменная окружения превращается в ноль. Number('') === 0,
+ *      и стёртый MAIL_FLOW_RETENTION_DAYS означал бы «хранить ноль дней»,
+ *      то есть тихую потерю всей истории доставки.
+ */
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { loadConfig } from '../config.js';
+import { loadAdminConfig } from './config.js';
+import { loadSettingsConfig } from '../settings/config.js';
+import { loadPushConfig } from '../push/config.js';
+import { loadLogoConfig } from '../logos/config.js';
+import { loadAccountsConfig } from '../accounts/config.js';
+import { loadAiConfig } from '../ai/config.js';
+import {
+  EDITABLE_KEYS,
+  findSetting,
+  isEditable,
+  SETTING_SECTIONS,
+  SETTING_SPECS,
+} from './server-settings-registry.js';
+import { findTarget } from './restart-targets.js';
+import { parseSettingValue, ServerSettings, typedValue } from './server-settings.js';
+
+/** Подделка базы: отдаёт заданные строки и помнит выполненные запросы. */
+class FakeDb {
+  rows: Array<{ key: string; value: string; updated_by: string | null; updated_at: Date }> = [];
+  queries: Array<{ text: string; values: unknown[] }> = [];
+  fail: Error | null = null;
+
+  async query<T>(text: string, values: unknown[] = []): Promise<T[]> {
+    this.queries.push({ text, values });
+    if (this.fail) throw this.fail;
+    if (text.startsWith('SELECT')) return this.rows as unknown as T[];
+    if (text.startsWith('INSERT')) {
+      const [key, value, by] = values as [string, string, string];
+      const existing = this.rows.find((r) => r.key === key);
+      if (existing) {
+        existing.value = value;
+        existing.updated_by = by;
+      } else {
+        this.rows.push({ key, value, updated_by: by, updated_at: new Date() });
+      }
+      return [];
+    }
+    if (text.startsWith('DELETE')) {
+      const [key] = values as [string];
+      this.rows = this.rows.filter((r) => r.key !== key);
+      return [];
+    }
+    return [];
+  }
+}
+
+function make(
+  rows: Array<{ key: string; value: string }> = [],
+  env: NodeJS.ProcessEnv = {},
+): { db: FakeDb; settings: ServerSettings } {
+  const db = new FakeDb();
+  db.rows = rows.map((r) => ({ ...r, updated_by: 'osmotr', updated_at: new Date() }));
+  // Кэш выключен: проверки меняют значения и тут же читают их снова.
+  return { db, settings: new ServerSettings({ db, env, cacheMs: 0 }) };
+}
+
+/* ------------------------------------------------------------------ */
+/* 1. Перечень не расходится со схемами окружения                       */
+/* ------------------------------------------------------------------ */
+
+void test('умолчание каждой настройки совпадает с умолчанием схемы окружения', () => {
+  const empty = {} as NodeJS.ProcessEnv;
+  // Все загрузчики, которые разбирают окружение сервера приложения.
+  const loaded: Record<string, unknown> = {
+    ...loadConfig(empty),
+    ...loadAdminConfig(empty),
+    ...loadSettingsConfig(empty),
+    ...loadPushConfig(empty),
+    ...loadLogoConfig(empty),
+    ...loadAccountsConfig(empty),
+    ...loadAiConfig(empty),
+  };
+
+  const mismatched: string[] = [];
+  for (const spec of SETTING_SPECS) {
+    const actual = loaded[spec.key];
+    // Ключа нет ни в одной схеме — значит его читает другой контейнер
+    // (autoconfig, rspamd, unbound) или сам docker compose. Такие ключи
+    // в перечне обязаны стоять как locked, и это проверяется ниже.
+    if (actual === undefined) continue;
+    const expected = typedValue(spec, spec.def);
+    // TRUSTED_PROXIES схема разворачивает в список — сверяем по строке.
+    const normalized = Array.isArray(actual) ? actual.join(',') : actual;
+    if (normalized !== expected) {
+      mismatched.push(`${spec.key}: в перечне ${String(expected)}, в схеме ${String(normalized)}`);
+    }
+  }
+  assert.deepEqual(mismatched, [], `Умолчания разошлись:\n${mismatched.join('\n')}`);
+});
+
+void test('ключ, которого нет ни в одной схеме окружения api, применяется чужой службой', () => {
+  const empty = {} as NodeJS.ProcessEnv;
+  const loaded: Record<string, unknown> = {
+    ...loadConfig(empty),
+    ...loadAdminConfig(empty),
+    ...loadSettingsConfig(empty),
+    ...loadPushConfig(empty),
+    ...loadLogoConfig(empty),
+    ...loadAccountsConfig(empty),
+    ...loadAiConfig(empty),
+  };
+  /*
+   * Ключ, которого нет ни в одной схеме окружения сервера приложения,
+   * читает КТО-ТО ДРУГОЙ. Раньше это означало «менять из панели
+   * бессмысленно», и такие ключи обязаны были стоять как locked. С
+   * появлением посредника перезапуска у них есть второй законный путь:
+   * группа recreate плюс явное указание, чей контейнер пересоздать.
+   *
+   * Чего быть НЕ должно — так это ключа, который обещает изменяемость и
+   * при этом не имеет ни читателя внутри процесса, ни службы, которая бы
+   * его подхватила. Это и есть «настройка, которая молча не работает».
+   */
+  const lying = SETTING_SPECS.filter((s) => {
+    if (s.group === 'locked') return false;
+    if (loaded[s.key] !== undefined) return false;
+    // Необязательный ключ схемы (PUSH_CONTACT и подобные) при пустом
+    // окружении в разобранной конфигурации просто отсутствует — это
+    // не «его не читают», а «значение не задано». Такие помечены
+    // allowEmpty: пустота у них осмысленна.
+    if (s.allowEmpty === true) return false;
+    // Настройку чужого контейнера применяет пересоздание этого контейнера.
+    return !(s.applies ?? []).some((a) => a.target !== 'api' && a.action === 'recreate');
+  }).map((s) => s.key);
+  assert.deepEqual(
+    lying,
+    [],
+    'Эти настройки обещают, что их можно менять, но сервер приложения их не читает, ' +
+      `и ни одна служба их не подхватывает: ${lying.join(', ')}`,
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* 1а. Обещание «применится» подкреплено настоящей кнопкой              */
+/* ------------------------------------------------------------------ */
+
+void test('у каждой настройки групп restart и recreate сказано, что её применяет', () => {
+  const silent = SETTING_SPECS.filter(
+    (s) => (s.group === 'restart' || s.group === 'recreate') && (s.applies ?? []).length === 0,
+  ).map((s) => s.key);
+  assert.deepEqual(
+    silent,
+    [],
+    'Эти настройки сообщают «подействует после перезапуска», но не говорят, какого ' +
+      `именно: ${silent.join(', ')}`,
+  );
+});
+
+void test('живая настройка ничего не обещает применять', () => {
+  const noisy = SETTING_SPECS.filter(
+    (s) => (s.group === 'live' || s.group === 'locked') && (s.applies ?? []).length > 0,
+  ).map((s) => s.key);
+  assert.deepEqual(noisy, [], `Применять тут нечего, а обещано: ${noisy.join(', ')}`);
+});
+
+void test('каждая служба из applies есть в перечне перезапускаемых и умеет это действие', () => {
+  const broken: string[] = [];
+  for (const spec of SETTING_SPECS) {
+    for (const apply of spec.applies ?? []) {
+      const target = findTarget(apply.target);
+      if (!target) {
+        broken.push(`${spec.key}: службы «${apply.target}» нет в перечне перезапускаемых`);
+        continue;
+      }
+      if (!target.actions.includes(apply.action)) {
+        broken.push(`${spec.key}: служба «${apply.target}» не умеет «${apply.action}»`);
+      }
+    }
+  }
+  assert.deepEqual(broken, [], `Настройка ссылается на кнопку, которой нет:\n${broken.join('\n')}`);
+});
+
+/**
+ * Список того, что посреднику разрешено писать в infra/.env, продублирован
+ * в самом посреднике — намеренно, как последний рубеж. Дублирование
+ * опасно ровно одним: списки разойдутся, и настройка, добавленная сюда,
+ * будет молча отвергаться посредником уже после того, как человек её
+ * сохранил и нажал «применить».
+ *
+ * Поэтому перечень сверяется с настоящим файлом посредника. Проверка
+ * читает его как текст: тащить ради этого разбор Perl незачем, а формат
+ * таблицы в нём простой и нарочно неизменный.
+ */
+void test('каждый ключ группы recreate разрешён посреднику для своей службы', async () => {
+  const path = new URL('../../../../infra/service-agent/agent.pl', import.meta.url);
+  const source = await readFile(path, 'utf8');
+  const table = source.slice(source.indexOf('my %ENV_KEYS'), source.indexOf('if ($TOKEN eq'));
+  assert.ok(table.length > 100, 'таблица %ENV_KEYS в посреднике не найдена');
+
+  // Раскладываем «служба => { КЛЮЧ => 1, ... }» в пары «служба:КЛЮЧ».
+  const allowed = new Set<string>();
+  for (const block of table.matchAll(/(\w+)\s*=>\s*\{([^}]*)\}/gu)) {
+    const service = block[1] ?? '';
+    for (const key of (block[2] ?? '').matchAll(/([A-Z][A-Z0-9_]+)\s*=>\s*1/gu)) {
+      allowed.add(`${service}:${String(key[1])}`);
+    }
+  }
+  assert.ok(allowed.size > 5, `в посреднике разобрано слишком мало ключей: ${allowed.size}`);
+
+  const missing: string[] = [];
+  for (const spec of SETTING_SPECS) {
+    for (const apply of spec.applies ?? []) {
+      if (apply.action !== 'recreate') continue;
+      if (!allowed.has(`${apply.target}:${spec.key}`)) {
+        missing.push(`${spec.key} для службы ${apply.target}`);
+      }
+    }
+  }
+  assert.deepEqual(
+    missing,
+    [],
+    'Панель обещает применить эти настройки пересозданием, но посредник откажется ' +
+      `записывать их в infra/.env — списки разошлись:\n${missing.join('\n')}`,
+  );
+});
+
+void test('посреднику не разрешён ни один ключ, которого нет в перечне настроек', async () => {
+  const path = new URL('../../../../infra/service-agent/agent.pl', import.meta.url);
+  const source = await readFile(path, 'utf8');
+  const table = source.slice(source.indexOf('my %ENV_KEYS'), source.indexOf('if ($TOKEN eq'));
+  const known = new Set(SETTING_SPECS.map((s) => s.key));
+  const stray: string[] = [];
+  for (const block of table.matchAll(/(\w+)\s*=>\s*\{([^}]*)\}/gu)) {
+    for (const key of (block[2] ?? '').matchAll(/([A-Z][A-Z0-9_]+)\s*=>\s*1/gu)) {
+      const name = key[1] ?? '';
+      if (!known.has(name)) stray.push(`${name} (служба ${String(block[1])})`);
+    }
+  }
+  assert.deepEqual(
+    stray,
+    [],
+    'Посреднику разрешено писать в infra/.env ключи, которых нет в перечне настроек. ' +
+      `Это лишнее право у службы с сокетом Docker:\n${stray.join('\n')}`,
+  );
+});
+
+void test('раздел каждой настройки существует, ключи не повторяются', () => {
+  const sections = new Set(SETTING_SECTIONS.map((s) => s.id));
+  const seen = new Set<string>();
+  for (const spec of SETTING_SPECS) {
+    assert.ok(sections.has(spec.section), `неизвестный раздел «${spec.section}» у ${spec.key}`);
+    assert.ok(!seen.has(spec.key), `ключ ${spec.key} встречается дважды`);
+    seen.add(spec.key);
+    assert.ok(spec.description.length > 10, `у ${spec.key} нет человеческого описания`);
+    if (spec.group === 'locked') {
+      assert.ok(spec.reason, `у ${spec.key} не сказано, почему его нельзя менять`);
+    }
+  }
+});
+
+void test('ни один секрет не попал в список изменяемого', () => {
+  const secrets = SETTING_SPECS.filter((s) => s.secret === true);
+  assert.ok(secrets.length > 0, 'секреты должны быть перечислены — иначе их негде запретить');
+  for (const spec of secrets) {
+    assert.equal(spec.group, 'locked', `${spec.key} — секрет, а лежит в изменяемых`);
+    assert.equal(isEditable(spec.key), false);
+    assert.equal(EDITABLE_KEYS.includes(spec.key), false);
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* 2. Порядок разрешения: база > окружение > умолчание                  */
+/* ------------------------------------------------------------------ */
+
+void test('значение из базы побеждает переменную окружения', async () => {
+  const { settings } = make([{ key: 'MAIL_FLOW_RETENTION_DAYS', value: '30' }], {
+    MAIL_FLOW_RETENTION_DAYS: '14',
+  });
+  const item = await settings.resolve('MAIL_FLOW_RETENTION_DAYS');
+  assert.equal(item.raw, '30');
+  assert.equal(item.source, 'db');
+  assert.equal(await settings.int('MAIL_FLOW_RETENTION_DAYS'), 30);
+});
+
+void test('без строки в базе действует окружение, без окружения — умолчание', async () => {
+  const withEnv = make([], { MAIL_FLOW_RETENTION_DAYS: '21' });
+  const fromEnv = await withEnv.settings.resolve('MAIL_FLOW_RETENTION_DAYS');
+  assert.equal(fromEnv.source, 'env');
+  assert.equal(fromEnv.raw, '21');
+
+  const bare = make([], {});
+  const fromDefault = await bare.settings.resolve('MAIL_FLOW_RETENTION_DAYS');
+  assert.equal(fromDefault.source, 'default');
+  assert.equal(fromDefault.raw, '14');
+});
+
+void test('пустая переменная окружения не превращается в ноль', async () => {
+  // Number('') === 0: без этой защиты стёртый ключ означал бы «хранить
+  // ноль дней», то есть немедленную потерю всей истории доставки.
+  const { settings } = make([], { MAIL_FLOW_RETENTION_DAYS: '' });
+  assert.equal(await settings.int('MAIL_FLOW_RETENTION_DAYS'), 14);
+  assert.equal((await settings.resolve('MAIL_FLOW_RETENTION_DAYS')).source, 'default');
+});
+
+void test('пустая строка остаётся значением там, где пустота осмысленна', async () => {
+  const { settings } = make([], { DNS_CHECK_RESOLVERS: '' });
+  const item = await settings.resolve('DNS_CHECK_RESOLVERS');
+  assert.equal(item.source, 'env');
+  assert.equal(item.raw, '');
+});
+
+void test('негодное значение в базе не роняет запрос — берётся умолчание', async () => {
+  const { settings } = make([
+    { key: 'ADMIN_DEFAULT_QUOTA_BYTES', value: 'не-число' },
+    { key: 'ADMIN_LOGIN_MAX_FAILURES', value: '999999' },
+  ]);
+  assert.equal(await settings.int('ADMIN_DEFAULT_QUOTA_BYTES'), 1073741824);
+  // Выход за предел перечня — тоже негодное значение.
+  assert.equal(await settings.int('ADMIN_LOGIN_MAX_FAILURES'), 5);
+});
+
+void test('отказ базы не обнуляет настройки: работаем по окружению', async () => {
+  const { db, settings } = make([], { ADMIN_LOGIN_MAX_FAILURES: '7' });
+  db.fail = Object.assign(new Error('база лежит'), { code: '08006' });
+  assert.equal(await settings.int('ADMIN_LOGIN_MAX_FAILURES'), 7);
+});
+
+void test('отсутствие таблицы (миграция не применена) не мешает работать', async () => {
+  const { db, settings } = make([], { ADMIN_LOGIN_MAX_FAILURES: '9' });
+  db.fail = Object.assign(new Error('relation does not exist'), { code: '42P01' });
+  assert.equal(await settings.int('ADMIN_LOGIN_MAX_FAILURES'), 9);
+});
+
+void test('строка с ключом вне перечня не действует ни на что', async () => {
+  // Ровно то, ради чего перечень живёт в коде: доступ к базе не должен
+  // давать подмену строки подключения и секретов.
+  const { settings } = make(
+    [
+      { key: 'DATABASE_URL', value: 'postgres://chuzhoy/host' },
+      { key: 'SESSION_SECRET', value: 'подменённый-секрет' },
+      { key: 'MAIL_DOMAIN', value: 'zloy.example' },
+    ],
+    { MAIL_DOMAIN: 'mail.local' },
+  );
+  const domain = await settings.resolve('MAIL_DOMAIN');
+  assert.equal(domain.raw, 'mail.local', 'locked-настройку строка в базе подменять не должна');
+  assert.equal(domain.source, 'env');
+  assert.equal(findSetting('DATABASE_URL'), undefined);
+  assert.equal(findSetting('SESSION_SECRET')?.group, 'locked');
+});
+
+/* ------------------------------------------------------------------ */
+/* 3. Проверка вводимых значений                                        */
+/* ------------------------------------------------------------------ */
+
+void test('число проверяется по пределам перечня', () => {
+  const spec = findSetting('ADMIN_LOGIN_MAX_FAILURES')!;
+  assert.equal(parseSettingValue(spec, 10), '10');
+  assert.equal(parseSettingValue(spec, '10'), '10');
+  assert.throws(() => parseSettingValue(spec, 0), /минимум 1/u);
+  assert.throws(() => parseSettingValue(spec, 1000), /максимум 100/u);
+  assert.throws(() => parseSettingValue(spec, '3.5'), /целое число/u);
+  assert.throws(() => parseSettingValue(spec, 'пять'), /целое число/u);
+});
+
+void test('да/нет принимается в человеческих написаниях, мусор — нет', () => {
+  const spec = findSetting('PUSH_ENABLED')!;
+  for (const yes of [true, 'true', '1', 'yes', 'ON']) {
+    assert.equal(parseSettingValue(spec, yes), 'true');
+  }
+  for (const no of [false, 'false', '0', 'no', 'Off']) {
+    assert.equal(parseSettingValue(spec, no), 'false');
+  }
+  assert.throws(() => parseSettingValue(spec, 'может быть'), /да или нет/u);
+});
+
+void test('перечисление принимает только известные значения', () => {
+  const spec = findSetting('LOG_LEVEL')!;
+  assert.equal(parseSettingValue(spec, 'debug'), 'debug');
+  assert.throws(() => parseSettingValue(spec, 'подробно'), /принимает одно из/u);
+});
+
+void test('перевод строки в значении не принимается', () => {
+  // Иначе одна настройка подсунула бы вторую тому, кто разбирает
+  // окружение построчно.
+  const spec = findSetting('AI_REDIS_PREFIX')!;
+  assert.throws(() => parseSettingValue(spec, 'mt:ai:\nSESSION_SECRET=x'), /перевод строки/u);
+});
+
+void test('пустое значение принимается только там, где пустота осмысленна', () => {
+  assert.equal(parseSettingValue(findSetting('DNS_CHECK_RESOLVERS')!, ''), '');
+  assert.throws(() => parseSettingValue(findSetting('SESSION_COOKIE_NAME')!, ''), /не может быть/u);
+});
+
+/* ------------------------------------------------------------------ */
+/* 4. Запись, возврат к умолчанию и запрет на locked                    */
+/* ------------------------------------------------------------------ */
+
+void test('запись сохраняет значение и показывает, что было до неё', async () => {
+  const { db, settings } = make([], { ADMIN_DEFAULT_QUOTA_BYTES: '1073741824' });
+  const { before, after } = await settings.set('ADMIN_DEFAULT_QUOTA_BYTES', 5368709120, 'osmotr');
+  assert.equal(before.raw, '1073741824');
+  assert.equal(before.source, 'env');
+  assert.equal(after.raw, '5368709120');
+  assert.equal(after.source, 'db');
+  assert.equal(db.rows[0]?.updated_by, 'osmotr');
+});
+
+void test('возврат к умолчанию убирает строку и возвращает окружение', async () => {
+  const { db, settings } = make([{ key: 'ADMIN_DEFAULT_QUOTA_BYTES', value: '5368709120' }], {
+    ADMIN_DEFAULT_QUOTA_BYTES: '1073741824',
+  });
+  const { after } = await settings.reset('ADMIN_DEFAULT_QUOTA_BYTES');
+  assert.equal(after.raw, '1073741824');
+  assert.equal(after.source, 'env');
+  assert.equal(db.rows.length, 0);
+});
+
+void test('настройку из группы locked записать нельзя', async () => {
+  const { settings } = make();
+  await assert.rejects(
+    () => settings.set('MAIL_DOMAIN', 'zloy.example', 'osmotr'),
+    /не меняется из панели/u,
+  );
+  await assert.rejects(
+    () => settings.set('POSTGRES_PASSWORD', 'x', 'osmotr'),
+    /не меняется из панели/u,
+  );
+  await assert.rejects(() => settings.set('DATABASE_URL', 'x', 'osmotr'), /Неизвестная настройка/u);
+});
+
+void test('кэш не заставляет ждать собственное изменение', async () => {
+  const db = new FakeDb();
+  // Кэш длинный: без сброса при записи новое значение не увидели бы минуту.
+  const settings = new ServerSettings({ db, env: {}, cacheMs: 60_000 });
+  assert.equal(await settings.int('ADMIN_LOGIN_MAX_FAILURES'), 5);
+  await settings.set('ADMIN_LOGIN_MAX_FAILURES', 12, 'osmotr');
+  assert.equal(await settings.int('ADMIN_LOGIN_MAX_FAILURES'), 12);
+});
+
+void test('кэш действительно бережёт базу: один запрос вместо десяти', async () => {
+  const db = new FakeDb();
+  const settings = new ServerSettings({ db, env: {}, cacheMs: 60_000 });
+  await Promise.all(Array.from({ length: 10 }, () => settings.int('ADMIN_LOGIN_MAX_FAILURES')));
+  const selects = db.queries.filter((q) => q.text.startsWith('SELECT'));
+  assert.equal(selects.length, 1, `походов в базу: ${selects.length}`);
+});
+
+void test('все настройки перечня отдаются одним чтением', async () => {
+  const { settings } = make([{ key: 'ADMIN_LOCKOUT_MINUTES', value: '45' }]);
+  const all = await settings.resolveAll();
+  assert.equal(all.length, SETTING_SPECS.length);
+  assert.equal(all.find((i) => i.spec.key === 'ADMIN_LOCKOUT_MINUTES')?.raw, '45');
+});

@@ -12,6 +12,7 @@
  * быть, ничего не зная о том, что есть. Сравнивать приходилось в голове.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { api } from '../api/client';
@@ -32,6 +33,7 @@ import {
 } from '../components/ui';
 import { formatRelative } from '../lib/format';
 import { DnsDialog } from './DnsDialog';
+import styles from './DomainsPage.module.css';
 
 export function DomainsPage() {
   const { can } = useSession();
@@ -194,6 +196,34 @@ export function DomainsPage() {
           </tbody>
         </Table>
       </TableWrap>
+
+      {/*
+        Вход в смену основного домена.
+
+        Он здесь, а не в общем меню, и это осознанный выбор. В меню лежит
+        то, куда заходят каждый день; смена домена — разовая операция с
+        простоем и без полного отката, и пункт, соседствующий с
+        «Пользователями», однажды будет нажат по ошибке. А по смыслу ей
+        место именно здесь: на этой странице человек и видит основной
+        домен со всеми его записями.
+
+        Блок стоит внизу, отделён чертой и назван тем, что произойдёт, —
+        не «Дополнительно» и не «Ещё»: за безликим заголовком опасное
+        действие выглядит рядовым.
+      */}
+      {can('domainchange.run') && (
+        <section className={styles.danger}>
+          <h2 className={styles.dangerTitle}>Смена основного домена</h2>
+          <p className={styles.dangerText}>
+            Перевести весь сервер на другое имя: адреса ящиков, алиасы, письма и настройки. Операция
+            длинная, с простоем в несколько минут, и после переноса писем не отменяется. Прежний
+            домен остаётся принимающим — почта на старые адреса продолжит приходить.
+          </p>
+          <Link className={styles.dangerLink} to="/domain-change">
+            Открыть смену домена
+          </Link>
+        </section>
+      )}
 
       {opened && (
         <DnsDialog

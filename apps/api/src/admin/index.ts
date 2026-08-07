@@ -30,6 +30,7 @@ import { adminMonitoringRoutes } from './routes/monitoring.js';
 import { adminOverviewRoutes } from './routes/overview.js';
 import { adminQueueRoutes } from './routes/queue.js';
 import { adminSpamRoutes } from './routes/spam.js';
+import { adminTlsRoutes } from './routes/tls.js';
 import { RspamdClient } from './rspamd.js';
 import { SpamCollector } from './spam-collector.js';
 import { SpamStore } from './spam-store.js';
@@ -39,6 +40,12 @@ import { FlowCollector } from './flow-collector.js';
 import { FlowStore } from './flow-store.js';
 import { MetricsCollector } from './metrics-collector.js';
 import { MetricsStore } from './metrics-store.js';
+import { adminServerSettingsRoutes } from './routes/server-settings.js';
+import { adminRestartRoutes } from './routes/restart.js';
+import { RestartStore } from './restart-store.js';
+import { SelfRestart } from './self-restart.js';
+import { ServiceAgent } from './service-agent.js';
+import { retentionReader, ServerSettings } from './server-settings.js';
 import { adminUserRoutes } from './routes/users.js';
 import { adminUserSettingsRoutes } from './routes/user-settings.js';
 import { mailboxAccessSelfRoutes } from './routes/self-access.js';
@@ -47,6 +54,9 @@ import { AdminJanitor } from './janitor.js';
 import { createImportBox } from './import-jobs.js';
 import { adminMigrateRoutes } from './routes/migrate.js';
 import { MigrationRunner } from './migrate-runner.js';
+import { adminDomainChangeRoutes } from './routes/domain-change.js';
+import { DomainChangeRunner } from './domain-change-runner.js';
+import { domainChangeSchemaReady } from './domain-change-jobs.js';
 import type { DestSettings } from './migrate-jobs.js';
 import { SecretBox } from '../crypto.js';
 import type { AdminContext } from './types.js';
@@ -75,6 +85,18 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
   }
 
   const db = new AdminDb({ connectionString: adminConfig.databaseUrl, logger });
+
+  /*
+   * Настройки сервера из базы. Живут рядом с админской базой, потому что
+   * меняются в панели и правами панели же и защищены.
+   *
+   * Кэш на пять секунд — плата за то, чтобы «поменял и сразу действует»
+   * не превращалось в запрос к Postgres на каждое создание ящика и каждый
+   * вход в панель. Своя запись сбрасывает кэш немедленно, поэтому человек
+   * никогда не видит собственное изменение с опозданием; пять секунд —
+   * это только про ВТОРОЙ процесс api, если однажды их станет несколько.
+   */
+  const serverSettings = new ServerSettings({ db, env: process.env, logger });
 
   // Postgres в пробу состояния кладёт админка: подключение здесь, и
   // заводить второе ради проверки незачем. База критична не только для
@@ -133,6 +155,27 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     );
   }
 
+  /*
+   * Перезапуск служб. Второй посредник и ровно та же причина: сокет
+   * Docker означает права root на всей машине, и серверу приложения он не
+   * даётся. Пустой секрет — чужие службы из панели не перезапускаются;
+   * СЕБЯ сервер приложения перезапускает и без посредника.
+   */
+  const serviceAgent = new ServiceAgent({
+    baseUrl: adminConfig.SERVICE_AGENT_URL,
+    token: adminConfig.SERVICE_AGENT_TOKEN,
+    logger,
+  });
+  if (!serviceAgent.configured) {
+    logger.warn(
+      'Посредник перезапуска не настроен (SERVICE_AGENT_URL/SERVICE_AGENT_TOKEN): ' +
+        'из панели можно будет перезапустить только сам сервер приложения, а про ' +
+        'остальные службы панель честно скажет, что нужна консоль.',
+    );
+  }
+  const restarts = new RestartStore(db);
+  const selfRestart = new SelfRestart({ logger, store: restarts });
+
   // Своё оформление входа. Каталог создаём сразу: логотип отдаётся
   // неаутентифицированным на странице входа, и «каталога ещё нет» не
   // должно всплывать первым же запросом после установки.
@@ -160,6 +203,9 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     intervalSeconds: adminConfig.MAIL_METRICS_INTERVAL_SECONDS,
     retentionDays: adminConfig.MAIL_METRICS_RETENTION_DAYS,
     maxRows: adminConfig.MAIL_METRICS_MAX_ROWS,
+    // Сроки хранения обещаны «действует сразу», поэтому спрашиваются
+    // перед каждой уборкой, а не запоминаются при сборке сборщика.
+    limits: retentionReader(serverSettings, 'MAIL_METRICS_RETENTION_DAYS', 'MAIL_METRICS_MAX_ROWS'),
   });
 
   /*
@@ -191,6 +237,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     intervalSeconds: adminConfig.MAIL_METRICS_INTERVAL_SECONDS,
     retentionDays: adminConfig.MAIL_METRICS_RETENTION_DAYS,
     maxRows: adminConfig.MAIL_METRICS_MAX_ROWS,
+    limits: retentionReader(serverSettings, 'MAIL_METRICS_RETENTION_DAYS', 'MAIL_METRICS_MAX_ROWS'),
   });
 
   /*
@@ -240,7 +287,32 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     migrationBox,
     migrationDest,
     migrationRunner,
+    serverSettings,
+    // Приватный ключ DKIM нового домена шифруется тем же секретом, что и
+    // пароли заданий переноса: второго секрета ради одной строки заводить
+    // незачем, а класть ключ подписи в базу открытым — нельзя.
+    domainChangeBox: migrationBox,
+    serviceAgent,
+    selfRestart,
+    // Журнал перезапусков подставляется НИЖЕ, после проверки миграции:
+    // без таблицы он должен быть null, а не «есть, но каждый запрос
+    // падает» — иначе раздел отвечал бы пятисотой ошибкой вместо
+    // объяснения, какую миграцию применить.
+    restarts: null,
   };
+
+  /*
+   * Работник смены домена. Живёт рядом с контекстом, а не создаётся в
+   * маршруте, по той же причине, что и работник переноса: маршрут
+   * отвечает за секунды, а операция идёт минутами, и после ответа за неё
+   * должен кто-то отвечать.
+   */
+  const domainChangeRunner = new DomainChangeRunner({
+    ctx,
+    logger,
+    backupDir: adminConfig.DOMAIN_CHANGE_BACKUP_DIR,
+  });
+  ctx.domainChangeRunner = domainChangeRunner;
 
   // Уборщик: карантин удалённых ящиков, брошенные сеансы входа в чужой
   // ящик, просроченные задания импорта (см. janitor.ts)
@@ -279,6 +351,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     intervalSeconds: adminConfig.MAIL_FLOW_INTERVAL_SECONDS,
     retentionDays: adminConfig.MAIL_FLOW_RETENTION_DAYS,
     maxRows: adminConfig.MAIL_FLOW_MAX_ROWS,
+    limits: retentionReader(serverSettings, 'MAIL_FLOW_RETENTION_DAYS', 'MAIL_FLOW_MAX_ROWS'),
   });
   new FlowStore(db)
     .schemaReady()
@@ -370,6 +443,49 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     })
     .catch((err: unknown) => logger.error({ err }, 'Не удалось проверить схему снимков антиспама'));
 
+  /*
+   * Задание смены домена, брошенное убитым процессом.
+   *
+   * Продолжить его нельзя — неизвестно, на каком шаге оборвалось, — но и
+   * оставить висеть в состоянии «выполняется» тоже нельзя: раздел
+   * отказывался бы начинать новую смену вечно. Разбираем при старте,
+   * пока никто ничего не нажимал.
+   */
+  domainChangeSchemaReady(db)
+    .then(async (ready: boolean) => {
+      if (!ready) return;
+      await domainChangeRunner.recoverAbandoned();
+    })
+    .catch((err: unknown) => logger.error({ err }, 'Не удалось разобрать задание смены домена'));
+
+  /*
+   * Журнал перезапусков и отметка о собственном старте.
+   *
+   * Отметка ставится ЗДЕСЬ, при подъёме процесса, и делает сразу две
+   * вещи. Первая: закрывает заявку, по которой этот процесс и был
+   * перезапущен, — то есть отвечает панели «сервер поднялся». Ответить
+   * иначе нельзя, тот процесс, что заявку завёл, уже не существует.
+   * Вторая: это счётчик для защиты от петли. Настройка, из-за которой
+   * сервер падает на старте, иначе превращала бы кнопку в бесконечный
+   * круг — а так он посчитает свои старты и откажется перезапускаться,
+   * объяснив почему (см. self-restart.ts).
+   */
+  restarts
+    .schemaReady()
+    .then(async (ready: boolean) => {
+      if (!ready) {
+        logger.warn(
+          'Таблицы журнала перезапусков нет. Примените ' +
+            'infra/postgres/migrations/0035_service_restarts.sql — до этого кнопки ' +
+            '«применить настройку» будут отвечать 503 с объяснением.',
+        );
+        return;
+      }
+      ctx.restarts = restarts;
+      await selfRestart.announceBoot();
+    })
+    .catch((err: unknown) => logger.error({ err }, 'Не удалось проверить журнал перезапусков'));
+
   app.addHook('onClose', async () => {
     janitor.stop();
     flow.stop();
@@ -381,6 +497,13 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     // истечёт срок молчания.
     migrationRunner.stop();
     await migrationRunner.drain();
+    /*
+     * Смену домена НЕ прерываем — дожидаемся. Прервать её посреди
+     * переименования каталогов значит оставить хранилище в состоянии, о
+     * котором не знает никто. Операция длится минуты, а не часы, и это
+     * ровно тот случай, когда остановка сервера должна подождать.
+     */
+    await domainChangeRunner.drain();
     await db.close().catch(() => undefined);
     if (redis) redis.disconnect();
   });
@@ -419,9 +542,22 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       await adminSenderLogoRoutes(scope, () => app.senderLogos);
       // Резервная копия НАСТРОЕК (не писем: письма — install/backup.sh)
       await adminBackupRoutes(scope);
+      // Настройки сервера: то, что раньше жило только в infra/.env.
+      // Право на них — владельца, самое сильное (см. permissions.ts).
+      await adminServerSettingsRoutes(scope);
+      // Перезапуск служб: кнопка рядом с настройкой вместо «идите
+      // в консоль». Право — владельца (см. permissions.ts).
+      await adminRestartRoutes(scope);
+      // Раздел «Сертификат»: какой TLS-сертификат стоит и замена его на свой.
+      // Право то же, что у настроек сервера, и по той же причине: это
+      // действие над всем сервером сразу, а имена в сертификате — карта
+      // установки. Правила проверки — общие с мастером первого запуска
+      // (packages/shared/src/tls-certificate.ts).
+      await adminTlsRoutes(scope);
       // Перенос почты с чужого сервера (Kerio Connect и прочие). Логика
       // переноса — в packages/migrate, здесь только задания и их показ.
       await adminMigrateRoutes(scope);
+      await adminDomainChangeRoutes(scope);
       // Раздел «Помощник ИИ»: настройки по домену, предел расходов, журнал.
       // Живёт в src/ai/, но регистрируется здесь — чтобы получить ту же
       // аутентификацию, те же роли и тот же аудит, что остальная админка.
@@ -470,4 +606,10 @@ export * from './branding-image.js';
 export * from './backup-format.js';
 export * from './backup-store.js';
 export { FlowCollector } from './flow-collector.js';
+export * from './server-settings.js';
+export * from './server-settings-registry.js';
+export * from './restart-targets.js';
+export * from './restart-store.js';
+export * from './self-restart.js';
+export * from './service-agent.js';
 export { createLogStreams } from './app-log.js';

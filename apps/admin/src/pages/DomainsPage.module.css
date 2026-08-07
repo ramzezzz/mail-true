@@ -1,0 +1,42 @@
+/* Раздел «Домены и DNS»: только вход в смену основного домена.
+ *
+ * Цвета берутся ТОЛЬКО из переменных панели (--mt-color-*, --mt-admin-*):
+ * у панели несколько тем, и захардкоженный красный оставался бы красным
+ * и в изумрудной, и в коралловой. */
+
+/* Блок отделён от таблицы чертой и отступом: это не ещё одна строка
+   списка, а переход к работе другого рода — долгой, с простоем и без
+   полного отката. Визуальная граница здесь несёт тот же смысл, что
+   пустая строка в тексте перед важным абзацем. */
+.danger {
+  border-top: 1px solid var(--mt-admin-border);
+  margin-top: 32px;
+  padding-top: 20px;
+}
+
+.dangerTitle {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.dangerText {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+  /* Ширина строки ограничена: длинная строка предупреждения читается
+     хуже короткой, а это ровно тот текст, который надо прочесть. */
+  max-width: 68ch;
+}
+
+.dangerLink {
+  color: var(--mt-color-icon-accent-themed);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.dangerLink:hover,
+.dangerLink:focus-visible {
+  text-decoration: underline;
+}

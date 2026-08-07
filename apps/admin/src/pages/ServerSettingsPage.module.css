@@ -1,0 +1,289 @@
+/*
+ * Раскладка раздела «Настройки сервера».
+ *
+ * Настроек 133, и главное здесь — не таблица, а КАРТОЧКА настройки:
+ * рядом с полем ввода обязаны стоять описание, состояние и источник
+ * значения. В строке таблицы это не помещается: описания у настроек в
+ * два-три предложения, и колонка с ними растянула бы страницу вбок.
+ */
+
+/* --- Плашка «нужен перезапуск прямо сейчас» -------------------------- */
+/*
+ * Отдельный вид, а не Notice: это не сообщение о действии пользователя,
+ * а состояние сервера, и оно остаётся на экране, пока перезапуск не
+ * сделан. Полоса слева и заливка предупреждения — чтобы её нельзя было
+ * принять за подсказку и пролистать.
+ */
+.restart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mt-admin-gap);
+  margin-bottom: var(--mt-admin-gap);
+  padding: 10px 12px;
+  border: 1px solid var(--mt-admin-warn);
+  border-left-width: 4px;
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-warning-tint, transparent);
+}
+
+.restartText {
+  flex: 1 1 340px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.restartTitle {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.command {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--mt-color-background-secondary);
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  user-select: all;
+}
+
+/* --- Пояснение к разделу --------------------------------------------- */
+.legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--mt-admin-gap);
+}
+
+.legendItem {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mt-color-text-secondary);
+}
+
+.legendItem b {
+  color: var(--mt-color-text-primary);
+}
+
+.note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mt-color-text-secondary);
+}
+
+.found {
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+.search {
+  min-width: 260px;
+}
+
+.filter {
+  min-width: 190px;
+}
+
+/* --- Список настроек внутри раздела ---------------------------------- */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * Разделитель между настройками, а не рамка вокруг каждой: рамок на
+ * экране и так две (панель раздела и поля), и третья превращала бы
+ * список в лестницу из прямоугольников.
+ */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: var(--mt-admin-gap);
+  padding: 12px 0;
+  border-top: 1px solid var(--mt-admin-border);
+}
+
+.row:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+/* Изменённое, но не сохранённое видно и краем глаза: полоса слева */
+.rowDirty {
+  box-shadow: inset 3px 0 0 var(--mt-color-accent-blue);
+  padding-left: 10px;
+}
+
+/* Ждёт перезапуска — та же полоса, но цветом предупреждения */
+.rowPending {
+  box-shadow: inset 3px 0 0 var(--mt-admin-warn);
+  padding-left: 10px;
+}
+
+@media (max-width: 900px) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  margin-bottom: 4px;
+}
+
+.key {
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+/*
+ * Описание — обычным цветом текста, а не вторичным.
+ *
+ * Раздел существует ради того, чтобы человек понимал, что меняет;
+ * описание здесь — содержание страницы, а не подпись к нему, и прятать
+ * его под серый — то же самое, что прятать под знак вопроса.
+ */
+.description {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* Причина запрета: рядом с настройкой, а не в подсказке при наведении */
+.reason {
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--mt-color-text-secondary);
+}
+
+.reason b {
+  color: var(--mt-color-text-primary);
+}
+
+.meta {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--mt-color-text-secondary);
+}
+
+.metaSep {
+  padding: 0 4px;
+  opacity: 0.6;
+}
+
+/* --- Правая колонка: поле и действия --------------------------------- */
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.inputRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+}
+
+.unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+  white-space: nowrap;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--mt-admin-gap-s);
+  font-size: 12px;
+}
+
+/*
+ * «Задан» / «не задан» у секрета.
+ *
+ * Плашка не растягивается на ширину колонки: растянутая, она читалась
+ * как поле ввода — то есть ровно как то, чего у секрета быть не должно.
+ */
+.secret {
+  align-self: flex-start;
+}
+
+/* Значение запертой настройки: показать можно, тронуть нельзя */
+.readonly {
+  padding: 6px 8px;
+  border: 1px dashed var(--mt-admin-border);
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-color-background-secondary);
+  color: var(--mt-color-text-secondary);
+  font-family: var(--mt-admin-font-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.hint {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mt-color-text-secondary);
+}
+
+.invalid {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--mt-color-text-negative);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--mt-admin-gap-s);
+  margin-top: 2px;
+}
+
+/* --- Полоса сохранения ------------------------------------------------ */
+/*
+ * Держится внизу экрана: список длинный, и кнопка «Сохранить» наверху
+ * страницы означала бы, что после правки поля в конце списка человек
+ * прокручивает страницу целиком обратно — и в половине случаев уходит
+ * со страницы, не сохранив.
+ */
+.saveBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--mt-admin-gap);
+  margin-top: var(--mt-admin-gap);
+  padding: 10px 12px;
+  border: 1px solid var(--mt-color-accent-blue);
+  border-radius: var(--mt-admin-radius);
+  background: var(--mt-admin-surface);
+  box-shadow: var(--mt-compose-shadow, 0 4px 16px rgb(0 0 0 / 18%));
+}
+
+.saveText {
+  flex: 1 1 240px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}

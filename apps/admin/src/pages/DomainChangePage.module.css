@@ -1,0 +1,170 @@
+/* Раздел «Смена домена». Только то, чего нет в общих элементах.
+ *
+ * Цвета берутся ТОЛЬКО из переменных панели (--mt-color-*, --mt-admin-*):
+ * у панели несколько тем, и захардкоженный красный оставался бы красным
+ * и в изумрудной, и в коралловой — то есть выглядел бы чужим элементом,
+ * попавшим на страницу по ошибке. */
+
+.arrow {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 18px;
+  gap: 10px;
+  margin: 0 0 4px;
+}
+
+.arrowFrom,
+.arrowTo {
+  background: var(--mt-color-background-secondary);
+  border: 1px solid var(--mt-admin-border);
+  border-radius: 8px;
+  font-family: var(--mt-font-mono, ui-monospace, monospace);
+  padding: 4px 10px;
+}
+
+.arrowTo {
+  background: var(--mt-color-background-accent-themed-alpha);
+}
+
+.hint {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  margin: 6px 0 0;
+}
+
+/* Записи DNS. Моноширинный шрифт обязателен: значение копируют в панель
+   регистратора, и «l» с «1» в пропорциональном шрифте неразличимы. */
+.records {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+.records th,
+.records td {
+  border-bottom: 1px solid var(--mt-admin-border);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.records th {
+  color: var(--mt-color-text-secondary);
+  font-weight: 500;
+}
+
+.value {
+  font-family: var(--mt-font-mono, ui-monospace, monospace);
+  /* Ключ DKIM — это 400 символов base64. Без переноса он растягивает
+     таблицу до горизонтальной прокрутки всей страницы. */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+/* Списки последствий. Не «предупреждение мелким шрифтом», а обычный
+   читаемый текст: это главное, что человек должен унести с экрана. */
+.list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.list li {
+  margin-bottom: 8px;
+}
+
+.list li:last-child {
+  margin-bottom: 0;
+}
+
+/* Ход работ. */
+.steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  border-left: 3px solid var(--mt-admin-border);
+  list-style: none;
+  padding: 8px 0 8px 12px;
+}
+
+.step_running {
+  border-left-color: var(--mt-color-icon-accent-themed);
+}
+
+.step_ok {
+  border-left-color: var(--mt-admin-ok, var(--mt-color-icon-accent-themed));
+}
+
+.step_failed {
+  border-left-color: var(--mt-admin-fail);
+}
+
+.step_skipped {
+  border-left-color: var(--mt-admin-border);
+  opacity: 0.6;
+}
+
+.stepTitle {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.stepDetail {
+  color: var(--mt-color-text-secondary);
+  font-size: 13px;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+/* Черта, за которой возврата нет. Рисуется прямо в списке шагов, между
+   ними, — иначе её читают как ещё одно предупреждение и пролистывают. */
+.noReturn {
+  align-items: center;
+  color: var(--mt-color-text-negative);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: 0.04em;
+  list-style: none;
+  margin: 4px 0;
+  text-transform: uppercase;
+}
+
+.noReturn::before,
+.noReturn::after {
+  background: var(--mt-color-text-negative);
+  content: '';
+  flex: 1;
+  height: 1px;
+  opacity: 0.5;
+}
+
+.confirmRow {
+  align-items: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.confirmField {
+  flex: 1 1 260px;
+}
+
+.history {
+  font-size: 13px;
+}
+
+.history td,
+.history th {
+  border-bottom: 1px solid var(--mt-admin-border);
+  padding: 6px 10px;
+  text-align: left;
+}

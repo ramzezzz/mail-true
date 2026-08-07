@@ -44,6 +44,8 @@ import type {
   MigrationSettings,
   MigrationSource,
   MigrationStarted,
+  DomainChangeJob,
+  DomainChangeOverview,
   MonitoringExpiry,
   MonitoringFailures,
   MonitoringHealth,
@@ -55,6 +57,18 @@ import type {
   OverviewSecurity,
   OverviewUsers,
   QueuePage,
+  ServerSetting,
+  ServerSettingsBulkResult,
+  RestartAccepted,
+  RestartAction,
+  RestartJobState,
+  RestartState,
+  ServerSettingsResponse,
+  TlsApplyResult,
+  TlsBundleInputDto,
+  TlsCheckResult,
+  TlsOverview,
+  SettingValue,
   SieveSyncState,
   SpamCheckResult,
   SpamHistory,
@@ -582,4 +596,61 @@ export const api = {
    */
   migrateRetry: (id: number, body: { masterPassword?: string; list?: MigrationListInput }) =>
     post<MigrationStarted>(`/migrate/jobs/${String(id)}/retry`, body),
+
+  /* --- смена основного домена ---
+   *
+   * Два шага и ни одним меньше: сначала план (он же выпускает ключ DKIM
+   * и показывает записи для DNS), потом выполнение с подтверждением.
+   * Подтверждением служит имя нового домена, набранное руками, — «да»
+   * набирают не читая.
+   */
+  domainChange: () => get<DomainChangeOverview>('/domain-change'),
+  domainChangeJob: (id: number) => get<DomainChangeJob>(`/domain-change/${String(id)}`),
+  domainChangePlan: (newDomain: string) =>
+    post<DomainChangeJob>('/domain-change/plan', { newDomain }),
+  domainChangeCancel: (id: number) =>
+    del<{ ok: true; targetDomainRemoved: boolean }>(`/domain-change/${String(id)}`),
+  domainChangeApply: (id: number, confirm: string) =>
+    post<{ ok: true; id: number; state: 'running' }>(`/domain-change/${String(id)}/apply`, {
+      confirm,
+    }),
+
+  /* --- настройки сервера ---
+   *
+   * Сохранение — пачкой, потому что так их и правят: открыл раздел,
+   * поменял три поля, нажал «Сохранить». Сервер сам пропускает те, чьё
+   * значение не изменилось, — иначе форма закрепляла бы в базе всё подряд
+   * и настройки переставали бы следовать за infra/.env.
+   *
+   * Возврат к умолчанию — отдельным запросом, а не «сохранением пустого»:
+   * это другое действие (строка из базы удаляется), и в журнале аудита
+   * оно называется по-своему.
+   */
+  serverSettings: () => get<ServerSettingsResponse>('/server-settings'),
+  saveServerSettings: (values: Record<string, SettingValue | null>) =>
+    post<ServerSettingsBulkResult>('/server-settings/bulk', { values }),
+  resetServerSetting: (key: string) =>
+    del<ServerSetting>(`/server-settings/${encodeURIComponent(key)}`),
+
+  /* --- перезапуск служб ---
+   *
+   * Протокол один на оба случая — и на перезапуск сервера приложения, и
+   * на пересоздание чужого контейнера: заявка принимается (202), ей
+   * выдаётся номер, итог спрашивается по номеру.
+   *
+   * Иначе и нельзя: сервер, который перезапускает сам себя, физически не
+   * может ответить, чем это кончилось. Заявку по нему закроет уже
+   * следующий процесс, при старте, — и это же будет ответом «поднялся».
+   */
+  restartState: () => get<RestartState>('/restart'),
+  requestRestart: (target: string, action: RestartAction) =>
+    post<RestartAccepted>(`/restart/${encodeURIComponent(target)}`, { action }),
+  restartJob: (id: string) => get<RestartJobState>(`/restart/jobs/${encodeURIComponent(id)}`),
+
+  /* --- сертификат сервера --- */
+  tls: () => get<TlsOverview>('/tls'),
+  /** Разбор принесённого сертификата БЕЗ применения. */
+  checkTls: (input: TlsBundleInputDto) => post<TlsCheckResult>('/tls/check', input),
+  /** Применение: только с явным подтверждением — службы будут перезапущены. */
+  applyTls: (input: TlsBundleInputDto) => post<TlsApplyResult>('/tls', { ...input, confirm: true }),
 };
