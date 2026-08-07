@@ -312,6 +312,50 @@ else
     else
         fail "submission (587) не поднимает STARTTLS — клиенты не смогут отправлять"
     fi
+
+    # ------------------------------------------------------------------
+    # Автопродление: не срок сертификата, а состояние того, что его двигает.
+    #
+    # Срок выше отвечает «сколько осталось», и этого мало: сертификат
+    # Let's Encrypt живёт 90 дней, и всё держится на том, ходит ли таймер.
+    # Молчаливо переставший ходить таймер не меняет ничего ровно до дня
+    # истечения — а тогда чинить уже поздно.
+    #
+    # Здесь, на хосте, состояние спрашивается у самого systemd; панель
+    # (раздел «Наблюдение») то же самое видит по отчёту, который скрипт
+    # продления оставляет в каталоге сертификатов.
+    # ------------------------------------------------------------------
+    CERT_SRC="$(tr -d '[:space:]' < "$CERT_DIR/source" 2>/dev/null || true)"
+    if [ "$CERT_SRC" = "custom" ]; then
+        ok "автопродление намеренно не работает: стоит свой сертификат"
+    elif [ "$CERT_SRC" = "selfsigned" ]; then
+        info "автопродление не применяется: сертификат самоподписанный"
+    elif ! have systemctl || [ ! -f /etc/systemd/system/mailtrue-certs.timer ]; then
+        if crontab -l 2>/dev/null | grep -q 'renew-certs\.sh'; then
+            ok "продление заведено в cron"
+        else
+            fail "автопродление не включено — сертификат истечёт через 90 дней после выпуска"
+            hint "включить: sudo bash install/renew-certs.sh --install-timer"
+        fi
+    elif [ "$(systemctl is-active mailtrue-certs.timer 2>/dev/null)" = "active" ]; then
+        ok "таймер продления работает (следующий запуск: $(systemctl show mailtrue-certs.timer -p NextElapseUSecRealtime --value 2>/dev/null || echo '?'))"
+    else
+        fail "таймер mailtrue-certs.timer есть, но не запущен — продление не сработает"
+        hint "включить: sudo bash install/renew-certs.sh --install-timer"
+    fi
+
+    RENEW_FILE="$(renew_report_path)"
+    if [ ! -f "$RENEW_FILE" ]; then
+        [ "$CERT_SRC" = "custom" ] || warn "отчёта о продлении нет ($RENEW_FILE) — панель не покажет, работает ли оно"
+    elif grep -m1 '"at": ' "$RENEW_FILE" | grep -q '"outcome": "failed"'; then
+        # Первая запись в списке — самая свежая. Смотрим только её:
+        # неудача полугодовой давности, после которой всё наладилось, —
+        # это история, а не повод.
+        fail "последняя попытка продления закончилась отказом"
+        hint "причина записана в $RENEW_FILE; повторить: sudo bash install/renew-certs.sh --force"
+    else
+        ok "отчёт о продлении на месте ($RENEW_FILE)"
+    fi
 fi
 
 # ==================================================================

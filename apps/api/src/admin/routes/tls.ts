@@ -45,6 +45,15 @@ import {
   type TlsValidationResult,
 } from '@mail-true/shared/tls-certificate';
 import { BadRequestError } from '../../errors.js';
+import {
+  gradeRenewal,
+  readCertificateSource,
+  readRenewalReport,
+  RENEW_COMMAND,
+  RENEW_FORCE_COMMAND,
+  RENEW_TIMER_COMMAND,
+  SOURCE_LABELS,
+} from '../cert-renewal.js';
 import { audit, currentAdmin, requireAdmin } from '../guard.js';
 
 /**
@@ -67,30 +76,14 @@ const applySchema = z.object({
 const checkSchema = applySchema.omit({ confirm: true });
 
 /**
- * Откуда взялся текущий сертификат. Хранится файлом рядом с ним, а не
- * ключом в infra/.env: этот файл — единственное, что сервер приложения
- * может записать, а прочитать его должны и install/renew-certs.sh на
- * хосте, и мастер первого запуска. Три читателя, один писатель, никакой
- * синхронизации между ними не нужно.
+ * Откуда взялся текущий сертификат (файл source рядом с ним) и как он
+ * продлевается — оба вопроса разбирает admin/cert-renewal.ts. Здесь их
+ * нет намеренно: те же сведения нужны разделу «Наблюдение», а два
+ * маршрута, читающих один файл каждый по-своему, однажды разошлись бы в
+ * ответе на вопрос «свой ли это сертификат» — и продление затёрло бы
+ * чужой, потому что один из них считал иначе.
  */
-export type CertificateSource = 'selfsigned' | 'letsencrypt' | 'custom' | 'unknown';
-
-const SOURCE_LABELS: Readonly<Record<CertificateSource, string>> = {
-  selfsigned: 'самоподписанный (выпущен установщиком)',
-  letsencrypt: 'Let’s Encrypt',
-  custom: 'свой сертификат',
-  unknown: 'неизвестно',
-};
-
-async function readSource(dir: string): Promise<CertificateSource> {
-  try {
-    const value = (await readFile(join(dir, 'source'), 'utf8')).trim();
-    if (value === 'selfsigned' || value === 'letsencrypt' || value === 'custom') return value;
-    return 'unknown';
-  } catch {
-    return 'unknown';
-  }
-}
+export type { CertificateSource } from '../cert-renewal.js';
 
 /** Сведения о сертификате без единого байта ключа. */
 function toDto(info: CertificateInfo): Record<string, unknown> {
@@ -198,7 +191,17 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
       unreadable = err instanceof Error ? err.message : String(err);
     }
 
-    const source = await readSource(dir);
+    const [source, renewal] = await Promise.all([
+      readCertificateSource(dir),
+      readRenewalReport(dir),
+    ]);
+
+    /*
+     * Состояние автопродления едет тем же ответом, а не отдельным
+     * маршрутом. Причина простая: на экране это один вопрос — «что стоит
+     * и продлится ли оно само». Два запроса означали бы два разных
+     * момента времени в одной таблице и мигание блока при обновлении.
+     */
     return {
       source,
       sourceLabel: SOURCE_LABELS[source],
@@ -206,6 +209,24 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
       optionalNames: expected.optional,
       unreadable,
       current: current === null ? null : resultDto(current),
+      renewal: {
+        report: renewal.report,
+        problem: renewal.problem,
+        verdict: gradeRenewal(renewal, source),
+        /*
+         * Команды отдаются сервером, а не зашиты в интерфейс: путь к
+         * скрипту знает сервер, и расхождение здесь означало бы
+         * подсказку, которая никуда не ведёт.
+         *
+         * Кнопки «продлить сейчас» тут нет и быть не может — почему
+         * именно, сказано в разделе «Сертификат» словами, на экране.
+         */
+        commands: {
+          renew: RENEW_COMMAND,
+          force: RENEW_FORCE_COMMAND,
+          installTimer: RENEW_TIMER_COMMAND,
+        },
+      },
     };
   });
 

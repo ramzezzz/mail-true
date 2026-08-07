@@ -579,6 +579,14 @@ install_cert_timer() {
     if ! have systemctl || [ ! -d /etc/systemd/system ]; then
         return 1
     fi
+    # MT_RENEW_TRIGGER=timer — чтобы в отчёте о продлении было видно, ЧЕМ
+    # запущен очередной прогон. Разница не косметическая: «последний раз
+    # продление запускали руками месяц назад» и «таймер отработал ночью» —
+    # это два разных ответа на вопрос «работает ли автопродление», и без
+    # пометки они выглядят одинаково. Запасной признак (переменная
+    # INVOCATION_ID, которую systemd задаёт любому своему юниту) есть в
+    # самом renew-certs.sh: на серверах, где юнит завели прошлой версией
+    # установщика, этой строки в файле нет.
     cat > /etc/systemd/system/mailtrue-certs.service <<EOF
 [Unit]
 Description=Mail.True: продление TLS-сертификата Let's Encrypt
@@ -586,6 +594,7 @@ After=docker.service
 
 [Service]
 Type=oneshot
+Environment=MT_RENEW_TRIGGER=timer
 ExecStart=/bin/bash $dir/renew-certs.sh
 EOF
     cat > /etc/systemd/system/mailtrue-certs.timer <<'EOF'
@@ -603,6 +612,224 @@ EOF
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl enable --now mailtrue-certs.timer >/dev/null 2>&1
 }
+
+# ==================================================================
+# ОТЧЁТ О ПРОДЛЕНИИ СЕРТИФИКАТА
+# ==================================================================
+#
+# ЧЕГО НЕ ХВАТАЛО. Сроки сертификата панель показывала и раньше — на
+# дашборде и в «Наблюдении», причём честно, из живого рукопожатия. Но на
+# вопрос «а продлится ли он сам» ответить было нечем: заведён ли таймер,
+# когда он в последний раз отработал и чем кончил, не знал никто. Именно
+# молчаливый отказ продления и приводит к истёкшему сертификату, а узнают
+# о нём по тому, что срок перестал отодвигаться, — в лучшем случае за
+# неделю до беды.
+#
+# ГДЕ ЛЕЖИТ И ПОЧЕМУ ИМЕННО ТАМ. Рядом с самим сертификатом,
+# infra/data/certs/renewal.json:
+#
+#   * этот каталог УЖЕ примонтирован в контейнер сервера приложения на
+#     чтение и запись (ради раздела «Сертификат»), поэтому панель читает
+#     отчёт тем же способом, что и сертификат, — без нового монтирования,
+#     без сокета Docker и без посредников;
+#   * infra/data в репозиторий не входит (.gitignore), значит обновление
+#     продукта — git pull, пересборка образов, docker compose up — отчёта
+#     не касается. Ровно как не касается самого сертификата;
+#   * потерять отчёт отдельно от сертификата невозможно: это один каталог.
+#     Временный каталог (/tmp, /run) не годится по первому же перезапуску
+#     машины, а install/state — по обновлению продукта из другого клона.
+#
+# ФОРМАТ. JSON, и его читают ДВЕ разные программы: сервер приложения (там
+# есть разбор) и этот же скрипт (там разбора нет и не будет — разбирать
+# JSON средствами bash значит завести третий формат в третьем месте).
+# Поэтому вид файла жёсткий: каждая попытка занимает РОВНО ОДНУ строку с
+# четырьмя пробелами отступа, и при следующей записи прежние строки
+# переносятся в новый файл как есть, без разбора. Если файл кто-то
+# поправил руками и строки перестали узнаваться — история обнулится, но
+# новая запись пройдёт: потерять историю неприятно, потерять текущий
+# результат — хуже.
+
+# Имя файла отчёта и сколько попыток храним. Десять — это пять суток
+# работы таймера: достаточно, чтобы увидеть «ломается каждый раз» против
+# «один раз не повезло», и мало, чтобы файл оставался читаемым глазами.
+RENEW_REPORT_NAME=renewal.json
+RENEW_HISTORY_MAX=10
+
+# renew_report_path — полный путь к отчёту.
+renew_report_path() { printf '%s/%s' "$CERT_DIR" "$RENEW_REPORT_NAME"; }
+
+# json_escape <строка> — значение для JSON, БЕЗ обрамляющих кавычек.
+#
+# Перевод строки и табуляция заменяются пробелом, а не экранируются: файл
+# читается построчно (см. выше), и многострочное значение сломало бы
+# ровно тот способ, которым сохраняется история. Управляющие символы
+# выбрасываются. Всё остальное, включая кириллицу, проходит как есть —
+# сообщения здесь по-русски.
+json_escape() {
+    printf '%s' "${1:-}" \
+        | LC_ALL=C tr '\n\r\t' '   ' \
+        | LC_ALL=C tr -d '\000-\037\177' \
+        | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# renew_time_iso <значение systemd> — время в виде 2026-08-07T15:17:00Z.
+#
+# systemd отдаёт временны́е свойства по-разному в зависимости от версии:
+# то строкой «Fri 2026-08-07 15:17:00 UTC», то числом микросекунд от
+# начала эпохи. Принимаем оба, на непонятное отвечаем пустотой — «не
+# знаю» честнее выдуманной даты.
+renew_time_iso() {
+    local raw="${1:-}" secs
+    case "$raw" in
+        ''|0|'n/a'|'infinity') return 0 ;;
+    esac
+    if printf '%s' "$raw" | grep -qE '^[0-9]+$'; then
+        secs=$(( raw / 1000000 ))
+        [ "$secs" -gt 0 ] || return 0
+        date -u -d "@$secs" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true
+    else
+        date -u -d "$raw" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true
+    fi
+}
+
+# cert_valid_to_iso <файл сертификата> — «действует до» в ISO 8601.
+cert_valid_to_iso() {
+    local file="${1:-}" raw
+    [ -f "$file" ] || return 0
+    raw="$(openssl x509 -in "$file" -noout -enddate 2>/dev/null | sed 's/^notAfter=//')"
+    [ -n "$raw" ] || return 0
+    date -u -d "$raw" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true
+}
+
+# renew_timer_json — состояние автопродления объектом JSON.
+#
+# Спрашивается У СИСТЕМЫ при каждой записи, а не запоминается при
+# установке. Иначе отчёт врал бы ровно в том случае, ради которого он
+# заведён: таймер выключили — а в файле по-прежнему «включено».
+#
+# Обратная сторона у этого есть, и её закрывает не отчёт, а панель:
+# состояние обновляется только когда скрипт запускается. Выключенный
+# таймер запускать скрипт перестаёт, поэтому «включено» в старом отчёте
+# ловится не по этому полю, а по возрасту последней попытки.
+renew_timer_json() {
+    local unit=mailtrue-certs.timer kind=none enabled=false next='' detail=''
+    if have systemctl && [ -f "/etc/systemd/system/$unit" ]; then
+        kind=systemd
+        local is_enabled is_active
+        is_enabled="$(systemctl is-enabled "$unit" 2>/dev/null || true)"
+        is_active="$(systemctl is-active "$unit" 2>/dev/null || true)"
+        if [ "$is_enabled" = "enabled" ] && [ "$is_active" = "active" ]; then
+            enabled=true
+            detail='Таймер systemd: проверка дважды в сутки (03:17 и 15:17 плюс случайная задержка до 30 минут)'
+        else
+            detail="Юнит $unit на месте, но systemd показывает его как «${is_enabled:-?}/${is_active:-?}» — продление не запустится"
+        fi
+        next="$(renew_time_iso "$(systemctl show "$unit" -p NextElapseUSecRealtime --value 2>/dev/null || true)")"
+    elif crontab -l 2>/dev/null | grep -q 'renew-certs\.sh'; then
+        # Запасной путь из подсказки установщика: «systemd нет — добавьте
+        # в cron». Пропустить его значило бы объявить отказом работающее
+        # автопродление на машине без systemd.
+        kind=cron
+        enabled=true
+        detail='Продление заведено в cron суперпользователя, а не в systemd'
+    else
+        detail='Автопродления нет: ни юнита systemd, ни записи в cron'
+    fi
+    printf '{"kind": "%s", "unit": "%s", "enabled": %s, "nextRunAt": "%s", "detail": "%s"}' \
+        "$kind" "$unit" "$enabled" "$(json_escape "$next")" "$(json_escape "$detail")"
+}
+
+# renew_report_history — прежние попытки, по одной в строке, БЕЗ отступа
+# и без запятой в конце.
+#
+# Отступ снимается обязательно, а не для красоты: при записи он ставится
+# заново. Первая версия его оставляла, и каждый прогон добавлял четыре
+# пробела — на втором записи переставали узнаваться собственным же
+# фильтром, и история молча обнулялась каждый раз. Ровно тот сорт
+# поломки, ради которого этот отчёт и заведён.
+renew_report_history() {
+    local file
+    file="$(renew_report_path)"
+    [ -f "$file" ] || return 0
+    grep -E '^[[:space:]]*\{"at": "' "$file" 2>/dev/null \
+        | sed -e 's/^[[:space:]]*//' -e 's/,[[:space:]]*$//' || true
+}
+
+# renew_report_save [строка новой попытки] — записать отчёт целиком.
+# Без аргумента обновляется только состояние таймера, история остаётся.
+renew_report_save() {
+    # cert_source, а не source: одноимённая переменная рядом со встроенной
+    # командой оболочки читается как ошибка при каждом взгляде на файл.
+    local attempt="${1:-}" file tmp line cert_source i last
+    file="$(renew_report_path)"
+    mkdir -p "$CERT_DIR" 2>/dev/null || return 1
+
+    local items=()
+    if [ -n "$attempt" ]; then items+=("$attempt"); fi
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        [ "${#items[@]}" -lt "$RENEW_HISTORY_MAX" ] || break
+        items+=("$line")
+    done < <(renew_report_history)
+
+    # Наличие файла проверяется ОТДЕЛЬНО, а не глушится через 2>/dev/null.
+    # Перенаправление ввода разбирается раньше, чем перенаправление вывода
+    # ошибок, поэтому «No such file or directory» от отсутствующего файла
+    # печатается мимо любого 2>/dev/null и попадает человеку на экран
+    # посреди работы установщика. Поймано живым прогоном.
+    cert_source=''
+    if [ -f "$CERT_DIR/source" ]; then
+        cert_source="$(tr -d '[:space:]' < "$CERT_DIR/source")"
+    fi
+
+    # Через временный файл: отчёт читает панель, и половина файла,
+    # попавшая под чтение, выглядела бы как «отчёта нет» — то есть как
+    # тревога на ровном месте.
+    tmp="$file.new"
+    {
+        printf '{\n'
+        printf '  "version": 1,\n'
+        printf '  "updatedAt": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        printf '  "certSource": "%s",\n' "$(json_escape "$cert_source")"
+        printf '  "timer": %s,\n' "$(renew_timer_json)"
+        printf '  "attempts": [\n'
+        last=$(( ${#items[@]} - 1 ))
+        for i in "${!items[@]}"; do
+            if [ "$i" -lt "$last" ]; then
+                printf '    %s,\n' "${items[$i]}"
+            else
+                printf '    %s\n' "${items[$i]}"
+            fi
+        done
+        printf '  ]\n'
+        printf '}\n'
+    } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+
+    mv -f "$tmp" "$file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    # 644, а не 600: файл читает сервер приложения из контейнера, и в нём
+    # нет ничего тайного — время, итог и дата окончания сертификата.
+    chmod 644 "$file" 2>/dev/null || true
+    return 0
+}
+
+# renew_report_write <откуда> <режим> <итог> <действует до> <секунд> <словами>
+#
+#   откуда — timer | manual | install
+#   режим  — renew | force | deploy | timer
+#   итог   — renewed | not-due | deployed | issued | failed | skipped-custom
+renew_report_write() {
+    local secs="${5:-0}" attempt
+    case "$secs" in *[!0-9]*|'') secs=0 ;; esac
+    attempt="$(printf \
+        '{"at": "%s", "trigger": "%s", "mode": "%s", "outcome": "%s", "validTo": "%s", "seconds": %s, "message": "%s"}' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        "$(json_escape "${1:-}")" "$(json_escape "${2:-}")" "$(json_escape "${3:-}")" \
+        "$(json_escape "${4:-}")" "$secs" "$(json_escape "${6:-}")")"
+    renew_report_save "$attempt"
+}
+
+# renew_report_refresh — обновить состояние таймера, не добавляя попытки.
+renew_report_refresh() { renew_report_save ''; }
 
 # ==================================================================
 # Отметка «сервер установлен»

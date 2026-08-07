@@ -1795,6 +1795,66 @@ export interface TlsCheckResult {
   missingNames: string[];
 }
 
+/* ------------------------------------------------------------------
+ * Автопродление: не срок сертификата, а состояние того, что его двигает.
+ *
+ * Сведения приходят из отчёта, который оставляет install/renew-certs.sh
+ * на хосте (infra/data/certs/renewal.json). Поля НЕ перечисления, а
+ * строки, и это осознанно: хост и контейнер обновляются порознь, и
+ * новое значение итога, приехавшее от свежего скрипта, не должно
+ * ломать разбор в старой панели.
+ * ------------------------------------------------------------------ */
+
+export interface RenewalAttempt {
+  /** Когда была попытка, ISO 8601. */
+  at: string;
+  /** Чем запущена: timer | manual | install. */
+  trigger: string;
+  /** С каким ключом: renew | force | deploy. */
+  mode: string;
+  /** Чем кончилась: renewed | not-due | deployed | issued | failed | skipped-custom. */
+  outcome: string;
+  /** До какого числа действует сертификат после попытки. Пусто — неизвестно. */
+  validTo: string;
+  seconds: number;
+  /** Причина словами — то единственное, что остаётся от неудачного прогона. */
+  message: string;
+}
+
+export interface RenewalTimer {
+  /** systemd | cron | none. */
+  kind: string;
+  unit: string;
+  enabled: boolean;
+  /** Пусто, если следующего запуска нет или он неизвестен. */
+  nextRunAt: string;
+  detail: string;
+}
+
+export interface RenewalReport {
+  version: number;
+  updatedAt: string;
+  certSource: string;
+  timer: RenewalTimer;
+  /** Новые сверху. Хранится последний десяток. */
+  attempts: RenewalAttempt[];
+}
+
+export interface RenewalVerdict {
+  state: CheckState;
+  detail: string;
+  hint?: string;
+}
+
+export interface TlsRenewal {
+  /** null, если отчёта нет или он не разобрался; тогда смотреть problem. */
+  report: RenewalReport | null;
+  problem: string;
+  verdict: RenewalVerdict;
+  /** Команды для консоли. Приходят с сервера: путь к скрипту знает он. */
+  commands: { renew: string; force: string; installTimer: string };
+}
+
 export interface TlsOverview {
   source: 'selfsigned' | 'letsencrypt' | 'custom' | 'unknown';
   sourceLabel: string;
@@ -1803,6 +1863,7 @@ export interface TlsOverview {
   /** Пусто, если сертификат прочитался. Иначе — почему не прочитался. */
   unreadable: string;
   current: TlsCheckResult | null;
+  renewal: TlsRenewal;
 }
 
 export interface TlsApplyResult {

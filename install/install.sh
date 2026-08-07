@@ -983,7 +983,11 @@ issue_letsencrypt() {
         hint "  sudo bash install/renew-certs.sh --force"
         return 1
     fi
-    bash "$INSTALL_DIR/renew-certs.sh" --deploy-only || return 1
+    # MT_RENEW_TRIGGER=install — чтобы в отчёте о продлении первая запись
+    # честно называлась установкой, а не «запуском руками»: иначе панель
+    # на свежем сервере показывала бы «последний раз продление запускали
+    # вручную», чего никто не делал.
+    MT_RENEW_TRIGGER=install bash "$INSTALL_DIR/renew-certs.sh" --deploy-only || return 1
     return 0
 }
 
@@ -1007,10 +1011,18 @@ elif [ "$TLS_MODE" = "letsencrypt" ]; then
             hint "на хосте: sudo bash $INSTALL_DIR/renew-certs.sh --install-timer"
             hint "либо в cron: 17 3 * * * /bin/bash $INSTALL_DIR/renew-certs.sh"
         fi
+        # Состояние автопродления — в отчёт, сразу. Три ветки выше кончаются
+        # по-разному, а панель обязана показать итог любой из них: молчание
+        # про невключившийся таймер и есть тот самый молчаливый отказ, из-за
+        # которого сертификаты истекают.
+        renew_report_refresh || warn "не удалось записать отчёт о продлении: $(renew_report_path)"
     else
         warn "работаем с самоподписанным сертификатом"
         hint "почта ходит, но клиенты будут ругаться на сертификат,"
         hint "а Outlook откажется настраиваться автоматически"
+        renew_report_write install issue failed '' 0 \
+            "Let's Encrypt не выпустил сертификат при установке — на сервере остался самоподписанный. Повторить: sudo bash install/renew-certs.sh --force" \
+            || true
     fi
 else
     info "выбран самоподписанный сертификат (MAILTRUE_TLS=selfsigned)"

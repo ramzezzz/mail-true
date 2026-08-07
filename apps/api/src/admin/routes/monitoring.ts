@@ -17,6 +17,12 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { IMAP_FAREWELL, probeTcpPort, SMTP_FAREWELL } from '../../health.js';
+import {
+  readCertificateSource,
+  readRenewalReport,
+  renewalHealthCheck,
+  RENEW_COMMAND,
+} from '../cert-renewal.js';
 import { FlowStore } from '../flow-store.js';
 import { requireAdmin } from '../guard.js';
 import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
@@ -330,9 +336,18 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
         implicitTls: true,
       },
     ];
-    const [certificates, domains] = await Promise.all([
+    const [certificates, domains, renewal, certSource] = await Promise.all([
       readCertificates(targets),
       ctx.db.listDomains().catch(() => []),
+      /*
+       * Состояние автопродления. Оно обязано быть ИМЕННО ЗДЕСЬ, а не
+       * только в разделе «Сертификат»: раздел открывают нарочно, когда
+       * уже что-то заподозрили, а сюда смотрят каждый день. Отказавшее
+       * продление не меняет ни одного показателя — срок просто перестаёт
+       * отодвигаться, — и заметить это без отдельной проверки нельзя.
+       */
+      readRenewalReport(ctx.config.TLS_CERT_DIR),
+      readCertificateSource(ctx.config.TLS_CERT_DIR),
     ]);
 
     /**
@@ -367,11 +382,11 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
               ? `Истёк ${String(-cert.daysLeft)} суток назад`
               : `Действует ещё ${String(cert.daysLeft)} суток, до ${dayOf(cert.validTo)}` +
                 (cert.selfSigned ? '; самоподписанный' : ''),
-        ...(state === 'ok'
-          ? {}
-          : { hint: 'Продление: sudo bash install/renew-certs.sh (при отказе — с --force)' }),
+        ...(state === 'ok' ? {} : { hint: `Продление: ${RENEW_COMMAND} (при отказе — с --force)` }),
       };
     });
+
+    certificateChecks.push(renewalHealthCheck(renewal, certSource));
 
     const dnsChecks: HealthCheck[] = domains.map((domain) => {
       const overall = domain.dns_overall ?? 'unknown';
@@ -416,7 +431,9 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
       checks,
       certificateNote:
         'Сертификат читается из живого соединения со службой, а не из файла: после обновления ' +
-        'файла служба продолжает отдавать старый, пока её не перезапустят',
+        'файла служба продолжает отдавать старый, пока её не перезапустят. Состояние ' +
+        'автопродления — из отчёта, который оставляет install/renew-certs.sh на самом сервере; ' +
+        'подробности и история попыток — в разделе «Сертификат»',
       dnsNote:
         'Состояние DNS показано по последней проверке в разделе «Домены и DNS»; сам этот ' +
         'раздел записи заново не спрашивает',

@@ -15,15 +15,43 @@
  * Правила проверки живут не здесь и не на сервере, а в общем пакете
  * (packages/shared/src/tls-certificate.ts): те же самые применяет мастер
  * первого запуска (apps/installer). Эта страница только показывает вывод.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ АВТОПРОДЛЕНИЕ ПОКАЗЫВАЕТСЯ ЗДЕСЬ, И ВТОРЫМ БЛОКОМ
+ * ------------------------------------------------------------------
+ * «Что стоит и до какого числа» и «продлится ли оно само» — это один
+ * вопрос, заданный дважды. Человек, открывший раздел, чтобы посмотреть
+ * срок, обязан тут же увидеть, отодвинется ли этот срок сам; иначе он
+ * уходит с экрана, ответив только на половину.
+ *
+ * Выше формы «Поставить свой сертификат» — потому что за эту форму
+ * берутся тогда, когда автопродление уже подвело. Показать её раньше
+ * причины значило бы предложить лечение до диагноза.
+ *
+ * Тревога при этом живёт НЕ здесь, а в «Наблюдении»: этот раздел
+ * открывают нарочно, а туда смотрят каждый день. Здесь — подробности и
+ * история, там — красная строка.
  */
-import { useState, type ChangeEvent } from 'react';
+import { useCallback, useState, type ChangeEvent } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { api } from '../api/client';
-import type { TlsBundleInputDto, TlsCheckResult, TlsIssue } from '../api/types';
+import type {
+  CheckState,
+  RenewalAttempt,
+  TlsBundleInputDto,
+  TlsCheckResult,
+  TlsIssue,
+  TlsRenewal,
+} from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
-import { ErrorNotice, Field, Notice, Panel } from '../components/ui';
+import { Badge, ErrorNotice, Field, Notice, Panel } from '../components/ui';
+import { formatDateTime } from '../lib/format';
+// Копирование в буфер — общее с разделом «Домены и DNS». Там же объяснено,
+// почему у него есть запасной путь: админку до выпуска сертификата
+// открывают по http, а navigator.clipboard там просто отсутствует.
+import { copyText } from './DnsDialog';
 
 const MUTED = { color: 'var(--mt-admin-muted)' } as const;
 const MONO = {
@@ -88,6 +116,216 @@ function Facts({ result }: { result: TlsCheckResult }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Автопродление                                                        */
+/* ------------------------------------------------------------------ */
+
+const STATE_TONE: Readonly<Record<CheckState, 'ok' | 'warn' | 'fail' | 'muted'>> = {
+  ok: 'ok',
+  warn: 'warn',
+  fail: 'fail',
+  unknown: 'muted',
+};
+
+const STATE_LABEL: Readonly<Record<CheckState, string>> = {
+  ok: 'работает',
+  warn: 'внимание',
+  fail: 'не работает',
+  unknown: 'неизвестно',
+};
+
+/** Плашка «отказ» на весь блок, «предупреждение» — обычной заметкой. */
+const NOTICE_TONE: Readonly<Record<CheckState, 'info' | 'error' | 'success'>> = {
+  ok: 'success',
+  warn: 'info',
+  fail: 'error',
+  unknown: 'info',
+};
+
+const OUTCOME_LABEL: Readonly<Record<string, string>> = {
+  renewed: 'продлён',
+  'not-due': 'срок не подошёл',
+  deployed: 'разложен по стеку',
+  issued: 'выпущен',
+  failed: 'отказ',
+  'skipped-custom': 'пропущено: свой сертификат',
+};
+
+const TRIGGER_LABEL: Readonly<Record<string, string>> = {
+  timer: 'по таймеру',
+  manual: 'вручную',
+  install: 'при установке',
+};
+
+/** Итог попытки. Незнакомое значение показывается как есть — см. типы. */
+export function attemptOutcome(outcome: string): string {
+  return OUTCOME_LABEL[outcome] ?? outcome;
+}
+
+export function attemptTrigger(trigger: string): string {
+  return TRIGGER_LABEL[trigger] ?? trigger;
+}
+
+/** Отказ красный, пропуск по своему сертификату — серый, остальное зелёное. */
+export function attemptTone(outcome: string): 'ok' | 'warn' | 'fail' | 'muted' {
+  if (outcome === 'failed') return 'fail';
+  if (outcome === 'skipped-custom') return 'muted';
+  return 'ok';
+}
+
+function CommandLine({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(() => {
+    void copyText(command).then((ok) => {
+      setCopied(ok);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [command]);
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+      <code style={{ ...MONO, flex: 1, wordBreak: 'break-all' }}>{command}</code>
+      <Button mode="secondary" size="s" onClick={onCopy}>
+        {copied ? 'Скопировано' : 'Копировать'}
+      </Button>
+    </div>
+  );
+}
+
+function Attempts({ attempts }: { attempts: RenewalAttempt[] }) {
+  if (attempts.length === 0) return null;
+  return (
+    <>
+      <h3 style={{ fontSize: 14, margin: '16px 0 6px' }}>Последние попытки</h3>
+      <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+        <tbody>
+          {attempts.map((attempt) => (
+            <tr key={`${attempt.at}-${attempt.outcome}`}>
+              <td style={{ ...MUTED, padding: '6px 12px 6px 0', verticalAlign: 'top' }}>
+                {formatDateTime(attempt.at)}
+              </td>
+              <td style={{ ...MUTED, padding: '6px 12px 6px 0', verticalAlign: 'top' }}>
+                {attemptTrigger(attempt.trigger)}
+              </td>
+              <td style={{ padding: '6px 12px 6px 0', verticalAlign: 'top' }}>
+                <Badge tone={attemptTone(attempt.outcome)}>{attemptOutcome(attempt.outcome)}</Badge>
+              </td>
+              <td style={{ padding: '6px 0', verticalAlign: 'top' }}>{attempt.message}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
+/**
+ * Блок «Автопродление».
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ЗДЕСЬ НЕТ КНОПКИ «ПРОДЛИТЬ СЕЙЧАС»
+ * ------------------------------------------------------------------
+ * Не потому, что до неё не дошли руки. Её нельзя сделать честно:
+ *
+ *   * certbot в режиме standalone занимает 80-й порт САМОЙ МАШИНЫ и на
+ *     время проверки требует остановить nginx. Изнутри контейнера этого
+ *     не сделать: порт принадлежит хосту;
+ *   * сам скрипт (install/renew-certs.sh) лежит на хосте, в каталоге
+ *     установки, который в контейнер панели не смонтирован и монтироваться
+ *     не должен — там же infra/.env со всеми паролями;
+ *   * посредник infra/service-agent умеет ровно две вещи (restart и
+ *     recreate) и только над закрытым списком служб. Выполнения
+ *     произвольной команды в нём нет и не появится: у него сокет Docker,
+ *     то есть права root на всей машине, и вся его безопасность держится
+ *     ровно на том, что список действий закрыт. Добавить туда «запусти
+ *     скрипт» значит отдать машину целиком тому, кто найдёт дыру в панели.
+ *
+ * Кнопка, которая молча ничего не делает, хуже её отсутствия: после неё
+ * человек уходит уверенным, что продление запущено. Поэтому вместо
+ * кнопки — команда, которую можно скопировать и выполнить на сервере.
+ */
+function RenewalPanel({ renewal }: { renewal: TlsRenewal }) {
+  const { verdict, report } = renewal;
+  const timer = report?.timer ?? null;
+  const rows: Array<[string, string]> = [];
+  if (timer) {
+    rows.push([
+      'Автопродление',
+      timer.kind === 'none'
+        ? 'не настроено'
+        : `${timer.kind === 'cron' ? 'cron' : `таймер systemd (${timer.unit})`}, ` +
+          (timer.enabled ? 'включено' : 'ВЫКЛЮЧЕНО'),
+    ]);
+    rows.push([
+      'Следующая попытка',
+      timer.nextRunAt === '' ? 'неизвестна' : formatDateTime(timer.nextRunAt),
+    ]);
+  }
+  const last = report?.attempts[0] ?? null;
+  if (last) {
+    rows.push([
+      'Последняя попытка',
+      `${formatDateTime(last.at)}, ${attemptTrigger(last.trigger)} — ${attemptOutcome(last.outcome)}`,
+    ]);
+    if (last.validTo !== '') {
+      rows.push(['Сертификат после неё действует до', formatDate(last.validTo)]);
+    }
+  }
+  if (report) {
+    rows.push(['Отчёт обновлён', formatDateTime(report.updatedAt)]);
+  }
+
+  return (
+    <Panel title="Автопродление">
+      <p style={{ marginBottom: 10 }}>
+        <Badge tone={STATE_TONE[verdict.state]}>{STATE_LABEL[verdict.state]}</Badge>
+      </p>
+      <Notice tone={NOTICE_TONE[verdict.state]}>
+        <div style={{ whiteSpace: 'pre-wrap' }}>{verdict.detail}</div>
+        {verdict.hint ? (
+          <div style={{ ...MUTED, whiteSpace: 'pre-wrap', marginTop: 6 }}>{verdict.hint}</div>
+        ) : null}
+      </Notice>
+
+      {rows.length > 0 ? (
+        <table style={{ borderCollapse: 'collapse', width: '100%', marginTop: 12 }}>
+          <tbody>
+            {rows.map(([name, value]) => (
+              <tr key={name}>
+                <td
+                  style={{ ...MUTED, padding: '6px 12px 6px 0', verticalAlign: 'top', width: 260 }}
+                >
+                  {name}
+                </td>
+                <td>{value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+
+      <Attempts attempts={report?.attempts ?? []} />
+
+      <h3 style={{ fontSize: 14, margin: '16px 0 6px' }}>Продлить сейчас</h3>
+      <p style={MUTED}>
+        Кнопки здесь нет намеренно. Продление выпускает сертификат через certbot, а тот занимает
+        80-й порт самой машины и на время проверки останавливает nginx; и порт, и скрипт принадлежат
+        серверу, а не панели — панель работает в контейнере без доступа к машине. Кнопка, которая
+        молча ничего не делает, хуже её отсутствия. Выполните на сервере:
+      </p>
+      <CommandLine command={renewal.commands.renew} />
+      <p style={{ ...MUTED, marginTop: 10 }}>
+        Если продление отказывает — с принудительным перевыпуском:
+      </p>
+      <CommandLine command={renewal.commands.force} />
+      <p style={{ ...MUTED, marginTop: 10 }}>
+        Если автопродление вообще не включено (так бывает после установки из браузера: systemd живёт
+        на хосте, а установщик — в контейнере):
+      </p>
+      <CommandLine command={renewal.commands.installTimer} />
+    </Panel>
   );
 }
 
@@ -185,6 +423,8 @@ export function TlsPage() {
           </>
         ) : null}
       </Panel>
+
+      {current ? <RenewalPanel renewal={current.renewal} /> : null}
 
       <Panel title="Поставить свой сертификат">
         <p style={MUTED}>
