@@ -75,13 +75,26 @@ fi
 # сообщение в лог, чтобы состояние было видно при старте.
 # Через override.d это делать нельзя: override.d заменяет секцию целиком,
 # и правило теряет адрес сервера.
+# Файл в override.d, а не подстановка внутри local.d: rspamd 4.1 не
+# разворачивает `{= env.X =}` в конфигурациях, и прежняя запись всегда
+# давала false — антивирус не включался ВООБЩЕ, сколько бы ни ставили
+# CLAMAV_ENABLED=true. override.d заменяет секцию целиком, поэтому копируем
+# описание правила полностью, заменив в нём только выключатель.
+rm -f /etc/rspamd/override.d/antivirus.conf
 if [ "${CLAMAV_ENABLED}" = "true" ]; then
-    echo "Антивирус: ClamAV ВКЛЮЧЁН (нужен профиль docker compose --profile clamav)"
+    if [ -f /etc/rspamd/local.d/antivirus.conf ]; then
+        # Заменяем ВСЕ выключатели, с любым отступом: их два — общий для
+        # модуля и внутренний для правила clamav.
+        sed -E 's/^([[:space:]]*)enabled = false;/\1enabled = true;/' \
+            /etc/rspamd/local.d/antivirus.conf \
+            > /etc/rspamd/override.d/antivirus.conf
+        echo "Антивирус: ClamAV ВКЛЮЧЁН (нужен профиль docker compose --profile clamav)"
+    else
+        echo "Антивирус: описание правила не найдено — модуль остался выключенным"
+    fi
 else
     echo "Антивирус: выключен (CLAMAV_ENABLED=${CLAMAV_ENABLED:-false})"
 fi
-# Подчищаем возможный остаток от прежних версий образа
-rm -f /etc/rspamd/override.d/antivirus.conf
 
 # ------------------------------------------------------------------
 # Карты (белые/чёрные списки) — каталог примонтирован на запись
