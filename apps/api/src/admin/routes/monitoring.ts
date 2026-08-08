@@ -29,6 +29,12 @@ import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.
 import { RspamdClient } from '../rspamd.js';
 import { checkAntispam, checkResolver } from '../services.js';
 import {
+  gradeBackup,
+  gradeMigrations,
+  readLastBackup,
+  readMigrationFiles,
+} from '../deploy-checks.js';
+import {
   gradeCertificate,
   gradeDisk,
   gradeQueue,
@@ -299,6 +305,30 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
         });
       }
     }
+
+    /*
+     * Обновление: докатана ли база и когда снимали копию.
+     *
+     * Оба каталога смонтированы только на чтение — это файлы продукта и
+     * одна строка с датой. Раньше оба вопроса стояли в списке «чего этот
+     * раздел не проверяет», хотя ответить на них ничего не мешало.
+     */
+    const files = await readMigrationFiles(ctx.config.MIGRATIONS_DIR);
+    if (files.length > 0) {
+      let applied = new Set<string>();
+      try {
+        const rows = await ctx.db.query<{ filename: string }>(
+          'SELECT filename FROM schema_migrations',
+        );
+        applied = new Set(rows.map((row) => row.filename));
+      } catch {
+        // Журнала миграций нет (сам он появляется миграцией 0000) —
+        // значит не применено ничего, и проверка так и скажет.
+      }
+      checks.push(gradeMigrations({ files, applied }));
+    }
+
+    checks.push(gradeBackup({ at: await readLastBackup(ctx.config.INSTALL_STATE_DIR) }));
 
     return {
       takenAt: new Date().toISOString(),
