@@ -36,6 +36,7 @@ import { BadRequestError } from '../../errors.js';
 import { audit, currentAdmin, requireAdmin } from '../guard.js';
 import type { AdminContext } from '../types.js';
 import { SETTING_SECTIONS } from '../server-settings-registry.js';
+import { findTarget } from '../restart-targets.js';
 import {
   parseSettingValue,
   typedValue,
@@ -219,6 +220,39 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
       const admin = currentAdmin(request);
       void admin;
       const { before, after } = await settings.reset(request.params.key);
+
+      /*
+       * СБРОС УБИРАЕТ СТРОКУ И ИЗ infra/.env.
+       *
+       * Без этого «вернуть к умолчанию» возвращало только показания
+       * панели: значение уходило из базы, а строка в файле оставалась
+       * навсегда, и служба продолжала подниматься с прежним. Поймано
+       * живьём на потолке памяти: в панели 512 МБ, в процессе Node 768.
+       *
+       * Убираем строку, а не пишем в неё умолчание: значение тогда
+       * берётся из умолчания в docker-compose.yml, и следов панели в
+       * файле не остаётся.
+       *
+       * Отказ посредника здесь НЕ отменяет сброс: значение из базы уже
+       * убрано, и это главное. Но и молчать нельзя — пишем в журнал, а
+       * панель покажет «ждёт применения», как и для любой другой
+       * настройки чужой службы.
+       */
+      const recreates = (after.spec.applies ?? []).filter((a) => a.action === 'recreate');
+      if (recreates.length > 0 && ctx.serviceAgent?.configured === true) {
+        for (const apply of recreates) {
+          const target = findTarget(apply.target);
+          if (!target) continue;
+          try {
+            await ctx.serviceAgent.unsetEnv(target, [after.spec.key]);
+          } catch (err) {
+            request.log.warn(
+              { err, key: after.spec.key, service: apply.target },
+              'Настройка сброшена в базе, но строку из infra/.env убрать не удалось',
+            );
+          }
+        }
+      }
       await audit(ctx, request, {
         action: 'serversettings.reset',
         targetType: 'serversettings',

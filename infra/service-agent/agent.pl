@@ -462,6 +462,10 @@ sub handle {
         my $service = check_service($client, $params{service}, 'recreate') or return;
         return do_recreate($client, $service, $body);
     }
+    if ($method eq 'POST' && $path eq '/env-unset') {
+        my $service = check_service($client, $params{service}, 'recreate') or return;
+        return do_env_unset($client, $service, $body);
+    }
     if ($method eq 'GET' && $path eq '/dkim') {
         return do_dkim($client, $params{domain}, $params{selector});
     }
@@ -667,6 +671,32 @@ sub do_restart {
     my $state = wait_up($service);
     log_line("restart $service: " . ($state->{state} // '?') . '/' . ($state->{health} // '?'));
     return reply_state($client, $service, $state);
+}
+
+# Убрать ключи из infra/.env, ничего не пересоздавая. Список ключей — в
+# теле, полем keys через запятую; проверяются по тому же белому списку,
+# что и запись.
+sub do_env_unset {
+    my ($client, $service, $body) = @_;
+    my %given   = parse_query($body);
+    my $allowed = $ENV_KEYS{$service} // {};
+    my @unset;
+    for my $key (split /,/, ($given{keys} // '')) {
+        $key =~ s/^\s+|\s+$//g;
+        next if $key eq '';
+        unless ($allowed->{$key}) {
+            return reply($client, 400, {
+                error => "ключ «$key» посреднику убирать не разрешено (служба $service)",
+            });
+        }
+        push @unset, $key;
+    }
+    return reply($client, 400, { error => 'не переданы ключи' }) unless @unset;
+
+    my $error = write_env({}, \@unset);
+    return reply($client, 500, { error => $error }) if $error ne '';
+    log_line("env-unset $service: " . join(',', @unset));
+    return reply($client, 200, { ok => \1, unset => \@unset });
 }
 
 sub do_recreate {
