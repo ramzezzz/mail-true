@@ -307,6 +307,63 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
     }
 
     /*
+     * КОНТЕЙНЕРЫ: запущены ли и сколько едят.
+     *
+     * Проверка по портам отвечает на вопрос «служба отвечает?» — и это
+     * главный вопрос. Но она молчит о двух вещах, за которыми лезут в
+     * консоль при разборе: контейнер в петле перезапусков (порт при этом
+     * может успевать отвечать) и память всего стека на VPS с двумя
+     * гигабайтами.
+     *
+     * Спрашиваем посредника — у него есть сокет Docker. Нет посредника —
+     * не выдумываем: раздел просто не покажет эту группу, как и раньше.
+     */
+    if (ctx.serviceAgent?.configured === true) {
+      try {
+        const stack = await ctx.serviceAgent.stack();
+        for (const item of stack) {
+          const running = item.state === 'running';
+          const healthy = item.health === 'healthy' || item.health === 'none';
+          const restarts = Number(item.restarts ?? '0');
+
+          let state: 'ok' | 'warn' | 'fail' = 'ok';
+          if (!running) state = 'fail';
+          else if (!healthy) state = 'warn';
+          // Больше десятка перезапусков — это петля, даже если прямо
+          // сейчас контейнер поднят: он поднимется и упадёт снова.
+          else if (restarts >= 10) state = 'warn';
+
+          const parts: string[] = [`состояние: ${item.state}`];
+          if (item.health !== 'none') parts.push(`проба: ${item.health}`);
+          if (item.memory !== undefined && item.memory !== '') {
+            parts.push(`память: ${item.memory}`);
+          }
+          if (restarts > 0) parts.push(`перезапусков: ${String(restarts)}`);
+
+          checks.push({
+            id: `container-${item.service}`,
+            group: 'Контейнеры',
+            title: `Контейнер ${item.service}`,
+            state,
+            detail: parts.join(', '),
+            ...(state === 'ok'
+              ? {}
+              : {
+                  hint:
+                    restarts >= 10
+                      ? 'Похоже на петлю перезапусков: смотрите журнал этой службы в разделе «Журналы почты».'
+                      : 'Поднять: docker compose -f infra/docker-compose.yml -f install/compose.prod.yml up -d ' +
+                        item.service,
+                }),
+          });
+        }
+      } catch {
+        // Посредник не ответил — это уже видно в разделе перезапуска
+        // служб, второй раз кричать об этом здесь незачем.
+      }
+    }
+
+    /*
      * Обновление: докатана ли база и когда снимали копию.
      *
      * Оба каталога смонтированы только на чтение — это файлы продукта и

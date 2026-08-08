@@ -154,6 +154,32 @@ export class ServiceAgent {
   }
 
   /**
+   * Состояние всего стека: что запущено, здорово ли, сколько
+   * перезапусков и сколько памяти занято.
+   *
+   * Первый пункт в списке «чего раздел не проверяет» — и стоял он там с
+   * верной причиной: нужен сокет Docker, а серверу приложения его давать
+   * нельзя. Причина в силе, изменилось другое: сокет есть у посредника, и
+   * он умеет отдать это чтением, не открывая ничего лишнего.
+   */
+  async stack(): Promise<
+    Array<ServiceState & { memory?: string; memPerc?: string; cpuPerc?: string }>
+  > {
+    const body = await this.call('/stack', 'GET');
+    const list = Array.isArray(body.services) ? body.services : [];
+    return list.map((item) => {
+      const row = item as Record<string, unknown>;
+      const state = readState(row);
+      return {
+        ...state,
+        ...(typeof row.memory === 'string' ? { memory: row.memory } : {}),
+        ...(typeof row.memPerc === 'string' ? { memPerc: row.memPerc } : {}),
+        ...(typeof row.cpuPerc === 'string' ? { cpuPerc: row.cpuPerc } : {}),
+      };
+    });
+  }
+
+  /**
    * Убрать ключи из infra/.env, ничего не пересоздавая.
    *
    * Зовётся при возврате настройки к умолчанию: строка в файле осталась

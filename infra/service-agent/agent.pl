@@ -462,6 +462,9 @@ sub handle {
         my $service = check_service($client, $params{service}, 'recreate') or return;
         return do_recreate($client, $service, $body);
     }
+    if ($method eq 'GET' && $path eq '/stack') {
+        return do_stack($client);
+    }
     if ($method eq 'POST' && $path eq '/certbot') {
         return do_certbot($client, $body);
     }
@@ -695,6 +698,73 @@ sub do_restart {
 # строка отсюда уходит аргументом в certbot, и «-d» с чем угодно внутри
 # был бы способом передать ему чужие ключи.
 # ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# СОСТОЯНИЕ ВСЕГО СТЕКА И ПАМЯТЬ КОНТЕЙНЕРОВ
+# ------------------------------------------------------------------
+# Раздел «Наблюдение» проверяет службы так, как их видит клиент, — по
+# портам. Это правильная проверка, но она не отвечает на два вопроса,
+# которые задают при разборе: «а контейнер вообще запущен или он в петле
+# перезапусков?» и «сколько памяти ест стек, не упрёмся ли мы в потолок
+# VPS?». Оба требуют Docker, и потому висели в списке непроверяемого.
+#
+# Список служб — из %SERVICES, а не из ответа Docker: показывать надо то,
+# что продукт считает своими службами, а не всё, что нашлось на машине.
+# Иначе на общей машине в панель попали бы чужие контейнеры.
+#
+# docker stats запускается с --no-stream: без него команда висит вечно, отдавая
+# показания раз в секунду, и запрос из панели никогда бы не завершился.
+# ------------------------------------------------------------------
+sub do_stack {
+    my ($client) = @_;
+
+    my @services = sort keys %SERVICES;
+    my (@items, @ids);
+    my %by_id;
+
+    for my $service (@services) {
+        my $state = service_state($service);
+        my $id    = container_of($service);
+        if ($id ne '') {
+            push @ids, $id;
+            $by_id{$id} = $service;
+        }
+        push @items, $state;
+    }
+
+    # Память одним вызовом на все контейнеры: отдельный вызов на каждый
+    # стоит около секунды, а служб дюжина.
+    my %memory;
+    if (@ids) {
+        my ($rc, $out) = run('docker', 'stats', '--no-stream', '--format',
+                             '{{.ID}}|{{.MemUsage}}|{{.MemPerc}}|{{.CPUPerc}}', @ids);
+        if ($rc == 0) {
+            for my $line (split /\n/, $out) {
+                my ($short, $mem, $memperc, $cpu) = split /\|/, trim($line);
+                next unless defined $short && $short ne '';
+                # docker stats печатает короткий идентификатор — сопоставляем
+                # по началу полного.
+                for my $id (@ids) {
+                    next unless index($id, $short) == 0;
+                    $memory{$by_id{$id}} = {
+                        memory  => trim($mem     // ''),
+                        memPerc => trim($memperc // ''),
+                        cpuPerc => trim($cpu     // ''),
+                    };
+                    last;
+                }
+            }
+        }
+    }
+
+    for my $item (@items) {
+        my $extra = $memory{ $item->{service} };
+        next unless $extra;
+        $item->{$_} = $extra->{$_} for keys %$extra;
+    }
+
+    return reply($client, 200, { ok => \1, services => \@items });
+}
+
 sub do_certbot {
     my ($client, $body) = @_;
     my %given = parse_query($body);

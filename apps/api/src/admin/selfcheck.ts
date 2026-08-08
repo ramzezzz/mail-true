@@ -136,12 +136,6 @@ export function summarize(checks: readonly HealthCheck[]): {
  */
 export const SHELL_ONLY_CHECKS: ReadonlyArray<{ title: string; why: string }> = [
   {
-    title: 'Состояние контейнеров (docker compose ps) и память всего стека',
-    why:
-      'Требует сокета Docker. Давать его серверу приложения нельзя: это права root на всей ' +
-      'машине. Панель вместо этого проверяет службы так, как их видит клиент, — по портам',
-  },
-  {
     title: 'Порты, открытые НАРУЖУ, и входящий 25-й от чужих серверов',
     why:
       'Изнутри контейнера видно только внутреннюю сеть Docker. Порт, слушающий на 127.0.0.1 ' +
