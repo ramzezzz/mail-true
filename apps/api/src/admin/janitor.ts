@@ -30,7 +30,7 @@
 import type { Logger } from 'pino';
 import type { AdminDb } from './db.js';
 import { errorInfo } from '../log.js';
-import { findOrphanMaildirs, removeTree } from './mailbox-cleanup.js';
+import { findOrphanMaildirs, quarantineMaildir, removeTree } from './mailbox-cleanup.js';
 
 export interface JanitorOptions {
   db: AdminDb;
@@ -121,9 +121,51 @@ export class AdminJanitor {
       const pending = await db.listDeletionsToPurge(this.#opts.batch ?? 20);
       for (const row of pending) {
         if (!row.quarantinePath) {
-          // Каталога не было вовсе — убирать нечего, закрываем запись.
-          await db.updateMailboxDeletion(row.id, { state: 'purged', purged: true });
-          continue;
+          /*
+           * Карантина нет — но причины у этого ДВЕ, и путать их нельзя.
+           *
+           * Раньше здесь стояло одно «убирать нечего, закрываем запись».
+           * Оно верно ровно для одного случая: каталога не существовало,
+           * потому что ящик ни разу не открывали. Второй случай выглядит
+           * так же, а означает противоположное: увести каталог в карантин
+           * НЕ УДАЛОСЬ (том смонтирован только на чтение, чужой владелец,
+           * нет прав). Тогда почта осталась лежать по ЖИВОМУ пути — и
+           * доставалась тому, кто заведёт ящик с этим же адресом заново.
+           * Запись при этом закрывалась как «убрано».
+           *
+           * Отличаем по записанной ошибке предыдущей попытки. Есть ошибка
+           * — пробуем увести в карантин ещё раз (том могли перемонтировать,
+           * права поправить). Не вышло снова — оставляем запись открытой с
+           * причиной: пусть висит и попадается на глаза, это честнее, чем
+           * зелёная отметка над чужой перепиской.
+           */
+          if (row.error !== null && row.error !== '') {
+            // Метка карантина — номер записи об удалении, тот же, что
+            // ставит маршрут удаления: так каталог одного и того же ящика,
+            // удалённого дважды, не перетирает сам себя.
+            const retry = await quarantineMaildir(this.#opts.mailRoot, row.email, String(row.id));
+            if (retry.quarantinePath === null) {
+              await db.updateMailboxDeletion(row.id, {
+                bumpAttempts: true,
+                error: retry.error ?? row.error,
+              });
+              logger.warn(
+                { email: row.email, path: retry.maildirPath, err: retry.error ?? row.error },
+                'Каталог ящика не удалось увести в карантин — запись оставлена открытой',
+              );
+              continue;
+            }
+            await db.updateMailboxDeletion(row.id, {
+              quarantinePath: retry.quarantinePath,
+              maildirPath: retry.maildirPath,
+              error: null,
+            });
+            row.quarantinePath = retry.quarantinePath;
+          } else {
+            // Каталога не было вовсе — убирать нечего, закрываем запись.
+            await db.updateMailboxDeletion(row.id, { state: 'purged', purged: true });
+            continue;
+          }
         }
         try {
           const bytes = await removeTree(row.quarantinePath);

@@ -100,6 +100,105 @@ void test('уборщик удаляет карантин и записывае�
   assert.equal(updates[0]?.state, 'purged');
 });
 
+void test('карантин не удался — уборщик не смеет закрыть запись как убранную', async () => {
+  /*
+   * Самый дорогой из возможных исходов, и выглядел он как успех.
+   *
+   * У записи об удалении нет пути карантина в двух совершенно разных
+   * случаях: каталога не было вовсе (ящик ни разу не открывали) и увести
+   * каталог в карантин НЕ УДАЛОСЬ — том смонтирован только на чтение,
+   * чужой владелец, нет прав. Уборщик их не различал и в обоих ставил
+   * «purged».
+   *
+   * Цена ошибки: почта осталась лежать по живому пути
+   * <корень>/<домен>/<логин>, и её открывает тот, кто заведёт ящик с этим
+   * же адресом заново. Над чужой перепиской при этом стоит зелёная
+   * отметка «убрано».
+   *
+   * Отличаем по записанной ошибке предыдущей попытки — она и есть
+   * доказательство, что каталог был и остался.
+   */
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-fail-'));
+  const live = await seed(root, 'stuck@x.local', 5_000);
+
+  const updates: Array<Record<string, unknown>> = [];
+  const db = {
+    listDeletionsToPurge: async () => [
+      {
+        id: 9,
+        email: 'stuck@x.local',
+        quarantinePath: null,
+        maildirPath: live,
+        error: 'EACCES: permission denied, rename',
+      },
+    ],
+    updateMailboxDeletion: async (_id: number, patch: Record<string, unknown>) => {
+      updates.push(patch);
+    },
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    listAllMailboxEmails: async () => [],
+  };
+
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger,
+    mailRoot: root,
+    intervalSeconds: 0,
+  });
+  await janitor.runOnce();
+
+  // Здесь повторная попытка УДАЁТСЯ (прав в тесте хватает), поэтому
+  // каталог обязан уехать в карантин и быть убран — но ни в одном
+  // обновлении не должно быть «purged» раньше, чем это случилось.
+  const closedBlindly = updates.some(
+    (patch) => patch.state === 'purged' && patch.bytesFreed === undefined,
+  );
+  assert.equal(closedBlindly, false, 'запись закрыта как убранная без единого убранного байта');
+  await assert.rejects(stat(live), 'каталог остался лежать по живому пути');
+});
+
+void test('карантин не удался и не удаётся снова — запись остаётся открытой с причиной', async () => {
+  // Второй раз тоже не вышло: корень указывает в никуда, значит увести
+  // каталог некуда. Единственный честный исход — оставить запись
+  // открытой, увеличив счётчик попыток, и сохранить причину.
+  const updates: Array<Record<string, unknown>> = [];
+  const db = {
+    listDeletionsToPurge: async () => [
+      {
+        id: 11,
+        email: 'stuck@x.local',
+        quarantinePath: null,
+        maildirPath: '/нет/такого/пути/stuck',
+        error: 'EROFS: read-only file system, rename',
+      },
+    ],
+    updateMailboxDeletion: async (_id: number, patch: Record<string, unknown>) => {
+      updates.push(patch);
+    },
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    listAllMailboxEmails: async () => [],
+  };
+
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger,
+    mailRoot: '/нет/такого/корня',
+    intervalSeconds: 0,
+  });
+  const result = await janitor.runOnce();
+
+  assert.equal(result.purgedMaildirs, 0);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0]?.state, undefined, 'состояние менять нельзя: ничего не убрано');
+  assert.equal(updates[0]?.bumpAttempts, true);
+  assert.ok(
+    typeof updates[0]?.error === 'string' && (updates[0].error as string).length > 0,
+    'причина обязана сохраниться — по ней это и разбирают',
+  );
+});
+
 void test('уборщик находит осиротевшие каталоги, но сам их не трогает', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'mt-orph-'));
   const living = await seed(root, 'alive@x.local');

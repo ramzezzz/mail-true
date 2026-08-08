@@ -753,11 +753,37 @@ export class AdminDb {
   }
 
   /** Что пора убрать с диска: карантин отлежал положенное. */
-  async listDeletionsToPurge(
-    limit: number,
-  ): Promise<Array<{ id: number; email: string; quarantinePath: string | null }>> {
-    const rows = await this.query<{ id: string; email: string; quarantine_path: string | null }>(
-      `SELECT id::text, email, quarantine_path
+  /**
+   * Записи, по которым пора убирать карантин.
+   *
+   * Отдаётся не только путь карантина, но и путь самого каталога с ошибкой
+   * предыдущей попытки. Без них уборщик не мог отличить два совершенно
+   * разных случая, потому что оба выглядят как «карантина нет»:
+   *
+   *   • каталога не было вовсе (ящик ни разу не открывали) — убирать нечего;
+   *   • увести каталог в карантин НЕ УДАЛОСЬ (права, том только на чтение) —
+   *     почта осталась лежать по живому пути.
+   *
+   * Второй случай уборщик закрывал как успешно убранный, и каталог с чужой
+   * перепиской доставался тому, кто заведёт ящик с этим же адресом заново.
+   */
+  async listDeletionsToPurge(limit: number): Promise<
+    Array<{
+      id: number;
+      email: string;
+      quarantinePath: string | null;
+      maildirPath: string | null;
+      error: string | null;
+    }>
+  > {
+    const rows = await this.query<{
+      id: string;
+      email: string;
+      quarantine_path: string | null;
+      maildir_path: string | null;
+      error: string | null;
+    }>(
+      `SELECT id::text, email, quarantine_path, maildir_path, error
          FROM mailbox_deletions
         WHERE state = 'pending' AND purge_after <= now() AND attempts < 10
         ORDER BY purge_after
@@ -768,6 +794,8 @@ export class AdminDb {
       id: Number(r.id),
       email: r.email,
       quarantinePath: r.quarantine_path,
+      maildirPath: r.maildir_path,
+      error: r.error,
     }));
   }
 
