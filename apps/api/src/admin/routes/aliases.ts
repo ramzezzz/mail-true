@@ -10,6 +10,7 @@ import { BadRequestError, NotFoundError } from '../../errors.js';
 import { ConflictError } from '../errors.js';
 import { isUniqueViolation } from '../db.js';
 import { audit, requireAdmin } from '../guard.js';
+import { pathId } from '../../params.js';
 
 const listQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
@@ -115,7 +116,7 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
     '/aliases/:id',
     { preHandler: requireAdmin(app, 'aliases.write') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'псевдонима');
       const body = patchSchema.parse(request.body);
       const before = await ctx.db.findAliasById(id);
       if (!before) throw new NotFoundError('Алиас не найден');
@@ -145,7 +146,7 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
     '/aliases/:id',
     { preHandler: requireAdmin(app, 'aliases.write') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'псевдонима');
       const before = await ctx.db.findAliasById(id);
       if (!before) throw new NotFoundError('Алиас не найден');
       await ctx.db.deleteAlias(id);

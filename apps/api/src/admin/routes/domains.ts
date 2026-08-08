@@ -13,6 +13,7 @@ import { ConflictError } from '../errors.js';
 import { isUniqueViolation, type DomainRow } from '../db.js';
 import { audit, requireAdmin } from '../guard.js';
 import { settingsOf } from '../server-settings.js';
+import { pathId } from '../../params.js';
 import {
   buildDkimRecord,
   buildDmarcRecord,
@@ -110,7 +111,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
     '/domains/:id',
     { preHandler: requireAdmin(app, 'domains.read') },
     async (request) => {
-      const row = await ctx.db.findDomainById(Number(request.params.id));
+      const row = await ctx.db.findDomainById(pathId(request.params.id, 'домена'));
       if (!row) throw new NotFoundError('Домен не найден');
       return toDto(row, host);
     },
@@ -147,7 +148,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
     '/domains/:id',
     { preHandler: requireAdmin(app, 'domains.write') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'домена');
       const body = settingsSchema.parse(request.body);
       const before = await ctx.db.findDomainById(id);
       if (!before) throw new NotFoundError('Домен не найден');
@@ -196,7 +197,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
     '/domains/:id',
     { preHandler: requireAdmin(app, 'domains.write') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'домена');
       const force = request.query.force === 'true' || request.query.force === '1';
       const row = await ctx.db.findDomainById(id);
       if (!row) throw new NotFoundError('Домен не найден');
@@ -314,7 +315,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       config: { rateLimit: { max: 30, timeWindow: 60_000 } },
     },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'домена');
       const row = await ctx.db.findDomainById(id);
       if (!row) throw new NotFoundError('Домен не найден');
 
@@ -347,7 +348,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       config: { rateLimit: { max: 120, timeWindow: 60_000 } },
     },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'домена');
       const checkId = request.params.checkId as DnsCheckId;
       if (!DNS_CHECK_IDS.includes(checkId)) {
         throw new BadRequestError(`Неизвестная запись «${request.params.checkId}»`);

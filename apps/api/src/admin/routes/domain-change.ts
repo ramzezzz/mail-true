@@ -40,6 +40,7 @@ import {
   type DomainChangeJobRow,
 } from '../domain-change-jobs.js';
 import { dropTargetDomain } from '../domain-change-store.js';
+import { pathId } from '../../params.js';
 
 const planSchema = z.object({
   newDomain: z.string().trim().toLowerCase().min(3).max(255),
@@ -150,7 +151,7 @@ export async function adminDomainChangeRoutes(app: FastifyInstance): Promise<voi
     { preHandler: requireAdmin(app, 'domainchange.run') },
     async (request) => {
       await requireSchema();
-      const job = await findJob(ctx.db, Number(request.params.id));
+      const job = await findJob(ctx.db, pathId(request.params.id, 'плана переезда'));
       if (!job) throw new NotFoundError('Задание смены домена не найдено');
       return toDto(job);
     },
@@ -262,7 +263,7 @@ export async function adminDomainChangeRoutes(app: FastifyInstance): Promise<voi
     { preHandler: requireAdmin(app, 'domainchange.run') },
     async (request) => {
       await requireSchema();
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'плана переезда');
       const job = await findJob(ctx.db, id);
       if (!job) throw new NotFoundError('Задание смены домена не найдено');
       if (job.pointOfNoReturnAt !== null) {
@@ -312,7 +313,7 @@ export async function adminDomainChangeRoutes(app: FastifyInstance): Promise<voi
     },
     async (request, reply) => {
       await requireSchema();
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'плана переезда');
       const body = applySchema.parse(request.body);
       const job = await findJob(ctx.db, id);
       if (!job) throw new NotFoundError('Задание смены домена не найдено');

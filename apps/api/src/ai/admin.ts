@@ -21,6 +21,7 @@ import { keyHint } from './secret.js';
 import { AiUnavailableError } from './errors.js';
 import type { AiDomainSettings, AiDomainSettingsPatch } from './db.js';
 import type { AiService } from './service.js';
+import { pathId } from '../params.js';
 
 const settingsSchema = z.object({
   enabled: z.boolean().optional(),
@@ -132,7 +133,7 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
     '/ai/domains/:id',
     { preHandler: requireAdmin(app, 'domains.read') },
     async (request) => {
-      const row = await requireDb().findDomainSettingsById(Number(request.params.id));
+      const row = await requireDb().findDomainSettingsById(pathId(request.params.id, 'записи'));
       if (!row) throw new NotFoundError('Настройки ИИ для домена не найдены');
       return toDto(row);
     },
@@ -147,7 +148,7 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
     { preHandler: requireAdmin(app, 'domains.write') },
     async (request) => {
       const db = requireDb();
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'записи');
       const body = settingsSchema.parse(request.body);
       const before = await db.findDomainSettingsById(id);
       if (!before) throw new NotFoundError('Настройки ИИ для домена не найдены');
@@ -235,7 +236,7 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
     },
     async (request) => {
       const db = requireDb();
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'записи');
       const row = await db.findDomainSettingsById(id);
       if (!row) throw new NotFoundError('Настройки ИИ для домена не найдены');
       if (!row.enabled) {
