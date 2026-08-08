@@ -132,6 +132,21 @@ server {
     # в собранном index.html нет, письма скриптов не получают вовсе.
     add_header Content-Security-Policy   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: http:; font-src 'self' data:; media-src 'self' data: blob:; connect-src 'self' ws: wss:; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'" always;
 
+    # --- Подтверждение владения доменом для Let's Encrypt -----------
+    # Стоит ВЫШЕ /.well-known/ намеренно: у nginx точный префикс сильнее
+    # общего, и без этого блока проверка уходила бы в автонастройку, а
+    # certbot получал бы её ответ вместо своего файла.
+    #
+    # Каталог общий с контейнером certbot (том acme-challenge). Так выпуск
+    # не требует останавливать nginx: раньше он гасился на время проверки,
+    # и запрос из панели рвался ровно тем действием, которое сам и вызвал.
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+        # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
+        add_header Cache-Control "no-store" always;
+    }
+
     # --- Автонастройка почтовых клиентов (было и осталось) ---------
     # Thunderbird: запасной путь по спецификации well-known
     location /.well-known/ {

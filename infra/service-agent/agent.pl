@@ -722,14 +722,31 @@ sub do_certbot {
     # бы «выдан неизвестным центром».
     my $cert_name = $staging ? 'mailtrue-staging' : 'mailtrue';
 
+    # ------------------------------------------------------------------
+    # Проверка через nginx (webroot), а НЕ остановкой nginx
+    # ------------------------------------------------------------------
+    # Certbot умеет и сам слушать 80-й порт (--standalone) — так делает
+    # консольный установщик, и там это уместно: он работает с сервера.
+    #
+    # Из панели так нельзя. Запрос на выпуск приходит ЧЕРЕЗ nginx, и
+    # первое, что делал бы выпуск, — рвал соединение, по которому пришёл:
+    # человек нажимает кнопку и получает обрыв вместо ответа. Проверено
+    # живьём, ответ был «код 000».
+    #
+    # Поэтому webroot: certbot кладёт файл-подтверждение в общий каталог,
+    # а отдаёт его nginx — по пути /.well-known/acme-challenge/, который у
+    # нас и так исключён из перенаправления на HTTPS. Никто ничего не
+    # гасит, веб-вход доступен всё время выпуска.
+    my $webroot_volume = $PROJECT . '_acme-challenge';
     my @args = (
         'run', '--rm',
-        '-p', '80:80',
+        '-v', "$webroot_volume:/var/www/acme",
         '-v', '/etc/letsencrypt:/etc/letsencrypt',
         '-v', '/var/lib/letsencrypt:/var/lib/letsencrypt',
         '-v', '/var/log/letsencrypt:/var/log/letsencrypt',
         'certbot/certbot:latest',
-        'certonly', '--standalone', '--non-interactive', '--agree-tos',
+        'certonly', '--webroot', '-w', '/var/www/acme',
+        '--non-interactive', '--agree-tos',
         '--email', $email,
         '--cert-name', $cert_name,
         '--keep-until-expiring',
@@ -737,14 +754,7 @@ sub do_certbot {
     push @args, '--staging' if $staging;
     push @args, ('-d', $_) for @domains;
 
-    # nginx держит 80-й порт — на время проверки его останавливаем.
-    my @stop = (compose_argv(), 'stop', 'nginx');
-    run(@stop);
-
     my ($rc, $out, $err) = run('docker', @args);
-
-    my @start = (compose_argv(), 'start', 'nginx');
-    run(@start);
 
     if ($rc != 0) {
         my $why = trim(($err || $out) || "код возврата $rc");
