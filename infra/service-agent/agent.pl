@@ -678,6 +678,25 @@ sub do_recreate {
     # код там, где его должно быть как можно меньше.
     my %given = parse_query($body);
     my $allowed = $ENV_KEYS{$service} // {};
+
+    # Особое поле: ключи, которые надо УБРАТЬ из infra/.env. Приходит
+    # списком через запятую, проверяется по тому же белому списку, что и
+    # запись, — убрать чужой ключ посредник не может ровно так же, как не
+    # может его записать.
+    my @unset;
+    if (defined $given{__unset}) {
+        for my $key (split /,/, delete $given{__unset}) {
+            $key =~ s/^\s+|\s+$//g;
+            next if $key eq '';
+            unless ($allowed->{$key}) {
+                return reply($client, 400, {
+                    error => "ключ «$key» посреднику убирать не разрешено (служба $service)",
+                });
+            }
+            push @unset, $key;
+        }
+    }
+
     my %write;
     for my $key (sort keys %given) {
         unless ($allowed->{$key}) {
@@ -693,8 +712,8 @@ sub do_recreate {
         $write{$key} = $value;
     }
 
-    if (%write) {
-        my $error = write_env(\%write);
+    if (%write || @unset) {
+        my $error = write_env(\%write, \@unset);
         return reply($client, 500, { error => $error }) if $error ne '';
     }
 
@@ -746,7 +765,9 @@ sub compose_argv {
 # монтирования нельзя — получилось бы «Device or resource busy». Прежнее
 # содержимое остаётся в памяти, и при неудачной записи возвращается назад.
 sub write_env {
-    my ($values) = @_;
+    my ($values, $unset) = @_;
+    $unset = [] unless defined $unset;
+    my %drop = map { $_ => 1 } @$unset;
     return 'Файл infra/.env посреднику не примонтирован — записать настройку некуда.'
         unless -f $ENV_FILE;
 
@@ -761,14 +782,28 @@ sub write_env {
     (my $text = $before) =~ s/\r//g;
     my @lines = split /\n/, $text, -1;
     my %done;
+    my @kept;
     for my $line (@lines) {
+        # Убираемые ключи просто не переносим в новый файл: значение
+        # тогда возьмётся из умолчания в docker-compose.yml, а это и есть
+        # «как у продукта».
+        my $dropped = 0;
+        for my $key (keys %drop) {
+            next unless index($line, "$key=") == 0;
+            $dropped = 1;
+            last;
+        }
+        next if $dropped;
+
         for my $key (keys %$values) {
             next if $done{$key};
             next unless index($line, "$key=") == 0;
             $line  = "$key=$values->{$key}";
             $done{$key} = 1;
         }
+        push @kept, $line;
     }
+    @lines = @kept;
     my $out = join("\n", @lines);
     for my $key (sort keys %$values) {
         next if $done{$key};

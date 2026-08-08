@@ -291,12 +291,29 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
      * умолчания продукта в файле делать явными — не наше дело.
      */
     const env: Record<string, string> = {};
+    /*
+     * И отдельно — ключи, которые надо УБРАТЬ из infra/.env.
+     *
+     * «Вернуть к умолчанию» убирало значение из базы, а строка в файле
+     * оставалась навсегда: панель показывала умолчание продукта, сервер
+     * работал с прежним значением. Поймано живьём — сброс потолка памяти
+     * вернул в панели 512 МБ, а контейнер поднялся с 768 из файла.
+     *
+     * Убираем строку, а не пишем в неё умолчание: тогда значение берётся
+     * оттуда, откуда и должно, — из умолчания в docker-compose.yml, и в
+     * файле не остаётся следов панели там, где человек их не просил.
+     */
+    const unset: string[] = [];
     if (action === 'recreate' && ctx.serverSettings) {
       for (const spec of settingsAppliedBy(target.id, 'recreate')) {
         const resolved = await ctx.serverSettings.resolve(spec.key);
         if (resolved.source === 'db') env[spec.key] = resolved.raw;
+        // Значение пришло из файла, хотя настройкой управляет панель, —
+        // значит его туда записала она же, а в базе его больше нет.
+        else if (resolved.source === 'env') unset.push(spec.key);
       }
     }
+    if (unset.length > 0) env.__unset = unset.join(',');
 
     const record = await journal.begin(target.id, action, login);
     await audit(ctx, request, {
