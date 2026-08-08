@@ -37,14 +37,22 @@ const OUT_HTML = join(HERE, 'build', 'manual.html');
 /* Главы                                                             */
 /* ---------------------------------------------------------------- */
 
+/*
+ * Порядок глав задаётся здесь, а не номерами файлов: числа в именах внутри
+ * `src/` — это порядок появления главы в проекте, и переименовывать четыре
+ * файла ради каждой вставленной в середину главы значило бы каждый раз
+ * трогать то, что не менялось.
+ */
 const CHAPTERS = [
   { file: join(HERE, 'src/01-o-produkte.md'), title: 'О продукте' },
   { file: join(DOCS, 'install.md'), title: 'Установка на боевой сервер' },
+  { file: join(HERE, 'src/05-ustanovka-master.md'), title: 'Установка через браузер' },
   { file: join(HERE, 'src/02-obzor.md'), title: 'Обзор интерфейса' },
   { file: join(HERE, 'src/03-admin.md'), title: 'Панель администратора' },
   { file: join(DOCS, 'autoconfig.md'), title: 'Почтовые клиенты и автонастройка' },
   { file: join(DOCS, 'migration.md'), title: 'Перенос почты с другого сервера' },
   { file: join(HERE, 'src/04-kerio.md'), title: 'Перенос из Kerio Connect: по шагам' },
+  { file: join(HERE, 'src/06-obsluzhivanie.md'), title: 'Обслуживание' },
 ];
 
 /* ---------------------------------------------------------------- */

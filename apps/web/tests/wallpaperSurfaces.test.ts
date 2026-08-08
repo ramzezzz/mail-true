@@ -157,27 +157,25 @@ describe('строки списка различимы поверх картин
    * должны сливаться. Считаем при обоих крайних фонах — на белой
    * фотографии разница накладки заметна хуже всего.
    */
-  const step = (photo: Rgb, alpha: number): number => {
-    const base = surface(photo);
-    return contrastRatio(composite(WALLPAPER_SURFACE.rowTint, alpha, base), base);
-  };
+  const step = (base: Rgb, alpha: number): number =>
+    contrastRatio(composite(WALLPAPER_SURFACE.rowTint, alpha, base), base);
 
   it('выделенная строка отличается не хуже, чем на белой карточке', () => {
     // белая карточка mail.ru: #FFFFFF против выделения #EBECEF
     const opaque = contrastRatio('#ffffff', '#ebecef');
-    expect(step(BLACK, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);
-    expect(step(WHITE, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);
+    expect(step(worst, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);
+    expect(step(lightest, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);
   });
 
   it('строка под курсором отличается не хуже, чем на белой карточке', () => {
     const opaque = contrastRatio('#ffffff', '#f5f5f7');
-    expect(step(BLACK, WALLPAPER_SURFACE.rowHover)).toBeGreaterThanOrEqual(opaque);
-    expect(step(WHITE, WALLPAPER_SURFACE.rowHover)).toBeGreaterThanOrEqual(opaque);
+    expect(step(worst, WALLPAPER_SURFACE.rowHover)).toBeGreaterThanOrEqual(opaque);
+    expect(step(lightest, WALLPAPER_SURFACE.rowHover)).toBeGreaterThanOrEqual(opaque);
   });
 
   it('выделение заметнее наведения — иначе их не различить', () => {
-    expect(step(WHITE, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThan(
-      step(WHITE, WALLPAPER_SURFACE.rowHover),
+    expect(step(lightest, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThan(
+      step(lightest, WALLPAPER_SURFACE.rowHover),
     );
   });
 

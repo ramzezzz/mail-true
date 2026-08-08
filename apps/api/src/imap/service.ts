@@ -3,6 +3,7 @@
  */
 import type { ImapFlow, FetchMessageObject, MessageStructureObject, SearchObject } from 'imapflow';
 import {
+  ftsSafeText,
   parseSearch,
   type Folder,
   type MailAddress,
@@ -159,7 +160,7 @@ export function buildSearchQuery(
   if (parsed.from) query.from = parsed.from;
   if (parsed.to) query.to = parsed.to;
   if (parsed.cc) query.cc = parsed.cc;
-  if (parsed.subject) query.subject = parsed.subject;
+  if (parsed.subject) query.subject = ftsSafeText(parsed.subject);
   if (parsed.since) query.since = parsed.since;
   if (parsed.before) query.before = parsed.before;
   if (parsed.seen !== null) query.seen = parsed.seen;
@@ -183,8 +184,17 @@ export function buildSearchQuery(
    * поиск обычными словами и не отдало пустоту.
    */
   if (parsed.text) {
-    // TEXT ищет и по заголовкам, и по телу
-    query.text = parsed.text;
+    /*
+     * TEXT ищет и по заголовкам, и по телу.
+     *
+     * Строка проходит через `ftsSafeText`: слово вида «452/26» полнотекстовый
+     * движок делит на «452» и «26» и требует обе части, а части короче трёх
+     * букв в индексе не существует — условие невыполнимо, и письмо со своей
+     * же темой в теме не находится (см. шапку ftsSafeText). Адресные условия
+     * (`от:`, `кому:`, `копия:`) через это НЕ пропускаются: там значение
+     * ищется целиком одной строкой, и дробить его нельзя.
+     */
+    query.text = ftsSafeText(parsed.text);
   }
   /*
    * Отбор по своей метке — командой IMAP `KEYWORD`, а не перебором

@@ -1,15 +1,18 @@
 // Временная настройка для живой проверки страницы входа: тот же исходник
 // админки, но /api уходит в поднятый стек через фронтовый nginx.
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-const ROOT = 'G:/Temp/Mail.True/apps/admin';
+// Пути считаются от самого файла: копия репозитория в другом каталоге
+// (или на другом диске) должна открываться без правок.
+const here = (relative: string) => fileURLToPath(new URL(relative, import.meta.url));
 
 export default defineConfig({
-  root: ROOT,
+  root: here('./apps/admin'),
   plugins: [react()],
   resolve: {
-    alias: { '@web': 'G:/Temp/Mail.True/apps/web/src' },
+    alias: { '@web': here('./apps/web/src') },
   },
   server: {
     port: 5175,

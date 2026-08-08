@@ -65,8 +65,11 @@ export interface MailboxToCreate {
   password?: string;
 }
 
+/** Нормализованные поля, в которые ложатся колонки выгрузки. */
+type ColumnKey = 'login' | 'fullName' | 'description' | 'email' | 'groups' | 'password';
+
 /** Синонимы имён колонок (Kerio по-английски, плюс запасные варианты). */
-const COLUMN_ALIASES: Record<string, keyof typeof COLUMN_KEYS> = {
+const COLUMN_ALIASES: Record<string, ColumnKey> = {
   name: 'login',
   alias: 'login',
   login: 'login',
@@ -87,15 +90,6 @@ const COLUMN_ALIASES: Record<string, keyof typeof COLUMN_KEYS> = {
   group: 'groups',
   password: 'password',
 };
-
-const COLUMN_KEYS = {
-  login: true,
-  fullName: true,
-  description: true,
-  email: true,
-  groups: true,
-  password: true,
-} as const;
 
 /** Разбить многозначное поле Kerio (значения разделены запятыми). */
 function splitMulti(value: string): string[] {
@@ -126,7 +120,7 @@ export function parseKerioUsersCsv(text: string): KerioUser[] {
   const users: KerioUser[] = [];
   for (const row of rows) {
     // Переносим известные колонки в нормализованные поля
-    const fields: Partial<Record<keyof typeof COLUMN_KEYS, string>> = {};
+    const fields: Partial<Record<ColumnKey, string>> = {};
     for (const [rawKey, value] of Object.entries(row)) {
       const mapped = COLUMN_ALIASES[rawKey];
       if (mapped && value.length > 0 && fields[mapped] === undefined) {

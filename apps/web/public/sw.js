@@ -29,7 +29,11 @@
  * TypeScript было бы самообманом — в браузер уезжает этот текст.
  */
 
-/* eslint-env serviceworker */
+/*
+ * Имена окружения Service Worker (self, clients, registration) объявлены
+ * в eslint.config.js для всех `*.js`: комментарий `/* eslint-env *\/` во
+ * flat-конфигурации больше не читается и с ESLint 10 станет ошибкой.
+ */
 
 const API = {
   notifications: '/api/push/notifications',

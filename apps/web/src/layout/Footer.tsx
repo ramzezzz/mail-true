@@ -68,7 +68,12 @@
  */
 
 import { useEffect, useState } from 'react';
-import { useIsFetching, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  notifyManager,
+  useIsFetching,
+  useQueryClient,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { useLocation } from 'react-router-dom';
 import { useAccount, useFolders, useRefreshMail, useServerVersion } from '../api/queries';
 import { cx } from '../lib/cx';
@@ -117,6 +122,26 @@ function readCache(client: QueryClient): QuerySnapshot[] {
  * Новое состояние ставится, только если оно вправду другое — кэш шумит на
  * каждое изменение любого запроса, и без этой проверки строка перерисовы-
  * валась бы десятками раз на одну прокрутку списка.
+ *
+ * ПОЧЕМУ ЧЕРЕЗ `notifyManager.batchCalls`, А НЕ ГОЛЫМ СЛУШАТЕЛЕМ.
+ *
+ * Кэш зовёт своих слушателей СИНХРОННО, прямо из того места, где его
+ * изменили (`QueryCache.notify`). А изменяют его в том числе ВО ВРЕМЯ
+ * ОТРИСОВКИ: `useQuery`/`useQueries` заводят запись в кэше в теле рендера
+ * (`getOptimisticResult` → `QueryCache.build` → событие `added`). Открытие
+ * поиска — ровно этот случай: ключи запросов там новые, поиск рисуется
+ * соседом строки состояния (AppLayout: `<Outlet/>`, затем `<Footer/>`), и
+ * голый слушатель дёргал `setStatus` посреди чужого рендера. React честно
+ * ругался: «Cannot update a component (Footer) while rendering a different
+ * component». В собранном виде предупреждения нет, но обновление посреди
+ * рендера — настоящая ошибка, а не шум разработки: в паре с параллельным
+ * режимом React такое обновление может потеряться или прийти дважды.
+ *
+ * `batchCalls` — то же самое, чем react-query обёртывает подписки всех
+ * СВОИХ хуков (см. useBaseQuery): вызов откладывается до конца текущей
+ * пачки изменений и уходит отдельной задачей, то есть заведомо вне фазы
+ * отрисовки. Заодно десяток событий одной загрузки сливается в один
+ * пересчёт — ровно то, ради чего рядом стоит проверка на равенство.
  */
 function useMailStatus(): MailStatus {
   const client = useQueryClient();
@@ -130,7 +155,7 @@ function useMailStatus(): MailStatus {
       );
     };
     update();
-    const unsubscribe = client.getQueryCache().subscribe(update);
+    const unsubscribe = client.getQueryCache().subscribe(notifyManager.batchCalls(update));
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
     return () => {

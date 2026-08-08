@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react-dom/test-utils';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
 import type { Account, Folder } from '@mail-true/shared';
 import { api } from '../src/api';
 import { SILENCE_MS } from '../src/layout/FooterStatus';
@@ -123,6 +123,21 @@ async function render(
   });
 }
 
+/**
+ * Дать разойтись не только микрозадачам, но и отложенным уведомлениям кэша.
+ *
+ * react-query шлёт их «следующей задачей» (setTimeout 0) — так он поступает
+ * со ВСЕМИ своими подписками, и на то же самое подписана строка состояния:
+ * иначе кэш дёргал бы её посреди отрисовки соседнего компонента (см.
+ * Footer.tsx, useMailStatus). Задержка в бою — доли миллисекунды, а вот
+ * проверке приходится её дожидаться явно.
+ */
+async function settle(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 const footer = (): HTMLElement | null => host.querySelector('footer[aria-label="Состояние почты"]');
 const footerText = (): string => footer()?.textContent ?? '';
 const refreshButton = (): HTMLButtonElement | null =>
@@ -205,6 +220,84 @@ describe('что показывает строка состояния', () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* Обновление посреди чужой отрисовки                                  */
+/* ------------------------------------------------------------------ */
+
+/** Кнопка «открыть поиск»: переход, а не первая отрисовка страницы. */
+function ToSearch(): JSX.Element {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate('/search')}>
+      {OPEN_SEARCH}
+    </button>
+  );
+}
+
+const OPEN_SEARCH = 'открыть поиск';
+
+describe('строка состояния не обновляется посреди чужой отрисовки', () => {
+  /*
+   * ЧТО ЗДЕСЬ ПРОВЕРЯЕТСЯ. Строка состояния подписана на кэш запросов, а
+   * кэш зовёт слушателей СИНХРОННО, прямо из того места, где его изменили.
+   * Изменяют его в том числе во время отрисовки: `useQuery`/`useQueries`
+   * заводят запись в кэше в теле рендера. Открытие поиска — ровно этот
+   * случай: колонка фильтров и сохранённые запросы (SearchFacets,
+   * SavedSearches) монтируются переходом и заводят свои записи, а строка
+   * состояния — их сосед по каркасу. Голый слушатель обновлял её посреди
+   * чужого рендера, и React честно ругался.
+   *
+   * Проверка идёт ПЕРЕХОДОМ, а не отрисовкой сразу на /search: при первой
+   * отрисовке строка подписывается уже после того, как всё нарисовано, и
+   * поймать нечего — на сломанном коде такая проверка зеленела бы.
+   */
+  it('открытие поиска не обновляет строку состояния из чужого рендера', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map((a) => String(a)).join(' '));
+    });
+
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={['/inbox/']}>
+            <SessionProvider>
+              <Routes>
+                <Route element={<AppLayout />}>
+                  <Route path=":folderId" element={<ToSearch />} />
+                  <Route path="search" element={<div>страница поиска</div>} />
+                </Route>
+              </Routes>
+            </SessionProvider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    errors.length = 0;
+
+    const open = [...host.querySelectorAll('button')].find((b) => b.textContent === OPEN_SEARCH);
+    expect(open, 'кнопки перехода в поиск нет — проверять нечего').toBeDefined();
+    await act(async () => {
+      open!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await settle();
+
+    spy.mockRestore();
+    expect(host.textContent, 'поиск не открылся — значит, проверка ничего не проверила').toContain(
+      'страница поиска',
+    );
+    const renderPhase = errors.filter((line) => line.includes('while rendering a different'));
+    expect(renderPhase, renderPhase.join('\n\n')).toEqual([]);
+    // Строка состояния при этом на месте и жива
+    expect(footer(), 'строка состояния пропала').not.toBeNull();
+  });
+});
+
 describe('свежесть и обновление', () => {
   it('показано, когда список обновлялся, и есть чем обновить', async () => {
     await render();
@@ -239,6 +332,7 @@ describe('состояние связи', () => {
     await act(async () => {
       await client.refetchQueries({ queryKey: ['folders'] });
     });
+    await settle();
 
     expect(footerText(), 'отказ сервера остался незамеченным').toContain('Сервер не отвечает');
   });
@@ -251,12 +345,14 @@ describe('состояние связи', () => {
     await act(async () => {
       await client.refetchQueries({ queryKey: ['folders'] });
     });
+    await settle();
     expect(footerText()).toContain('Сервер не отвечает');
 
     vi.mocked(api.getFolders).mockResolvedValue(folders);
     await act(async () => {
       await client.refetchQueries({ queryKey: ['folders'] });
     });
+    await settle();
     expect(footerText()).not.toContain('Сервер не отвечает');
     expect(footerText()).toMatch(/Обновлено/u);
   });
@@ -282,6 +378,8 @@ describe('состояние связи', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+
+    await settle();
 
     // Ошибка не осела: запрос ждёт повтора (retryDelay 10 с)
     const state = client.getQueryState(['folders']);
