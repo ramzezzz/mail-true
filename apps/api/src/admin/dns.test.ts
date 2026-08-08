@@ -303,6 +303,60 @@ test('DMARC с p=none — замечание, а не ошибка', async () =>
   assert.equal(dmarc.status, 'warn');
 });
 
+test('домена нет в интернете — «не проверено», а не десяток красных строк', async () => {
+  /*
+   * Стенд с доменом `home.local` — и вообще любой домен, зона которого
+   * ещё не делегирована, — красил ВСЕ проверки разом: A, MX, SPF, DKIM,
+   * DMARC, PTR. Чинить там нечего: спрашивать записи не у кого.
+   *
+   * Десяток красных строк, которые невозможно исправить, приучает не
+   * смотреть на раздел вообще — и настоящий отказ, когда он случится,
+   * тоже никто не заметит. Поэтому такие проверки помечаются «не
+   * проверено», а причина называется словами.
+   */
+  const report = await checkDomainDns('home.local', {
+    ...OPTIONS,
+    mailHostname: 'mail.home.local',
+    querier: fakeQuerier({}),
+  });
+  assert.equal(report.overall, 'unknown');
+  const failed = report.checks.filter((c) => c.status === 'fail');
+  assert.deepEqual(
+    failed.map((c) => c.id),
+    [],
+    'у несуществующей зоны нечего объявлять сломанным',
+  );
+  assert.match(report.checks[0]?.diff ?? '', /не опубликован/);
+});
+
+test('пустая зона у обычного домена — тоже «не проверено», если резольвер отвечает', async () => {
+  // Домен купили, записи ещё не завели. Отличается от предыдущего только
+  // тем, что зона верхнего уровня настоящая: диагноз выводится из того,
+  // что резольвер отвечает по существу, но по домену нет вообще ничего.
+  const report = await checkDomainDns('example.ru', { ...OPTIONS, querier: fakeQuerier({}) });
+  assert.equal(report.overall, 'unknown');
+  assert.equal(
+    report.checks.filter((c) => c.status === 'fail').length,
+    0,
+    'пустая зона — это «ещё не настроено», а не «сломано»',
+  );
+});
+
+test('частично настроенная зона по-прежнему краснеет', async () => {
+  /*
+   * Граница поведения: щадящий диагноз положен только тому, у кого НЕТ
+   * НИЧЕГО. Зона, где адрес сервера опубликован, а SPF забыли, — это
+   * обычная недонастройка, и она обязана быть красной. Иначе новое
+   * правило превратилось бы в способ прятать настоящие ошибки.
+   */
+  const zone = goodZone();
+  delete zone['TXT example.ru'];
+  const report = await checkDomainDns('example.ru', { ...OPTIONS, querier: fakeQuerier(zone) });
+  const spf = by(report.checks, 'spf');
+  assert.equal(spf.verdict, 'missing');
+  assert.notEqual(spf.status, 'unknown');
+});
+
 test('недоступный резольвер — «не удалось спросить», ни одной записи не объявлено ненастроенной', async () => {
   const report = await checkDomainDns('example.ru', {
     ...OPTIONS,
