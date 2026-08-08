@@ -407,6 +407,29 @@ env_set POP3S_PORT      "${MAILTRUE_POP3S_PORT:-995}"
 env_set AUTOCONFIG_PORT "${MAILTRUE_AUTOCONFIG_PORT:-8025}"
 env_set NGINX_HTTP_PORT "${MAILTRUE_NGINX_HTTP_PORT:-80}"
 env_set NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-443}"
+
+# ------------------------------------------------------------------
+# Резервный вход в панель: адрес, на котором его слушать.
+#
+# Панель отвечает только на имя admin.<домен>. Пока DNS не разошёлся — а
+# на внутреннем домене он не разойдётся никогда — управлять сервером
+# нечем. Поэтому есть второй вход по адресу, и здесь решается, кому он
+# виден.
+#
+# Берём ЛОКАЛЬНЫЙ адрес сервера (192.168.x, 10.x, 172.16–31.x), если он
+# есть: почти всегда админ сидит в той же сети, и вход должен работать
+# сразу. Нет частного адреса (машина смотрит в интернет напрямую) —
+# оставляем 127.0.0.1: снаружи такой порт недоступен вовсе, а зайти можно
+# пробросом через SSH. Открывать управление сервером в интернет по
+# умолчанию нельзя ни при каких удобствах.
+# ------------------------------------------------------------------
+ADMIN_LOCAL_BIND="${MAILTRUE_ADMIN_LOCAL_BIND:-}"
+if [ -z "$ADMIN_LOCAL_BIND" ]; then
+    ADMIN_LOCAL_BIND="$(private_ip)"
+    ADMIN_LOCAL_BIND="${ADMIN_LOCAL_BIND:-127.0.0.1}"
+fi
+env_set ADMIN_LOCAL_BIND "$ADMIN_LOCAL_BIND"
+env_set ADMIN_LOCAL_PORT "${MAILTRUE_ADMIN_LOCAL_PORT:-8081}"
 env_set API_LOG_LEVEL info
 # Веб-интерфейс: cookie сессии отдаётся только по HTTPS. Отладочный порт
 # сервера приложения наружу не публикуется (install/compose.prod.yml).
@@ -961,13 +984,55 @@ WEB_SCHEME=https
 
 cat <<EOF
 
-  Почта в браузере:  $WEB_SCHEME://mail.$DOMAIN   (и $WEB_SCHEME://$DOMAIN)
-  Админка:           $WEB_SCHEME://admin.$DOMAIN
+  ── Куда заходить ─────────────────────────────────────────────
+
+  Почта:    $WEB_SCHEME://mail.$DOMAIN   (и $WEB_SCHEME://$DOMAIN)
+            логин — полный адрес ящика: $ADMIN_EMAIL
+            пароль — тот же, что у администратора
+
+  Панель:   $WEB_SCHEME://admin.$DOMAIN
+            логин — $ADMIN_LOGIN
+EOF
+if [ "${GENERATED_ADMIN_PASSWORD:-0}" != "1" ]; then
+    printf '            пароль — тот, что вы задали при установке\n'
+fi
+cat <<EOF
 
   Почтовый сервер:   $MAIL_HOST
   Домен:             $DOMAIN
-  Ящик админа:       $ADMIN_EMAIL
-  Логин в админке:   $ADMIN_LOGIN
+EOF
+
+# ------------------------------------------------------------------
+# Резервный вход и строка для hosts.
+#
+# Оба пункта — про один и тот же час после установки: DNS ещё не
+# разошёлся (а на внутреннем домене не разойдётся вовсе), и по именам
+# ничего не открывается. Человек в этот момент видит работающий сервер,
+# в который не может войти, — и идёт искать, что сломалось.
+# ------------------------------------------------------------------
+ADMIN_BIND="$(env_get ADMIN_LOCAL_BIND)"
+ADMIN_LPORT="$(env_get ADMIN_LOCAL_PORT)"
+if [ -n "$ADMIN_BIND" ] && [ "$ADMIN_BIND" != "127.0.0.1" ]; then
+cat <<EOF
+
+  Панель без DNS:    https://$ADMIN_BIND:${ADMIN_LPORT:-8081}/
+                     (отвечает только машинам из локальной сети)
+EOF
+elif [ -n "$ADMIN_BIND" ]; then
+cat <<EOF
+
+  Панель без DNS:    https://127.0.0.1:${ADMIN_LPORT:-8081}/ — только с самого сервера.
+                     Со своей машины: ssh -L ${ADMIN_LPORT:-8081}:127.0.0.1:${ADMIN_LPORT:-8081} $(whoami)@${SERVER_IP:-<IP>}
+                     и открыть https://127.0.0.1:${ADMIN_LPORT:-8081}/
+EOF
+fi
+
+cat <<EOF
+
+  Пока DNS-записи не разошлись, имена можно прописать у себя.
+  Windows: C:\\Windows\\System32\\drivers\\etc\\hosts, Linux и macOS: /etc/hosts
+
+    ${SERVER_IP:-<IP сервера>}  $DOMAIN mail.$DOMAIN admin.$DOMAIN autoconfig.$DOMAIN
 EOF
 if [ "${GENERATED_ADMIN_PASSWORD:-0}" = "1" ]; then
 cat <<EOF
