@@ -208,44 +208,7 @@ export class ServiceAgent {
       sameAsExample?: number;
     };
   }> {
-    const body = await this.call('/audit', 'GET');
-    const rawPorts = Array.isArray(body.ports) ? body.ports : [];
-    const ports = rawPorts.flatMap((item) => {
-      const row = item as Record<string, unknown>;
-      if (typeof row.service !== 'string' || typeof row.host !== 'number') return [];
-      return [
-        {
-          service: row.service,
-          container: typeof row.container === 'number' ? row.container : 0,
-          host: row.host,
-          proto: typeof row.proto === 'string' ? row.proto : 'tcp',
-          bind: typeof row.bind === 'string' ? row.bind : '',
-          public: row.public === true,
-        },
-      ];
-    });
-
-    const rawEnv = (body.env ?? {}) as Record<string, unknown>;
-    // Поле, которого посредник не прислал, не подставляется нулём или
-    // ложью: «не ответил» и «ноль» — разные ответы, и раздел показывает
-    // их по-разному.
-    const num = (key: string): { [k: string]: number } =>
-      typeof rawEnv[key] === 'number' ? { [key]: rawEnv[key] } : {};
-    const flag = (key: string): { [k: string]: boolean } =>
-      typeof rawEnv[key] === 'boolean' ? { [key]: rawEnv[key] } : {};
-
-    return {
-      ports,
-      env: {
-        readable: rawEnv.readable === true,
-        ...(typeof rawEnv.mode === 'string' ? { mode: rawEnv.mode } : {}),
-        ...flag('groupReadable'),
-        ...flag('worldReadable'),
-        ...num('crlfLines'),
-        ...num('keys'),
-        ...num('sameAsExample'),
-      },
-    };
+    return parseAudit(await this.call('/audit', 'GET'));
   }
 
   /**
@@ -378,4 +341,89 @@ export function describeState(state: ServiceState): string {
       ? 'Контейнера службы в проекте нет вовсе.'
       : `Служба не поднялась: состояние «${state.state}», проба «${state.health}».`;
   return state.detail === null ? base : `${base} ${state.detail}`;
+}
+
+/** Порт, опубликованный наружу, глазами посредника. */
+export interface AuditPort {
+  service: string;
+  container: number;
+  host: number;
+  proto: string;
+  bind: string;
+  public: boolean;
+}
+
+/** Состояние файла настроек: вердикты и числа, без единого значения. */
+export interface AuditEnv {
+  readable: boolean;
+  mode?: string;
+  groupReadable?: boolean;
+  worldReadable?: boolean;
+  crlfLines?: number;
+  keys?: number;
+  sameAsExample?: number;
+}
+
+/*
+ * Число может прийти строкой — и приходит.
+ *
+ * Посредник написан на Perl без библиотеки JSON: там число и строка не
+ * различаются, и в ответе оказывается "993", а не 993. Первая версия
+ * разбора требовала именно number — и молча выбрасывала ВСЕ порты,
+ * оставляя раздел без единой проверки. Именно молча: пустой список
+ * неотличим от «портов нет вовсе», и на живом сервере это выглядело как
+ * «проверка не написана», а не как «проверка сломана».
+ */
+function toNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
+  return undefined;
+}
+
+/**
+ * Разбор ответа /audit. Вынесен из класса, чтобы проверялся напрямую:
+ * ошибка здесь не роняет ничего и не пишет в журнал — она просто убирает
+ * проверки из раздела, а это самый дорогой вид поломки.
+ */
+export function parseAudit(body: Record<string, unknown>): { ports: AuditPort[]; env: AuditEnv } {
+  const rawPorts = Array.isArray(body.ports) ? body.ports : [];
+  const ports = rawPorts.flatMap((item): AuditPort[] => {
+    const row = item as Record<string, unknown>;
+    const host = toNumber(row.host);
+    if (typeof row.service !== 'string' || host === undefined) return [];
+    return [
+      {
+        service: row.service,
+        container: toNumber(row.container) ?? 0,
+        host,
+        proto: typeof row.proto === 'string' ? row.proto : 'tcp',
+        bind: typeof row.bind === 'string' ? row.bind : '',
+        public: row.public === true,
+      },
+    ];
+  });
+
+  const rawEnv = (body.env ?? {}) as Record<string, unknown>;
+  // Поле, которого посредник не прислал, не подставляется нулём или
+  // ложью: «не ответил» и «ноль» — разные ответы, и раздел показывает их
+  // по-разному.
+  const num = (key: string): { [k: string]: number } => {
+    const value = toNumber(rawEnv[key]);
+    return value === undefined ? {} : { [key]: value };
+  };
+  const flag = (key: string): { [k: string]: boolean } =>
+    typeof rawEnv[key] === 'boolean' ? { [key]: rawEnv[key] } : {};
+
+  return {
+    ports,
+    env: {
+      readable: rawEnv.readable === true,
+      ...(typeof rawEnv.mode === 'string' ? { mode: rawEnv.mode } : {}),
+      ...flag('groupReadable'),
+      ...flag('worldReadable'),
+      ...num('crlfLines'),
+      ...num('keys'),
+      ...num('sameAsExample'),
+    },
+  };
 }
