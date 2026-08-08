@@ -55,6 +55,7 @@ import {
   SOURCE_LABELS,
 } from '../cert-renewal.js';
 import { audit, currentAdmin, requireAdmin } from '../guard.js';
+import { ServiceAgentUnavailableError } from '../service-agent.js';
 
 /**
  * Предел на тело запроса. Сертификат с цепочкой — это единицы килобайт;
@@ -74,6 +75,21 @@ const applySchema = z.object({
 });
 
 const checkSchema = applySchema.omit({ confirm: true });
+
+/** Запрос на выпуск Let's Encrypt. */
+const issueSchema = z.object({
+  /** Адрес для писем Let's Encrypt об истечении срока. */
+  email: z.string().trim().email('Адрес для уведомлений не похож на адрес'),
+  /** Пробный выпуск испытательным центром — не тратит попытки настоящего. */
+  staging: z.boolean().default(false),
+  /**
+   * Включать ли необязательные имена (autoconfig, autodiscover). По
+   * умолчанию да: без них почтовые программы не находят автонастройку.
+   * Но если запись ещё не создана, выпуск сорвётся целиком — тогда
+   * человек снимает флажок и получает сертификат на главное.
+   */
+  includeOptional: z.boolean().default(true),
+});
 
 /**
  * Откуда взялся текущий сертификат (файл source рядом с ним) и как он
@@ -251,6 +267,71 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
         ...(roots === undefined ? {} : { trustedRootSubjects: roots }),
       });
       return resultDto(result);
+    },
+  );
+
+  /**
+   * ВЫПУСТИТЬ LET'S ENCRYPT.
+   *
+   * Заказчик: «нет возможности заменить самоподписанный сертификат на
+   * lets encrypt в интерфейсе». Верно: раздел умел показать срок и
+   * принять СВОЙ сертификат, а выпустить бесплатный — нет, для этого шли
+   * на сервер.
+   *
+   * Выпускает посредник: у сервера приложения нет доступа ни к Docker, ни
+   * к /etc/letsencrypt, и не будет. Он же раскладывает файлы по стеку —
+   * службы перечитывают их сами.
+   *
+   * Пробный выпуск (staging) существует ради ограничения Let's Encrypt:
+   * пять неудач в час на домен. Проверить, что домен вообще указывает
+   * сюда и 80-й порт доступен снаружи, дешевле испытательным центром —
+   * его сертификат никуда не раскладывается.
+   */
+  app.post(
+    '/tls/letsencrypt',
+    { preHandler: requireAdmin(app, 'serversettings.write') },
+    async (request) => {
+      const body = issueSchema.parse(request.body);
+      const agent = ctx.serviceAgent;
+      if (!agent?.configured) {
+        throw new ServiceAgentUnavailableError(
+          'Выпуск из панели недоступен: не настроен посредник служб. На сервере это делает ' +
+            'sudo bash install/renew-certs.sh --force',
+        );
+      }
+
+      const expected = names();
+      // Имена берём из настроек сервера, а не из запроса: сертификат должен
+      // покрывать то, чем сервер представляется, а не то, что попросили.
+      const domains = body.includeOptional
+        ? [...expected.required, ...expected.optional]
+        : [...expected.required];
+
+      const result = await agent.issueLetsEncrypt({
+        domains,
+        email: body.email,
+        staging: body.staging,
+      });
+
+      await audit(ctx, request, {
+        action: 'tls.letsencrypt',
+        targetType: 'settings',
+        targetLabel: domains.join(', '),
+        after: { staging: result.staging, certName: result.certName },
+      });
+
+      return {
+        ok: true,
+        staging: result.staging,
+        domains,
+        /** Хвост вывода certbot: по нему видно, что именно он сделал. */
+        output: result.output,
+        message: result.staging
+          ? 'Пробный выпуск прошёл: домен подтверждается, порт 80 доступен снаружи. ' +
+            'Испытательный сертификат никуда не установлен — повторите без пробного режима.'
+          : 'Сертификат выпущен и разложен по стеку. Службы перечитают его в течение ' +
+            'десяти секунд, перезапускать ничего не нужно.',
+      };
     },
   );
 

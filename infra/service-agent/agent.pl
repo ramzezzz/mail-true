@@ -462,6 +462,9 @@ sub handle {
         my $service = check_service($client, $params{service}, 'recreate') or return;
         return do_recreate($client, $service, $body);
     }
+    if ($method eq 'POST' && $path eq '/certbot') {
+        return do_certbot($client, $body);
+    }
     if ($method eq 'POST' && $path eq '/env-unset') {
         my $service = check_service($client, $params{service}, 'recreate') or return;
         return do_env_unset($client, $service, $body);
@@ -676,6 +679,133 @@ sub do_restart {
 # Убрать ключи из infra/.env, ничего не пересоздавая. Список ключей — в
 # теле, полем keys через запятую; проверяются по тому же белому списку,
 # что и запись.
+# ------------------------------------------------------------------
+# ВЫПУСК СЕРТИФИКАТА LET'S ENCRYPT
+# ------------------------------------------------------------------
+# Запускается тем же способом, что и в мастере первого запуска: certbot
+# отдельным контейнером, файлы — в /etc/letsencrypt хоста (иначе продлевать
+# будет нечего: install/renew-certs.sh ищет их именно там).
+#
+# Проверка идёт по 80-му порту (--standalone), поэтому nginx на это время
+# останавливается. Почта не прерывается: через 80-й ходят только веб-вход
+# и автонастройка. Останавливаем и поднимаем ЗДЕСЬ, а не в сервере
+# приложения: у того нет и не будет доступа к Docker.
+#
+# Имена доменов приходят снаружи, поэтому каждое проверяется образцом:
+# строка отсюда уходит аргументом в certbot, и «-d» с чем угодно внутри
+# был бы способом передать ему чужие ключи.
+# ------------------------------------------------------------------
+sub do_certbot {
+    my ($client, $body) = @_;
+    my %given = parse_query($body);
+
+    my @domains;
+    for my $name (split /,/, ($given{domains} // '')) {
+        $name =~ s/^\s+|\s+$//g;
+        next if $name eq '';
+        unless ($name =~ /\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+\z/i) {
+            return reply($client, 400, { error => "«$name» не похоже на доменное имя" });
+        }
+        push @domains, lc $name;
+    }
+    return reply($client, 400, { error => 'не переданы домены' }) unless @domains;
+
+    my $email = $given{email} // '';
+    unless ($email =~ /\A[^\s@]+@[a-z0-9.-]+\.[a-z]{2,}\z/i) {
+        return reply($client, 400, { error => 'адрес для уведомлений не похож на адрес' });
+    }
+
+    my $staging = ($given{staging} // '') eq '1';
+
+    # Пробный выпуск — отдельным именем сертификата: иначе испытательный
+    # сертификат лёг бы поверх настоящего, и почтовые программы получили
+    # бы «выдан неизвестным центром».
+    my $cert_name = $staging ? 'mailtrue-staging' : 'mailtrue';
+
+    my @args = (
+        'run', '--rm',
+        '-p', '80:80',
+        '-v', '/etc/letsencrypt:/etc/letsencrypt',
+        '-v', '/var/lib/letsencrypt:/var/lib/letsencrypt',
+        '-v', '/var/log/letsencrypt:/var/log/letsencrypt',
+        'certbot/certbot:latest',
+        'certonly', '--standalone', '--non-interactive', '--agree-tos',
+        '--email', $email,
+        '--cert-name', $cert_name,
+        '--keep-until-expiring',
+    );
+    push @args, '--staging' if $staging;
+    push @args, ('-d', $_) for @domains;
+
+    # nginx держит 80-й порт — на время проверки его останавливаем.
+    my @stop = (compose_argv(), 'stop', 'nginx');
+    run(@stop);
+
+    my ($rc, $out, $err) = run('docker', @args);
+
+    my @start = (compose_argv(), 'start', 'nginx');
+    run(@start);
+
+    if ($rc != 0) {
+        my $why = trim(($err || $out) || "код возврата $rc");
+        # Хвост, а не всё: журнал certbot бывает на сотни строк, а нужна
+        # причина — она в конце.
+        $why = substr($why, -1200) if length($why) > 1200;
+        log_line("certbot: код $rc");
+        return reply($client, 500, { error => $why });
+    }
+
+    # ------------------------------------------------------------------
+    # Разложить по стеку
+    # ------------------------------------------------------------------
+    # Выпущенные файлы лежат в /etc/letsencrypt хоста, а службам нужен
+    # каталог infra/data/certs: nginx, Postfix и Dovecot следят именно за
+    # ним и перечитывают сертификат сами в течение десяти секунд.
+    #
+    # Копирует не сервер приложения (у него нет /etc/letsencrypt) и не мы
+    # своими руками (в контейнере посредника нет ни того, ни другого
+    # каталога), а одноразовый контейнер, которому смонтированы оба. Образ
+    # берём тот же, что уже скачан ради выпуска, — второй тянуть незачем.
+    #
+    # Пробный сертификат НЕ раскладываем: он выписан испытательным центром,
+    # и почтовые программы на нём ругаются. Его смысл — проверить, что
+    # проверка домена вообще проходит, не потратив попытку у настоящего
+    # Let's Encrypt (там пять неудач в час на домен).
+    unless ($staging) {
+        my @copy = (
+            'run', '--rm',
+            '-v', '/etc/letsencrypt:/le:ro',
+            '-v', "$PROJECT_DIR/data/certs:/certs",
+            '--entrypoint', 'sh',
+            'certbot/certbot:latest',
+            '-c',
+            "set -e; cp -L /le/live/$cert_name/fullchain.pem /certs/mail.crt.tmp; "
+              . "cp -L /le/live/$cert_name/privkey.pem /certs/mail.key.tmp; "
+              . 'chmod 644 /certs/mail.crt.tmp; chmod 600 /certs/mail.key.tmp; '
+              . 'mv /certs/mail.crt.tmp /certs/mail.crt; mv /certs/mail.key.tmp /certs/mail.key; '
+              . "printf 'letsencrypt\\n' > /certs/source",
+        );
+        my ($crc, $cout, $cerr) = run('docker', @copy);
+        if ($crc != 0) {
+            my $why = trim(($cerr || $cout) || "код возврата $crc");
+            log_line("certbot: выпущен, но не разложен: код $crc");
+            return reply($client, 500, {
+                error => "Сертификат выпущен, но разложить его по стеку не удалось: $why",
+            });
+        }
+    }
+
+    log_line('certbot: выпущен ' . join(',', @domains) . ($staging ? ' (пробный)' : ''));
+    return reply($client, 200, {
+        ok        => \1,
+        cert_name => $cert_name,
+        domains   => \@domains,
+        staging   => $staging ? \1 : \0,
+        live_dir  => "/etc/letsencrypt/live/$cert_name",
+        output    => trim(substr($out, -1200)),
+    });
+}
+
 sub do_env_unset {
     my ($client, $service, $body) = @_;
     my %given   = parse_query($body);

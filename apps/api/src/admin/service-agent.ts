@@ -171,6 +171,35 @@ export class ServiceAgent {
   }
 
   /**
+   * Выпустить сертификат Let's Encrypt и разложить его по стеку.
+   *
+   * До сих пор это умела только консоль (install/renew-certs.sh), и
+   * переход с самоподписанного на настоящий требовал доступа к серверу —
+   * при том что панель показывает срок, предупреждает об истечении и
+   * умеет поставить свой сертификат.
+   *
+   * Долгая операция: проверка домена, обращение к Let's Encrypt и
+   * остановка nginx на время проверки. Предел ожидания у клиента общий
+   * (150 с) и его хватает: обычный выпуск — секунды.
+   */
+  async issueLetsEncrypt(input: {
+    domains: readonly string[];
+    email: string;
+    staging: boolean;
+  }): Promise<{ certName: string; staging: boolean; output: string }> {
+    const form = new URLSearchParams();
+    form.set('domains', input.domains.join(','));
+    form.set('email', input.email);
+    form.set('staging', input.staging ? '1' : '0');
+    const body = await this.call('/certbot', 'POST', form);
+    return {
+      certName: typeof body.cert_name === 'string' ? body.cert_name : '',
+      staging: body.staging === true,
+      output: typeof body.output === 'string' ? body.output : '',
+    };
+  }
+
+  /**
    * Готовая строка DNS для DKIM: то, что rspamd сам положил рядом с
    * ключом. Публичная часть — та же, что потом уходит в общедоступный
    * DNS; приватный ключ посредник не отдаёт ни при каких параметрах.

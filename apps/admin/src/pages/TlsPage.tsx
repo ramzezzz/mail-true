@@ -33,8 +33,8 @@
  * история, там — красная строка.
  */
 import { useCallback, useState, type ChangeEvent } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { Button } from '@web/components';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
 import type {
   CheckState,
@@ -42,6 +42,7 @@ import type {
   TlsBundleInputDto,
   TlsCheckResult,
   TlsIssue,
+  TlsOverview,
   TlsRenewal,
 } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
@@ -246,6 +247,122 @@ function Attempts({ attempts }: { attempts: RenewalAttempt[] }) {
  * человек уходит уверенным, что продление запущено. Поэтому вместо
  * кнопки — команда, которую можно скопировать и выполнить на сервере.
  */
+/**
+ * ВЫПУСК LET'S ENCRYPT ИЗ ПАНЕЛИ.
+ *
+ * Заказчик: «нет возможности заменить самоподписанный сертификат на
+ * lets encrypt в интерфейсе». Так и было: раздел показывал срок,
+ * предупреждал об истечении и принимал СВОЙ сертификат — а выпустить
+ * бесплатный, ради которого всё и затевалось, отправлял на сервер.
+ *
+ * Здесь спрашивается ровно то, чего не знает сервер: адрес для писем об
+ * истечении. Имена берутся из настроек сервера — сертификат обязан
+ * покрывать то, чем сервер представляется, а не то, что попросили в
+ * форме.
+ */
+function LetsEncryptPanel({
+  current,
+  onIssued,
+}: {
+  current: TlsOverview;
+  onIssued: (message: string) => void;
+}) {
+  const [email, setEmail] = useState('');
+  const [staging, setStaging] = useState(false);
+  const [includeOptional, setIncludeOptional] = useState(true);
+  const [output, setOutput] = useState('');
+
+  const issue = useMutation({
+    mutationFn: () => api.issueLetsEncrypt({ email: email.trim(), staging, includeOptional }),
+    onSuccess: (result) => {
+      setOutput(result.output);
+      onIssued(result.message);
+    },
+  });
+
+  const names = includeOptional
+    ? [...current.expectedNames, ...current.optionalNames]
+    : current.expectedNames;
+
+  return (
+    <Panel title="Выпустить Let's Encrypt">
+      <p style={MUTED}>
+        Бесплатный сертификат на 90 суток с автопродлением. Выпускается на этом же сервере:
+        Let&rsquo;s Encrypt проверяет домен обращением на 80-й порт, поэтому имена{' '}
+        {names.join(', ')} должны уже указывать сюда, а порт 80 быть доступен снаружи. На время
+        проверки веб-вход недоступен несколько секунд; почта в это время ходит.
+      </p>
+
+      <ErrorNotice error={issue.error} />
+
+      <div style={{ display: 'grid', gap: 10, maxWidth: 520 }}>
+        <Field
+          label="Адрес для уведомлений"
+          hint="Сюда Let's Encrypt напишет, если сертификат вот-вот истечёт, а продление не удалось."
+        >
+          <input
+            className="mt-input"
+            placeholder="admin@example.ru"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </Field>
+
+        <Checkbox
+          label="Включить autoconfig и autodiscover"
+          checked={includeOptional}
+          onChange={(event) => setIncludeOptional(event.target.checked)}
+        />
+        <p style={{ ...MUTED, margin: '-6px 0 0 26px', fontSize: 12 }}>
+          Без этих имён почтовые программы не находят автонастройку. Но если их записи ещё не
+          созданы, выпуск сорвётся целиком — тогда снимите флажок и получите сертификат на главное.
+        </p>
+
+        <Checkbox
+          label="Пробный выпуск (испытательный центр)"
+          checked={staging}
+          onChange={(event) => setStaging(event.target.checked)}
+        />
+        <p style={{ ...MUTED, margin: '-6px 0 0 26px', fontSize: 12 }}>
+          Проверяет, что домен подтверждается и порт доступен, не тратя попытки настоящего
+          Let&rsquo;s Encrypt (их пять в час на домен). Такой сертификат никуда не устанавливается.
+        </p>
+
+        <div>
+          <Button
+            disabled={issue.isPending || email.trim() === ''}
+            onClick={() => {
+              setOutput('');
+              issue.mutate();
+            }}
+          >
+            {issue.isPending
+              ? 'Выпускаем… это до минуты'
+              : staging
+                ? 'Проверить пробным выпуском'
+                : 'Выпустить и установить'}
+          </Button>
+        </div>
+      </div>
+
+      {output !== '' ? (
+        <pre
+          style={{
+            marginTop: 12,
+            padding: 10,
+            overflowX: 'auto',
+            fontSize: 12,
+            background: 'var(--mt-color-background-secondary)',
+            borderRadius: 8,
+          }}
+        >
+          {output}
+        </pre>
+      ) : null}
+    </Panel>
+  );
+}
+
 function RenewalPanel({ renewal }: { renewal: TlsRenewal }) {
   const { verdict, report } = renewal;
   const timer = report?.timer ?? null;
@@ -339,7 +456,14 @@ export function TlsPage() {
   const [checked, setChecked] = useState<TlsCheckResult | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
 
+  const queryClient = useQueryClient();
   const overview = useQuery({ queryKey: ['tls'], queryFn: () => api.tls() });
+
+  /* После выпуска перечитываем раздел: срок и источник сертификата другие. */
+  const onIssued = (message: string): void => {
+    setFlash(message);
+    void queryClient.invalidateQueries({ queryKey: ['tls'] });
+  };
 
   function bundle(): TlsBundleInputDto {
     return chain.trim() === '' ? { certificate, privateKey } : { certificate, privateKey, chain };
@@ -425,6 +549,8 @@ export function TlsPage() {
       </Panel>
 
       {current ? <RenewalPanel renewal={current.renewal} /> : null}
+
+      {current ? <LetsEncryptPanel current={current} onIssued={onIssued} /> : null}
 
       <Panel title="Поставить свой сертификат">
         <p style={MUTED}>

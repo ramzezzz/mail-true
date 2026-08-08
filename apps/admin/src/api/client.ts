@@ -535,6 +535,19 @@ export const api = {
     loginFooter?: string | null;
   }) => patch<BrandingSettings>('/branding', body),
 
+  /**
+   * Выпустить Let's Encrypt. Долгая операция: обращение к центру плюс
+   * остановка nginx на время проверки домена.
+   */
+  issueLetsEncrypt: (body: { email: string; staging: boolean; includeOptional: boolean }) =>
+    post<{
+      ok: true;
+      staging: boolean;
+      domains: string[];
+      output: string;
+      message: string;
+    }>('/tls/letsencrypt', body),
+
   /* --- логотипы доменов отправителей --- */
   senderLogos: (params: { q?: string; limit: number; offset: number }) =>
     get<SenderLogoList>(`/sender-logos${query(params)}`),
