@@ -100,7 +100,17 @@ function deltaE(a: string, b: string): number {
 
 /** Значение переменной из блока темы в charts.css. */
 function cssVar(block: ChartSurface, name: string): string {
-  const marker = block === 'light' ? ':root {' : `:root[data-theme='${block}']`;
+  /*
+   * Тёмных тем теперь семь, а набор цветов у них один: карточка #232324
+   * общая всему семейству. Поэтому и правило в charts.css одно — по
+   * суффиксу имени темы, а не по каждому имени отдельно.
+   */
+  const marker =
+    block === 'light'
+      ? ':root {'
+      : block === 'dark'
+        ? ":root[data-theme$='dark']"
+        : `:root[data-theme='${block}']`;
   const start = css.indexOf(marker);
   expect(start, `в charts.css нет блока ${block}`).toBeGreaterThanOrEqual(0);
   const open = css.indexOf('{', start);
@@ -280,10 +290,10 @@ describe('стили и реестр не разъезжаются', () => {
   }
 
   it('тёмные наборы заданы явно, а не унаследованы от светлого', () => {
-    // Без своего блока графит и тёмная тема получили бы светлые цвета
+    // Без своего блока графит и тёмное семейство получили бы светлые цвета
     // рядов: тёмно-синяя линия на графитовой карточке — 1,4:1, то есть
     // невидимая.
-    expect(css).toContain(":root[data-theme='dark']");
+    expect(css).toContain(":root[data-theme$='dark']");
     expect(css).toContain(":root[data-theme='graphite']");
     for (const hue of CHART_HUES) {
       expect(cssVar('dark', `--mt-chart-${hue}`), hue).not.toBe(

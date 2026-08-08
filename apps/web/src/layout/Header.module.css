@@ -59,12 +59,18 @@
   width: 28px;
 }
 
-:global([data-theme='dark']) .logoLight,
+/*
+ * Тёмное начертание включается на ЛЮБОЙ тёмной теме, а не на одной
+ * «Тёмной»: имена тёмных тем кончаются на `-dark` (ThemeName в
+ * appearance/themes.ts), и суффикс ловит их все разом — включая обойную
+ * тёмную. Перечислять темы поимённо значит забыть про следующую.
+ */
+:global([data-theme$='dark']) .logoLight,
 :global([data-theme='wallpaper']) .logoLight {
   display: none;
 }
 
-:global([data-theme='dark']) .logoDark,
+:global([data-theme$='dark']) .logoDark,
 :global([data-theme='wallpaper']) .logoDark {
   display: block;
 }
@@ -121,9 +127,9 @@
    */
   .logoLight,
   .logoDark,
-  :global([data-theme='dark']) .logoLight,
+  :global([data-theme$='dark']) .logoLight,
   :global([data-theme='wallpaper']) .logoLight,
-  :global([data-theme='dark']) .logoDark,
+  :global([data-theme$='dark']) .logoDark,
   :global([data-theme='wallpaper']) .logoDark {
     display: none;
   }

@@ -249,14 +249,21 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Тёмная тема                                                          */
+/* Тёмное семейство: общая основа                                       */
 /* ------------------------------------------------------------------ */
 /*
  * В выгрузке только светлые значения, поэтому тёмная палитра собрана вручную
  * по образцу тёмных тем почтовых веб-интерфейсов. Переопределяем базовые --mt-color-*,
  * от которых каскадом зависят компоненты, плюс семантику каркаса.
+ *
+ * Селектор ловит ВСЕ тёмные темы разом — их имена кончаются на `-dark`
+ * (см. ThemeName в src/appearance/themes.ts). Раньше тёмная тема была
+ * ровно одна, и блок был выписан на неё; когда у каждой цветной темы
+ * появился тёмный близнец, копировать сюда сорок строк шесть раз значило
+ * бы гарантированно их рассинхронизировать. Цветная тёмная тема, как и
+ * цветная светлая, меняет поверх этой основы ровно акцент и фон страницы.
  */
-:root[data-theme='dark'] {
+:root[data-theme$='dark'] {
   color-scheme: dark;
 
   /* Базовые цвета VKUI, тёмные значения */
@@ -279,16 +286,13 @@
   --mt-color-field-border-alpha: rgba(255, 255, 255, 0.16);
   --mt-color-image-border-alpha: rgba(255, 255, 255, 0.08);
 
-  /* Фирменный акцент в тёмной теме: осветлённый #5CA8F5 (7.10:1 на фоне),
-     на акцентной кнопке — тёмный текст #15181D (см. docs/brand.md).
-     Ступени hover/press здесь идут в светлую сторону — кластер токенов
-     подхватывает их через --mt-accent-* из базового блока. */
-  --mt-accent: #5ca8f5;
-  --mt-accent-hover: #7cbaf7;
-  --mt-accent-press: #4694e3;
+  /* Акцент задаёт КАЖДАЯ тёмная тема сама (блоки ниже): здесь он был бы
+     общим на всё семейство, и цветные тёмные темы отличались бы только
+     фоном страницы. На акцентной кнопке текст тёмный #15181D — на тёмной
+     основе акцент светлый, и белым по нему вышло бы 1,5–2:1. */
+  --mt-color-text-contrast: #15181d;
   /* Нейтральная подложка выделения, на ступень светлее фона строки */
   --mt-list-selection: #3a3a3b;
-  --mt-color-text-contrast: #15181d;
 
   /* Мейловый слой */
   /* Третичные кнопки панели в привычных почтовых интерфейсах покрашены в #333 — на тёмном фоне
@@ -307,7 +311,9 @@
   --mt-ph-custom-color-tooltip-bg: #3a3a3b;
   --mt-ph-custom-color-tooltip-text: #e1e3e6;
 
-  /* Семантика каркаса */
+  /* Семантика каркаса. Фон страницы — нейтральный по умолчанию: цветные
+     тёмные темы подкрашивают его своим тоном (блоки ниже), карточка же
+     остаётся общей #232324 у всего семейства. */
   --mt-app-bg: #19191a;
   --mt-app-content-bg: #232324;
 
@@ -357,7 +363,10 @@
   --mt-search-highlight-bg: color-mix(in srgb, var(--mt-color-accent-orange) 40%, transparent);
   --mt-search-highlight-text: var(--mt-color-text-primary);
 
-  --mt-drop-target-bg: rgba(92, 168, 245, 0.16);
+  /* Подложка папки под перетаскиваемым письмом — тон акцента ТЕМЫ.
+     Стояло rgba(92,168,245,.16), то есть синий тёмной темы: в «Тёмном
+     изумруде» письмо подсвечивало папку синим мимо всей гаммы. */
+  --mt-drop-target-bg: color-mix(in srgb, var(--mt-accent) 16%, transparent);
   --mt-skeleton-bg: #2c2d2e;
   --mt-skeleton-shine: #3a3a3b;
 
@@ -367,6 +376,66 @@
   --mt-switch-track-off-hover: #7b7e84;
   --mt-switch-track-off-press: #8a8d93;
   --mt-switch-thumb: var(--mt-color-text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Тёмное семейство: сами темы                                          */
+/* ------------------------------------------------------------------ */
+/*
+ * Каждая меняет поверх общей основы ровно то же, что цветная светлая
+ * тема меняет поверх белой, — пять переменных акцента и фон страницы.
+ * Карточка у всех одна (#232324): её цвет — не вкусовщина, под него
+ * посчитаны и цвета графиков панели управления, и полосы журнала.
+ *
+ * Акценты не «зелёный вместо синего», а ТОТ ЖЕ ТОН, что у светлого
+ * близнеца, поднятый по светлоте до контраста 6,3:1 на карточке — как у
+ * фирменного синего тёмной темы. Числа и способ вывода — в реестре
+ * src/appearance/themes.ts, сверяет их tests/themes.test.ts.
+ */
+:root[data-theme='dark'] {
+  --mt-accent: #5ca8f5;
+  --mt-accent-hover: #7cbaf7;
+  --mt-accent-press: #4694e3;
+}
+
+:root[data-theme='emerald-dark'] {
+  --mt-accent: #12ba89;
+  --mt-accent-hover: #2fd8a2;
+  --mt-accent-press: #0f9871;
+  --mt-app-bg: #121a17;
+  --mt-settings-bg: #121a17;
+}
+
+:root[data-theme='violet-dark'] {
+  --mt-accent: #af97e5;
+  --mt-accent-hover: #c5b4ec;
+  --mt-accent-press: #9a7cde;
+  --mt-app-bg: #14121a;
+  --mt-settings-bg: #14121a;
+}
+
+:root[data-theme='coral-dark'] {
+  --mt-accent: #ef80ae;
+  --mt-accent-hover: #f3a0c2;
+  --mt-accent-press: #ea629b;
+  --mt-app-bg: #1a1215;
+  --mt-settings-bg: #1a1215;
+}
+
+:root[data-theme='lagoon-dark'] {
+  --mt-accent: #19b1dc;
+  --mt-accent-hover: #35c1ea;
+  --mt-accent-press: #1497bc;
+  --mt-app-bg: #12181a;
+  --mt-settings-bg: #12181a;
+}
+
+:root[data-theme='sunset-dark'] {
+  --mt-accent: #f48658;
+  --mt-accent-hover: #f69e7a;
+  --mt-accent-press: #f26d38;
+  --mt-app-bg: #1a1412;
+  --mt-settings-bg: #1a1412;
 }
 
 /* ------------------------------------------------------------------ */
@@ -565,4 +634,95 @@
   --mt-accent: #004e8f; /* 5.05:1 в худшем случае */
   --mt-accent-hover: #01437c;
   --mt-accent-press: #013a6b;
+}
+
+/* ------------------------------------------------------------------ */
+/* «Обойная» тема на тёмной основе                                      */
+/* ------------------------------------------------------------------ */
+/*
+ * Та же фотография и тот же выбор фона, но всё, что лежит ПОВЕРХ неё, —
+ * тёмное: карточка списка писем, меню, окно настроек. До этого человек,
+ * поставивший фон, получал светлый интерфейс независимо от того, работает
+ * он днём или ночью, — обойная тема была единственной без пары.
+ *
+ * Общую тёмную основу (цвета текста, поверхностей, разделителей) блок
+ * получает даром: имя темы кончается на `-dark`, и её ловит селектор
+ * семейства выше. Здесь — только то, что связано с картинкой.
+ *
+ * Наихудший случай ЗЕРКАЛЕН светлой обойной теме: там текст терялся на
+ * чёрной фотографии, здесь — на БЕЛОЙ (тёмная подложка светлеет, светлому
+ * тексту не на чем держаться). Числа — WALLPAPER_DARK_SURFACE в
+ * src/appearance/themes.ts, проверка — tests/wallpaperSurfaces.test.ts.
+ */
+:root[data-theme='wallpaper-dark'] {
+  --mt-app-bg: #4d4d4d; /* фон под картинкой */
+  --mt-wallpaper-image: var(
+    --mt-user-wallpaper,
+    linear-gradient(160deg, #1e3c72 0%, #2a5298 45%, #6a85b6 100%)
+  );
+  --mt-wallpaper-dim: rgba(9, 16, 34, 0.3);
+  --mt-app-bg-image:
+    linear-gradient(var(--mt-wallpaper-dim), var(--mt-wallpaper-dim)), var(--mt-wallpaper-image);
+
+  /* Слои за левым меню и под выдвижным ящиком — те же, что у светлой
+     обойной темы: они и там, и там лежат на фотографии, а не на карточке */
+  --mt-sidebar-backdrop: rgba(9, 16, 34, 0.42);
+  --mt-sidebar-drawer-bg: #232a38;
+
+  --mt-header-bg: rgba(0, 0, 0, 0.4);
+  --mt-header-text: #ffffff;
+  --mt-header-text-secondary: rgba(255, 255, 255, 0.72);
+  --mt-header-icon: #ffffff;
+  --mt-header-button-bg-hover: var(--mt-mail-color-header-button-background-alpha-hover);
+  --mt-header-button-bg-press: var(--mt-mail-color-header-button-background-alpha-press);
+  --mt-header-search-bg: rgba(255, 255, 255, 0.16);
+  --mt-header-search-text: #ffffff;
+  --mt-header-search-placeholder: rgba(255, 255, 255, 0.72);
+  --mt-header-search-icon: rgba(255, 255, 255, 0.72);
+
+  --mt-sidebar-item-text: var(--mt-mail-color-sidebar-item-text); /* #FFFFFF */
+  --mt-sidebar-item-icon: var(--mt-mail-color-sidebar-item-icon);
+  --mt-sidebar-item-bg-hover: var(--mt-mail-color-sidebar-item-background-alpha-hover);
+  --mt-sidebar-item-bg-active: var(--mt-mail-color-sidebar-item-background-alpha-press);
+  --mt-sidebar-counter-text: var(--mt-mail-color-sidebar-counter-text);
+  --mt-sidebar-compose-bg: rgba(255, 255, 255, 0.16);
+  --mt-sidebar-compose-bg-hover: rgba(255, 255, 255, 0.2);
+  --mt-sidebar-compose-bg-press: rgba(255, 255, 255, 0.24);
+  --mt-sidebar-compose-text: #ffffff;
+  --mt-sidebar-compose-border: transparent;
+
+  /* Непрозрачность на две сотых выше светлой обойной: белая фотография
+     «вымывает» тёмную подложку сильнее, чем чёрная — светлую. */
+  --mt-wallpaper-surface-alpha: 0.8;
+  --mt-wallpaper-float-alpha: 0.9;
+
+  --mt-app-content-bg: rgba(35, 35, 36, var(--mt-wallpaper-surface-alpha));
+
+  /* Строки списка своей заливки не имеют — её роль играет карточка.
+     Накладки СВЕТЛЫЕ: тёмная плёнка на тёмной подложке читалась бы
+     провалом, а не выбором. */
+  --mt-mail-color-list-letter-background: transparent;
+  --mt-mail-color-list-letter-background-hover: rgba(255, 255, 255, 0.06);
+  --mt-list-selection: rgba(255, 255, 255, 0.14);
+
+  --mt-color-background-modal: rgba(35, 35, 36, var(--mt-wallpaper-float-alpha));
+
+  /* Карточка раздела настроек светлее не только своей страницы, но и
+     карточки почты: на белой фотографии светлеют обе подложки, и разница
+     между ними съедается фотографией. */
+  --mt-settings-bg: rgba(19, 19, 20, var(--mt-wallpaper-surface-alpha));
+  --mt-settings-card-bg: rgba(74, 74, 76, 0.62);
+
+  /* Серые — на ступень СВЕТЛЕЕ мейловых тёмных: #8C8E94 на подложке
+     поверх белой фотографии даёт 3.50:1 вместо 4.79:1 на сплошном фоне */
+  --mt-list-secondary-text: #b0b3b8;
+  --mt-color-text-secondary: #b0b3b8;
+  --mt-color-text-subhead: #b0b3b8;
+  --mt-color-text-tertiary: #9a9da3; /* подсказки полей: 3:1, не текст */
+  --mt-color-icon-secondary: #9a9da3;
+
+  /* Акцент на ступень светлее тёмной темы: #5CA8F5 давал бы 4.14:1 */
+  --mt-accent: #7cbaf7;
+  --mt-accent-hover: #9bcdf9;
+  --mt-accent-press: #5ca8f5;
 }

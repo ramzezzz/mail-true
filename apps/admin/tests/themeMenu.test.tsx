@@ -199,11 +199,18 @@ describe('признаки на <html>', () => {
     }
   });
 
-  it('у графита и тёмной вид тёмный, у цветных — светлый', () => {
+  it('вид темы выводится из её имени, а не перечислен вручную', () => {
+    /*
+     * Имена тёмных тем кончаются на `-dark`, и на это опираются стили:
+     * общая тёмная основа выписана одним селектором [data-theme$='dark'].
+     * Тема, у которой имя и вид разошлись, получила бы светлые цвета
+     * текста на тёмной карточке — поэтому сверяется весь реестр разом,
+     * а не список из шести имён, который забудут дописать.
+     */
     expect(adminThemeMeta('graphite').kind).toBe('dark');
-    expect(adminThemeMeta('dark').kind).toBe('dark');
-    for (const id of ['light', 'emerald', 'violet', 'coral', 'lagoon', 'sunset'] as const) {
-      expect(adminThemeMeta(id).kind).toBe('light');
+    for (const theme of ADMIN_THEMES) {
+      if (theme.id === 'graphite') continue;
+      expect(theme.kind, `«${theme.title}»`).toBe(theme.id.endsWith('dark') ? 'dark' : 'light');
     }
   });
 });

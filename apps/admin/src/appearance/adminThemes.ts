@@ -33,8 +33,34 @@
 
 import { LOG_LEVELS, type LevelColors, type LogLevel } from '../lib/logLevels';
 
+/**
+ * Имена тем панели.
+ *
+ * У каждой цветной темы есть пара — светлая и тёмная, как в почте, и имя
+ * тёмной ВСЕГДА кончается на `-dark`. Суффикс не украшение: по нему
+ * стили одним селектором накрывают всё тёмное семейство (styles/
+ * adminThemes.css, logLevels.css, charts.css и общий themes.css почты).
+ * Пока тёмная тема была одна, её перечисляли поимённо; с семью такой
+ * список пришлось бы дописывать в четырёх файлах при каждой новой теме.
+ *
+ * «Графит» из этого правила выпадает намеренно: это не тёмный близнец
+ * чего-либо, а самостоятельная фирменная гамма панели, и своё оформление
+ * (журнал, графики) она задаёт отдельными блоками.
+ */
 export type AdminThemeName =
-  'graphite' | 'light' | 'dark' | 'emerald' | 'violet' | 'coral' | 'lagoon' | 'sunset';
+  | 'graphite'
+  | 'light'
+  | 'dark'
+  | 'emerald'
+  | 'emerald-dark'
+  | 'violet'
+  | 'violet-dark'
+  | 'coral'
+  | 'coral-dark'
+  | 'lagoon'
+  | 'lagoon-dark'
+  | 'sunset'
+  | 'sunset-dark';
 
 /** Явный выбор администратора; 'system' — следовать prefers-color-scheme. */
 export type AdminThemeSetting = AdminThemeName | 'system';
@@ -143,6 +169,60 @@ function lightTheme(
   };
 }
 
+/**
+ * Поправки для мелкого шрифта, общие всему ТЁМНОМУ семейству почты.
+ *
+ * Значения ровно те, что раньше стояли в единственной тёмной теме: карточка
+ * и вторая поверхность почты, служебные цвета состояний, поднятые до нормы
+ * на тёмном (светлый #0A7B44 давал на #232324 2,94:1). Вынесены отдельно,
+ * когда у каждой цветной темы появился тёмный близнец: шесть копий одних
+ * и тех же семи цветов разошлись бы при первой же правке.
+ */
+const DARK_INK = {
+  textPrimary: '#e1e3e6',
+  // #8C8E94 из тёмной темы почты даёт 4,21:1 на третичной подложке —
+  // почте хватает, панели с её 11px нет. Тот же тон, светлее на ступень.
+  textSecondary: '#9ea1a6',
+  ok: '#5fd693',
+  warn: '#f5c164',
+  fail: '#ff9c85',
+  okTint: '#12301f',
+  failTint: '#3b1f1a',
+  surface: '#232324',
+  // Вторая поверхность у почты совпадает с карточкой (#232324): плашка
+  // администратора и погашенная кнопка сливались бы с шапкой.
+  surfaceAlt: '#2c2d2e',
+  // Подпись на акцентной заливке тёмная: акцент на тёмной основе светлый
+  onAccent: '#15181d',
+} as const;
+
+/**
+ * Тёмная тема почты и её цветные варианты — акценты снова слово в слово
+ * из почты. Ссылка равна САМОМУ акценту, а не ступени press: на тёмном
+ * акцент и есть светлый цвет, а press увёл бы подпись в темноту.
+ */
+function darkTheme(
+  id: AdminThemeName,
+  title: string,
+  accent: string,
+  accentHover: string,
+  accentPress: string,
+  appBg: string,
+): AdminThemeMeta {
+  return {
+    id,
+    title,
+    kind: 'dark',
+    accent,
+    accentHover,
+    accentPress,
+    ink: accent,
+    appBg,
+    ...DARK_INK,
+    log: logOf('dark'),
+  };
+}
+
 export const ADMIN_THEMES: readonly AdminThemeMeta[] = [
   {
     /*
@@ -191,35 +271,24 @@ export const ADMIN_THEMES: readonly AdminThemeMeta[] = [
     // и измерен раньше (styles/admin.css), менять его не на что.
     '#0059c2',
   ),
-  {
-    /* Тёмная тема почты — для тех, кто держит открытыми оба приложения. */
-    id: 'dark',
-    title: 'Тёмная',
-    kind: 'dark',
-    accent: '#5ca8f5',
-    accentHover: '#7cbaf7',
-    accentPress: '#4694e3',
-    onAccent: '#15181d',
-    ink: '#5ca8f5',
-    appBg: '#19191a',
-    surface: '#232324',
-    surfaceAlt: '#2c2d2e',
-    textPrimary: '#e1e3e6',
-    // #8C8E94 из тёмной темы почты даёт 4,21:1 на третичной подложке —
-    // почте хватает, панели с её 11px нет. Тот же тон, светлее на ступень.
-    textSecondary: '#9ea1a6',
-    ok: '#5fd693',
-    warn: '#f5c164',
-    fail: '#ff9c85',
-    okTint: '#12301f',
-    failTint: '#3b1f1a',
-    log: logOf('dark'),
-  },
+  /* Тёмная тема почты — для тех, кто держит открытыми оба приложения. */
+  darkTheme('dark', 'Тёмная', '#5ca8f5', '#7cbaf7', '#4694e3', '#19191a'),
+  /*
+   * Дальше — пары: у каждой цветной темы светлый и тёмный вариант.
+   * Раньше цветных тем было пять и все светлые: администратор, работающий
+   * в тёмном интерфейсе, выбирал между «Графитом» и «Тёмной», а вся
+   * цветная часть набора была для него закрыта.
+   */
   lightTheme('emerald', 'Изумруд', '#047857', '#03654a', '#05543f', '#eaf3ee'),
+  darkTheme('emerald-dark', 'Тёмный изумруд', '#12ba89', '#2fd8a2', '#0f9871', '#121a17'),
   lightTheme('violet', 'Фиалка', '#6941c6', '#5a35ad', '#4c2c96', '#efecf9'),
+  darkTheme('violet-dark', 'Тёмная фиалка', '#af97e5', '#c5b4ec', '#9a7cde', '#14121a'),
   lightTheme('coral', 'Коралл', '#be185d', '#a31450', '#8c1145', '#faeef2'),
+  darkTheme('coral-dark', 'Тёмный коралл', '#ef80ae', '#f3a0c2', '#ea629b', '#1a1215'),
   lightTheme('lagoon', 'Лагуна', '#0e7490', '#0c627a', '#0a5266', '#e9f4f6'),
+  darkTheme('lagoon-dark', 'Тёмная лагуна', '#19b1dc', '#35c1ea', '#1497bc', '#12181a'),
   lightTheme('sunset', 'Закат', '#c2410c', '#a8380a', '#8f2f09', '#f7efe9'),
+  darkTheme('sunset-dark', 'Тёмный закат', '#f48658', '#f69e7a', '#f26d38', '#1a1412'),
 ];
 
 export const ADMIN_THEME_IDS: readonly AdminThemeName[] = ADMIN_THEMES.map((theme) => theme.id);

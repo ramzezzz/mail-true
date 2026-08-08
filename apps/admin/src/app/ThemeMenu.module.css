@@ -19,6 +19,10 @@
 
 .panel {
   width: 268px;
+  /* Тем стало вдвое больше — на невысоком окне нижние ряды образцов
+     уходили за край экрана, а прокрутки у панели не было. */
+  max-height: calc(100vh - var(--mt-admin-header-height) - 24px);
+  overflow-y: auto;
 }
 
 .title {
@@ -76,13 +80,20 @@
     0 0 0 4px var(--mt-color-icon-accent);
 }
 
+/*
+ * Подпись переносится на вторую строку, а не обрезается многоточием, —
+ * та же правка, что в почте, и по той же причине: с парными тёмными
+ * темами названия стали в два слова («Тёмный изумруд»), и в колонку
+ * шириной 80 точек одной строкой они не помещаются. Высота под две строки
+ * задана всем подписям, чтобы ряды сетки остались одинаковыми.
+ */
 .optionTitle {
   font-size: var(--mt-font-caption1-size, 12px);
   line-height: var(--mt-font-caption1-line-height, 16px);
+  min-height: 32px;
   color: var(--mt-color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  text-align: center;
+  overflow-wrap: break-word;
   max-width: 100%;
 }
 

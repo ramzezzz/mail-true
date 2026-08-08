@@ -19,6 +19,8 @@ import {
   WALLPAPER_SCRIM,
   WALLPAPER_SURFACE,
   isThemeName,
+  themeMeta,
+  type ThemeName,
 } from '../src/appearance/themes';
 import {
   WALLPAPER_PRESETS,
@@ -31,14 +33,90 @@ import { resolveTheme } from '../src/app/store';
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
 const themesCss = readFileSync(join(SRC, 'styles/themes.css'), 'utf8');
 
-/** Тело CSS-блока темы по значению data-theme. */
-function themeBlock(id: string): string {
-  const at = themesCss.indexOf(`[data-theme='${id}']`);
-  expect(at, `в themes.css нет блока data-theme='${id}'`).toBeGreaterThanOrEqual(0);
-  const open = themesCss.indexOf('{', at);
-  const close = themesCss.indexOf('}', open);
-  return themesCss.slice(open + 1, close);
+/** Правила верхнего уровня: селекторы и тело. Внутрь @media не заходим. */
+function rules(css: string): { selectors: string[]; body: string }[] {
+  const out: { selectors: string[]; body: string }[] = [];
+  let depth = 0;
+  let start = 0;
+  let head = '';
+  for (let i = 0; i < css.length; i += 1) {
+    const ch = css[i];
+    if (ch === '{') {
+      if (depth === 0) {
+        head = css.slice(start, i);
+        start = i + 1;
+      }
+      depth += 1;
+    } else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        const clean = head.replace(/\/\*[\s\S]*?\*\//gu, '').trim();
+        if (clean && !clean.startsWith('@')) {
+          out.push({ selectors: clean.split(',').map((s) => s.trim()), body: css.slice(start, i) });
+        }
+        start = i + 1;
+      }
+    }
+  }
+  return out;
 }
+
+/** Действует ли правило с таким селектором на эту тему. */
+function appliesTo(selector: string, id: string): boolean {
+  if (selector === `:root[data-theme='${id}']`) return true;
+  // Основа тёмного семейства выписана один раз по суффиксу имени
+  return selector === ":root[data-theme$='dark']" && id.endsWith('dark');
+}
+
+/**
+ * Всё, что CSS говорит о теме, — одной строкой.
+ *
+ * Раньше здесь был поиск подстроки `[data-theme='id']` и первая пара
+ * скобок за ней. Так было можно, пока каждая тема помещалась в один блок.
+ * Теперь тёмные темы собраны из ДВУХ: общая основа семейства
+ * (`[data-theme$='dark']`, чтобы не переписывать сорок строк шесть раз)
+ * и собственный блок с акцентом. Поиск подстроки такого не разбирает —
+ * и вдобавок путал бы `[data-theme='dark']` с перечислением, где это имя
+ * встречается внутри чужого селектора. Поэтому — честный разбор правил.
+ */
+function themeBlock(id: string): string {
+  const bodies = rules(themesCss)
+    .filter((rule) => rule.selectors.some((selector) => appliesTo(selector, id)))
+    .map((rule) => rule.body);
+  expect(bodies.length, `в themes.css нет правил для темы «${id}»`).toBeGreaterThan(0);
+  return bodies.join('\n');
+}
+
+/** Тон цвета в градусах — по нему сверяется «личность» темы. */
+function hue(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff].map((v) => v / 255) as [
+    number,
+    number,
+    number,
+  ];
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const raw = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (raw * 60 + 360) % 360;
+}
+
+/** Светлые и тёмные темы одного тона: «Изумруд» и «Тёмный изумруд». */
+const TWINS: readonly [light: ThemeName, dark: ThemeName][] = [
+  ['light', 'dark'],
+  ['emerald', 'emerald-dark'],
+  ['violet', 'violet-dark'],
+  ['coral', 'coral-dark'],
+  ['lagoon', 'lagoon-dark'],
+  ['sunset', 'sunset-dark'],
+  ['wallpaper', 'wallpaper-dark'],
+];
+
+/** Цветные темы на светлой основе — те, что меняют только акцент и фон. */
+const COLOURED_LIGHT = ['emerald', 'violet', 'coral', 'lagoon', 'sunset'] as const;
+/** Их тёмные близнецы. */
+const COLOURED_DARK = COLOURED_LIGHT.map((id) => `${id}-dark`);
 
 describe('контраст каждой темы (WCAG AA)', () => {
   for (const t of THEMES) {
@@ -95,17 +173,22 @@ describe('реестр тем и themes.css не разъехались', () => 
    * блок держал светлый тон акцента #E7F1FB, и каждая цветная тема
    * переопределяла его своим — выделение было голубым, зелёным, лиловым.
    */
-  it('подложка выделенной строки — нейтральная и своя только у тёмной темы', () => {
+  it('подложка выделенной строки — нейтральная и своя только у тёмного семейства', () => {
     expect(themesCss).toMatch(/--mt-list-selection:\s*#ebecef/u);
     expect(themesCss).not.toMatch(/--mt-accent-selection/u);
-    for (const id of ['emerald', 'violet', 'coral', 'lagoon', 'sunset']) {
+    for (const id of COLOURED_LIGHT) {
       expect(themeBlock(id), `${id}: своей подложки выделения быть не должно`).not.toContain(
         '--mt-list-selection',
       );
     }
-    expect(themeBlock('dark')).toContain(
-      `--mt-list-selection: ${THEMES.find((t) => t.id === 'dark')!.selection}`,
-    );
+    // У тёмных она своя, но ОДНА на всё семейство: цвет выделения не
+    // зависит от расцветки темы ни на светлом, ни на тёмном.
+    for (const [, dark] of TWINS) {
+      if (dark === 'wallpaper-dark') continue; // там она полупрозрачная накладка
+      expect(themeBlock(dark), `${dark}: подложка выделения`).toContain(
+        `--mt-list-selection: ${themeMeta(dark).selection}`,
+      );
+    }
   });
 
   it('цветные темы и тёмная переопределяют акцент значениями реестра', () => {
@@ -157,14 +240,95 @@ describe('реестр тем и themes.css не разъехались', () => 
 
   it('цветные темы меняют только переменные, а не компоненты', () => {
     // В блоке цветной темы не должно быть ничего, кроме custom properties
-    for (const id of ['emerald', 'violet', 'coral', 'lagoon', 'sunset']) {
+    for (const id of [...COLOURED_LIGHT, ...COLOURED_DARK]) {
       const lines = themeBlock(id)
+        // Пояснения вырезаем целиком: построчная отсечка не справлялась
+        // с многострочным комментарием, у которого середина — обычный текст
+        .replace(/\/\*[\s\S]*?\*\//gu, '')
         .split('\n')
         .map((l) => l.trim())
-        .filter((l) => l && !l.startsWith('/*') && !l.startsWith('*') && !l.endsWith('*/'));
+        .filter(Boolean);
       for (const line of lines) {
         expect(line, `${id}: «${line}»`).toMatch(/^(--mt-|color-scheme)/u);
       }
+    }
+  });
+});
+
+describe('у каждой темы есть пара на другой основе', () => {
+  /*
+   * Раньше набор был перекошен: восемь тем, из них семь на светлой основе
+   * и одна тёмная. Человек, работающий в тёмном интерфейсе, выбирал не
+   * между расцветками, а между «тёмной» и ничем. Пары ниже — и есть
+   * требование заказчика: та же личность темы, но на другой основе.
+   */
+  it('ни одна тема не осталась без близнеца', () => {
+    const paired = new Set(TWINS.flat());
+    for (const id of THEME_IDS) {
+      expect(paired.has(id), `тема «${id}» не входит ни в одну пару`).toBe(true);
+    }
+    expect(paired.size).toBe(THEME_IDS.length);
+  });
+
+  it('светлая и тёмная стороны набора равны по числу', () => {
+    const dark = THEMES.filter((t) => t.id.endsWith('dark'));
+    expect(dark.length).toBe(TWINS.length);
+    expect(THEMES.length - dark.length).toBe(TWINS.length);
+  });
+
+  it('близнец сохраняет тон: «Тёмный изумруд» остаётся изумрудом', () => {
+    // Иначе получился бы не тёмный вариант темы, а новая тема с тем же
+    // названием: тёмный акцент выводится из светлого подъёмом светлоты,
+    // тон не трогается.
+    for (const [light, dark] of TWINS) {
+      const distance = Math.abs(hue(themeMeta(light).accent) - hue(themeMeta(dark).accent));
+      expect(
+        Math.min(distance, 360 - distance),
+        `«${themeMeta(light).title}» и «${themeMeta(dark).title}» разошлись по тону`,
+      ).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it('тёмные близнецы стоят на одной основе — карточка у всех одна', () => {
+    // Цвет карточки не вкусовщина: под него посчитаны цвета графиков
+    // панели управления и полосы журнала. Разойдись он по темам —
+    // и считать пришлось бы каждую заново.
+    for (const [, dark] of TWINS) {
+      const meta = themeMeta(dark);
+      if (meta.kind === 'wallpaper') continue; // там подложка полупрозрачная
+      expect(meta.contentBg, dark).toBe(themeMeta('dark').contentBg);
+      expect(meta.textPrimary, dark).toBe(themeMeta('dark').textPrimary);
+      expect(meta.onAccent, dark).toBe(themeMeta('dark').onAccent);
+    }
+  });
+
+  it('имя тёмной темы кончается на -dark: на это опираются стили', () => {
+    // Общая тёмная основа выписана в themes.css один раз селектором
+    // [data-theme$='dark'], и по тому же суффиксу выбирают начертание
+    // логотипа и палитру строки состояния. Тема с другим именем молча
+    // получила бы светлые цвета текста на тёмной карточке.
+    for (const [light, dark] of TWINS) {
+      expect(dark.endsWith('dark'), `«${dark}» не кончается на -dark`).toBe(true);
+      expect(light.endsWith('dark'), `«${light}» кончается на -dark, а тема светлая`).toBe(false);
+    }
+    expect(themesCss).toContain(":root[data-theme$='dark']");
+  });
+
+  it('каждая цветная тёмная тема меняет ровно акцент и фон страницы', () => {
+    for (const id of COLOURED_DARK) {
+      const own = rules(themesCss).find((r) =>
+        r.selectors.includes(`:root[data-theme='${id}']`),
+      )?.body;
+      const names = [...(own ?? '').matchAll(/(--mt-[\w-]+):/gu)].map((m) => m[1]);
+      expect(names.sort(), id).toEqual(
+        [
+          '--mt-accent',
+          '--mt-accent-hover',
+          '--mt-accent-press',
+          '--mt-app-bg',
+          '--mt-settings-bg',
+        ].sort(),
+      );
     }
   });
 });

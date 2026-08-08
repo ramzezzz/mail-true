@@ -23,18 +23,27 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { composite, contrastRatio, luminance, type Rgb } from '../src/appearance/contrast';
-import { WALLPAPER_SCRIM, WALLPAPER_SURFACE, themeMeta } from '../src/appearance/themes';
+import {
+  WALLPAPER_DARK_SURFACE,
+  WALLPAPER_SCRIM,
+  WALLPAPER_SURFACE,
+  themeMeta,
+} from '../src/appearance/themes';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
 const themesCss = readFileSync(join(SRC, 'styles/themes.css'), 'utf8');
 
-/** Тело CSS-блока «обойной» темы. */
-function wallpaperBlock(): string {
-  const at = themesCss.indexOf(`[data-theme='wallpaper']`);
-  expect(at, 'в themes.css нет блока обойной темы').toBeGreaterThanOrEqual(0);
+/** Тело CSS-блока обойной темы: светлой или тёмной. */
+function blockOf(theme: 'wallpaper' | 'wallpaper-dark'): string {
+  const at = themesCss.indexOf(`[data-theme='${theme}']`);
+  expect(at, `в themes.css нет блока темы ${theme}`).toBeGreaterThanOrEqual(0);
   const open = themesCss.indexOf('{', at);
   const close = themesCss.indexOf('}', open);
   return themesCss.slice(open + 1, close);
+}
+
+function wallpaperBlock(): string {
+  return blockOf('wallpaper');
 }
 
 const BLACK: Rgb = { r: 0, g: 0, b: 0 };
@@ -187,6 +196,140 @@ describe('строки списка различимы поверх картин
     expect(block).toContain(
       `--mt-list-selection: rgba(0, 16, 61, ${WALLPAPER_SURFACE.rowSelected})`,
     );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Обойная тема на тёмной основе                                        */
+/* ------------------------------------------------------------------ */
+/*
+ * Всё то же самое, но наихудший случай ЗЕРКАЛЬНЫЙ. Для тёмного текста на
+ * светлой подложке хуже всего чёрное фото; для светлого текста на ТЁМНОЙ
+ * подложке — белое: карточка светлеет, и держаться тексту не на чем.
+ * Пока обойная тема была одна (светлая), человек с фоновой картинкой был
+ * обязан работать в светлом интерфейсе, каким бы тёмным ни было фото.
+ */
+describe('обойная тёмная: читаемость на белой фотографии', () => {
+  const darkSurface = (photo: Rgb, alpha = WALLPAPER_DARK_SURFACE.alpha): Rgb =>
+    composite(themeMeta('wallpaper-dark').contentBg, alpha, dimmed(photo));
+
+  /** Самая светлая подложка, какая возможна, — белая фотография. */
+  const worstDark = darkSurface(WHITE);
+  /** Самая тёмная — чёрная. */
+  const darkest = darkSurface(BLACK);
+
+  it('карточка полупрозрачна теми же числами, что в реестре', () => {
+    const block = blockOf('wallpaper-dark');
+    expect(block).toContain(
+      '--mt-app-content-bg: rgba(35, 35, 36, var(--mt-wallpaper-surface-alpha))',
+    );
+    expect(block).toContain(`--mt-wallpaper-surface-alpha: ${WALLPAPER_DARK_SURFACE.alpha}`);
+    expect(block).toContain(`--mt-wallpaper-float-alpha: ${WALLPAPER_DARK_SURFACE.floatAlpha}`);
+    expect(block).toContain('--mt-mail-color-list-letter-background: transparent');
+    expect(WALLPAPER_DARK_SURFACE.alpha).toBeLessThan(1);
+  });
+
+  it('основной текст ≥ 4.5:1', () => {
+    expect(
+      contrastRatio(themeMeta('wallpaper-dark').textPrimary, worstDark),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('вторичный текст списка ≥ 4.5:1', () => {
+    expect(contrastRatio(WALLPAPER_DARK_SURFACE.secondaryText, worstDark)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+    // серый тёмной темы почты здесь не проходит — ради этого он и заменён
+    expect(contrastRatio('#8c8e94', worstDark)).toBeLessThan(4.5);
+  });
+
+  it('акцент (ссылки, имена отправителей) ≥ 4.5:1', () => {
+    expect(contrastRatio(WALLPAPER_DARK_SURFACE.accent, worstDark)).toBeGreaterThanOrEqual(4.5);
+    // акцент тёмной темы здесь недобирает — отсюда своя, более светлая ступень
+    expect(contrastRatio('#5ca8f5', worstDark)).toBeLessThan(4.5);
+  });
+
+  it('третичный текст и вторичные значки ≥ 3:1', () => {
+    expect(contrastRatio(WALLPAPER_DARK_SURFACE.tertiaryText, worstDark)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('текст на акцентной кнопке ≥ 4.5:1', () => {
+    expect(
+      contrastRatio(themeMeta('wallpaper-dark').onAccent, WALLPAPER_DARK_SURFACE.accent),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('меню плотнее карточки, значит там не хуже', () => {
+    const menu = darkSurface(WHITE, WALLPAPER_DARK_SURFACE.floatAlpha);
+    expect(contrastRatio(WALLPAPER_DARK_SURFACE.secondaryText, menu)).toBeGreaterThanOrEqual(
+      contrastRatio(WALLPAPER_DARK_SURFACE.secondaryText, worstDark),
+    );
+  });
+
+  const settingsPage = (photo: Rgb): Rgb =>
+    composite(WALLPAPER_DARK_SURFACE.settingsBg, WALLPAPER_DARK_SURFACE.alpha, dimmed(photo));
+  const settingsCard = (photo: Rgb): Rgb =>
+    composite(
+      WALLPAPER_DARK_SURFACE.settingsCard,
+      WALLPAPER_DARK_SURFACE.settingsCardAlpha,
+      settingsPage(photo),
+    );
+
+  it('текст настроек читается и на странице, и в карточке', () => {
+    const ink = themeMeta('wallpaper-dark').textPrimary;
+    for (const photo of [WHITE, BLACK]) {
+      expect(contrastRatio(ink, settingsPage(photo))).toBeGreaterThanOrEqual(4.5);
+      expect(contrastRatio(ink, settingsCard(photo))).toBeGreaterThanOrEqual(4.5);
+      expect(
+        contrastRatio(WALLPAPER_DARK_SURFACE.secondaryText, settingsCard(photo)),
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('карточка настроек светлее своей страницы на любой фотографии', () => {
+    /*
+     * На белом фото светлеют обе подложки сразу, и разница между ними
+     * съедается фотографией: на цвете карточки почты (#3A3A3B) оставалось
+     * 1.06:1 — карточки было не видно. Отсюда более светлый цвет.
+     */
+    for (const photo of [WHITE, BLACK]) {
+      expect(luminance(settingsCard(photo))).toBeGreaterThan(luminance(settingsPage(photo)));
+      expect(contrastRatio(settingsCard(photo), settingsPage(photo))).toBeGreaterThanOrEqual(1.15);
+    }
+  });
+
+  it('строки списка различимы: накладки светлые, а не тёмные', () => {
+    // Тёмная плёнка на тёмной подложке читается провалом, а не выбором.
+    expect(WALLPAPER_DARK_SURFACE.rowTint).toBe('#ffffff');
+    const step = (base: Rgb, alpha: number): number =>
+      contrastRatio(composite(WALLPAPER_DARK_SURFACE.rowTint, alpha, base), base);
+    const selected = contrastRatio('#ffffff', '#ebecef');
+    const hovered = contrastRatio('#ffffff', '#f5f5f7');
+    for (const base of [worstDark, darkest]) {
+      expect(step(base, WALLPAPER_DARK_SURFACE.rowSelected)).toBeGreaterThanOrEqual(selected);
+      expect(step(base, WALLPAPER_DARK_SURFACE.rowHover)).toBeGreaterThanOrEqual(hovered);
+      expect(step(base, WALLPAPER_DARK_SURFACE.rowSelected)).toBeGreaterThan(
+        step(base, WALLPAPER_DARK_SURFACE.rowHover),
+      );
+    }
+  });
+
+  it('накладки заданы в CSS теми же числами', () => {
+    const block = blockOf('wallpaper-dark');
+    expect(block).toContain(
+      `--mt-mail-color-list-letter-background-hover: rgba(255, 255, 255, ${WALLPAPER_DARK_SURFACE.rowHover})`,
+    );
+    expect(block).toContain(
+      `--mt-list-selection: rgba(255, 255, 255, ${WALLPAPER_DARK_SURFACE.rowSelected})`,
+    );
+    expect(block).toContain(`--mt-accent: ${WALLPAPER_DARK_SURFACE.accent}`);
+    expect(block).toContain(`--mt-list-secondary-text: ${WALLPAPER_DARK_SURFACE.secondaryText}`);
+  });
+
+  it('фотография видна не меньше, чем в светлой обойной теме', () => {
+    // Иначе «тёмный вариант» превратился бы в тему со случайной картинкой
+    // за окном: смысл обоев в том, что их видно сквозь интерфейс.
+    expect(1 - WALLPAPER_DARK_SURFACE.alpha).toBeGreaterThanOrEqual(0.15);
   });
 });
 

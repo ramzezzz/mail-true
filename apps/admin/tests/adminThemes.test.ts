@@ -28,6 +28,7 @@ import {
   isAdminThemeName,
   navActiveBackground,
   type AdminThemeMeta,
+  type AdminThemeName,
 } from '../src/appearance/adminThemes';
 import { DEFAULT_ADMIN_THEME } from '../src/appearance/themeStore';
 import { LEVEL_IDS } from '../src/lib/logLevels';
@@ -97,9 +98,25 @@ function declarations(css: string, selector: string): Map<string, string> {
   return found;
 }
 
-/** Значение переменной темы из adminThemes.css. */
+/**
+ * Значение переменной темы из adminThemes.css.
+ *
+ * Тёмное семейство описано ОДНИМ правилом по суффиксу имени
+ * (`[data-theme$='dark']`), а не блоком на каждую тему: шесть копий одних
+ * и тех же служебных цветов разошлись бы при первой правке. Поэтому здесь
+ * повторяется каскад — сначала правило семейства, потом собственное
+ * правило темы; иначе проверка искала бы блок, которого нет, и решила бы,
+ * что цвет не задан вовсе.
+ */
 function themeVar(theme: string, name: string): string | undefined {
-  return declarations(themesCss, `:root[data-theme='${theme}']`).get(name);
+  const merged = new Map<string, string>();
+  const selectors = theme.endsWith('dark')
+    ? [":root[data-theme$='dark']", `:root[data-theme='${theme}']`]
+    : [`:root[data-theme='${theme}']`];
+  for (const selector of selectors) {
+    for (const [key, value] of declarations(themesCss, selector)) merged.set(key, value);
+  }
+  return merged.get(name);
 }
 
 /** Цвета строк журнала одной темы — из logLevels.css. */
@@ -241,29 +258,116 @@ describe('графит задан в стилях ровно так, как в �
   });
 });
 
-describe('тёмная тема почты получает служебные цвета панели', () => {
-  const dark = adminThemeMeta('dark');
+describe('тёмное семейство почты получает служебные цвета панели', () => {
+  // Проверяется КАЖДАЯ тёмная тема почты, а не только «Тёмная»: правило в
+  // стилях одно на всё семейство, и если оно вдруг перестанет их накрывать,
+  // цветная тёмная тема молча получит светлые значки состояний.
+  const family = ADMIN_THEMES.filter((theme) => theme.id.endsWith('dark'));
 
-  it('значки состояния перекрашены: светлые на тёмном не читались', () => {
-    expect(themeVar('dark', '--mt-admin-ok')?.toLowerCase()).toBe(dark.ok);
-    expect(themeVar('dark', '--mt-admin-warn')?.toLowerCase()).toBe(dark.warn);
-    expect(themeVar('dark', '--mt-admin-fail')?.toLowerCase()).toBe(dark.fail);
+  it('семейство не пустое — иначе проверка ничего не проверяет', () => {
+    expect(family.length).toBeGreaterThan(1);
   });
 
-  it('плашки под значками тоже тёмные', () => {
-    expect(themeVar('dark', '--mt-color-background-positive-tint')?.toLowerCase()).toBe(
-      dark.okTint,
-    );
-    expect(themeVar('dark', '--mt-color-background-negative-tint')?.toLowerCase()).toBe(
-      dark.failTint,
-    );
+  for (const theme of family) {
+    describe(`«${theme.title}»`, () => {
+      it('значки состояния перекрашены: светлые на тёмном не читались', () => {
+        expect(themeVar(theme.id, '--mt-admin-ok')?.toLowerCase()).toBe(theme.ok);
+        expect(themeVar(theme.id, '--mt-admin-warn')?.toLowerCase()).toBe(theme.warn);
+        expect(themeVar(theme.id, '--mt-admin-fail')?.toLowerCase()).toBe(theme.fail);
+      });
+
+      it('плашки под значками тоже тёмные', () => {
+        expect(themeVar(theme.id, '--mt-color-background-positive-tint')?.toLowerCase()).toBe(
+          theme.okTint,
+        );
+        expect(themeVar(theme.id, '--mt-color-background-negative-tint')?.toLowerCase()).toBe(
+          theme.failTint,
+        );
+      });
+
+      it('вторичный текст и вторая поверхность взяты панельные', () => {
+        expect(themeVar(theme.id, '--mt-color-text-secondary')?.toLowerCase()).toBe(
+          theme.textSecondary,
+        );
+        expect(themeVar(theme.id, '--mt-color-background-secondary')?.toLowerCase()).toBe(
+          theme.surfaceAlt,
+        );
+      });
+    });
+  }
+});
+
+describe('у каждой цветной темы есть пара: светлая и тёмная', () => {
+  /*
+   * Раньше цветных тем было пять и все светлые: администратор, работающий
+   * в тёмном интерфейсе, выбирал между «Графитом» и «Тёмной», а вся
+   * цветная часть набора была для него закрыта. Пара — это та же личность
+   * темы на другой основе, а не новая тема с похожим названием.
+   */
+  const TWINS: readonly [light: AdminThemeName, dark: AdminThemeName][] = [
+    ['light', 'dark'],
+    ['emerald', 'emerald-dark'],
+    ['violet', 'violet-dark'],
+    ['coral', 'coral-dark'],
+    ['lagoon', 'lagoon-dark'],
+    ['sunset', 'sunset-dark'],
+  ];
+  const twins = TWINS.map(([, dark]) => adminThemeMeta(dark)).filter((t) => t.id !== 'dark');
+
+  it('ни одна тема, кроме графита, не осталась без близнеца', () => {
+    // Графит — сам себе тема: это не тёмный вариант чего-то, а фирменная
+    // гамма панели, светлого близнеца у неё нет и не нужно.
+    const paired = new Set<string>(TWINS.flat());
+    for (const theme of ADMIN_THEMES) {
+      if (theme.id === 'graphite') continue;
+      expect(paired.has(theme.id), `тема «${theme.title}» не входит ни в одну пару`).toBe(true);
+    }
+    expect(paired.size + 1).toBe(ADMIN_THEME_IDS.length);
   });
 
-  it('вторичный текст и вторая поверхность взяты панельные', () => {
-    expect(themeVar('dark', '--mt-color-text-secondary')?.toLowerCase()).toBe(dark.textSecondary);
-    expect(themeVar('dark', '--mt-color-background-secondary')?.toLowerCase()).toBe(
-      dark.surfaceAlt,
-    );
+  it('близнец сохраняет тон акцента', () => {
+    /** Тон цвета в градусах. */
+    const hue = (hex: string): number => {
+      const n = parseInt(hex.slice(1), 16);
+      const [r, g, b] = [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff].map((v) => v / 255) as [
+        number,
+        number,
+        number,
+      ];
+      const max = Math.max(r, g, b);
+      const d = max - Math.min(r, g, b);
+      if (d === 0) return 0;
+      const raw = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+      return (raw * 60 + 360) % 360;
+    };
+    for (const [lightId, darkId] of TWINS) {
+      const light = adminThemeMeta(lightId);
+      const dark = adminThemeMeta(darkId);
+      const distance = Math.abs(hue(light.accent) - hue(dark.accent));
+      expect(
+        Math.min(distance, 360 - distance),
+        `«${light.title}» и «${dark.title}» разошлись по тону`,
+      ).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it('тёмные близнецы стоят на той же основе, что тёмная тема почты', () => {
+    // Поверхность у них общая не для красоты: под неё посчитаны цвета
+    // графиков и полос журнала (tests/chartContrast.test.ts).
+    const dark = adminThemeMeta('dark');
+    for (const theme of twins) {
+      expect(theme.surface, theme.id).toBe(dark.surface);
+      expect(theme.surfaceAlt, theme.id).toBe(dark.surfaceAlt);
+      expect(theme.textPrimary, theme.id).toBe(dark.textPrimary);
+      expect(theme.textSecondary, theme.id).toBe(dark.textSecondary);
+      expect(theme.onAccent, theme.id).toBe(dark.onAccent);
+    }
+  });
+
+  it('светлых и тёмных тем поровну, если не считать графит', () => {
+    const dark = ADMIN_THEMES.filter((t) => t.id.endsWith('dark'));
+    const light = ADMIN_THEMES.filter((t) => t.kind === 'light');
+    expect(dark.length).toBe(light.length);
   });
 });
 
@@ -308,7 +412,9 @@ describe('цветные светлые темы поправлены под м�
 describe('строки журнала расписаны на все темы', () => {
   /** Какой блок logLevels.css действует в теме. */
   function selectorFor(theme: AdminThemeMeta): string {
-    if (theme.id === 'dark') return ":root[data-theme='dark']";
+    // Всё тёмное семейство почты обслуживает одно правило по суффиксу
+    // имени: карточка у этих тем одна, значит и полосы журнала одни.
+    if (theme.id.endsWith('dark')) return ":root[data-theme$='dark']";
     if (theme.id === 'graphite') return ":root[data-theme='graphite']";
     return ':root';
   }

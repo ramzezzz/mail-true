@@ -1,5 +1,6 @@
 /**
- * Контраст нижней строки состояния — во ВСЕХ восьми темах оформления.
+ * Контраст нижней строки состояния — во ВСЕХ темах оформления, светлых и
+ * тёмных.
  *
  * Числа здесь СЧИТАЮТСЯ по формуле WCAG 2.1 из настоящих значений в CSS
  * и в реестре тем, а не сверяются со списком «правильных» цветов. Образец
@@ -11,15 +12,17 @@
  * первым местом в продукте, не берущим WCAG AA. На старом коде падает
  * весь файл: ни строки состояния, ни её стилей не существовало.
  *
- * Поверхностей под строкой три, а не одна:
- *   - белая карточка #FFFFFF (light, emerald, violet, coral, lagoon, sunset);
- *   - тёмная карточка #232324 (dark);
+ * Поверхностей под строкой четыре, а не одна:
+ *   - белая карточка #FFFFFF (все светлые темы);
+ *   - тёмная карточка #232324 (всё тёмное семейство);
  *   - ПОЛУПРОЗРАЧНАЯ карточка «обойной» темы, под которой лежит фотография
- *     пользователя. Постоянного цвета у неё нет вовсе, поэтому считается
- *     наихудший случай — сплошь чёрное фото, на котором подложка светлеет
- *     меньше всего, — и заодно самый светлый, сплошь белое фото. Модель та
+ *     пользователя. Постоянного цвета у неё нет вовсе, поэтому считаются
+ *     оба крайних случая — сплошь чёрное и сплошь белое фото. Модель та
  *     же, что в tests/wallpaperSurfaces.test.ts, и берётся из тех же
- *     констант: разъехаться им не даст ни один из двух файлов.
+ *     констант: разъехаться им не даст ни один из двух файлов;
+ *   - полупрозрачная ТЁМНАЯ карточка обойной тёмной темы: там наихудший
+ *     случай зеркальный — белое фото, на котором подложка светлеет
+ *     сильнее всего и светлому тексту не на чем держаться.
  */
 
 import { readFileSync } from 'node:fs';
@@ -27,7 +30,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { composite, contrastRatio, type Rgb } from '../src/appearance/contrast';
-import { THEMES, WALLPAPER_SCRIM, WALLPAPER_SURFACE } from '../src/appearance/themes';
+import {
+  THEMES,
+  WALLPAPER_DARK_SURFACE,
+  WALLPAPER_SCRIM,
+  WALLPAPER_SURFACE,
+} from '../src/appearance/themes';
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
 const css = readFileSync(join(SRC, 'layout/Footer.module.css'), 'utf8');
@@ -41,13 +49,22 @@ function ruleBody(source: string, selector: string): string {
   return source.slice(open + 1, source.indexOf('}', open));
 }
 
-/** Какой набор переменных строки состояния действует в теме. */
-type Palette = 'light' | 'dark' | 'wallpaper';
+/**
+ * Какой набор переменных строки состояния действует в теме.
+ *
+ * Наборов четыре, а тем четырнадцать: у всех светлых карточка белая, у
+ * всего тёмного семейства — #232324, и только у двух обойных тем
+ * постоянного цвета нет вовсе. Тёмное семейство ловится в CSS по суффиксу
+ * имени (`-dark`), а не перечислением — иначе список приходилось бы
+ * дописывать при каждой новой тёмной теме.
+ */
+type Palette = 'light' | 'dark' | 'wallpaper' | 'wallpaper-dark';
 
 const paletteSelector: Record<Palette, string> = {
   light: '.footer {',
-  dark: ":global(html[data-theme='dark']) .footer",
+  dark: ":global(html[data-theme$='dark']) .footer",
   wallpaper: ":global(html[data-theme='wallpaper']) .footer",
+  'wallpaper-dark': ":global(html[data-theme='wallpaper-dark']) .footer",
 };
 
 /** Цвет переменной строки состояния (только сплошной). */
@@ -58,9 +75,14 @@ function footerColor(palette: Palette, name: string): string {
   return found![1]!.toLowerCase();
 }
 
-/** Дорожка шкалы «обойной» темы — затемнение, а не цвет: цвет и доля. */
-function wallpaperTrackTint(): { tint: string; alpha: number } {
-  const body = ruleBody(css, paletteSelector.wallpaper);
+/**
+ * Дорожка шкалы обойных тем — не цвет, а ПЛЁНКА: цвет и доля.
+ * У светлой она затемняющая, у тёмной осветляющая — сплошной серый
+ * пропадал бы и там, и там, а плёнка одинаково работает поверх любой
+ * фотографии.
+ */
+function wallpaperTrackTint(palette: Palette = 'wallpaper'): { tint: string; alpha: number } {
+  const body = ruleBody(css, paletteSelector[palette]);
   const found = /--mt-footer-track:\s*rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/u.exec(body);
   expect(found, 'дорожка обойной темы должна быть полупрозрачной').not.toBeNull();
   const [, r, g, b, a] = found!;
@@ -85,9 +107,9 @@ const BLACK: Rgb = { r: 0, g: 0, b: 0 };
 const WHITE: Rgb = { r: 255, g: 255, b: 255 };
 
 /** Фотография после общего затемнения темы, затем полупрозрачная карточка. */
-function wallpaperSurface(photo: Rgb): Rgb {
+function wallpaperSurface(photo: Rgb, card = '#ffffff', alpha = WALLPAPER_SURFACE.alpha): Rgb {
   const dimmed = composite(WALLPAPER_SCRIM.tint, WALLPAPER_SCRIM.dim, photo);
-  return composite('#ffffff', WALLPAPER_SURFACE.alpha, dimmed);
+  return composite(card, alpha, dimmed);
 }
 
 /** Наихудшая и самая светлая подложки «обойной» темы. */
@@ -96,16 +118,24 @@ const WALLPAPER_SURFACES: Array<[what: string, bg: Rgb]> = [
   ['сплошь белое фото', wallpaperSurface(WHITE)],
 ];
 
-/** Все подложки темы: у обычных одна, у «обойной» — крайние случаи. */
+/** То же для обойной тёмной: там подложка тёмная и полупрозрачная. */
+const DARK_WALLPAPER_SURFACES: Array<[what: string, bg: Rgb]> = [
+  ['сплошь чёрное фото', wallpaperSurface(BLACK, '#232324', WALLPAPER_DARK_SURFACE.alpha)],
+  ['сплошь белое фото', wallpaperSurface(WHITE, '#232324', WALLPAPER_DARK_SURFACE.alpha)],
+];
+
+/** Все подложки темы: у обычных одна, у обойных — крайние случаи. */
 function surfaces(id: string, contentBg: string): Array<[what: string, bg: Rgb | string]> {
   if (id === 'wallpaper') return WALLPAPER_SURFACES;
+  if (id === 'wallpaper-dark') return DARK_WALLPAPER_SURFACES;
   return [['карточка', contentBg]];
 }
 
 function palette(id: string): Palette {
-  if (id === 'dark') return 'dark';
   if (id === 'wallpaper') return 'wallpaper';
-  return 'light';
+  if (id === 'wallpaper-dark') return 'wallpaper-dark';
+  // Имена тёмных тем кончаются на -dark; CSS выбирает набор так же
+  return id.endsWith('dark') ? 'dark' : 'light';
 }
 
 /** Норма WCAG AA: текст 4,5:1, нетекстовые элементы 3:1 (1.4.11). */
@@ -116,8 +146,9 @@ const NON_TEXT_MIN = 3;
 const HOVER_BG: Record<Palette, string | null> = {
   light: '#f0f1f3',
   dark: '#232324',
-  // В «обойной» теме и она полупрозрачна — проверяется на самой подложке
+  // В обойных темах и она полупрозрачна — проверяется на самой подложке
   wallpaper: null,
+  'wallpaper-dark': null,
 };
 
 describe('строка состояния читается в каждой теме', () => {
@@ -147,10 +178,10 @@ describe('строка состояния читается в каждой те�
         it(`${what}: шкала занятого места — заливка к дорожке ≥ 3:1`, () => {
           // Шкала не текст, ей WCAG 1.4.11 требует 3:1, а не 4,5:1.
           // Само число при этом всегда написано словами рядом.
-          const track =
-            theme.id === 'wallpaper'
-              ? composite(wallpaperTrackTint().tint, wallpaperTrackTint().alpha, bg)
-              : footerColor(kind, '--mt-footer-track');
+          const film = kind === 'wallpaper' || kind === 'wallpaper-dark';
+          const track = film
+            ? composite(wallpaperTrackTint(kind).tint, wallpaperTrackTint(kind).alpha, bg)
+            : footerColor(kind, '--mt-footer-track');
           const fill = contrastRatio(accent, track);
           expect(fill, `заливка ${accent} = ${fill.toFixed(2)}:1`).toBeGreaterThanOrEqual(
             NON_TEXT_MIN,
@@ -197,13 +228,21 @@ describe('дорожка шкалы видна на своей подложке'
     }
   });
 
-  it('в «обойной» теме — на любой фотографии', () => {
+  it('в обойных темах — на любой фотографии', () => {
     // Сплошной серый здесь пропадал: #DADCE0 на светлой подложке даёт
-    // 1,22:1. Затемнение работает одинаково поверх чего угодно.
-    const { tint, alpha } = wallpaperTrackTint();
-    for (const [what, bg] of WALLPAPER_SURFACES) {
-      const value = contrastRatio(composite(tint, alpha, bg), bg);
-      expect(value, `${what}: дорожка = ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(MIN_BAND);
+    // 1,22:1. Плёнка работает одинаково поверх чего угодно — в светлой
+    // теме затемняющая, в тёмной осветляющая.
+    for (const [palette, list] of [
+      ['wallpaper', WALLPAPER_SURFACES],
+      ['wallpaper-dark', DARK_WALLPAPER_SURFACES],
+    ] as Array<[Palette, typeof WALLPAPER_SURFACES]>) {
+      const { tint, alpha } = wallpaperTrackTint(palette);
+      for (const [what, bg] of list) {
+        const value = contrastRatio(composite(tint, alpha, bg), bg);
+        expect(value, `${palette}/${what}: дорожка = ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+          MIN_BAND,
+        );
+      }
     }
   });
 });
@@ -220,11 +259,14 @@ describe('почему цвета свои, а не общие', () => {
     expect(css).not.toMatch(/opacity:\s*0?\.\d/u);
   });
 
-  it('в «обойной» теме текст строки — тот же, что и во всей теме', () => {
+  it('в обойных темах текст строки — тот же, что и во всей теме', () => {
     // Иначе подвал выбивался бы из темы, а расчёт разъехался бы с
     // tests/wallpaperSurfaces.test.ts
     expect(footerColor('wallpaper', '--mt-footer-text')).toBe(
       WALLPAPER_SURFACE.secondaryText.toLowerCase(),
+    );
+    expect(footerColor('wallpaper-dark', '--mt-footer-text')).toBe(
+      WALLPAPER_DARK_SURFACE.secondaryText.toLowerCase(),
     );
   });
 
@@ -232,6 +274,9 @@ describe('почему цвета свои, а не общие', () => {
     for (const name of ['--mt-footer-text', '--mt-footer-alert']) {
       expect(footerColor('dark', name), name).not.toBe(footerColor('light', name));
       expect(footerColor('wallpaper', name), name).not.toBe(footerColor('light', name));
+      // Обойная тёмная тоже своя: серые тёмной темы на подложке поверх
+      // белой фотографии дают 3,50:1 вместо 4,79:1 на сплошном #232324
+      expect(footerColor('wallpaper-dark', name), name).not.toBe(footerColor('dark', name));
     }
   });
 });

@@ -36,11 +36,17 @@ export const THEME_SETTINGS = [
   'light',
   'dark',
   'emerald',
+  'emerald-dark',
   'violet',
+  'violet-dark',
   'coral',
+  'coral-dark',
   'lagoon',
+  'lagoon-dark',
   'sunset',
+  'sunset-dark',
   'wallpaper',
+  'wallpaper-dark',
 ] as const;
 
 export type ThemeSetting = (typeof THEME_SETTINGS)[number];

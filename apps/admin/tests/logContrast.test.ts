@@ -32,9 +32,16 @@ function ratio(foreground: string, background: string): number {
   return (light! + 0.05) / (dark! + 0.05);
 }
 
-/** Значение переменной из блока темы в logLevels.css. */
+/**
+ * Значение переменной из блока темы в logLevels.css.
+ *
+ * У тёмного семейства блок один на все темы: карточка у них общая
+ * (#232324), значит и полосы журнала одни. Отсюда селектор по суффиксу
+ * имени темы, а не по имени «dark».
+ */
 function cssVar(theme: 'light' | 'dark', name: string): string {
-  const start = theme === 'dark' ? css.indexOf(":root[data-theme='dark']") : css.indexOf(':root {');
+  const start =
+    theme === 'dark' ? css.indexOf(":root[data-theme$='dark']") : css.indexOf(':root {');
   expect(start, `в logLevels.css нет блока темы ${theme}`).toBeGreaterThanOrEqual(0);
   const open = css.indexOf('{', start);
   const close = css.indexOf('}', open);
@@ -118,11 +125,11 @@ describe('стили и реестр не разъезжаются', () => {
     });
   }
 
-  it('тёмная тема задана явно, а не унаследована от светлой', () => {
+  it('тёмное семейство задано явно, а не унаследовано от светлой темы', () => {
     // Светлых подложек negative-tint/warning-tint в тёмной теме нет вовсе:
     // без своего блока строка «ошибка» стала бы почти белой полосой
     // посреди тёмного экрана.
-    expect(css).toContain(":root[data-theme='dark']");
+    expect(css).toContain(":root[data-theme$='dark']");
     for (const level of LOG_LEVELS) {
       expect(cssVar('dark', `--mt-log-${level.id}-bg`)).not.toBe(
         cssVar('light', `--mt-log-${level.id}-bg`),
