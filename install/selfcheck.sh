@@ -764,6 +764,12 @@ WANT_COLUMNS="$(awk '
         sub(/^[ \t]+/, "", line)
         # Ограничения таблицы — не колонки.
         if (line ~ /^(primary|foreign|unique|check|constraint|exclude)[ \t(]/) next
+        # Продолжение описания предыдущей колонки, перенесённое на новую
+        # строку: «template_id BIGINT NOT NULL» и следующей строкой
+        # «REFERENCES mail_templates (id) ON DELETE CASCADE». Первый
+        # прогон на живой базе поймал ровно это и потребовал колонок
+        # «references» — которых, разумеется, нет.
+        if (line ~ /^(references|on|deferrable|initially|default|not|null|generated|collate|using|with)[ \t(]/) next
         sub(/[^a-z_0-9].*$/, "", line)
         if (tbl != "" && line != "") print tbl "." line
     }
