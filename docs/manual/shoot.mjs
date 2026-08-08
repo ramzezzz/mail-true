@@ -433,7 +433,28 @@ const SHOTS = [
       return true;
     })()`,
   },
-  { name: '36-admin-tls', url: `${ADMIN}/tls`, wait: 'main', admin: true },
+  {
+    name: '36-admin-tls',
+    url: `${ADMIN}/tls`,
+    wait: 'main',
+    admin: true,
+    /*
+     * Прокручиваем к выпуску Let's Encrypt.
+     *
+     * Верх страницы — «что стоит сейчас», и он одинаков во всех
+     * установках. Новизна раздела в другом: сертификат теперь
+     * выпускается кнопкой отсюда, и руководство про это пишет. Снимок,
+     * на котором этой кнопки не видно, спорил бы с текстом рядом.
+     */
+    act: `(async () => {${HELPERS}
+      const heading = await till(
+        () => [...document.querySelectorAll('h2, h3')].find((h) => /Let's Encrypt|Lets Encrypt/i.test(h.textContent || '')),
+        'заголовок выпуска Let\\'s Encrypt',
+      );
+      heading.scrollIntoView({ block: 'start' });
+      return true;
+    })()`,
+  },
   { name: '37-admin-domain-change', url: `${ADMIN}/domain-change`, wait: 'main', admin: true },
 ];
 
@@ -534,7 +555,32 @@ async function withDomainChangePlan(cookieHeader, body) {
   }
 }
 
+/**
+ * Что снимать в этот раз.
+ *
+ * Без аргументов — весь набор, как раньше. С аргументами снимается только
+ * названное: `node docs/manual/shoot.mjs 26-admin-spam 27-admin-monitoring`.
+ *
+ * Нужно потому, что пересъёмка ОДНОГО экрана — самая частая работа с этим
+ * скриптом: поправили раздел, надо обновить его снимок. Полный прогон ради
+ * этого стоит нескольких минут, гоняет браузер по двум десяткам страниц и
+ * заодно составляет на стенде показательный план смены домена. Последнее
+ * особенно неуместно, когда снимаешь один экран антиспама.
+ */
+const ONLY = process.argv.slice(2).filter((arg) => !arg.startsWith('-'));
+const wanted = (shot) => ONLY.length === 0 || ONLY.includes(shot.name);
+
 async function main() {
+  if (ONLY.length > 0) {
+    const unknown = ONLY.filter((name) => !SHOTS.some((s) => s.name === name));
+    if (unknown.length > 0) {
+      // Опечатка в имени иначе выглядит как «снимок не обновился»: скрипт
+      // отработал бы вхолостую и молча сообщил об успехе.
+      console.error(`нет таких снимков: ${unknown.join(', ')}`);
+      process.exit(1);
+    }
+    console.log(`снимаем только: ${ONLY.join(', ')}`);
+  }
   await mkdir(OUT, { recursive: true });
   const profile = join(process.env.TEMP ?? '/tmp', `mailtrue-shots-${process.pid}`);
 
@@ -551,7 +597,7 @@ async function main() {
 
     // Сначала то, что снимается до входа. Порядок важен: вошедшего продукт
     // уводит с формы входа на «Входящие», и снимок формы получить уже нельзя.
-    for (const shot of SHOTS.filter((s) => s.auth === false && !s.installer)) {
+    for (const shot of SHOTS.filter((s) => s.auth === false && !s.installer && wanted(s))) {
       await shoot(chrome, shot);
     }
 
@@ -566,7 +612,7 @@ async function main() {
     const cookieHeader = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
     const messageUrl = await firstMessageUrl(cookieHeader);
 
-    for (const shot of SHOTS.filter((s) => s.auth !== false && !s.admin && !s.installer)) {
+    for (const shot of SHOTS.filter((s) => s.auth !== false && !s.admin && !s.installer && wanted(s))) {
       await shoot(chrome, { ...shot, url: shot.url === 'ПЕРВОЕ_ПИСЬМО' ? messageUrl : shot.url });
     }
 
@@ -579,11 +625,25 @@ async function main() {
     console.log(`вход в админку: ${ADM_LOGIN}`);
 
     const adminHeader = admin.map((c) => `${c.name}=${c.value}`).join('; ');
-    await withDomainChangePlan(adminHeader, async () => {
-      for (const shot of SHOTS.filter((s) => s.admin)) {
+    const takeAdminShots = async () => {
+      for (const shot of SHOTS.filter((s) => s.admin && wanted(s))) {
         await shoot(chrome, shot);
       }
-    });
+    };
+    /*
+     * Показательный план смены домена составляется, только если снимок
+     * смены домена в этот раз действительно снимается.
+     *
+     * Он изменяет состояние стенда: заводит задание и выпускает ключ DKIM.
+     * Делать это ради снимка антиспама неуместно, а на стенде, где уже
+     * есть чужое задание, план вообще не составится — и в журнале появится
+     * непонятная строка про отказ.
+     */
+    if (wanted({ name: '37-admin-domain-change' })) {
+      await withDomainChangePlan(adminHeader, takeAdminShots);
+    } else {
+      await takeAdminShots();
+    }
   } finally {
     chrome.close();
     await rm(profile, { recursive: true, force: true }).catch(() => undefined);
