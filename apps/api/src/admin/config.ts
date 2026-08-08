@@ -10,6 +10,8 @@
  *   ADMIN_SESSION_TTL_SECONDS          срок жизни админской сессии (8 часов)
  *   ADMIN_LOGIN_MAX_FAILURES           неудач подряд до блокировки (5)
  *   ADMIN_LOCKOUT_MINUTES              на сколько блокировать (15)
+ *   ADMIN_ACCOUNT_LOCK_FAILURES        промахов по учётке со всех адресов (30)
+ *   ADMIN_KNOWN_IP_DAYS                сколько суток адрес считается своим (30)
  *   DOVECOT_MASTER_USER                служебный пользователь Dovecot
  *   DOVECOT_MASTER_PASSWORD            его пароль
  *   DOVECOT_MASTER_SEPARATOR           разделитель auth_master_user_separator (*)
@@ -36,6 +38,8 @@ export const adminEnvSchema = z.object({
   ADMIN_SESSION_TTL_SECONDS: intVar(8 * 3600, 60),
   ADMIN_LOGIN_MAX_FAILURES: intVar(5, 1),
   ADMIN_LOCKOUT_MINUTES: intVar(15, 1),
+  ADMIN_ACCOUNT_LOCK_FAILURES: intVar(30, 5),
+  ADMIN_KNOWN_IP_DAYS: intVar(30, 1),
 
   DOVECOT_MASTER_USER: z.string().default(''),
   DOVECOT_MASTER_PASSWORD: z.string().default(''),

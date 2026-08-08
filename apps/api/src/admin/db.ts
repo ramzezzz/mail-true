@@ -354,6 +354,99 @@ export class AdminDb {
     );
   }
 
+  /* ---------------------------------------------------------------- */
+  /* Подбор пароля: считаем по паре «учётка + адрес»                     */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Заперт ли ЭТОТ адрес для ЭТОЙ учётной записи.
+   *
+   * Отдельно от блокировки самой учётной записи: перебирающий запирает
+   * себя, а не администратора. Разбор — в миграции 0037.
+   */
+  async adminAddressLock(login: string, ip: string): Promise<Date | null> {
+    const row = await this.one<{ locked_until: Date | null }>(
+      `SELECT locked_until FROM admin_login_failures
+         WHERE login = $1 AND ip = $2 AND locked_until IS NOT NULL AND locked_until > now()`,
+      [login, ip],
+    );
+    return row?.locked_until ?? null;
+  }
+
+  /** Промах с этого адреса. Возвращает счётчик и срок блокировки адреса. */
+  async markAdminAddressFailure(
+    login: string,
+    ip: string,
+    maxFailures: number,
+    lockMinutes: number,
+  ): Promise<{ attempts: number; locked_until: Date | null }> {
+    const row = await this.one<{ attempts: number; locked_until: Date | null }>(
+      `INSERT INTO admin_login_failures (login, ip, attempts)
+            VALUES ($1, $2, 1)
+       ON CONFLICT (login, ip) DO UPDATE
+          SET attempts = admin_login_failures.attempts + 1,
+              locked_until = CASE WHEN admin_login_failures.attempts + 1 >= $3
+                                  THEN now() + ($4 || ' minutes')::interval
+                                  ELSE admin_login_failures.locked_until END,
+              updated_at = now()
+        RETURNING attempts, locked_until`,
+      [login, ip, maxFailures, String(lockMinutes)],
+    );
+    return row ?? { attempts: 0, locked_until: null };
+  }
+
+  /** Удачный вход — счётчик этого адреса обнуляется. */
+  async clearAdminAddressFailures(login: string, ip: string): Promise<void> {
+    await this.query(`DELETE FROM admin_login_failures WHERE login = $1 AND ip = $2`, [login, ip]);
+  }
+
+  /**
+   * Запоминает адрес, с которого вход УДАЛСЯ.
+   *
+   * Нужно ровно для одного случая: учётная запись заперта из-за
+   * распределённого подбора, и надо отличить своих от чужих. Без этого
+   * распределённый подбор остаётся способом выключить администратору
+   * доступ — только подороже.
+   */
+  async rememberAdminAddress(adminId: number, ip: string): Promise<void> {
+    await this.query(
+      `INSERT INTO admin_known_ips (admin_id, ip)
+            VALUES ($1, $2)
+       ON CONFLICT (admin_id, ip) DO UPDATE SET last_success = now()`,
+      [adminId, ip],
+    );
+  }
+
+  /** Входили ли с этого адреса успешно за последние N суток. */
+  async adminAddressKnown(adminId: number, ip: string, days: number): Promise<boolean> {
+    const row = await this.one<{ known: boolean }>(
+      `SELECT true AS known FROM admin_known_ips
+         WHERE admin_id = $1 AND ip = $2 AND last_success > now() - ($3 || ' days')::interval`,
+      [adminId, ip, String(days)],
+    );
+    return row?.known === true;
+  }
+
+  /**
+   * Уборка: строки о промахах живут не вечно.
+   *
+   * Без неё таблица растёт от каждого перебора и остаётся расти после
+   * него. Читается она на каждом входе, и разрастание — это медленный
+   * вход тогда, когда сервер и так под нагрузкой перебора.
+   */
+  async sweepAdminLoginFailures(keepDays: number): Promise<number> {
+    // RETURNING нужен, чтобы узнать, сколько удалено: наш query() отдаёт
+    // строки, а не отчёт драйвера.
+    const rows = await this.query<{ gone: number }>(
+      `DELETE FROM admin_login_failures
+         WHERE updated_at < now() - ($1 || ' days')::interval
+           AND (locked_until IS NULL OR locked_until < now())
+       RETURNING 1 AS gone`,
+      [String(keepDays)],
+    );
+    return rows.length;
+  }
+
   /** Увеличивает счётчик неудач и при переполнении ставит блокировку. */
   async markAdminLoginFailure(
     id: number,

@@ -71,23 +71,73 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
         'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
       const passwordOk = verifyAdminPassword(password, stored);
 
+      const origin = originOf(request);
+      const ip = origin.ip ?? '';
+      const settings = settingsOf(ctx);
+
+      /*
+       * БЛОКИРУЕТСЯ АДРЕС, А НЕ УЧЁТНАЯ ЗАПИСЬ.
+       *
+       * Раньше пять промахов подряд запирали учётку целиком — всем, включая
+       * настоящего администратора. Зная логин (а это «admin» на каждой
+       * второй установке), чужой человек держал его запертым бесконечно:
+       * пять неверных паролей раз в пятнадцать минут. Защита от подбора
+       * работала как кнопка «выключить админу доступ».
+       *
+       * Теперь перебирающий запирает сам себя. Разбор — в миграции 0037.
+       */
+      if (ip !== '') {
+        const until = await ctx.db.adminAddressLock(login, ip);
+        if (until) {
+          const minutes = Math.ceil((until.getTime() - Date.now()) / 60_000);
+          throw new LockedError(
+            `Слишком много неудачных попыток с этого адреса. Вход заблокирован ещё на ${minutes} мин.`,
+          );
+        }
+      }
+
+      /*
+       * Блокировка самой учётной записи остаётся — она ловит подбор с
+       * МНОЖЕСТВА адресов, которому поадресный счётчик не мешает. Но
+       * адрес, с которого недавно входили успешно, под неё не попадает:
+       * иначе распределённый подбор снова становится способом запереть
+       * администратора, только подороже.
+       */
       if (row && row.locked_until && row.locked_until.getTime() > Date.now()) {
-        const minutes = Math.ceil((row.locked_until.getTime() - Date.now()) / 60_000);
-        throw new LockedError(
-          `Слишком много неудачных попыток. Вход заблокирован ещё на ${minutes} мин.`,
-        );
+        const knownDays = await settings.int('ADMIN_KNOWN_IP_DAYS');
+        const friendly = ip !== '' && (await ctx.db.adminAddressKnown(row.id, ip, knownDays));
+        if (!friendly) {
+          const minutes = Math.ceil((row.locked_until.getTime() - Date.now()) / 60_000);
+          throw new LockedError(
+            `Учётная запись временно заперта: слишком много неудачных попыток с разных адресов. ` +
+              `Осталось ${minutes} мин. Со своего обычного адреса вход при этом работает.`,
+          );
+        }
       }
 
       if (!row || !passwordOk || !row.active) {
+        // Порог и срок блокировки — настройки «действуют сразу»:
+        // администратор поднимает их в панели, когда идёт подбор пароля,
+        // и ждать перезапуска в этот момент ему негде.
+        const maxFailures = await settings.int('ADMIN_LOGIN_MAX_FAILURES');
+        const lockMinutes = await settings.int('ADMIN_LOCKOUT_MINUTES');
+
+        /*
+         * Промах записывается по адресу ВСЕГДА — даже когда логина не
+         * существует. Иначе перебор имён администраторов не ограничен
+         * ничем: «нет такого» отвечается мгновенно и бесплатно.
+         */
+        if (ip !== '') {
+          await ctx.db.markAdminAddressFailure(login, ip, maxFailures, lockMinutes);
+        }
+
         if (row) {
-          // Порог и срок блокировки — настройки «действуют сразу»:
-          // администратор поднимает их в панели, когда идёт подбор пароля,
-          // и ждать перезапуска в этот момент ему негде.
-          const settings = settingsOf(ctx);
           const state = await ctx.db.markAdminLoginFailure(
             row.id,
-            await settings.int('ADMIN_LOGIN_MAX_FAILURES'),
-            await settings.int('ADMIN_LOCKOUT_MINUTES'),
+            // Порог на учётку заметно выше поадресного: он ловит подбор с
+            // множества адресов, а не обычную опечатку в пароле.
+            await settings.int('ADMIN_ACCOUNT_LOCK_FAILURES'),
+            lockMinutes,
           );
           await auditAnonymous(ctx, request, login, {
             action: 'admin.login.failed',
@@ -107,8 +157,14 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
         throw new AuthFailedError('Неверный логин или пароль');
       }
 
-      const origin = originOf(request);
       await ctx.db.markAdminLoginSuccess(row.id, origin.ip);
+      if (ip !== '') {
+        // Счётчик этого адреса обнуляется: человек вспомнил пароль.
+        await ctx.db.clearAdminAddressFailures(login, ip);
+        // И адрес запоминается — по нему потом отличают своих от чужих,
+        // когда учётная запись заперта распределённым подбором.
+        await ctx.db.rememberAdminAddress(row.id, ip);
+      }
 
       const sessionId = newSessionId();
       const ttlSeconds = await settingsOf(ctx).int('ADMIN_SESSION_TTL_SECONDS');
