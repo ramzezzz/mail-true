@@ -138,7 +138,7 @@ export function AttachmentViewer({
     };
   }, [messageId, current, releaseUrl]);
 
-  /* Листание стрелками клавиатуры — как в просмотре картинок у mail.ru.
+  /* Листание стрелками клавиатуры — как в просмотре картинок в привычных почтовых интерфейсах.
      Escape уже закрывает окно (Modal). */
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

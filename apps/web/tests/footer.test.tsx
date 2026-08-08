@@ -181,7 +181,7 @@ describe('что показывает строка состояния', () => {
     expect(footerText()).toContain('Занято');
   });
 
-  it('занятое место — словами mail.ru и шкалой с настоящей долей', async () => {
+  it('занятое место — словами привычных почтовых интерфейсов и шкалой с настоящей долей', async () => {
     await render();
     expect(footerText()).toContain('Занято 400 МБ из 8 ГБ');
     const meter = host.querySelector('footer [role="progressbar"]');

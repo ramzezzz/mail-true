@@ -1,6 +1,6 @@
 /**
  * Тесты прав на действия с папками и счётчика писем в настройках.
- * Эталон — таблица из docs/features-mailru.md и скриншот 12-folders.png.
+ * Эталон — таблица из docs/features-reference.md и скриншот 12-folders.png.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -74,7 +74,7 @@ describe('formatFolderCount', () => {
     expect(formatFolderCount({ unreadCount: 0, totalCount: 11 })).toBe('11');
   });
 
-  it('с непрочитанными — «10/999+», как у Входящих в mail.ru', () => {
+  it('с непрочитанными — «10/999+», как у папки «Входящие» в привычных почтовых интерфейсах', () => {
     expect(formatFolderCount({ unreadCount: 10, totalCount: 5000 })).toBe('10/999+');
   });
 

@@ -2,7 +2,7 @@
  * Генератор слоя дизайн-токенов.
  *
  * Читает brand/reference/design-tokens-raw.json (полная выгрузка CSS-переменных
- * с живого e.mail.ru, ~1500 переменных) и порождает:
+ * с живого эталонный интерфейс, ~1500 переменных) и порождает:
  *
  *   src/styles/tokens.css      — отобранное подмножество в нашем пространстве
  *                                имён --mt-* (значения :root, светлая тема);
@@ -49,7 +49,7 @@ export const EXCLUDE_PATTERNS = [
   /^--ph-custom-color-social-/, //  соцкнопки портальной шапки
   /^--ph-custom-portal-/, //        портальные виджеты (облако и т. п.)
   /^--ph-home-/, //                 главная страница портала
-  /^--calls-logo|^--logo-/, //      URL логотипов с CDN mail.ru
+  /^--calls-logo|^--logo-/, //      URL логотипов с CDN привычный почтовый интерфейс
   /^--column-right/, //             правая рекламная колонка — не делаем
   /^--operand-height/, //           операнды поисковых фильтров — до поиска далеко
   /^--vkui-lft-sidebar-bg/, //      залипший токен старой темы
@@ -256,7 +256,7 @@ export function generateCss(tokens) {
 
   let css = `/*
  * СГЕНЕРИРОВАНО СКРИПТОМ — НЕ ПРАВИТЬ РУКАМИ.
- * Источник: brand/reference/design-tokens-raw.json (выгрузка с живого e.mail.ru).
+ * Источник: brand/reference/design-tokens-raw.json (выгрузка с живого эталонный интерфейс).
  * Генератор: apps/web/scripts/build-tokens.mjs.
  * Карта соответствия «--mt-* → исходное имя»: src/styles/tokens.map.json.
  *

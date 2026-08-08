@@ -21,7 +21,7 @@ export function quoteHtml(message: Message): string {
 
 /**
  * Ответ отправителю. Настройка «Включать содержимое исходного письма
- * в ответ» — только про ответ; пересылка ей не подчиняется и у mail.ru.
+ * в ответ» — только про ответ; пересылка ей не подчиняется и в привычных почтовых интерфейсах.
  */
 export function replyInit(message: Message, quoteOriginal: boolean): ComposeInit {
   return {

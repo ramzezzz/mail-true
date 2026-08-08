@@ -32,7 +32,7 @@ describe('parseSearchParams', () => {
     });
   });
 
-  it('читает запрос из q_query — как у mail.ru', () => {
+  it('читает запрос из q_query — как в привычных почтовых интерфейсах', () => {
     expect(parse('q_query=%D1%81%D1%87%D0%B5%D1%82').query).toBe('счет');
   });
 

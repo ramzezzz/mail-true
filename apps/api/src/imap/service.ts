@@ -96,7 +96,7 @@ const DEFAULT_ROLE_PATHS: Record<string, string> = {
 
 /**
  * Как requireFolder, но недостающую системную папку (например, «Архив»)
- * создаёт автоматически — так ведёт себя и mail.ru.
+ * создаёт автоматически — так ведут себя привычные почтовые интерфейсы.
  */
 export async function requireOrCreateFolder(client: ImapFlow, folderId: string): Promise<Folder> {
   const folders = await listFolders(client);

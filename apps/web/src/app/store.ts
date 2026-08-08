@@ -230,7 +230,7 @@ interface UiState {
   theme: ThemeName;
   setTheme(setting: ThemeSetting): void;
 
-  /** Компактный список писем (у mail.ru — «pony mode», строки 40px). */
+  /** Компактный список писем (в привычных почтовых интерфейсах — «pony mode», строки 40px). */
   compactList: boolean;
   toggleCompactList(): void;
 

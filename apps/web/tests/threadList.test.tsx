@@ -317,7 +317,7 @@ describe('действия страницы папки над строкой-п�
     vi.spyOn(settingsApi, 'getGeneral').mockResolvedValue(DEFAULT_GENERAL_SETTINGS);
   });
 
-  it('по умолчанию список просят сгруппированным — как в mail.ru', async () => {
+  it('по умолчанию список просят сгруппированным — как в привычных почтовых интерфейсах', async () => {
     render();
     await waitFor(() => getMessages.mock.calls.length > 0, 'запрос списка');
     expect(getMessages.mock.calls[0]?.[0].threaded).toBe(true);

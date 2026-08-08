@@ -47,8 +47,8 @@ describe('переключатель', () => {
   const switchCss = css('components/Switch/Switch.module.css');
   const themes = css('styles/themes.css');
 
-  it('размеры сняты с mail.ru, а не взяты из сырых токенов VKUI', () => {
-    // Замеры по research/mailru/05-filters.png: дорожка 32×20, бегунок 16,
+  it('размеры сняты с эталонной вёрстки, а не взяты из сырых токенов VKUI', () => {
+    // Замеры по эталонные снимки интерфейса: дорожка 32×20, бегунок 16,
     // поле 2. Сырые --vkui--size_switch_* дают 34×14 при бегунке 20 —
     // с ними бегунок вылезал за дорожку на 8px вниз и на 2px вправо.
     expect(themes).toMatch(/--mt-switch-width:\s*32px/);

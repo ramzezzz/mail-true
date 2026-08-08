@@ -126,7 +126,7 @@ describe('подгрузка писем', () => {
     vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
     render();
     await waitFor(() => Boolean(button('Показать ещё')), 'кнопку подгрузки');
-    // Подписи «Показано 100 из 187» под списком у mail.ru нет ни в каком виде
+    // Подписи «Показано 100 из 187» под списком в привычных почтовых интерфейсах нет ни в каком виде
     expect(text()).not.toContain('Показано');
   });
 

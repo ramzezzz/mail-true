@@ -201,7 +201,7 @@ describe('кружок отправителя рисуется ОДНИМ ком
   }
 });
 
-describe('логотип вписан в круг, как в mail.ru', () => {
+describe('логотип вписан в круг, как в привычных почтовых интерфейсах', () => {
   /** Тело правила по селектору. */
   function rule(selector: string): string {
     const at = avatarCss.indexOf(`\n${selector} {`);

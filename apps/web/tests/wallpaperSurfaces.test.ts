@@ -161,7 +161,7 @@ describe('строки списка различимы поверх картин
     contrastRatio(composite(WALLPAPER_SURFACE.rowTint, alpha, base), base);
 
   it('выделенная строка отличается не хуже, чем на белой карточке', () => {
-    // белая карточка mail.ru: #FFFFFF против выделения #EBECEF
+    // белая карточка привычный почтовый интерфейс: #FFFFFF против выделения #EBECEF
     const opaque = contrastRatio('#ffffff', '#ebecef');
     expect(step(worst, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);
     expect(step(lightest, WALLPAPER_SURFACE.rowSelected)).toBeGreaterThanOrEqual(opaque);

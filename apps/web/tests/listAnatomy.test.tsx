@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * Анатомия строки списка писем — сверка с живым mail.ru.
+ * Анатомия строки списка писем — сверка с живым привычный почтовый интерфейс.
  *
- * Эталон лежит в research/mailru:
+ * Эталон лежит в справочник по вёрстке:
  *   row-anatomy.json — строка .llc: сама строка x=232 (в край колонки),
  *                      колонка статуса 28×48, аватар 32×32 с x=260;
  *   01-inbox.png     — пипеткой: заголовок периода «Сегодня» тёмный
@@ -42,7 +42,7 @@ function rule(css: string, selector: string): string {
   return css.slice(open + 1, css.indexOf('}', open));
 }
 
-describe('колонки строки списка совпадают с mail.ru', () => {
+describe('колонки строки списка совпадают с эталонной вёрсткой', () => {
   it('строка идёт в край колонки: у прокрутки нет боковых полей', () => {
     // Было `padding: 0 8px` — весь список стоял на x=240 при колонке 232
     expect(rule(listCss, '.scroll')).toMatch(/padding:\s*0;/u);
@@ -170,7 +170,7 @@ describe('счётчик писем в цепочке', () => {
     expect(parentClass, `счётчик лежит в «${parentClass}»`).toMatch(/title/u);
     expect(parentClass).not.toMatch(/correspondent/u);
 
-    // И идёт ПЕРЕД темой: у mail.ru пилюля слева от неё
+    // И идёт ПЕРЕД темой: в привычных почтовых интерфейсах пилюля слева от неё
     const subject = host.querySelector('[class*="subject"]')!;
     expect(badge!.compareDocumentPosition(subject) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });

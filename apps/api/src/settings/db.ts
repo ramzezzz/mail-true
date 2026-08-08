@@ -227,7 +227,7 @@ function toSettings(row: SettingsRow): MailSettings {
     // умолчание возможности (пять секунд) проставляет колонке миграция.
     undoSendSeconds: normalizeUndoSeconds(row.undo_send_seconds ?? 0),
     // `?? true` — и умолчание, и поведение до миграции 0019: список
-    // группируется, как у mail.ru.
+    // группируется, как в привычных почтовых интерфейсах.
     threadedList: row.threaded_list ?? true,
     autoReply: {
       enabled: row.autoreply_enabled,

@@ -1,6 +1,6 @@
 /**
  * Тесты правил фильтрации: разбор предзаполнения, сборка правила из формы
- * и описание правила для списка (research/mailru/05-filters.png).
+ * и описание правила для списка (эталонные снимки интерфейса).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -124,7 +124,7 @@ describe('buildRule', () => {
     expect(rule.actions.applyToExistingFolderIds).toEqual([]);
   });
 
-  it('умолчания повторяют окно mail.ru: другие фильтры — да, спам — нет', () => {
+  it('умолчания повторяют окно привычных почтовых интерфейсов: другие фильтры — да, спам — нет', () => {
     const actions = emptyRule().actions;
     expect(actions.continueOtherFilters).toBe(true);
     expect(actions.applyToSpam).toBe(false);

@@ -80,7 +80,7 @@
   }
 }
 
-/* Шапка раскрытого письма выше — 60px (letter__head в mail.ru) */
+/* Шапка раскрытого письма выше — 60px (letter__head в привычных почтовых интерфейсах) */
 .headExpanded {
   height: 60px;
   align-items: center;

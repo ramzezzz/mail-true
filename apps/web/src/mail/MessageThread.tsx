@@ -1,5 +1,5 @@
 /**
- * Цепочка переписки под раскрытым письмом (docs/features-mailru.md,
+ * Цепочка переписки под раскрытым письмом (docs/features-reference.md,
  * «Цепочки переписки»).
  *
  * Одно письмо раскрыто целиком — его рисует страница письма, — а остальные
@@ -24,7 +24,7 @@ import styles from './MessageThread.module.css';
 import { SenderAvatar } from './SenderAvatar';
 
 export interface MessageThreadProps {
-  /** Остальные письма цепочки, старые сверху — как в mail.ru. */
+  /** Остальные письма цепочки, старые сверху — как в привычных почтовых интерфейсах. */
   messages: readonly MessageSummary[];
   /** Всего писем в цепочке, включая раскрытое: число в заголовке. */
   totalCount: number;

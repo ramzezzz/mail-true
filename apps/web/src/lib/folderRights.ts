@@ -1,6 +1,6 @@
 /**
  * Права на действия с папкой и счётчик писем — раздел настроек «Папки»
- * (см. research/mailru/12-folders.png и таблицу в docs/features-mailru.md).
+ * (см. эталонные снимки интерфейса и таблицу в docs/features-reference.md).
  *
  * Права зависят от роли папки, а не от её имени: роль сервер определяет по
  * SPECIAL-USE, поэтому логика не ломается на серверах, где системные папки
@@ -37,7 +37,7 @@ export function folderRights(folder: FolderLike): FolderRights {
   switch (folder.role) {
     case 'trash':
       // Корзина и так свалка удалённого — очищать её отдельной кнопкой
-      // mail.ru не даёт, поэтому не даём и мы.
+      // привычный почтовый интерфейс не даёт, поэтому не даём и мы.
       return { canClear: false, canRename: false, canDelete: false };
     case 'spam':
       // Спам чистится, но переименовать или удалить его нельзя:
