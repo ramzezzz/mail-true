@@ -44,12 +44,13 @@
  * настройки, а не «сохранением пустого поля»: он удаляет строку из базы,
  * то есть настройка снова начинает следовать за infra/.env.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useBlocker } from 'react-router-dom';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
 import { api, ApiError } from '../api/client';
-import type { RestartTarget, ServerSetting, SettingValue } from '../api/types';
+import type { RestartTarget, ServerSetting, SettingApply, SettingValue } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { Badge, Field, Notice, Panel, Tile, Tiles, Toolbar } from '../components/ui';
@@ -137,6 +138,13 @@ export function ServerSettingsPage() {
     (setting) => validate(setting, draft[setting.key] ?? '') !== null,
   ).length;
 
+  /**
+   * Службы, которые надо тронуть сразу после успешного сохранения.
+   * null — сохраняем и ничего не трогаем.
+   */
+  const [restartAfterSave, setRestartAfterSave] = useState<SettingApply[] | null>(null);
+  const [restartError, setRestartError] = useState<string | null>(null);
+
   const save = useMutation({
     mutationFn: (values: Record<string, SettingValue | null>) => api.saveServerSettings(values),
     onSuccess: (result) => {
@@ -145,6 +153,25 @@ export function ServerSettingsPage() {
         counts: result.counts,
       });
       setDraft({});
+
+      /*
+       * Перезапуск идёт ЗДЕСЬ, после успешного сохранения, а не рядом с
+       * ним: перезапустить службу и не сохранить значение — худший из
+       * возможных исходов. Служба переподнимется со старым значением, а
+       * человек будет уверен, что применил новое.
+       */
+      const targets = restartAfterSave;
+      setRestartAfterSave(null);
+      if (targets && targets.length > 0) {
+        setFlash(
+          `Сохранено настроек: ${String(result.changed)}. Перезапускаю: ` +
+            targets.map((t) => t.target).join(', ') +
+            '…',
+        );
+        void runRestarts(targets);
+        return;
+      }
+
       setFlash(
         result.changed === 0
           ? 'Менять было нечего: значения и так такие.'
@@ -155,6 +182,36 @@ export function ServerSettingsPage() {
       );
     },
   });
+
+  /**
+   * Перезапуск затронутых служб — по одной, а не пачкой.
+   *
+   * Последовательно намеренно: на почтовом сервере службы связаны
+   * (Postfix спрашивает пароли у Dovecot), и одновременный перезапуск
+   * двух даёт отказ аутентификации у того, кто в этот момент отправляет
+   * письмо. Разница в пару секунд — цена, которую никто не заметит.
+   */
+  const runRestarts = async (targets: SettingApply[]): Promise<void> => {
+    const done: string[] = [];
+    for (const apply of targets) {
+      try {
+        await api.requestRestart(apply.target, apply.action);
+        done.push(apply.target);
+      } catch (err) {
+        setFlash(null);
+        setRestartError(
+          `Служба ${apply.target}: ${err instanceof Error ? err.message : 'перезапуск не удался'}` +
+            (done.length > 0 ? `. До неё перезапущены: ${done.join(', ')}` : ''),
+        );
+        break;
+      }
+    }
+    if (done.length > 0) {
+      setFlash(`Настройки сохранены, перезапущены службы: ${done.join(', ')}.`);
+    }
+    // Список перечитываем: у перезапущенных служб пропадает «ждёт перезапуска».
+    void queryClient.invalidateQueries({ queryKey: ['server-settings'] });
+  };
 
   const reset = useMutation({
     mutationFn: (key: string) => api.resetServerSetting(key),
@@ -186,7 +243,71 @@ export function ServerSettingsPage() {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
 
-  const submit = (): void => {
+  /**
+   * Службы, которых коснутся сохраняемые правки.
+   *
+   * Считаются по самим настройкам, а не выбираются человеком: он не
+   * обязан помнить, что HELO читает Postfix, а срок сессии — api. Каждая
+   * служба попадает сюда один раз, даже если изменённых настроек у неё
+   * десяток, и с самым сильным из требуемых действий: пересоздание
+   * контейнера включает в себя перезапуск, обратное неверно.
+   */
+  const affected = useMemo((): SettingApply[] => {
+    const byTarget = new Map<string, SettingApply>();
+    for (const setting of changed) {
+      for (const apply of setting.applies) {
+        const known = byTarget.get(apply.target);
+        if (!known || (known.action === 'restart' && apply.action === 'recreate')) {
+          byTarget.set(apply.target, apply);
+        }
+      }
+    }
+    return [...byTarget.values()];
+  }, [changed]);
+
+  /*
+   * НЕСОХРАНЁННЫЕ ПРАВКИ НЕ ПРОПАДАЮТ МОЛЧА.
+   *
+   * Раздел большой, правок за раз делают десяток, а уйти с него можно
+   * одним щелчком по любому пункту меню — и набранное исчезало без
+   * единого слова. Здесь два разных ухода, и оба надо перехватить:
+   *
+   *   * переход внутри панели — его ловит маршрутизатор (useBlocker) и
+   *     позволяет спросить;
+   *   * закрытие вкладки и обновление страницы — их ловит только
+   *     beforeunload, и текст вопроса пишет браузер, а не мы.
+   */
+  const hasUnsaved = changed.length > 0;
+
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasUnsaved && currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    const stay = !window.confirm(
+      `Не сохранено настроек: ${String(changed.length)}. Уйти со страницы и потерять правки?`,
+    );
+    if (stay) blocker.reset();
+    else blocker.proceed();
+  }, [blocker, changed.length]);
+
+  useEffect(() => {
+    if (!hasUnsaved) return undefined;
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      // Значение не показывается со времён старых браузеров, но само его
+      // наличие включает окно с вопросом.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => {
+      window.removeEventListener('beforeunload', warn);
+    };
+  }, [hasUnsaved]);
+
+  const submit = (thenRestart = false): void => {
     const values: Record<string, SettingValue | null> = {};
     for (const setting of changed) {
       const value = draft[setting.key];
@@ -195,6 +316,8 @@ export function ServerSettingsPage() {
     }
     if (Object.keys(values).length === 0) return;
     setFlash(null);
+    // Что перезапускать, решаем ДО сохранения: после него changed опустеет.
+    setRestartAfterSave(thenRestart ? affected : null);
     save.mutate(values);
   };
 
@@ -208,6 +331,11 @@ export function ServerSettingsPage() {
       {flash && <Notice tone="success">{flash}</Notice>}
       {(list.error ?? save.error ?? reset.error) && (
         <Notice tone="error">{errorText(list.error ?? save.error ?? reset.error)}</Notice>
+      )}
+      {/* Перезапуск отдельной строкой: значения при этом СОХРАНЕНЫ, и
+          человек должен видеть, что не применилось, а не что не легло. */}
+      {restartError !== null && (
+        <Notice tone="error">Настройки сохранены, но перезапуск не удался. {restartError}</Notice>
       )}
 
       {/* ФАКТ, а не обещание: сохранено, но живой процесс работает по-старому */}
@@ -376,9 +504,29 @@ export function ServerSettingsPage() {
               <> — {changed.map((setting) => setting.key).join(', ')}</>
             )}
           </div>
-          <Button size="s" disabled={busy || invalidCount === changed.length} onClick={submit}>
+          <Button
+            size="s"
+            disabled={busy || invalidCount === changed.length}
+            onClick={() => submit(false)}
+          >
             {save.isPending ? 'Сохраняем…' : 'Сохранить'}
           </Button>
+          {/*
+            Вторая кнопка появляется, только если среди правок есть такие,
+            которым перезапуск нужен. Когда всё «действует сразу», она
+            была бы предложением сделать бессмысленную работу — с обрывом
+            чужих сессий в придачу.
+          */}
+          {affected.length > 0 && writable && (
+            <Button
+              size="s"
+              disabled={busy || invalidCount === changed.length}
+              title={`Тронет: ${affected.map((a) => a.target).join(', ')}`}
+              onClick={() => submit(true)}
+            >
+              {save.isPending ? 'Сохраняем…' : 'Сохранить и перезапустить'}
+            </Button>
+          )}
           <Button mode="secondary" size="s" disabled={busy} onClick={() => setDraft({})}>
             Отменить правки
           </Button>
@@ -467,12 +615,18 @@ export function SettingRow({
         )}
 
         {/*
-          Кнопки стоят у самой настройки, а не общей «перезапустить всё»
-          наверху: у служб разные последствия. Перезапуск Postfix — несколько
-          секунд без приёма почты, Dovecot — обрыв сессий почтовых программ,
-          nginx — недоступный веб-вход. Одной кнопкой это не описать честно.
+          Кнопки перезапуска у КАЖДОЙ настройки здесь больше нет.
+          Их было по одной на строку, а строк на экране десятки — и
+          человек, поправив пять полей одной службы, жал одну и ту же
+          кнопку пять раз, гадая, нужно ли. Теперь перезапуск идёт от
+          «Сохранить и перезапустить» внизу: он трогает ровно те службы,
+          которых коснулись правки, и по одному разу каждую.
+
+          Осталась она только у настроек, СОХРАНЁННЫХ ранее и ждущих
+          перезапуска: их правки уже не в этой сессии, «Сохранить» для
+          них нечего, а применить надо.
         */}
-        {setting.applies.length > 0 && (
+        {setting.pendingRestart && setting.applies.length > 0 && (
           <div className={styles.applies}>
             <ApplyButtons applies={setting.applies} allowed={writable} onApplied={onApplied} />
           </div>
