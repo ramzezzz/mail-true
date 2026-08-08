@@ -824,6 +824,81 @@ else
     esac
 fi
 
+# --- Защита от подбора паролей (fail2ban) ---------------------------
+# Проверяются три разные вещи, и каждая ломается по-своему:
+#
+#   1) служба вообще запущена;
+#   2) камеры подняты (fail2ban умеет остаться живым процессом, не подняв
+#      ни одной камеры из-за ошибки в конфигурации — снаружи это выглядит
+#      как работающая защита);
+#   3) правило перехвата стоит в пакетном фильтре ХОСТА.
+#
+# Третий пункт — самый важный и самый коварный. Трафик к опубликованным
+# портам контейнеров идёт через цепочку FORWARD (Docker подменяет адрес
+# назначения), а не через INPUT. Правило, положенное не в ту цепочку,
+# выглядит настроенным во всех отчётах и не задерживает ни одного пакета.
+# Проверка смотрит, что цепочки f2b-* видны из хоста и что переход на них
+# стоит там, где надо.
+F2B_STATE="$(service_state fail2ban)"
+if [ -z "$F2B_STATE" ]; then
+    fail "fail2ban — контейнера нет: подбор паролей по IMAP/POP3/SMTP ничем не останавливается"
+    hint "поднять: docker compose -f infra/docker-compose.yml -f install/compose.prod.yml up -d fail2ban"
+elif [ "${FAIL2BAN_ENABLED:-true}" != "true" ]; then
+    case "$F2B_STATE" in
+        *healthy*|running*)
+            warn "fail2ban работает, но защита выключена (FAIL2BAN_ENABLED=false в infra/.env)"
+            hint "так и задумано, если вы её выключили осознанно; включить обратно:"
+            hint "  FAIL2BAN_ENABLED=true в $ENV_FILE, затем docker compose ... up -d fail2ban" ;;
+        *)  warn "fail2ban выключен настройкой и контейнер не работает: состояние «$F2B_STATE»" ;;
+    esac
+else
+    case "$F2B_STATE" in
+        *healthy*|running*)
+            # Камеры: сколько поднято и какие. Пустой список означает, что
+            # служба жива, а не ловит ничего.
+            F2B_JAILS="$(dc exec -T fail2ban fail2ban-client status 2>/dev/null | \
+                         sed -n 's/.*Jail list:[[:space:]]*//p' | tr -d '\r')"
+            if [ -z "${F2B_JAILS// /}" ]; then
+                fail "fail2ban запущен, но не поднял ни одной камеры — никого не банит"
+                hint "смотрите ошибки конфигурации: docker compose -f infra/docker-compose.yml logs fail2ban"
+            else
+                ok "fail2ban следит за подбором паролей (камеры: $F2B_JAILS)"
+                for jail in mailtrue-dovecot mailtrue-postfix-sasl mailtrue-api; do
+                    case "$F2B_JAILS" in
+                        *"$jail"*) : ;;
+                        *) warn "камера $jail не поднялась — этот путь подбора не прикрыт"
+                           hint "смотрите: docker compose -f infra/docker-compose.yml logs fail2ban | grep -i '$jail'" ;;
+                    esac
+                done
+            fi
+
+            # Правила в пакетном фильтре хоста.
+            if ! command -v iptables >/dev/null 2>&1; then
+                warn "на хосте нет команды iptables — проверить правила бана нечем"
+            elif iptables -w -n -L DOCKER-USER 2>/dev/null | grep -q 'f2b-'; then
+                ok "правила бана стоят в цепочке DOCKER-USER — забаненный адрес не дойдёт до почтовых портов"
+            elif iptables -w -n -L INPUT 2>/dev/null | grep -q 'f2b-'; then
+                fail "правила бана есть только в INPUT — до контейнеров они не применяются, бан ничего не даёт"
+                hint "цепочки DOCKER-USER нет или переход в неё не встал."
+                hint "трафик к портам контейнеров идёт через FORWARD, а не через INPUT."
+                hint "смотрите: docker compose -f infra/docker-compose.yml logs fail2ban | grep -i iptables"
+            else
+                warn "цепочек бана в пакетном фильтре хоста не видно — возможно, банить не получится"
+                hint "fail2ban заводит их при запуске камеры; если их нет, служба не смогла"
+                hint "изменить правила хоста (нет NET_ADMIN, нет сети хоста, другой вариант iptables)."
+                hint "проверить наверняка (адрес из документации, забанится на час):"
+                hint "  docker compose -f infra/docker-compose.yml exec fail2ban \\"
+                hint "    fail2ban-client set mailtrue-dovecot banip 203.0.113.7"
+                hint "  iptables -n -L DOCKER-USER | grep f2b-"
+                hint "  docker compose -f infra/docker-compose.yml exec fail2ban \\"
+                hint "    fail2ban-client unban 203.0.113.7"
+            fi
+            ;;
+        *)  fail "fail2ban — состояние «$F2B_STATE»: защита от подбора паролей не работает"
+            hint "смотреть журнал: docker compose -f infra/docker-compose.yml logs --tail=100 fail2ban" ;;
+    esac
+fi
+
 # ==================================================================
 step "Итог"
 # ==================================================================
