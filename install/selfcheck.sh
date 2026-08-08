@@ -233,22 +233,25 @@ if [ -z "$DNS_JSON" ]; then
     warn "сервис автонастройки не ответил — проверить DNS автоматически не вышло"
     hint "вручную: curl 'http://127.0.0.1:8025/api/dns-check?domain=$DOMAIN'"
 else
+    # На непубличном домене строки «не опубликована» и «ошибка резолва»
+    # пересказывают одно и то же, уже сказанное выше: зоны нет. Считаем их
+    # и печатаем одной строкой — иначе вывод шага состоит из десятка
+    # одинаковых замечаний, между которыми теряется всё остальное.
+    SKIPPED_DNS=0
     while IFS=$'\t' read -r status rtype rname expected found comment; do
         [ -n "${rtype:-}" ] || continue
         label="$rtype $rname"
+        if [ "$PUBLIC_ZONE" = "0" ] && [ "$status" != "ok" ]; then
+            SKIPPED_DNS=$((SKIPPED_DNS + 1))
+            continue
+        fi
         case "$status" in
             ok)       ok "$label — опубликована и совпадает" ;;
             mismatch) fail "$label — опубликована, но отличается от ожидаемой"
                       hint "ожидается: ${expected:-?}"
                       hint "в DNS:     ${found:-?}"
                       hint "${comment:-}" ;;
-            # На непубличном домене «не опубликована» — не диагноз, а
-            # пересказ того, что уже сказано выше одной строкой.
-            missing)  if [ "$PUBLIC_ZONE" = "0" ]; then
-                          info "$label — не проверяется: домен не публичный"
-                          continue
-                      fi
-                      fail "$label — не опубликована"
+            missing)  fail "$label — не опубликована"
                       if [ "${#expected}" -gt 100 ]; then
                           hint "готовую строку возьмите в $STATE_DIR/dns-records.txt"
                       else
@@ -259,6 +262,9 @@ else
             *)        warn "$label — состояние «$status»" ;;
         esac
     done <<< "$DNS_JSON"
+    if [ "$SKIPPED_DNS" -gt 0 ]; then
+        info "записей DNS пропущено: $SKIPPED_DNS — проверять их на непубличном домене нечем"
+    fi
 fi
 
 # --- PTR (обратная зона) -------------------------------------------
