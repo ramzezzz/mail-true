@@ -5,7 +5,7 @@
 
 ## Существующая схема базы
 
-Уже есть (`infra/postgres/migrations/0001_init.sql`), это контракт с Postfix
+Уже есть (`infra/postgres/migrations/0001_baseline.sql`), это контракт с Postfix
 и Dovecot — менять осторожно, они читают эти таблицы напрямую:
 
 - `virtual_domains` — id, name, created_at

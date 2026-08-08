@@ -388,7 +388,7 @@ export async function createTargetDomain(
  * Убирает заведённый домен, если человек передумал до точки невозврата.
  *
  * Только пустой: если в домене уже что-то появилось, удаление унесло бы
- * это каскадом (`ON DELETE CASCADE` в 0001_init.sql). Такого быть не
+ * это каскадом (`ON DELETE CASCADE` в 0001_baseline.sql). Такого быть не
  * должно — но «не должно» это не проверка.
  */
 export async function dropTargetDomain(db: AdminDb, newDomain: string): Promise<boolean> {

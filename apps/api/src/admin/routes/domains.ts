@@ -287,7 +287,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
 
       const aliasCount = Number(row.alias_count);
       if (aliasCount > 0 && !force) {
-        // Алиасы уносит каскад в схеме (0001_init.sql), поэтому здесь их
+        // Алиасы уносит каскад в схеме (0001_baseline.sql), поэтому здесь их
         // тоже показываем поимённо: «нельзя» без ответа на вопрос «что
         // именно мешает» стоит человеку похода в соседний раздел.
         const doomed = await ctx.db.listAliases({ domainId: id, limit: 20, offset: 0 });
