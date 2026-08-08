@@ -11,7 +11,7 @@
  * проверку связи, audit.read на журнал) — он ответит 403 независимо от
  * того, что нарисовано в интерфейсе.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
@@ -21,7 +21,9 @@ import { useSession } from '../app/session';
 import { Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import {
+  AI_PRESETS,
   canEnable,
+  isInsidePerimeter,
   endpointOf,
   errorLabel,
   formatCount,
@@ -35,6 +37,15 @@ import {
 import { formatDateTime } from '../lib/format';
 import { AiAuditPanel } from './AiAuditPanel';
 import styles from './AiPage.module.css';
+
+/** Имя узла из адреса — для подписи «уйдёт на …». */
+function hostOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl.trim()).host;
+  } catch {
+    return baseUrl.trim();
+  }
+}
 
 export function AiPage() {
   const { can } = useSession();
@@ -141,9 +152,9 @@ function OutboundWarning({ domain }: { domain: AiDomain }) {
   return (
     <Notice tone="success">
       Помощник включён. Тексты писем домена <b>{domain.domain}</b> отправляются на{' '}
-      <code className="mt-mono">{endpoint}</code> и, судя по настройке «модель внутри периметра»,
-      сервер не покидают. Проверьте, что этот адрес действительно ведёт внутрь вашей сети: признак
-      задаётся вручную, сам по себе он ничего не гарантирует.
+      <code className="mt-mono">{endpoint}</code> и сервер не покидают: этот адрес ведёт во
+      внутреннюю сеть. Признак больше не задаётся вручную — он следует из самого адреса, поэтому
+      «внутри периметра» здесь означает то, что написано, а не то, что кто-то отметил галочкой.
     </Notice>
   );
 }
@@ -218,6 +229,38 @@ function DomainSettings({
     setDraft((previous) => ({ ...previous, [key]: value }));
     setFlash(null);
   };
+
+  /* --- Что подключаем: готовый вариант, адрес и периметр -------------- */
+
+  const [presetId, setPresetId] = useState('');
+  const presetHint = AI_PRESETS.find((item) => item.id === presetId)?.hint ?? '';
+
+  /**
+   * Периметр — вывод из адреса, а не отдельная галочка. `local` в черновике
+   * остаётся (он уходит на сервер и виден пользователю почты), но теперь
+   * следует за адресом и руками не задаётся.
+   */
+  const inside = isInsidePerimeter(draft.baseUrl);
+
+  const applyPreset = (id: string): void => {
+    setPresetId(id);
+    const preset = AI_PRESETS.find((item) => item.id === id);
+    if (!preset || preset.baseUrl === '') return;
+    setDraft((previous) => ({
+      ...previous,
+      baseUrl: preset.baseUrl,
+      // Название модели — только если человек ещё не вписал своё:
+      // затирать набранное выбором из списка нельзя.
+      model: previous.model.trim() === '' ? preset.model : previous.model,
+      local: preset.local,
+    }));
+    setFlash(null);
+  };
+
+  // Признак периметра держим согласованным с адресом при любой правке.
+  useEffect(() => {
+    setDraft((previous) => (previous.local === inside ? previous : { ...previous, local: inside }));
+  }, [inside]);
 
   /* Разбор числовых полей: границы те же, что в схеме сервера. */
   const maxBodyChars = parseNumber(draft.maxBodyChars, 200, 200_000);
@@ -310,19 +353,69 @@ function DomainSettings({
               disabled={!canWrite}
               onChange={(event) => set('enabled', event.target.checked)}
             />
-            <Checkbox
-              label="Модель внутри периметра — письма не покидают сервер"
-              checked={draft.local}
-              disabled={!canWrite}
-              onChange={(event) => set('local', event.target.checked)}
-            />
+          </div>
+
+          {/*
+            ЧТО ПОДКЛЮЧАЕМ — выбором, а не догадкой.
+
+            Поле называлось «Адрес совместимого API», и это всё, что о нём
+            можно было узнать: совместимого с чем, что туда писать —
+            «claude», «chatgpt», «ollama»? Совместимость тут одна —
+            OpenAI Chat Completions, тот самый формат, ради которого рядом
+            стоит «Путь метода». Поэтому список того, что действительно
+            подходит, с готовыми адресами.
+          */}
+          {canWrite && (
+            <Field
+              label="Что подключаем"
+              hint="Выбор подставит адрес и пример модели. Дальше их можно поправить руками."
+            >
+              <select
+                className="mt-select"
+                value={presetId}
+                onChange={(event) => applyPreset(event.target.value)}
+              >
+                <option value="">— выбрать —</option>
+                {AI_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.title}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          )}
+          {presetHint !== '' && <p className={styles.presetHint}>{presetHint}</p>}
+
+          {/*
+            Периметр ВЫЧИСЛЯЕТСЯ из адреса, а не объявляется галочкой.
+            Галочка не проверяла ничего: меняла только текст, который
+            видит пользователь почты, — «письма не покидают периметр»
+            против «уйдёт наружу». То есть позволяла указать чужой сервис
+            и сказать людям неправду ровно там, где они решают, доверить
+            ли письмо.
+          */}
+          <div className={styles.perimeter}>
+            {draft.baseUrl.trim() === '' ? (
+              <Badge tone="muted">адрес не задан</Badge>
+            ) : inside ? (
+              <>
+                <Badge tone="ok">внутри периметра</Badge> Модель отвечает по адресу внутренней сети
+                — переписка не уходит за пределы сервера, и пользователю это видно.
+              </>
+            ) : (
+              <>
+                <Badge tone="warn">внешний сервис</Badge> Содержимое писем уйдёт на{' '}
+                <span className="mt-mono">{hostOf(draft.baseUrl)}</span>. Пользователь увидит это
+                перед тем, как согласиться.
+              </>
+            )}
           </div>
 
           <div className={styles.grid}>
             <div className={styles.wide}>
               <Field
                 label="Адрес совместимого API"
-                hint="Например, http://127.0.0.1:11434/v1 для модели, поднятой рядом с почтой."
+                hint="Формат OpenAI Chat Completions. Локальная модель — http://host.docker.internal:11434/v1 (Ollama), внешний сервис — https://api.openai.com/v1."
               >
                 <input
                   className="mt-input mt-mono"

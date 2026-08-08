@@ -165,3 +165,137 @@ export function rangeSince(range: AiAuditRange, now = Date.now()): string | unde
   if (!found || found.ms === null) return undefined;
   return new Date(now - found.ms).toISOString();
 }
+
+/* ------------------------------------------------------------------ */
+/* Куда вообще можно подключиться                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ГОТОВЫЕ ВАРИАНТЫ.
+ *
+ * Поле называлось «Адрес совместимого API», и это всё, что человек о нём
+ * узнавал. Совместимого с чем? Что туда писать — «claude», «chatgpt»,
+ * «ollama»? Ответ был только в документации, а до неё из этого экрана
+ * ничего не вело.
+ *
+ * Совместимость здесь одна: OpenAI Chat Completions — тот самый формат,
+ * ради которого рядом стоит поле «Путь метода» со значением
+ * /chat/completions. Поэтому вместо пустого поля — список того, что
+ * действительно подходит, с готовыми адресами и примерами моделей.
+ *
+ * Сервисы со СВОИМ форматом (GigaChat, YandexGPT) сюда не годятся, и
+ * честнее сказать это списком, чем оставить человека выяснять опытным
+ * путём.
+ */
+export interface AiPreset {
+  id: string;
+  title: string;
+  /** Адрес, который подставится в поле. */
+  baseUrl: string;
+  /** Пример названия модели — его человек всё равно уточняет у себя. */
+  model: string;
+  /** Нужен ли ключ доступа. */
+  needsKey: boolean;
+  /** Уходят ли письма за пределы сервера. */
+  local: boolean;
+  /** Что это и когда выбирать. */
+  hint: string;
+}
+
+export const AI_PRESETS: readonly AiPreset[] = [
+  {
+    id: 'ollama',
+    title: 'Ollama на этом же сервере',
+    baseUrl: 'http://host.docker.internal:11434/v1',
+    model: 'qwen2.5:7b',
+    needsKey: false,
+    local: true,
+    hint:
+      'Модель работает рядом с почтой, переписка не покидает сервер. Нужны свободная память ' +
+      'и место под модель: 7B в четырёхбитном сжатии — около 5 ГБ.',
+  },
+  {
+    id: 'lmstudio',
+    title: 'LM Studio на этом же сервере',
+    baseUrl: 'http://host.docker.internal:1234/v1',
+    model: 'qwen2.5-7b-instruct',
+    needsKey: false,
+    local: true,
+    hint: 'То же самое, если модель поднята через LM Studio.',
+  },
+  {
+    id: 'openai',
+    title: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    needsKey: true,
+    local: false,
+    hint: 'Внешний сервис: содержимое писем уходит за пределы вашего сервера. Нужен ключ доступа.',
+  },
+  {
+    id: 'anthropic',
+    title: 'Anthropic (Claude)',
+    baseUrl: 'https://api.anthropic.com/v1',
+    model: 'claude-sonnet-4-5',
+    needsKey: true,
+    local: false,
+    hint:
+      'Внешний сервис. Работает через совместимый с OpenAI слой Anthropic — отдельной настройки ' +
+      'это не требует, но ключ нужен.',
+  },
+  {
+    id: 'custom',
+    title: 'Другой совместимый сервис',
+    baseUrl: '',
+    model: '',
+    needsKey: false,
+    local: false,
+    hint:
+      'Любой сервис, отвечающий в формате OpenAI Chat Completions: vLLM, llama.cpp server, ' +
+      'локальный шлюз организации. GigaChat и YandexGPT напрямую НЕ подходят — у них свой формат.',
+  },
+];
+
+/**
+ * ПОКИДАЮТ ЛИ ПИСЬМА ПЕРИМЕТР — вычисляется, а не объявляется.
+ *
+ * Раньше это была галочка, которую администратор ставил сам, и она не
+ * проверяла ничего: меняла только текст, который видит пользователь
+ * почты — «письма не покидают периметр» против «уйдёт наружу». То есть
+ * можно было указать api.openai.com, поставить галочку и сказать людям
+ * неправду ровно там, где они решают, доверить письмо или нет.
+ *
+ * Теперь ответ следует из адреса: петля и частные сети — внутри
+ * периметра, всё остальное — снаружи. Обмануть это можно только уведя
+ * трафик через свой прокси в частной сети, но тогда за периметр отвечает
+ * тот, кто этот прокси поставил, — и он знает, что делает.
+ */
+export function isInsidePerimeter(baseUrl: string): boolean {
+  const text = baseUrl.trim();
+  if (text === '') return false;
+  let host = '';
+  try {
+    host = new URL(text).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+
+  // Имена, которыми контейнер зовёт соседей и саму машину.
+  if (host === 'localhost' || host === 'host.docker.internal') return true;
+  if (host.endsWith('.local') || host.endsWith('.internal')) return true;
+  // Имя без точек — это сосед по сети контейнеров (ollama, llm, gateway).
+  if (!host.includes('.') && !host.includes(':')) return true;
+
+  if (host === '::1' || host === '[::1]') return true;
+
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 10) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    return false;
+  }
+
+  return false;
+}

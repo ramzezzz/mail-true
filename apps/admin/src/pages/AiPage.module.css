@@ -77,3 +77,24 @@
 .muted {
   color: var(--mt-color-text-secondary);
 }
+
+/* Подсказка к выбранному варианту подключения. */
+.presetHint {
+  margin: -2px 0 10px;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
+
+/*
+ * Строка «внутри периметра / внешний сервис». Стоит прямо под выбором
+ * сервиса: это главный ответ раздела, и он должен читаться раньше полей.
+ */
+.perimeter {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--mt-color-text-secondary);
+}
