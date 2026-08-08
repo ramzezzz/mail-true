@@ -511,6 +511,9 @@ sub handle {
     if ($method eq 'GET' && $path eq '/dkim') {
         return do_dkim($client, $params{domain}, $params{selector});
     }
+    if ($method eq 'GET' && $path eq '/audit') {
+        return do_audit($client);
+    }
     return reply($client, 404, { error => 'неизвестный запрос' });
 }
 
@@ -799,6 +802,105 @@ sub do_stack {
     }
 
     return reply($client, 200, { ok => \1, services => \@items });
+}
+
+# ------------------------------------------------------------------
+# /audit — то, чего сервер приложения о себе узнать не может
+# ------------------------------------------------------------------
+# Два вопроса, за которыми до сих пор ходили в консоль по ssh, и оба
+# из тех, где ошибка обнаруживается поздно и дорого:
+#
+#   1. НА КАКОМ АДРЕСЕ слушают порты. Изнутри контейнера видно только
+#      внутреннюю сеть Docker: порт, привязанный к 127.0.0.1, оттуда
+#      неотличим от открытого наружу. А разница — вся: 25-й порт на
+#      localhost означает, что чужие серверы не доставят ни одного
+#      письма, и узнают об этом по молчанию, а не по отказу.
+#   2. КТО МОЖЕТ ПРОЧИТАТЬ infra/.env. В нём пароль базы, ключи
+#      шифрования и секрет сессий. Файл с правами 0644 на машине, где
+#      есть ещё чей-то доступ, — это выданные наружу ключи от всего.
+#
+# ЧТО ОТДАЁТСЯ И ЧЕГО ЗДЕСЬ НЕТ. Только вердикты и числа: режим доступа,
+# владелец, есть ли возвраты каретки, СКОЛЬКО ключей совпадает с
+# примером. Ни одного значения, ни одного имени ключа-заглушки — иначе
+# ответ посредника сам стал бы подсказкой «какой пароль подбирать
+# первым». Тот же принцип, что и во всех остальных операциях: наружу
+# уходит суждение, а не содержимое.
+sub do_audit {
+    my ($client) = @_;
+
+    my @ports;
+    for my $service (sort keys %SERVICES) {
+        my $id = container_of($service);
+        next if $id eq '';
+        # docker port печатает строки вида «25/tcp -> 0.0.0.0:25».
+        my ($rc, $out) = run('docker', 'port', $id);
+        next unless $rc == 0;
+        for my $line (split /\n/, $out) {
+            $line = trim($line);
+            next unless $line =~ m{^(\d+)/(tcp|udp)\s*->\s*(.+):(\d+)$};
+            my ($inner, $proto, $bind, $outer) = ($1, $2, $3, $4);
+            # ::  и 0.0.0.0 — «слушаем на всех адресах машины».
+            my $public = ($bind eq '0.0.0.0' || $bind eq '::') ? \1 : \0;
+            push @ports, {
+                service   => $service,
+                container => $inner + 0,
+                host      => $outer + 0,
+                proto     => $proto,
+                bind      => $bind,
+                public    => $public,
+            };
+        }
+    }
+
+    my %env = (readable => \0);
+    if (-f $ENV_FILE) {
+        my @st = stat($ENV_FILE);
+        if (@st) {
+            $env{readable} = \1;
+            # Восьмеричные права без типа файла: 0600, 0644 и так далее.
+            $env{mode}     = sprintf('%04o', $st[2] & 07777);
+            $env{uid}      = $st[4] + 0;
+            $env{gid}      = $st[5] + 0;
+            # Доступен ли файл кому-то, кроме владельца.
+            $env{groupReadable} = ($st[2] & 0040) ? \1 : \0;
+            $env{worldReadable} = ($st[2] & 0004) ? \1 : \0;
+        }
+        if (open(my $fh, '<', $ENV_FILE)) {
+            my ($crlf, $keys) = (0, 0);
+            my %values;
+            while (my $line = <$fh>) {
+                $crlf++ if $line =~ /\r\n$/;
+                $line =~ s/\r?\n$//;
+                next if $line =~ /^\s*(#|$)/;
+                next unless $line =~ /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
+                $keys++;
+                $values{$1} = $2;
+            }
+            close($fh);
+            $env{crlfLines} = $crlf;
+            $env{keys}      = $keys;
+
+            # Сколько значений так и остались из примера. Сам пример
+            # лежит рядом с compose и посреднику виден на чтение.
+            my $example = '/repo/infra/.env.example';
+            if (open(my $eh, '<', $example)) {
+                my $same = 0;
+                while (my $line = <$eh>) {
+                    $line =~ s/\r?\n$//;
+                    next unless $line =~ /^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/;
+                    my ($key, $val) = ($1, $2);
+                    # Пустое значение в примере — это «заполните сами», а
+                    # не заглушка: совпадение по нему ничего не значит.
+                    next if $val =~ /^\s*$/;
+                    $same++ if exists $values{$key} && $values{$key} eq $val;
+                }
+                close($eh);
+                $env{sameAsExample} = $same;
+            }
+        }
+    }
+
+    return reply($client, 200, { ok => \1, ports => \@ports, env => \%env });
 }
 
 sub do_certbot {

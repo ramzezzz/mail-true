@@ -180,6 +180,75 @@ export class ServiceAgent {
   }
 
   /**
+   * То, чего сервер приложения о себе узнать не может: на каких адресах
+   * слушают порты и кто может прочитать infra/.env.
+   *
+   * Оба вопроса упираются в одно и то же: изнутри контейнера видно только
+   * внутреннюю сеть Docker, а файл настроек сюда не примонтирован и
+   * монтироваться не должен. Посредник отдаёт вердикты и числа, но не
+   * значения — ответ не должен превращаться в подсказку, какой пароль
+   * подбирать первым.
+   */
+  async audit(): Promise<{
+    ports: Array<{
+      service: string;
+      container: number;
+      host: number;
+      proto: string;
+      bind: string;
+      public: boolean;
+    }>;
+    env: {
+      readable: boolean;
+      mode?: string;
+      groupReadable?: boolean;
+      worldReadable?: boolean;
+      crlfLines?: number;
+      keys?: number;
+      sameAsExample?: number;
+    };
+  }> {
+    const body = await this.call('/audit', 'GET');
+    const rawPorts = Array.isArray(body.ports) ? body.ports : [];
+    const ports = rawPorts.flatMap((item) => {
+      const row = item as Record<string, unknown>;
+      if (typeof row.service !== 'string' || typeof row.host !== 'number') return [];
+      return [
+        {
+          service: row.service,
+          container: typeof row.container === 'number' ? row.container : 0,
+          host: row.host,
+          proto: typeof row.proto === 'string' ? row.proto : 'tcp',
+          bind: typeof row.bind === 'string' ? row.bind : '',
+          public: row.public === true,
+        },
+      ];
+    });
+
+    const rawEnv = (body.env ?? {}) as Record<string, unknown>;
+    // Поле, которого посредник не прислал, не подставляется нулём или
+    // ложью: «не ответил» и «ноль» — разные ответы, и раздел показывает
+    // их по-разному.
+    const num = (key: string): { [k: string]: number } =>
+      typeof rawEnv[key] === 'number' ? { [key]: rawEnv[key] } : {};
+    const flag = (key: string): { [k: string]: boolean } =>
+      typeof rawEnv[key] === 'boolean' ? { [key]: rawEnv[key] } : {};
+
+    return {
+      ports,
+      env: {
+        readable: rawEnv.readable === true,
+        ...(typeof rawEnv.mode === 'string' ? { mode: rawEnv.mode } : {}),
+        ...flag('groupReadable'),
+        ...flag('worldReadable'),
+        ...num('crlfLines'),
+        ...num('keys'),
+        ...num('sameAsExample'),
+      },
+    };
+  }
+
+  /**
    * Убрать ключи из infra/.env, ничего не пересоздавая.
    *
    * Зовётся при возврате настройки к умолчанию: строка в файле осталась
