@@ -20,6 +20,7 @@ import { LogBuffer } from './logbuf.js';
 import { createRunner, readSummary, type Runner } from './install.js';
 import type { RepoLocation } from './repo.js';
 import {
+  answersFromEnv,
   readEnvFile,
   readInstallMark,
   readServerTraces,
@@ -226,10 +227,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   app.get('/api/context', async (req, reply) => {
     if (!authorize(req, reply)) return;
     const state = await currentState();
+    // Ответы, которые человек уже дал: домен и имя сервера могли спросить
+    // до мастера — `install.sh --prepare-only` пишет их в infra/.env.
+    // Спрашивать то же самое второй раз незачем: подставляем в форму.
+    const env = await readEnvFile(envPath);
+    const example = await readEnvFile(repoDir === '' ? '' : `${repoDir}/infra/.env.example`);
     return {
       mode: state.mode,
       steps: WIZARD_STEPS,
-      defaults: defaultAnswers(),
+      defaults: { ...defaultAnswers(), ...answersFromEnv(env, example) },
       traces: state.traces?.traces ?? [],
       looksConfigured: state.traces?.looksConfigured ?? false,
       repoDir,

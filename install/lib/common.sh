@@ -31,6 +31,13 @@ CERT_DIR="$INFRA_DIR/data/certs"
 # «port is already allocated» при подъёме стека.
 MT_REQUIRED_PORTS=(25 80 443 143 993 110 995 587 465)
 
+# Нижние границы, при которых установка имеет смысл. Живут здесь, а не в
+# install.sh: те же проверки делает мастер первого запуска в браузере.
+MT_MIN_RAM_MB=1800
+MT_MIN_RAM_CLAMAV_MB=3000
+MT_MIN_DISK_GB=10
+MT_MIN_COMPOSE=2.24
+
 # ------------------------------------------------------------------
 # Тома с данными, которые ОБЯЗАНЫ попадать в резервную копию.
 # Один список на backup.sh и restore.sh: раздельные перечни уже привели
@@ -1144,6 +1151,216 @@ handle_foreign_mta() {
     fi
 }
 
+# ------------------------------------------------------------------
+# ensure_prereqs — инструменты, без которых нечем проверять.
+# На голой Ubuntu Server нет ни curl, ни dig, а без ss не видно,
+# кто занял порты.
+# ------------------------------------------------------------------
+ensure_prereqs() {
+    local missing=()
+    have curl    || missing+=(curl)
+    have openssl || missing+=(openssl)
+    have dig     || missing+=(dnsutils)
+    have ss      || missing+=(iproute2)
+    if [ "${#missing[@]}" -eq 0 ]; then
+        return 0
+    fi
+    if ! have apt-get; then
+        warn "не хватает: ${missing[*]}, а apt-get нет — поставьте вручную"
+        return 0
+    fi
+    info "доустанавливаем: ${missing[*]}"
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null 2>&1 || true
+}
+
+# ------------------------------------------------------------------
+# PREFLIGHT — всё, что нужно узнать о машине ДО установки.
+#
+# Один набор проверок на обе точки входа. Раньше он жил только в
+# install.sh, и мастер первого запуска (web-install.sh) начинал сразу с
+# Docker: человек, поднимающий сервер через браузер, узнавал про чужой
+# Postfix, нехватку памяти и закрытый исходящий 25-й порт в лучшем
+# случае потом, в худшем — не узнавал вовсе. Плюс мастер отправлял за
+# установкой Docker в консольный установщик, то есть «установка одной
+# командой» превращалась в две разные команды.
+#
+# OS_ID и VERSION_CODENAME остаются глобальными намеренно: их читает
+# install_docker, когда подключает репозиторий Docker.
+# ------------------------------------------------------------------
+preflight_system() {
+    [ "$(id -u)" -eq 0 ] && ensure_prereqs
+
+    # --- Операционная система --------------------------------------
+    OS_NAME='неизвестна'; OS_ID=''; OS_VER=''
+    if [ -r /etc/os-release ]; then
+        # shellcheck disable=SC1091
+        . /etc/os-release
+        OS_NAME="${PRETTY_NAME:-$NAME}"; OS_ID="${ID:-}"; OS_VER="${VERSION_ID:-}"
+    fi
+    case "$OS_ID:$OS_VER" in
+        ubuntu:22.04) ok "ОС: $OS_NAME (целевая система)" ;;
+        ubuntu:24.04|ubuntu:20.04|debian:12|debian:11)
+            ok "ОС: $OS_NAME"
+            info "проект рассчитан на Ubuntu Server 22.04, но эта система тоже подойдёт" ;;
+        *)
+            warn "ОС: $OS_NAME — не Ubuntu 22.04"
+            hint "проверялось на Ubuntu Server 22.04; на других системах возможны сюрпризы" ;;
+    esac
+
+    # --- Архитектура -----------------------------------------------
+    local arch; arch="$(uname -m)"
+    case "$arch" in
+        x86_64|aarch64) ok "архитектура: $arch" ;;
+        *) warn "архитектура $arch — образы стека собраны под x86_64 и aarch64" ;;
+    esac
+
+    # --- Память ----------------------------------------------------
+    local ram_mb=0
+    if [ -r /proc/meminfo ]; then
+        ram_mb=$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)
+    fi
+    if [ "$ram_mb" -ge "$MT_MIN_RAM_MB" ]; then
+        ok "память: ${ram_mb} МБ (стек в простое занимает около 310 МБ)"
+    else
+        warn "память: ${ram_mb} МБ — рекомендуется от ${MT_MIN_RAM_MB} МБ"
+        hint "стек поднимется и на меньшем объёме, но запаса на письма и поиск не останется"
+    fi
+
+    # --- Место на диске --------------------------------------------
+    local disk_gb
+    disk_gb=$(df -BG --output=avail "$REPO_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
+    disk_gb="${disk_gb:-0}"
+    if [ "$disk_gb" -ge "$MT_MIN_DISK_GB" ]; then
+        ok "свободно на диске: ${disk_gb} ГБ"
+    else
+        warn "свободно на диске: ${disk_gb} ГБ — рекомендуется от ${MT_MIN_DISK_GB} ГБ"
+        hint "образы стека занимают около 1.5 ГБ, остальное — письма и индексы поиска"
+    fi
+
+    # --- Чужой MTA --------------------------------------------------
+    # ДО проверки портов, а не после неё. Раньше было наоборот, и на
+    # машине с системным Postfix человек сначала получал вопрос «порт 25
+    # занят процессом master, всё равно продолжать?», отвечал «нет» — и
+    # установка обрывалась, так и не показав, что это за «master» и что
+    # с ним делать: совет печатался следующим шагом.
+    handle_foreign_mta
+
+    preflight_ports
+    preflight_outbound_25
+}
+
+# preflight_ports — свободны ли порты, которые займёт стек.
+preflight_ports() {
+    local stack_running=0 busy=0 port listener proc ports_re
+    if have docker && docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
+        stack_running=1
+    fi
+
+    if [ "${SKIP_PORT_CHECK:-0}" = "1" ]; then
+        info "проверка портов пропущена (--skip-port-check)"
+        return 0
+    fi
+    if ! have ss && ! have netstat; then
+        warn "нет ни ss, ни netstat — занятость портов проверить нечем"
+        return 0
+    fi
+
+    for port in "${MT_REQUIRED_PORTS[@]}"; do
+        listener="$(port_listener "$port")"
+        if [ -z "$listener" ]; then
+            ok "порт $port свободен"
+        elif [ "$stack_running" = "1" ] && printf '%s' "$listener" | grep -qi 'docker'; then
+            ok "порт $port занят нашим же стеком (повторная установка)"
+        else
+            proc=$(printf '%s' "$listener" | sed -n 's/.*users:((\("[^"]*"\).*/\1/p' | tr -d '"')
+            if [ -n "$proc" ]; then
+                fail "порт $port занят процессом «$proc»"
+            else
+                fail "порт $port занят (имя процесса определить не удалось)"
+                hint "кто именно: fuser -v $port/tcp  или  lsof -i :$port"
+            fi
+            busy=1
+        fi
+    done
+
+    if [ "$busy" = "1" ]; then
+        # Раньше здесь было только предупреждение, и установка шла дальше
+        # до падения `docker compose up` с сырой ошибкой про занятый порт.
+        # Спрашиваем: продолжать почти всегда бессмысленно.
+        fail "часть портов занята чужими процессами — стек не сможет их открыть"
+        # Список для подсказки строится из MT_REQUIRED_PORTS, а не пишется
+        # руками: переписанный отдельно, он уже разошёлся с проверкой —
+        # 465-й проверяли, а в подсказке его не было.
+        ports_re="$(printf '%s|' "${MT_REQUIRED_PORTS[@]}")"
+        hint "посмотреть кто: ss -ltnp | grep -E ':(${ports_re%|})\\b'"
+        hint "освободите порты или запустите с --skip-port-check, если знаете, что делаете"
+        if ! confirm "Всё равно продолжить установку (стек, скорее всего, не поднимется)?"; then
+            die "установка прервана: сначала освободите занятые порты"
+        fi
+    fi
+}
+
+# preflight_outbound_25 — уходит ли почта наружу.
+# Самая частая причина «письма не уходят»: хостер закрывает исходящий
+# 25-й. Проверяем заранее, чтобы это не выяснилось через неделю.
+preflight_outbound_25() {
+    if [ "${SKIP_PORT_CHECK:-0}" = "1" ]; then
+        info "проверка исходящего 25-го порта пропущена"
+        return 0
+    fi
+    local mx
+    for mx in gmail-smtp-in.l.google.com alt1.aspmx.l.google.com mx.yandex.ru; do
+        if tcp_probe "$mx" 25 6; then
+            ok "исходящий порт 25 открыт — письма смогут уходить наружу"
+            return 0
+        fi
+    done
+    if tcp_probe 1.1.1.1 443 5; then
+        fail "исходящий порт 25 закрыт: соединение с чужими MX не устанавливается"
+        hint "Интернет при этом работает — значит порт режет провайдер или хостер."
+        hint "Это самая частая причина «почта приходит, но не уходит»."
+        hint "Что делать: написать в поддержку хостинга и попросить открыть"
+        hint "исходящий TCP/25 (обычно открывают после короткой переписки),"
+        hint "либо настроить отправку через внешний релей (docs/install.md)."
+        if ! confirm "Продолжить установку?"; then
+            die "установка прервана"
+        fi
+    else
+        warn "не удалось проверить исходящий 25-й порт: сеть недоступна вообще"
+    fi
+}
+
+# ------------------------------------------------------------------
+# ensure_docker — довести Docker до пригодного состояния.
+# Ставит, если нет; запускает, если стоит и молчит; меняет snap-версию
+# на официальную; проверяет compose и видимость каталога проекта.
+# ------------------------------------------------------------------
+ensure_docker() {
+    ensure_docker_native
+
+    if ! have docker; then
+        info "Docker не установлен — ставим официальный"
+        install_docker
+    elif ! docker info >/dev/null 2>&1; then
+        warn "Docker установлен, но демон не отвечает — пробуем запустить"
+        have systemctl && systemctl start docker >/dev/null 2>&1 || true
+    fi
+
+    docker info >/dev/null 2>&1 ||
+        die "демон Docker не отвечает — проверьте: systemctl status docker"
+    ok "Docker работает ($(docker version --format '{{.Server.Version}}' 2>/dev/null))"
+
+    local compose_ver
+    compose_ver="$(docker compose version --short 2>/dev/null | tr -d 'v' || true)"
+    [ -n "$compose_ver" ] || die "нет плагина docker compose (пакет docker-compose-plugin)"
+    version_ge "$compose_ver" "$MT_MIN_COMPOSE" ||
+        die "docker compose $compose_ver слишком старый, нужен от $MT_MIN_COMPOSE"
+    ok "docker compose $compose_ver"
+
+    require_docker_sees_repo
+}
+
 # require_root — установщику нужен root (docker, apt, порты <1024, certbot).
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
@@ -1155,7 +1372,11 @@ require_root() {
 public_ip() {
     local ip=''
     if have ip; then
-        ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+        # «|| true» обязателен: без маршрута наружу `ip route get` вернёт
+        # единицу, pipefail протащит её в подстановку, и set -e оборвёт
+        # установку молча. Пустой адрес здесь — штатный случай, ниже его
+        # спрашивают у внешнего сервиса.
+        ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1 || true)
     fi
     case "$ip" in
         10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|127.*|'')

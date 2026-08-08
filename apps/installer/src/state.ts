@@ -21,6 +21,7 @@
  */
 import { readFile, access } from 'node:fs/promises';
 import { run } from './shell.js';
+import { PORT_FIELDS } from './validate.js';
 
 export interface EnvMap {
   readonly values: ReadonlyMap<string, string>;
@@ -212,4 +213,75 @@ export async function readServerTraces(ctx: StateContext, env: EnvMap): Promise<
   }
 
   return { traces, looksConfigured: traces.length > 0 };
+}
+
+/**
+ * ОТВЕТЫ, КОТОРЫЕ УЖЕ ДАНЫ.
+ *
+ * Домен и имя сервера могли спросить до мастера: `install.sh --prepare-only`
+ * задаёт те же вопросы и пишет ответы в infra/.env. Мастер об этом не знал и
+ * спрашивал всё заново — человек вводил домен, хост и адрес администратора
+ * по второму разу, гадая, какой из двух ответов победит.
+ *
+ * Что реально задано, а что осталось заглушкой из образца, различаем
+ * сравнением с самим образцом: совпало — значит никто этого не менял.
+ * Так не нужен список «настоящих» значений, который всё равно устарел бы.
+ *
+ * Секреты сюда не попадают: пароли, ключи и токены в форму не
+ * возвращаются никогда.
+ */
+export function answersFromEnv(
+  env: EnvMap,
+  example: EnvMap,
+): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  if (!env.exists) return out;
+
+  const changed = (key: string): string | null => {
+    const value = env.values.get(key);
+    if (value === undefined || value === '') return null;
+    if (value === example.values.get(key)) return null;
+    if (/^change-me/i.test(value)) return null;
+    return value;
+  };
+
+  const text: ReadonlyArray<readonly [string, string]> = [
+    ['MAIL_DOMAIN', 'domain'],
+    ['MAIL_HOSTNAME', 'hostname'],
+    ['BIND_ADDRESS', 'bindAddress'],
+    ['DOCKER_SUBNET', 'subnet'],
+    ['RESOLVER_IP', 'resolverIp'],
+    ['DOVECOT_IP', 'dovecotIp'],
+  ];
+  for (const [key, field] of text) {
+    const value = changed(key);
+    if (value !== null) out[field] = value;
+  }
+
+  const numbers: ReadonlyArray<readonly [string, string]> = [
+    ['MESSAGE_MAX_BYTES', 'messageMaxBytes'],
+    ['UPLOAD_MAX_BYTES', 'uploadMaxBytes'],
+    ['COMPOSE_BODY_MAX_BYTES', 'composeBodyMaxBytes'],
+  ];
+  for (const [key, field] of numbers) {
+    const value = changed(key);
+    if (value !== null && /^\d+$/.test(value)) out[field] = Number(value);
+  }
+
+  const flags: ReadonlyArray<readonly [string, string]> = [
+    ['CLAMAV_ENABLED', 'clamav'],
+    ['AI_ENABLED', 'aiEnabled'],
+  ];
+  for (const [key, field] of flags) {
+    const value = changed(key);
+    if (value !== null) out[field] = /^(true|yes|1|on)$/i.test(value);
+  }
+
+  // Порты: ключи в .env те же, что мастер отдаёт установщику.
+  for (const field of PORT_FIELDS) {
+    const value = changed(field.envKey);
+    if (value !== null && /^\d+$/.test(value)) out[field.key] = Number(value);
+  }
+
+  return out;
 }

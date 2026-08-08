@@ -24,10 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 . "$SCRIPT_DIR/lib/common.sh"
 
-MT_MIN_RAM_MB=1800
-MT_MIN_RAM_CLAMAV_MB=3000
-MT_MIN_DISK_GB=10
-MT_MIN_COMPOSE=2.24
+# Пороги памяти, диска и версии compose живут в install/lib/common.sh:
+# ими пользуется и мастер первого запуска в браузере.
 
 PREPARE_ONLY=0
 SKIP_DOCKER_INSTALL=0
@@ -113,156 +111,8 @@ if [ "$(id -u)" -ne 0 ]; then
     fi
 fi
 
-# --- Инструменты, без которых нечем проверять ----------------------
-# Ставим до проверок: на голой Ubuntu Server нет ни curl, ни dig,
-# а без ss нечем посмотреть, кто занял порты.
-ensure_prereqs() {
-    local missing=()
-    have curl    || missing+=(curl)
-    have openssl || missing+=(openssl)
-    have dig     || missing+=(dnsutils)
-    have ss      || missing+=(iproute2)
-    if [ "${#missing[@]}" -eq 0 ]; then
-        return 0
-    fi
-    if ! have apt-get; then
-        warn "не хватает: ${missing[*]}, а apt-get нет — поставьте вручную"
-        return 0
-    fi
-    info "доустанавливаем: ${missing[*]}"
-    DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}" >/dev/null 2>&1 || true
-}
-if [ "$(id -u)" -eq 0 ]; then
-    ensure_prereqs
-fi
+preflight_system
 
-# --- Операционная система -----------------------------------------
-OS_NAME='неизвестна'; OS_ID=''; OS_VER=''
-if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    OS_NAME="${PRETTY_NAME:-$NAME}"; OS_ID="${ID:-}"; OS_VER="${VERSION_ID:-}"
-fi
-case "$OS_ID:$OS_VER" in
-    ubuntu:22.04) ok "ОС: $OS_NAME (целевая система)" ;;
-    ubuntu:24.04|ubuntu:20.04|debian:12|debian:11)
-        ok "ОС: $OS_NAME"
-        info "проект рассчитан на Ubuntu Server 22.04, но эта система тоже подойдёт" ;;
-    *)
-        warn "ОС: $OS_NAME — не Ubuntu 22.04"
-        hint "проверялось на Ubuntu Server 22.04; на других системах возможны сюрпризы" ;;
-esac
-
-# --- Архитектура ---------------------------------------------------
-ARCH="$(uname -m)"
-case "$ARCH" in
-    x86_64|aarch64) ok "архитектура: $ARCH" ;;
-    *) warn "архитектура $ARCH — образы стека собраны под x86_64 и aarch64" ;;
-esac
-
-# --- Память --------------------------------------------------------
-RAM_MB=0
-if [ -r /proc/meminfo ]; then
-    RAM_MB=$(awk '/^MemTotal:/ {printf "%d", $2/1024}' /proc/meminfo)
-fi
-if [ "$RAM_MB" -ge "$MT_MIN_RAM_MB" ]; then
-    ok "память: ${RAM_MB} МБ (стек в простое занимает около 310 МБ)"
-else
-    warn "память: ${RAM_MB} МБ — рекомендуется от ${MT_MIN_RAM_MB} МБ"
-    hint "стек поднимется и на меньшем объёме, но запаса на письма и поиск не останется"
-fi
-
-# --- Место на диске ------------------------------------------------
-DISK_GB=$(df -BG --output=avail "$REPO_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || echo 0)
-DISK_GB="${DISK_GB:-0}"
-if [ "$DISK_GB" -ge "$MT_MIN_DISK_GB" ]; then
-    ok "свободно на диске: ${DISK_GB} ГБ"
-else
-    warn "свободно на диске: ${DISK_GB} ГБ — рекомендуется от ${MT_MIN_DISK_GB} ГБ"
-    hint "образы стека занимают около 1.5 ГБ, остальное — письма и индексы поиска"
-fi
-
-# --- Чужой MTA -----------------------------------------------------
-# Идёт ДО проверки портов, а не после неё. Раньше было наоборот, и на
-# машине с системным Postfix человек сначала получал вопрос «порт 25
-# занят процессом master, всё равно продолжать?», отвечал «нет» — и
-# установка обрывалась, так и не показав, что это за «master» и что с
-# ним делать. Совет печатался следующим шагом, до которого не доходило.
-handle_foreign_mta
-
-# --- Порты ---------------------------------------------------------
-STACK_RUNNING=0
-if have docker && docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
-    STACK_RUNNING=1
-fi
-
-if [ "$SKIP_PORT_CHECK" = "1" ]; then
-    info "проверка портов пропущена (--skip-port-check)"
-elif ! have ss && ! have netstat; then
-    warn "нет ни ss, ни netstat — занятость портов проверить нечем"
-else
-    BUSY_FOREIGN=0
-    for port in "${MT_REQUIRED_PORTS[@]}"; do
-        listener="$(port_listener "$port")"
-        if [ -z "$listener" ]; then
-            ok "порт $port свободен"
-        elif [ "$STACK_RUNNING" = "1" ] && printf '%s' "$listener" | grep -qi 'docker'; then
-            ok "порт $port занят нашим же стеком (повторная установка)"
-        else
-            proc=$(printf '%s' "$listener" | sed -n 's/.*users:((\("[^"]*"\).*/\1/p' | tr -d '"')
-            if [ -n "$proc" ]; then
-                fail "порт $port занят процессом «$proc»"
-            else
-                fail "порт $port занят (имя процесса определить не удалось)"
-                hint "кто именно: fuser -v $port/tcp  или  lsof -i :$port"
-            fi
-            BUSY_FOREIGN=1
-        fi
-    done
-    if [ "$BUSY_FOREIGN" = "1" ]; then
-        # Раньше здесь было только предупреждение, и установка шла дальше
-        # до падения `docker compose up` с сырой ошибкой про занятый порт.
-        # Спрашиваем: продолжать почти всегда бессмысленно.
-        fail "часть портов занята чужими процессами — стек не сможет их открыть"
-        # Список для подсказки строится из MT_REQUIRED_PORTS, а не пишется
-        # руками: переписанный отдельно, он уже разошёлся с проверкой —
-        # 465-й проверяли, а в подсказке его не было.
-        PORTS_RE="$(printf '%s|' "${MT_REQUIRED_PORTS[@]}")"
-        hint "посмотреть кто: ss -ltnp | grep -E ':(${PORTS_RE%|})\\b'"
-        hint "освободите порты или запустите с --skip-port-check, если знаете, что делаете"
-        if ! confirm "Всё равно продолжить установку (стек, скорее всего, не поднимется)?"; then
-            die "установка прервана: сначала освободите занятые порты"
-        fi
-    fi
-fi
-
-# --- Исходящий 25-й порт -------------------------------------------
-# Самая частая причина «письма не уходят»: хостер закрывает исходящий 25-й.
-# Проверяем заранее, чтобы это не выяснилось через неделю после установки.
-if [ "$SKIP_PORT_CHECK" = "1" ]; then
-    info "проверка исходящего 25-го порта пропущена"
-else
-    OUT_OK=0
-    for mx in gmail-smtp-in.l.google.com alt1.aspmx.l.google.com mx.yandex.ru; do
-        if tcp_probe "$mx" 25 6; then OUT_OK=1; break; fi
-    done
-    if [ "$OUT_OK" = "1" ]; then
-        ok "исходящий порт 25 открыт — письма смогут уходить наружу"
-    elif tcp_probe 1.1.1.1 443 5; then
-        fail "исходящий порт 25 закрыт: соединение с чужими MX не устанавливается"
-        hint "Интернет при этом работает — значит порт режет провайдер или хостер."
-        hint "Это самая частая причина «почта приходит, но не уходит»."
-        hint "Что делать: написать в поддержку хостинга и попросить открыть"
-        hint "исходящий TCP/25 (обычно открывают после короткой переписки),"
-        hint "либо настроить отправку через внешний релей (docs/install.md)."
-        if ! confirm "Продолжить установку?"; then
-            die "установка прервана"
-        fi
-    else
-        warn "не удалось проверить исходящий 25-й порт: сеть недоступна вообще"
-    fi
-fi
 
 # ==================================================================
 step "2. Docker"
@@ -682,7 +532,18 @@ fi
 # писать сюда должен и сервер приложения (у него нет доступа к .env), а
 # читать — и install/renew-certs.sh на хосте, и мастер первого запуска.
 CERT_SOURCE_FILE="$CERT_DIR/source"
-CERT_SOURCE="$(cat "$CERT_SOURCE_FILE" 2>/dev/null | tr -d '[:space:]')"
+# Читаем ТОЛЬКО существующий файл, и без конвейера.
+#
+# Было: CERT_SOURCE="$(cat "$CERT_SOURCE_FILE" 2>/dev/null | tr -d ...)".
+# На чистом сервере файла ещё нет, `cat` возвращает единицу, `pipefail`
+# тянет её в подстановку, и `set -e` обрывает установку — молча, без
+# единого слова об ошибке: последнее, что видел человек, была строка про
+# каталог сертификатов, а дальше «прервалось, код 1». У нас это не
+# всплывало годами, потому что на стенде файл source давно существовал.
+CERT_SOURCE=''
+if [ -f "$CERT_SOURCE_FILE" ]; then
+    CERT_SOURCE="$(tr -d '[:space:]' < "$CERT_SOURCE_FILE" 2>/dev/null || true)"
+fi
 
 if [ -f "$CERT_DIR/mail.crt" ] && [ -f "$CERT_DIR/mail.key" ]; then
     CERT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')"

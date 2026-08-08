@@ -150,12 +150,31 @@ printf '%s' "$OUT" | grep -q 'apt-get purge'
 check "сказано про оставшийся пакет" 0 $?
 
 # ==== 4. подсказка про порты собирается из общего списка =============
-grep -q 'MT_REQUIRED_PORTS\[@\]' "$REPO/install/install.sh"
+grep -q 'MT_REQUIRED_PORTS\[@\]' "$REPO/install/lib/common.sh"
 check "подсказка строится из MT_REQUIRED_PORTS" 0 $?
-grep -q '465|' "$REPO/install/install.sh" || grep -q 'PORTS_RE' "$REPO/install/install.sh"
+grep -q 'ports_re' "$REPO/install/lib/common.sh"
 check "жёсткий список портов убран" 0 $?
-grep -q 'стек его не использует' "$REPO/install/install.sh"
+grep -q 'стек его не использует' "$REPO/install/install.sh" "$REPO/install/lib/common.sh"
 check "устаревшая фраза про 465 удалена" 1 $?
+
+# ==== 5. Присваивание из падающей команды под set -e ==================
+# Установка обрывалась молча (код 1, ни слова об ошибке) на чистом
+# сервере: CERT_SOURCE="$(cat файл 2>/dev/null | tr -d ...)" — файла ещё
+# нет, cat возвращает единицу, pipefail тянет её в подстановку.
+grep -nE '^[^#]*=\"?\$\(cat ' "$REPO/install/install.sh" "$REPO/install/lib/common.sh" >/dev/null 2>&1
+check "чтение файла не идёт через \$(cat …)" 1 $?
+
+OUT_SETE=$(
+    set -euo pipefail
+    CERT_SOURCE_FILE="$TMP/net/source"
+    CERT_SOURCE=''
+    if [ -f "$CERT_SOURCE_FILE" ]; then
+        CERT_SOURCE="$(tr -d '[:space:]' < "$CERT_SOURCE_FILE" 2>/dev/null || true)"
+    fi
+    printf 'выжили:%s\n' "${CERT_SOURCE:-пусто}"
+)
+printf '%s' "$OUT_SETE" | grep -q 'выжили:пусто'
+check "отсутствие файла не обрывает установку" 0 $?
 
 rm -rf "$TMP"
 printf '\nпройдено %s, провалено %s\n' "$PASS" "$FAILED"
