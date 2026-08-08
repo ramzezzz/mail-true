@@ -35,6 +35,7 @@ import {
   SETTING_SECTIONS,
   SETTING_SPECS,
 } from './server-settings-registry.js';
+import { generateSecret, ROTATABLE_SECRETS } from './secret-rotation.js';
 import { findTarget } from './restart-targets.js';
 import { parseSettingValue, ServerSettings, typedValue } from './server-settings.js';
 
@@ -265,6 +266,19 @@ void test('посреднику не разрешён ни один ключ, к
       if (apply.action === 'recreate') promised.add(`${apply.target}:${spec.key}`);
     }
   }
+  /*
+   * Перевыпускаемые секреты — вторая законная причина писать в файл.
+   *
+   * Записывает их ПЕРВАЯ служба списка (у общего секрета двух служб это
+   * та, которая его проверяет), остальные только пересоздаются: ключ уже
+   * в файле. Поэтому в разрешённые попадает ровно одна пара на секрет —
+   * право писать SESSION_SECRET «через postfix» так же лишне, как право
+   * писать туда пароль базы.
+   */
+  for (const secret of ROTATABLE_SECRETS) {
+    const first = secret.applies[0];
+    if (first) promised.add(`${first.target}:${secret.key}`);
+  }
   const stray: string[] = [];
   for (const block of table.matchAll(/(\w+)\s*=>\s*\{([^}]*)\}/gu)) {
     const service = block[1] ?? '';
@@ -279,6 +293,79 @@ void test('посреднику не разрешён ни один ключ, к
     'Посреднику разрешено писать в infra/.env то, чего перечень настроек ему не поручал. ' +
       `Это лишнее право у службы с сокетом Docker:\n${stray.join('\n')}`,
   );
+});
+
+void test('в списке посредника у каждой службы ровно одна запись', async () => {
+  /*
+   * Поймано живьём: в %ENV_KEYS стояли ДВЕ записи «postfix» и две
+   * «nginx» — сначала с BIND_ADDRESS, потом пустые. В Perl побеждает
+   * последняя, поэтому обе пустышки молча отменяли разрешения выше:
+   * панель сохраняла BIND_ADDRESS и показывала его применённым, а
+   * посредник отказывался его записывать.
+   *
+   * Проверки выше этого не видели по устройству: они разбирают таблицу
+   * регулярным выражением и складывают ВСЕ найденные пары, то есть
+   * моделируют объединение, а не перезапись. Отсюда отдельная проверка
+   * на сам факт повтора имени.
+   */
+  const path = new URL('../../../../infra/service-agent/agent.pl', import.meta.url);
+  const source = await readFile(path, 'utf8');
+  const table = source.slice(source.indexOf('my %ENV_KEYS'), source.indexOf('if ($TOKEN eq'));
+
+  const seen = new Set<string>();
+  const duplicates: string[] = [];
+  for (const block of table.matchAll(/^\s{4}(\w+)\s*=>\s*\{/gmu)) {
+    const service = block[1] ?? '';
+    if (seen.has(service)) duplicates.push(service);
+    seen.add(service);
+  }
+  assert.deepEqual(
+    duplicates,
+    [],
+    'Служба перечислена в %ENV_KEYS дважды — последняя запись затирает предыдущие, ' +
+      `и разрешения из них молча пропадают: ${duplicates.join(', ')}`,
+  );
+});
+
+void test('перевыпуск секретов: только секреты, только известные службы', () => {
+  for (const secret of ROTATABLE_SECRETS) {
+    const spec = SETTING_SPECS.find((s) => s.key === secret.key);
+    assert.ok(spec, `${secret.key} перевыпускается, но в перечне настроек его нет`);
+    // Перевыпуск не превращает секрет в обычную настройку: значение
+    // по-прежнему не отдаётся и не вводится руками.
+    assert.equal(spec.secret, true, `${secret.key} перевыпускается, но не помечен секретом`);
+    assert.equal(spec.group, 'locked', `${secret.key} обязан оставаться в locked`);
+    assert.ok(secret.applies.length > 0, `${secret.key} перевыпускается, но никого не пересоздаёт`);
+    for (const apply of secret.applies) {
+      const target = findTarget(apply.target);
+      assert.ok(target, `${secret.key}: службы «${apply.target}» нет в перечне перезапускаемых`);
+      assert.ok(
+        target.actions.includes(apply.action),
+        `${secret.key}: служба «${apply.target}» не умеет «${apply.action}»`,
+      );
+    }
+    // Цена нажатия обязана быть названа словами: кнопка, выкидывающая
+    // всех администраторов, не имеет права выглядеть как «обновить».
+    assert.ok(secret.impact.length > 60, `${secret.key}: не описано, что сломается`);
+  }
+});
+
+void test('новый секрет проходит собственную проверку схемы', () => {
+  /*
+   * SESSION_SECRET проверяется схемой на минимум 32 символа. Секрет
+   * короче уронил бы сервер приложения при следующем запуске — то есть
+   * кнопка «перевыпустить» превратилась бы в кнопку «сломать вход».
+   */
+  for (const secret of ROTATABLE_SECRETS) {
+    const value = generateSecret(secret.bytes);
+    assert.ok(value.length >= 32, `${secret.key}: секрет короче 32 символов`);
+    // Значение попадает в infra/.env построчно и в командные строки
+    // контейнеров: пробелы, кавычки и знаки доллара там ломают разбор.
+    assert.match(value, /^[A-Za-z0-9_-]+$/u, `${secret.key}: в секрете есть опасные символы`);
+  }
+  // Два вызова подряд не дают одинакового значения — иначе «перевыпуск»
+  // ничего бы не перевыпускал.
+  assert.notEqual(generateSecret(32), generateSecret(32));
 });
 
 void test('раздел каждой настройки существует, ключи не повторяются', () => {

@@ -53,7 +53,7 @@ import { api, ApiError } from '../api/client';
 import type { RestartTarget, ServerSetting, SettingApply, SettingValue } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
-import { Badge, Field, Notice, Panel, Tile, Tiles, Toolbar } from '../components/ui';
+import { Badge, ErrorNotice, Field, Notice, Panel, Tile, Tiles, Toolbar } from '../components/ui';
 import { formatDateTime, plural, pluralize } from '../lib/format';
 import { ApplyButtons, useRestartState } from '../components/ServiceRestart';
 import { appliesSummary } from '../lib/restart';
@@ -116,6 +116,26 @@ export function ServerSettingsPage() {
   const list = useQuery({
     queryKey: ['server-settings'],
     queryFn: () => api.serverSettings(),
+  });
+
+  /*
+   * Перевыпускаемые секреты — отдельным запросом, и только тем, кому
+   * можно писать настройки: список сам по себе рассказывает, какие
+   * секреты в продукте есть и что они скрепляют.
+   */
+  const secrets = useQuery({
+    queryKey: ['server-settings-secrets'],
+    queryFn: () => api.rotatableSecrets(),
+    enabled: writable,
+  });
+  const rotate = useMutation({
+    mutationFn: (key: string) => api.rotateSecret(key),
+    onSuccess: (result) => {
+      setFlash(
+        `Секрет ${result.key} выпущен заново. Пересозданы службы: ${result.services.join(', ')}. ` +
+          'Если это была подпись сессий — войдите заново.',
+      );
+    },
   });
 
   const settings = useMemo(
@@ -489,6 +509,60 @@ export function ServerSettingsPage() {
           </ul>
         </Panel>
       ))}
+
+      {writable && secrets.data && secrets.data.secrets.length > 0 && (
+        <Panel title="Перевыпуск секретов">
+          <p className={styles.note}>
+            Значения секретов не показываются и не вводятся руками: новое рождается на сервере,
+            уходит прямо в infra/.env и не проходит ни через браузер, ни через журналы. Здесь только
+            те секреты, разрыв которых стоит повторного входа. Ключи шифрования (данные помощника
+            ИИ, пароли чужих ящиков) не перевыпускаются кнопкой: ими зашифровано уже записанное, и
+            новый ключ не меняет замок, а делает содержимое нечитаемым.
+          </p>
+          {!secrets.data.available && (
+            <Notice tone="error">
+              Перевыпуск недоступен: не настроен посредник служб. Новое значение писать в infra/.env
+              некому.
+            </Notice>
+          )}
+          <ul className={styles.list}>
+            {secrets.data.secrets.map((secret) => (
+              <li key={secret.key} className={styles.row}>
+                <div className={styles.head}>
+                  <span className={styles.key}>{secret.title}</span>
+                  <Badge tone="muted">{secret.key}</Badge>
+                </div>
+                <span className={styles.hint}>{secret.impact}</span>
+                <span className={styles.hint}>
+                  Пересоздаются службы: {secret.services.join(', ')}
+                </span>
+                <div className={styles.actions}>
+                  <Button
+                    mode="secondary"
+                    size="s"
+                    disabled={!secrets.data.available || rotate.isPending}
+                    onClick={() => {
+                      // Подтверждение обязательно: отменить перевыпуск
+                      // нельзя, а «Подпись сессий панели» выкидывает из
+                      // панели того, кто нажал.
+                      if (!window.confirm(`${secret.title}.\n\n${secret.impact}\n\nПродолжить?`)) {
+                        return;
+                      }
+                      setFlash(null);
+                      rotate.mutate(secret.key);
+                    }}
+                  >
+                    {rotate.isPending && rotate.variables === secret.key
+                      ? 'Перевыпускаем…'
+                      : 'Выпустить новый'}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {rotate.error && <ErrorNotice error={rotate.error} />}
+        </Panel>
+      )}
 
       {changed.length > 0 && (
         <div className={styles.saveBar}>

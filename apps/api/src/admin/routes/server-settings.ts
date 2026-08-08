@@ -37,6 +37,7 @@ import { audit, currentAdmin, requireAdmin } from '../guard.js';
 import type { AdminContext } from '../types.js';
 import { SETTING_SECTIONS } from '../server-settings-registry.js';
 import { findTarget } from '../restart-targets.js';
+import { findRotatable, generateSecret, ROTATABLE_SECRETS } from '../secret-rotation.js';
 import {
   parseSettingValue,
   typedValue,
@@ -332,6 +333,98 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
       }
 
       return { changed, ...(await listDto(settings, ctx)) };
+    },
+  );
+
+  /* ---------------------------------------------------------------- */
+  /* Перевыпуск секретов                                                */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Что можно перевыпустить и чем это обернётся.
+   *
+   * Список отдаётся отдельно от настроек, потому что это не настройки:
+   * значения у них нет и не будет — ни текущего, ни нового. Есть только
+   * действие и его цена.
+   */
+  app.get(
+    '/server-settings/secrets',
+    { preHandler: requireAdmin(app, 'serversettings.write') },
+    () => ({
+      available: ctx.serviceAgent?.configured === true,
+      secrets: ROTATABLE_SECRETS.map((item) => ({
+        key: item.key,
+        title: item.title,
+        impact: item.impact,
+        services: item.applies.map((apply) => apply.target),
+      })),
+    }),
+  );
+
+  app.post<{ Params: { key: string } }>(
+    '/server-settings/secrets/:key/rotate',
+    {
+      preHandler: requireAdmin(app, 'serversettings.write'),
+      // Перевыпуск пересоздаёт службы. Три за пять минут — это уже не
+      // «поправил не тот», а что-то не то происходит.
+      config: { rateLimit: { max: 3, timeWindow: 300_000 } },
+    },
+    async (request) => {
+      const secret = findRotatable(request.params.key);
+      if (!secret) {
+        // Именно 400, а не 404: ключ мог существовать как настройка, но
+        // не входить в закрытый список перевыпускаемых, и ответ должен
+        // отличать «нет такого» от «этот — нельзя».
+        throw new BadRequestError(
+          `Секрет «${request.params.key}» не перевыпускается из панели. ` +
+            'Перевыпускаются только те, разрыв которых стоит повторного входа, ' +
+            'а не потери данных.',
+        );
+      }
+      const agent = ctx.serviceAgent;
+      if (!agent || !agent.configured) {
+        throw new BadRequestError(
+          'Перевыпуск требует посредника служб: новое значение пишется в infra/.env, ' +
+            'а затем службы пересоздаются. Задайте SERVICE_AGENT_TOKEN и поднимите стек заново.',
+        );
+      }
+
+      const value = generateSecret(secret.bytes);
+      const admin = currentAdmin(request);
+
+      /*
+       * Сначала запись и пересоздание ПЕРВОЙ службы из списка, затем
+       * остальные — без окружения (оно уже в файле).
+       *
+       * Порядок в списке не случайный: у общего секрета двух служб
+       * первой идёт та, которая его ПРОВЕРЯЕТ (посредник очереди,
+       * контроллер антиспама). Наоборот — гарантированный отказ на
+       * несколько секунд: сервер приложения уже ходил бы с новым
+       * секретом к службе, которая ещё живёт со старым.
+       */
+      const applied: string[] = [];
+      let first = true;
+      for (const step of secret.applies) {
+        const target = findTarget(step.target);
+        if (!target) continue;
+        await agent.apply(target, step.action, first ? { [secret.key]: value } : {});
+        applied.push(target.id);
+        first = false;
+      }
+
+      /*
+       * В журнал аудита — сам факт и затронутые службы. Значения нет
+       * нигде: ни в ответе, ни в аудите, ни в журнале сервера. Аудит
+       * читают из панели, а панель показывают на совещаниях.
+       */
+      await audit(ctx, request, {
+        action: 'serversettings.secret.rotate',
+        targetType: 'serversettings',
+        targetLabel: secret.key,
+        after: { services: applied, by: admin.login },
+      });
+
+      return { key: secret.key, services: applied };
     },
   );
 }

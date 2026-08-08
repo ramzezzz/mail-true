@@ -1743,6 +1743,22 @@ export interface ServerSettingsBulkResult extends ServerSettingsResponse {
   changed: number;
 }
 
+/** Секрет, который можно выпустить заново. Значения у него нет и не будет. */
+export interface RotatableSecret {
+  key: string;
+  title: string;
+  /** Что произойдёт сразу после нажатия — до него, а не после. */
+  impact: string;
+  /** Какие службы пересоздаются, в порядке выполнения. */
+  services: string[];
+}
+
+export interface RotatableSecretsResponse {
+  /** Есть ли посредник: без него писать новое значение в infra/.env некому. */
+  available: boolean;
+  secrets: RotatableSecret[];
+}
+
 /* ================================================================== */
 /* Перезапуск служб                                                    */
 /* ================================================================== */

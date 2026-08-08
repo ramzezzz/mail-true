@@ -64,6 +64,7 @@ import type {
   RestartAction,
   RestartJobState,
   RestartState,
+  RotatableSecretsResponse,
   ServerSettingsResponse,
   TlsApplyResult,
   TlsBundleInputDto,
@@ -704,6 +705,18 @@ export const api = {
     post<ServerSettingsBulkResult>('/server-settings/bulk', { values }),
   resetServerSetting: (key: string) =>
     del<ServerSetting>(`/server-settings/${encodeURIComponent(key)}`),
+
+  /* --- перевыпуск секретов ---
+   *
+   * Не настройки: значения у них нет ни текущего, ни нового — оно
+   * рождается на сервере и уходит прямо в infra/.env. Отсюда и отдельная
+   * пара запросов: «что можно перевыпустить и чем это обернётся» и «жми».
+   */
+  rotatableSecrets: () => get<RotatableSecretsResponse>('/server-settings/secrets'),
+  rotateSecret: (key: string) =>
+    post<{ key: string; services: string[] }>(
+      `/server-settings/secrets/${encodeURIComponent(key)}/rotate`,
+    ),
 
   /* --- перезапуск служб ---
    *
