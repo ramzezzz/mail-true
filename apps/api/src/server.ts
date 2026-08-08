@@ -6,6 +6,7 @@ import { Redis } from 'ioredis';
 import { loadConfig } from './config.js';
 import { SecretBox } from './crypto.js';
 import { MemorySessionStore, RedisSessionStore, type SessionStore } from './session.js';
+import { GeoIpDatabase, parseCountryList } from './geoip/index.js';
 import { ImapPool } from './imap/pool.js';
 import { UploadStore } from './uploads.js';
 import { buildApp } from './app.js';
@@ -105,7 +106,30 @@ async function main(): Promise<void> {
   const sweepTimer = setInterval(() => void uploads.sweep().catch(() => undefined), 3600_000);
   sweepTimer.unref();
 
-  const { app, notifier } = await buildApp({ config, logger, sessions, secretBox, pool, uploads });
+  /*
+   * База стран читается при старте, а не при первом входе: разбор десяти
+   * мегабайт текста занимает доли секунды, но случиться они должны до
+   * того, как кто-то ждёт ответа формы входа, а не во время.
+   *
+   * Отказ загрузки не мешает старту: без базы вход работает как раньше.
+   */
+  const geoip = new GeoIpDatabase({
+    path: config.GEOIP_DB_PATH,
+    policy: config.GEOIP_LOGIN_POLICY,
+    allowed: parseCountryList(config.GEOIP_ALLOWED_COUNTRIES),
+    logger,
+  });
+  await geoip.load().catch(() => undefined);
+
+  const { app, notifier } = await buildApp({
+    config,
+    logger,
+    sessions,
+    secretBox,
+    pool,
+    uploads,
+    geoip,
+  });
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'Остановка сервера');

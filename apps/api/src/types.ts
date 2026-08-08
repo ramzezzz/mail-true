@@ -5,6 +5,7 @@ import type { preHandlerAsyncHookHandler } from 'fastify';
 import type { Logger } from 'pino';
 import type { AppConfig } from './config.js';
 import type { SecretBox } from './crypto.js';
+import type { GeoIpDatabase } from './geoip/index.js';
 import type { HealthMonitor } from './health.js';
 import type { SessionStore } from './session.js';
 import type { ImapPool } from './imap/pool.js';
@@ -43,6 +44,12 @@ export interface AppDeps {
    * и почта обязана работать как обычно.
    */
   accessLog?: AccessRecorder;
+  /**
+   * Страна входа. Необязательная: без базы стран вход работает как
+   * раньше, и это не «выключенная защита», а штатное состояние сервера,
+   * на котором базу не скачивали.
+   */
+  geoip?: GeoIpDatabase;
 }
 
 declare module 'fastify' {

@@ -462,6 +462,47 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
     }
 
     /*
+     * База стран — только если проверку страны включили.
+     *
+     * Выключенная проверка не показывается вовсе: строка «база не
+     * загружена» рядом с настройкой, которую никто не включал, читается
+     * как поломка. А вот включённая политика без базы — настоящая беда:
+     * администратор уверен, что вход ограничен страной, а на деле не
+     * ограничен ничем.
+     */
+    const geoip = app.deps.geoip;
+    if (geoip?.enabled === true) {
+      const state = geoip.state;
+      const ageDays =
+        state.fileDate === null
+          ? null
+          : Math.floor((Date.now() - state.fileDate.getTime()) / 86_400_000);
+      // Выпуск базы ежемесячный. Два месяца — уже заметный разрыв:
+      // диапазоны переходят между странами постоянно.
+      const stale = ageDays !== null && ageDays > 60;
+
+      checks.push({
+        id: 'geoip-db',
+        group: 'Порты наружу',
+        title: 'База стран для проверки входа',
+        state: !state.loaded ? 'fail' : stale ? 'warn' : 'ok',
+        detail: state.loaded
+          ? `диапазонов: ${String(state.rows)}` +
+            (ageDays === null ? '' : `, файлу ${String(ageDays)} дн.`) +
+            (state.skipped > 0 ? `, пропущено строк: ${String(state.skipped)}` : '')
+          : (state.error ?? 'файл базы не прочитан'),
+        ...(state.loaded && !stale
+          ? {}
+          : {
+              hint: state.loaded
+                ? 'База выпускается ежемесячно. Обновить: bash install/fetch-geoip.sh'
+                : 'Проверка страны включена, но базы нет — значит вход не ограничен ничем, ' +
+                  'хотя настройка говорит обратное. Скачать: bash install/fetch-geoip.sh',
+            }),
+      });
+    }
+
+    /*
      * Обновление: докатана ли база и когда снимали копию.
      *
      * Оба каталога смонтированы только на чтение — это файлы продукта и

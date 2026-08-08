@@ -5,7 +5,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { newSessionId } from '../crypto.js';
-import { UnauthorizedError } from '../errors.js';
+import { AuthFailedError, UnauthorizedError } from '../errors.js';
 import { originOf } from '../settings/access-record.js';
 
 const loginSchema = z.object({
@@ -43,6 +43,36 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { email, password } = loginSchema.parse(request.body);
       const origin = originOf(request);
+
+      /*
+       * Страна входа — ДО проверки пароля.
+       *
+       * Порядок важен: если страна запрещена, пароль не проверяется вовсе.
+       * Иначе запрет превратился бы в удобную проверялку паролей —
+       * подбирающий узнавал бы «пароль верный, но страна не та» и понимал,
+       * что пара найдена.
+       *
+       * Ответ при отказе тот же, что и при неверном пароле, и это не
+       * лишняя вежливость: разные ответы сообщают чужому человеку, какие
+       * ящики на сервере существуют, и заодно — что защита по стране
+       * включена. Настоящая причина уходит в журнал ящика, где её видит
+       * владелец.
+       */
+      const geo = app.deps.geoip?.check(origin.ip ?? '');
+      if (geo && !geo.allowed) {
+        app.deps.accessLog?.record({
+          accountEmail: email,
+          kind: 'login.failed',
+          success: false,
+          detail: `Вход отклонён: ${geo.reason}`,
+          ...origin,
+        });
+        request.log.warn(
+          { kind: 'login.failed', ip: request.ip, email, country: geo.country },
+          'Вход в веб-почту отклонён по стране',
+        );
+        throw new AuthFailedError('Неверный адрес или пароль');
+      }
 
       /*
        * Проверяем учётные данные реальным IMAP-логином.

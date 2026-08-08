@@ -416,6 +416,14 @@ services:
       MAIL_DOMAIN: ${MAIL_DOMAIN}
       MAIL_HOSTNAME: ${MAIL_HOSTNAME}
 
+      # Страна входа. off — не определять (умолчание: базы нет),
+      # log — писать в журнал, allow — пускать только из списка стран.
+      # Касается ТОЛЬКО входа человека; входящую почту по стране никто не
+      # фильтрует и фильтровать не будет.
+      GEOIP_LOGIN_POLICY: ${GEOIP_LOGIN_POLICY:-off}
+      GEOIP_ALLOWED_COUNTRIES: ${GEOIP_ALLOWED_COUNTRIES:-}
+      GEOIP_DB_PATH: /srv/geoip/country.csv
+
       # Почтовые службы — по именам контейнеров внутри сети стека
       IMAP_HOST: dovecot
       IMAP_PORT: 143
@@ -768,6 +776,11 @@ services:
       # ни править миграции, ни подделывать отметку о копии.
       - ./postgres/migrations:/srv/migrations:ro
       - ../install/state:/srv/install-state:ro
+      # База «адрес → страна» для проверки страны входа. Тоже на чтение и
+      # тоже не секрет: это публичный список диапазонов. Каталога может не
+      # быть вовсе — базу скачивают отдельным шагом (install/fetch-geoip.sh),
+      # и без неё вход работает как раньше.
+      - ./data/geoip:/srv/geoip:ro
     ports:
       # Прямой доступ для отладки; браузер ходит через nginx
       - '127.0.0.1:${API_PORT:-3000}:3000'

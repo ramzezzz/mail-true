@@ -16,6 +16,7 @@ import type { RspamdClient } from './rspamd.js';
 import type { RestartStore } from './restart-store.js';
 import type { SelfRestart } from './self-restart.js';
 import type { ServerSettings } from './server-settings.js';
+import type { GeoIpDatabase } from '../geoip/index.js';
 import type { ServiceAgent } from './service-agent.js';
 
 /** Всё, что нужно админским маршрутам. Собирается один раз при регистрации. */
@@ -136,6 +137,11 @@ export interface AdminContext {
    * кнопки, которая молча ничего не делает.
    */
   serviceAgent?: ServiceAgent;
+  /**
+   * Страна входа. Тоже необязательное: без базы стран вход в панель
+   * работает как раньше, а проверки маршрутов собирают контекст без неё.
+   */
+  geoip?: GeoIpDatabase;
   /**
    * Перезапуск сервера приложения САМИМ СОБОЙ. Посредник ему не нужен:
    * у контейнера стоит restart: unless-stopped, поэтому достаточно

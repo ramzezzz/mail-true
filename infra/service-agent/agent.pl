@@ -191,6 +191,11 @@ my %ENV_KEYS = (
         AUTOCONFIG_IMAPS_PORT      => 1,
         AUTOCONFIG_SUBMISSION_PORT => 1,
         AUTOCONFIG_POP3S_PORT      => 1,
+        # Страна входа. База стран читается один раз при запуске процесса
+        # (десяток мегабайт текста), поэтому и политика берётся оттуда же —
+        # из окружения, а не из базы настроек.
+        GEOIP_LOGIN_POLICY         => 1,
+        GEOIP_ALLOWED_COUNTRIES    => 1,
     },
     postfix => {},
     nginx   => {},

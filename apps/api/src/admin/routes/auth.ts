@@ -76,6 +76,37 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       const settings = settingsOf(ctx);
 
       /*
+       * Страна входа — до всего остального.
+       *
+       * Проверяется раньше пароля и раньше блокировок намеренно: иначе
+       * запрет по стране превратился бы в проверялку паролей («страна не
+       * та» приходит только при верном пароле — значит пара найдена»).
+       *
+       * Ответ тот же, что при неверном пароле. Настоящая причина уходит в
+       * журнал аудита и в api.log, где её видит владелец сервера, а не
+       * тот, кто стучится.
+       *
+       * Локальные адреса сюда не попадают вовсе (см. geoip/index.ts), и
+       * это же спасает от самозапирания: резервный вход в панель по
+       * адресу сервера из локальной сети продолжает работать при любом
+       * списке стран.
+       */
+      const geo = ctx.geoip?.check(ip);
+      if (geo && !geo.allowed) {
+        await auditAnonymous(ctx, request, login, {
+          action: 'admin.login.failed',
+          targetType: 'admin',
+          targetLabel: login,
+          after: { reason: geo.reason, country: geo.country },
+        });
+        request.log.warn(
+          { kind: 'admin.login.failed', ip: request.ip, login, country: geo.country },
+          'Вход в панель отклонён по стране',
+        );
+        throw new AuthFailedError('Неверный логин или пароль');
+      }
+
+      /*
        * БЛОКИРУЕТСЯ АДРЕС, А НЕ УЧЁТНАЯ ЗАПИСЬ.
        *
        * Раньше пять промахов подряд запирали учётку целиком — всем, включая

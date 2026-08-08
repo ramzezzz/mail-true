@@ -63,6 +63,21 @@ export const envSchema = z
           .filter(Boolean),
       ),
 
+    /*
+     * Страна входа.
+     *
+     * off  — не определять вовсе (по умолчанию: базы на свежем сервере нет);
+     * log  — определять и писать в журнал, но пускать всех;
+     * allow — пускать только из стран списка.
+     *
+     * Умолчание «off», а не «log», намеренно: без базы режим log означал бы
+     * строку «страна неизвестна» в каждой записи журнала — шум, который
+     * выглядит как поломка.
+     */
+    GEOIP_LOGIN_POLICY: z.enum(['off', 'log', 'allow']).default('off'),
+    GEOIP_ALLOWED_COUNTRIES: z.string().default(''),
+    GEOIP_DB_PATH: z.string().default('/srv/geoip/country.csv'),
+
     REDIS_URL: z.string().default('redis://127.0.0.1:6379'),
     /** Postgres не обязателен: профиль аккаунта деградирует до значений по умолчанию. */
     DATABASE_URL: z.string().optional(),
