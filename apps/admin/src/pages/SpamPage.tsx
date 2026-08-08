@@ -1,18 +1,32 @@
 /**
- * Спам: что фильтр сделал, по каким правилам и как это изменить.
+ * Антиспам: что фильтр сделал, по каким правилам и как это изменить.
  *
  * ------------------------------------------------------------------
  * ЗАЧЕМ СЮДА ПРИХОДЯТ
  * ------------------------------------------------------------------
- * Не «посмотреть статистику». Приходят с одним из трёх вопросов:
+ * Не «посмотреть статистику». Приходят с одним из четырёх вопросов:
  *
  *   • «письмо от партнёра ушло в спам» → разрешить отправителя и обучить
  *     фильтр на этом письме;
  *   • «нас заваливают с этого домена» → запретить домен;
+ *   • «почему письмо признали спамом» → разобрать письмо, посмотреть
+ *     пороги и сработавшие правила;
  *   • «а фильтр вообще работает?» → цифры за период и последние письма.
  *
- * Экран построен под эти три, а не под полноту показа: сверху числа,
- * дальше списки с добавлением в одну строку, внизу разбор письма.
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ВКЛАДКИ, А НЕ ОДНА ДЛИННАЯ СТРАНИЦА
+ * ------------------------------------------------------------------
+ * Раньше раздел был одним свитком: сводка, пороги, состояние, топ правил,
+ * восемь списков подряд плитками, разбор письма и таблица писем. Списки
+ * при этом были не таблицами, а столбиками строк с кнопкой «Убрать», без
+ * поиска, — и на списке из сотни разрешённых адресов найти нужный можно
+ * было только поиском по странице в браузере. Заказчик просил ровно этого:
+ * таблицы на вкладках.
+ *
+ * Вкладки дают ещё одно, менее очевидное: измерение порогов профиля «свой
+ * отправитель» стоит одного пробного письма через rspamd. На вкладке за
+ * него платят только те, кто открыл пороги, а не каждый, кто зашёл в
+ * раздел.
  *
  * ------------------------------------------------------------------
  * ЧТО ЗДЕСЬ ЧЕСТНО СКАЗАНО ВСЛУХ
@@ -22,18 +36,19 @@
  *    рядом: без него провал на графике выглядел бы как затишье.
  * 2. Топ правил — с момента запуска процесса, а НЕ за выбранный период.
  *    Другого источника у rspamd нет.
- * 3. Пороги показаны, но кнопки «сохранить» нет: контроллер rspamd их
- *    менять не даёт, а обходной путь завёл бы второй источник истины.
- *    Вместо кнопки — точный путь к файлу и команда применения.
+ * 3. Пороги показаны и объяснены, но кнопки «сохранить» нет: писать их
+ *    некуда. Причина напечатана целиком, вместе с файлом, форматом строки
+ *    и командой применения, — а не спрятана за отключённой кнопкой.
  */
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@web/components';
+import { cx } from '@web/lib/cx';
 import { api } from '../api/client';
-import type { SpamList } from '../api/types';
+import type { SpamList, SpamThresholdItem, SpamThresholdProfile } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
-import { Table, TableWrap, tableStyles } from '../components/Table';
+import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import {
   Badge,
   ErrorNotice,
@@ -66,13 +81,219 @@ export function entryPlaceholder(value: SpamList['value']): string {
   return '203.0.113.7 или 203.0.113.0/24';
 }
 
+/**
+ * Поиск по списку — подстрокой и без учёта регистра.
+ *
+ * Именно подстрокой, а не «начинается с»: ищут обычно по домену внутри
+ * адреса («кто у нас разрешён из partner.example»), и поиск по началу
+ * строки на такой вопрос не отвечает вовсе.
+ */
+export function filterEntries(entries: readonly string[], search: string): string[] {
+  const needle = search.trim().toLowerCase();
+  if (needle === '') return [...entries];
+  return entries.filter((entry) => entry.toLowerCase().includes(needle));
+}
+
+/** Вес правила со знаком: минус у разрешающих, плюс у запрещающих. */
+export function scoreText(score: number): string {
+  return score > 0 ? `+${String(score)}` : String(score);
+}
+
 /* ------------------------------------------------------------------ */
-/* Один список                                                          */
+/* Вкладки                                                              */
 /* ------------------------------------------------------------------ */
 
-function ListPanel({ list, canEdit }: { list: SpamList; canEdit: boolean }) {
+type TabId = 'summary' | 'thresholds' | 'lists' | 'check' | 'history';
+
+function Tabs<T extends string>({
+  value,
+  onChange,
+  items,
+  label,
+}: {
+  value: T;
+  onChange: (next: T) => void;
+  items: ReadonlyArray<{ id: T; title: string; count?: number }>;
+  label: string;
+}) {
+  return (
+    <div className={styles.tabs} role="tablist" aria-label={label}>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          role="tab"
+          aria-selected={value === item.id}
+          className={cx(styles.tab, value === item.id && styles.tabActive)}
+          onClick={() => onChange(item.id)}
+        >
+          {item.title}
+          {item.count !== undefined && <span className={styles.tabCount}>{item.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Пороги                                                               */
+/* ------------------------------------------------------------------ */
+
+/** Один рубеж строкой таблицы: число слева, последствия справа. */
+function ThresholdRow({ item }: { item: SpamThresholdItem }) {
+  const off = item.value === null;
+  return (
+    <tr>
+      <td className={styles.wrapCell}>{item.title}</td>
+      <td className={tableStyles.nowrap}>
+        {off ? (
+          <Badge tone="muted">выключено</Badge>
+        ) : (
+          <>
+            <span className={styles.thresholdValue}>{item.value}</span>
+            {/* «Необычно» — не ошибка, а повод перепроверить: коридор это
+                мнение продукта, а не ограничение rspamd. */}
+            {item.unusual && <Badge tone="warn">необычно</Badge>}
+          </>
+        )}
+        {item.advice && (
+          <span className={styles.advice}>
+            обычно {item.advice[0]}–{item.advice[1]}
+          </span>
+        )}
+      </td>
+      <td className={styles.wrapCell}>
+        <p className={styles.effect}>{off ? item.off : item.effect}</p>
+        {!off && (
+          <>
+            <p className={styles.sub}>{item.visible}</p>
+            {item.higher !== '—' && (
+              <p className={styles.sub}>
+                <span className={styles.subKey}>Поднять порог:</span> {item.higher}
+              </p>
+            )}
+            {item.lower !== '—' && (
+              <p className={styles.sub}>
+                <span className={styles.subKey}>Опустить порог:</span> {item.lower}
+              </p>
+            )}
+          </>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function ThresholdProfilePanel({ profile }: { profile: SpamThresholdProfile }) {
+  return (
+    <Panel title={profile.title}>
+      <p className={styles.hint}>{profile.note}</p>
+      {profile.measured && (
+        // Откуда числа — важно: измеренное пробным письмом может отличаться
+        // от прочитанного у контроллера, и списывать разницу на ошибку
+        // панели не надо.
+        <p className={styles.note}>
+          Числа получены прогоном пробного письма: профили настроек контроллер rspamd отдельно не
+          показывает.
+        </p>
+      )}
+      {profile.problem && <Notice tone="error">{profile.problem}</Notice>}
+
+      {profile.warnings.length > 0 && (
+        <Notice tone="error">
+          <strong>Замечания к набору порогов</strong>
+          <ul className={styles.warnings}>
+            {profile.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
+
+      <TableWrap>
+        <Table>
+          <thead>
+            <tr>
+              <th>Рубеж</th>
+              <th>С какого балла</th>
+              <th>Что происходит с письмом</th>
+            </tr>
+          </thead>
+          <tbody>
+            {profile.items.map((item) => (
+              <ThresholdRow key={item.id} item={item} />
+            ))}
+            {profile.items.length === 0 && (
+              <EmptyRow colSpan={3}>
+                Пороги не прочитаны: антиспам не ответил. Почта при этом продолжает ходить, но без
+                проверки.
+              </EmptyRow>
+            )}
+          </tbody>
+        </Table>
+      </TableWrap>
+    </Panel>
+  );
+}
+
+function ThresholdsTab() {
+  const thresholds = useQuery({
+    queryKey: ['spam-thresholds'],
+    queryFn: () => api.spamThresholds(),
+  });
+  const data = thresholds.data;
+
+  return (
+    <>
+      <ErrorNotice error={thresholds.error} />
+      {data && !data.available && (
+        <Notice tone="error">
+          {data.unavailable ?? 'Антиспам не отвечает — пороги прочитать не удалось.'}
+        </Notice>
+      )}
+
+      {data && (
+        <>
+          <p className={styles.note}>{data.scaleNote}</p>
+          {data.profiles.map((profile) => (
+            <ThresholdProfilePanel key={profile.id} profile={profile} />
+          ))}
+
+          {/* Почему нет кнопки «Сохранить». Причина напечатана целиком:
+              отключённая кнопка без объяснения читается как «сломано». */}
+          <Panel title="Как изменить пороги">
+            <p className={styles.hint}>{data.whyReadonly}</p>
+            <dl className={styles.howTo}>
+              <dt>Файл</dt>
+              <dd>
+                <code>{data.howTo.file}</code>
+              </dd>
+              <dt>Строка</dt>
+              <dd>
+                <code>{data.howTo.format}</code>
+              </dd>
+              <dt>Применить</dt>
+              <dd>
+                <code>{data.howTo.command}</code>
+              </dd>
+            </dl>
+            <p className={styles.note}>{data.howTo.note}</p>
+            <p className={styles.note}>{data.probeNote}</p>
+          </Panel>
+        </>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Один список — таблицей                                               */
+/* ------------------------------------------------------------------ */
+
+function ListTable({ list, canEdit }: { list: SpamList; canEdit: boolean }) {
   const queryClient = useQueryClient();
   const [value, setValue] = useState('');
+  const [search, setSearch] = useState('');
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -112,15 +333,14 @@ function ListPanel({ list, canEdit }: { list: SpamList; canEdit: boolean }) {
   });
 
   const editable = list.editable && canEdit;
+  const shown = filterEntries(list.entries, search);
 
   return (
     <Panel title={list.title}>
       <p className={styles.hint}>
         {/* Что реально произойдёт с письмом — числом, а не словом
             «важный»: администратор должен видеть цену решения. */}
-        <Badge tone={list.tone === 'allow' ? 'ok' : 'fail'}>
-          {list.score > 0 ? `+${String(list.score)}` : String(list.score)} балла
-        </Badge>{' '}
+        <Badge tone={list.tone === 'allow' ? 'ok' : 'fail'}>{scoreText(list.score)} балла</Badge>{' '}
         {list.hint}
       </p>
 
@@ -162,33 +382,120 @@ function ListPanel({ list, canEdit }: { list: SpamList; canEdit: boolean }) {
       <ErrorNotice error={error} />
       {message && <Notice tone="success">{message}</Notice>}
 
-      {list.entries.length === 0 ? (
-        <p className={styles.empty}>Список пуст.</p>
-      ) : (
-        <ul className={styles.entries}>
-          {list.entries.map((entry) => (
-            <li key={entry} className={styles.entry}>
-              <span className={styles.entryValue}>{entry}</span>
-              {editable && (
-                <button
-                  type="button"
-                  className={styles.entryRemove}
-                  disabled={remove.isPending}
-                  title={`Убрать ${entry}`}
-                  onClick={() => remove.mutate(entry)}
-                >
-                  Убрать
-                </button>
-              )}
-            </li>
-          ))}
-        </ul>
+      {/* Поиск появляется, только когда искать есть в чём: на списке из
+          трёх адресов поле поиска — лишний элемент. */}
+      {list.entries.length > 5 && (
+        <Toolbar>
+          <input
+            className={`mt-input ${styles.search}`}
+            type="search"
+            value={search}
+            placeholder="Поиск по списку"
+            aria-label={`Поиск в списке «${list.title}»`}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <ToolbarSpacer />
+          <span className={styles.count}>
+            {search.trim() === ''
+              ? `${String(list.entries.length)} ${plural(list.entries.length, 'запись', 'записи', 'записей')}`
+              : `найдено ${String(shown.length)} из ${String(list.entries.length)}`}
+          </span>
+        </Toolbar>
       )}
+
+      <TableWrap>
+        <Table>
+          <thead>
+            <tr>
+              <th>Запись</th>
+              {editable && <th className={styles.actionHead}>Действие</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((entry) => (
+              <tr key={entry}>
+                <td className={styles.entryValue}>{entry}</td>
+                {editable && (
+                  <td className={tableStyles.nowrap}>
+                    <button
+                      type="button"
+                      className={styles.entryRemove}
+                      disabled={remove.isPending}
+                      title={`Убрать ${entry}`}
+                      onClick={() => remove.mutate(entry)}
+                    >
+                      Убрать
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {shown.length === 0 && (
+              <EmptyRow colSpan={editable ? 2 : 1}>
+                {list.entries.length > 0 ? (
+                  `По запросу «${search.trim()}» в этом списке ничего нет.`
+                ) : (
+                  // Пустая таблица обязана объяснить, зачем список нужен:
+                  // иначе единственное, что человек узнаёт, — что записей
+                  // нет. Из-за этого разрешённые серверы (IP) путали с
+                  // разрешёнными отправителями, хотя подделать можно ровно
+                  // одно из двух.
+                  <>
+                    <span className={styles.emptyPurpose}>{list.purpose}</span>
+                    <span className={styles.emptyExample}>
+                      Пример записи: <code>{list.example}</code>
+                    </span>
+                  </>
+                )}
+              </EmptyRow>
+            )}
+          </tbody>
+        </Table>
+      </TableWrap>
 
       <p className={styles.file}>
         Символ {list.symbol}, файл infra/rspamd/maps.d/{list.file}
       </p>
     </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Списки: вкладка на список                                            */
+/* ------------------------------------------------------------------ */
+
+function ListsTab({ canEdit }: { canEdit: boolean }) {
+  const lists = useQuery({ queryKey: ['spam-lists'], queryFn: () => api.spamLists() });
+  const [current, setCurrent] = useState<string | null>(null);
+
+  const items = lists.data?.items ?? [];
+  // Первый список — запасной выбор: до первого ответа сервера выбирать
+  // нечего, а после — незачем заставлять человека щёлкать вкладку.
+  const active = items.find((item) => item.id === current) ?? items[0];
+
+  return (
+    <>
+      <ErrorNotice error={lists.error} />
+      {lists.data && !lists.data.available && (
+        <Notice tone="error">{lists.data.unavailable}</Notice>
+      )}
+      {lists.data && <p className={styles.note}>{lists.data.note}</p>}
+
+      {items.length > 0 && (
+        <Tabs
+          label="Списки антиспама"
+          value={active?.id ?? items[0]?.id ?? ''}
+          onChange={setCurrent}
+          items={items.map((item) => ({
+            id: item.id,
+            title: item.title,
+            count: item.entries.length,
+          }))}
+        />
+      )}
+
+      {active && <ListTable key={active.id} list={active} canEdit={canEdit} />}
+    </>
   );
 }
 
@@ -325,7 +632,7 @@ function MessageTools({ canLearn }: { canLearn: boolean }) {
               />
             ))}
           </Tiles>
-          {/* Пороги здесь — те, что применились ИМЕННО к этому письму: у
+          {/* Пороги здесь — те, что применились ИМЕННО К ЭТОМУ письму: у
               своих аутентифицированных отправителей они мягче, и увидеть
               это можно только так. Отправитель показан отдельно: по нему
               работают списки, и подставился он из заголовка From. */}
@@ -346,7 +653,7 @@ function MessageTools({ canLearn }: { canLearn: boolean }) {
                     <td className={tableStyles.nowrap}>{symbol.name}</td>
                     <td className={tableStyles.nowrap}>
                       <span className={symbol.score > 0 ? styles.plus : styles.minus}>
-                        {symbol.score > 0 ? `+${String(symbol.score)}` : String(symbol.score)}
+                        {scoreText(symbol.score)}
                       </span>
                     </td>
                     <td>{symbol.description || '—'}</td>
@@ -362,33 +669,93 @@ function MessageTools({ canLearn }: { canLearn: boolean }) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Страница                                                             */
+/* Последние проверенные письма                                         */
 /* ------------------------------------------------------------------ */
 
-export function SpamPage() {
-  const { session } = useSession();
-  const [hours, setHours] = useState(24);
-  const canEditLists = can(session?.permissions, 'domains.write');
-  const canLearn = can(session?.permissions, 'users.write');
-  const canReadHistory = can(session?.permissions, 'mailbox.impersonate');
+function HistoryTab() {
+  const history = useQuery({
+    queryKey: ['spam-history'],
+    queryFn: () => api.spamHistory({ limit: 30 }),
+  });
+  const data = history.data;
 
+  return (
+    <Panel title="Последние проверенные письма">
+      <ErrorNotice error={history.error} />
+      {data && <p className={styles.note}>{data.note}</p>}
+      {data?.available && (
+        <TableWrap>
+          <Table>
+            <thead>
+              <tr>
+                <th>Когда</th>
+                <th>Решение</th>
+                <th>Баллы</th>
+                <th>От кого</th>
+                <th>Тема</th>
+                <th>Почему</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items.map((item) => (
+                <tr key={`${item.at}-${item.subject}-${item.sender}`}>
+                  <td className={tableStyles.nowrap}>{formatDateTime(item.at)}</td>
+                  <td className={tableStyles.nowrap}>
+                    <Badge
+                      tone={
+                        item.action === 'reject'
+                          ? 'fail'
+                          : item.action === 'add header'
+                            ? 'warn'
+                            : 'ok'
+                      }
+                    >
+                      {item.actionTitle}
+                    </Badge>
+                  </td>
+                  <td className={tableStyles.nowrap}>{item.score.toFixed(1)}</td>
+                  <td className={styles.wrapCell}>
+                    {item.sender || '—'}
+                    {item.user && <span className={styles.own}>свой</span>}
+                  </td>
+                  <td className={styles.wrapCell}>
+                    {item.subject || '(без темы)'}
+                    <span className={styles.size}>{formatBytes(item.sizeBytes)}</span>
+                  </td>
+                  <td className={styles.wrapCell}>
+                    {item.symbols.length === 0
+                      ? '—'
+                      : item.symbols
+                          .map((symbol) => `${symbol.name} ${scoreText(symbol.score)}`)
+                          .join(', ')}
+                  </td>
+                </tr>
+              ))}
+              {data.items.length === 0 && (
+                <EmptyRow colSpan={6}>Писем в памяти фильтра пока нет.</EmptyRow>
+              )}
+            </tbody>
+          </Table>
+        </TableWrap>
+      )}
+    </Panel>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Сводка                                                               */
+/* ------------------------------------------------------------------ */
+
+function SummaryTab() {
+  const [hours, setHours] = useState(24);
   const overview = useQuery({
     queryKey: ['spam-overview', hours],
     queryFn: () => api.spamOverview(hours),
   });
-  const lists = useQuery({ queryKey: ['spam-lists'], queryFn: () => api.spamLists() });
-  const history = useQuery({
-    queryKey: ['spam-history'],
-    queryFn: () => api.spamHistory({ limit: 30 }),
-    enabled: canReadHistory,
-  });
-
   const data = overview.data;
 
   return (
     <>
-      <PageTitle title="Спам" subtitle="Что отсеял фильтр, по каким правилам и как это изменить" />
-
       <Toolbar>
         <select
           className={`mt-select ${styles.control}`}
@@ -454,33 +821,6 @@ export function SpamPage() {
 
       {data && !data.period && <Notice tone="info">{data.periodNote}</Notice>}
 
-      {/* Пороги. Кнопки сохранения нет намеренно — см. шапку файла. */}
-      {data && (
-        <Panel title="Пороги">
-          <Tiles>
-            {Object.entries(data.thresholds).map(([name, value]) => (
-              <Tile
-                key={name}
-                value={value === null ? 'выключено' : value}
-                label={
-                  name === 'add header'
-                    ? 'помечать как спам'
-                    : name === 'reject'
-                      ? 'отклонять приём'
-                      : name === 'greylist'
-                        ? 'серый список'
-                        : name === 'rewrite subject'
-                          ? 'менять тему'
-                          : name
-                }
-              />
-            ))}
-          </Tiles>
-          <p className={styles.note}>{data.thresholdsNote}</p>
-          <p className={styles.note}>{data.settingsNote}</p>
-        </Panel>
-      )}
-
       {data?.live && (
         <Panel title="Состояние фильтра">
           <Tiles>
@@ -527,7 +867,7 @@ export function SpamPage() {
                     <td className={tableStyles.nowrap}>{symbol.hits}</td>
                     <td className={tableStyles.nowrap}>
                       <span className={symbol.weight > 0 ? styles.plus : styles.minus}>
-                        {symbol.weight > 0 ? `+${String(symbol.weight)}` : String(symbol.weight)}
+                        {scoreText(symbol.weight)}
                       </span>
                     </td>
                   </tr>
@@ -537,99 +877,46 @@ export function SpamPage() {
           </TableWrap>
         </Panel>
       )}
+    </>
+  );
+}
 
-      {/* Списки. Разрешающие и запрещающие рядом: их и правят вместе,
-          разбирая одно и то же обращение. */}
-      <ErrorNotice error={lists.error} />
-      {lists.data && !lists.data.available && (
-        <Notice tone="error">{lists.data.unavailable}</Notice>
-      )}
-      {lists.data && (
-        <>
-          <p className={styles.note}>{lists.data.note}</p>
-          <div className={styles.lists}>
-            {lists.data.items.map((list) => (
-              <ListPanel key={list.id} list={list} canEdit={canEditLists} />
-            ))}
-          </div>
-        </>
-      )}
+/* ------------------------------------------------------------------ */
+/* Страница                                                             */
+/* ------------------------------------------------------------------ */
 
-      <MessageTools canLearn={canLearn} />
+export function SpamPage() {
+  const { session } = useSession();
+  const [tab, setTab] = useState<TabId>('summary');
+  const canEditLists = can(session?.permissions, 'domains.write');
+  const canLearn = can(session?.permissions, 'users.write');
+  // Темы и адреса писем — то же, что журналы почты: не сводка о переписке,
+  // а сама переписка. Вкладки без права просто нет — отключённая вкладка
+  // сообщала бы дежурному, что от него что-то прячут.
+  const canReadHistory = can(session?.permissions, 'mailbox.impersonate');
 
-      {/* Последние проверенные письма: в них видны темы и адреса, поэтому
-          право то же, что у журналов почты. */}
-      {canReadHistory && history.data && (
-        <Panel title="Последние проверенные письма">
-          <p className={styles.note}>{history.data.note}</p>
-          {!history.data.available ? null : (
-            <TableWrap>
-              <Table>
-                <thead>
-                  <tr>
-                    <th>Когда</th>
-                    <th>Решение</th>
-                    <th>Баллы</th>
-                    <th>От кого</th>
-                    <th>Тема</th>
-                    <th>Почему</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.data.items.map((item) => (
-                    <tr key={`${item.at}-${item.subject}-${item.sender}`}>
-                      <td className={tableStyles.nowrap}>{formatDateTime(item.at)}</td>
-                      <td className={tableStyles.nowrap}>
-                        <Badge
-                          tone={
-                            item.action === 'reject'
-                              ? 'fail'
-                              : item.action === 'add header'
-                                ? 'warn'
-                                : 'ok'
-                          }
-                        >
-                          {item.actionTitle}
-                        </Badge>
-                      </td>
-                      <td className={tableStyles.nowrap}>{item.score.toFixed(1)}</td>
-                      <td className={styles.wrapCell}>
-                        {item.sender || '—'}
-                        {item.user && <span className={styles.own}>свой</span>}
-                      </td>
-                      <td className={styles.wrapCell}>
-                        {item.subject || '(без темы)'}
-                        <span className={styles.size}>{formatBytes(item.sizeBytes)}</span>
-                      </td>
-                      <td className={styles.wrapCell}>
-                        {item.symbols.length === 0
-                          ? '—'
-                          : item.symbols
-                              .map(
-                                (symbol) =>
-                                  `${symbol.name} ${
-                                    symbol.score > 0
-                                      ? `+${String(symbol.score)}`
-                                      : String(symbol.score)
-                                  }`,
-                              )
-                              .join(', ')}
-                      </td>
-                    </tr>
-                  ))}
-                  {history.data.items.length === 0 && (
-                    <tr>
-                      <td className={styles.emptyCell} colSpan={6}>
-                        Писем в памяти фильтра пока нет.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </Table>
-            </TableWrap>
-          )}
-        </Panel>
-      )}
+  const tabs: ReadonlyArray<{ id: TabId; title: string }> = [
+    { id: 'summary', title: 'Сводка' },
+    { id: 'thresholds', title: 'Пороги' },
+    { id: 'lists', title: 'Списки' },
+    { id: 'check', title: 'Разбор письма' },
+    ...(canReadHistory ? [{ id: 'history' as const, title: 'Последние письма' }] : []),
+  ];
+
+  return (
+    <>
+      <PageTitle
+        title="Антиспам"
+        subtitle="Что отсеял фильтр, по каким правилам и как это изменить"
+      />
+
+      <Tabs label="Разделы антиспама" value={tab} onChange={setTab} items={tabs} />
+
+      {tab === 'summary' && <SummaryTab />}
+      {tab === 'thresholds' && <ThresholdsTab />}
+      {tab === 'lists' && <ListsTab canEdit={canEditLists} />}
+      {tab === 'check' && <MessageTools canLearn={canLearn} />}
+      {tab === 'history' && canReadHistory && <HistoryTab />}
     </>
   );
 }

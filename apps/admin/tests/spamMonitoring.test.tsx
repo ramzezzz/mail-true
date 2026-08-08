@@ -1,17 +1,20 @@
 /**
- * Разделы «Спам» и «Наблюдение».
+ * Разделы «Антиспам» и «Наблюдение».
  *
  * Проверки закрывают ровно те обещания, которыми раздел может соврать, и
  * падают на прежнем коде, где вместо разделов стояли заглушки:
  *
  *   1. Пометки «скоро» с обоих пунктов сняты, а маршруты ведут на живые
  *      страницы, а не на StubPage.
- *   2. У порогов НЕТ кнопки сохранения: контроллер rspamd их менять не
+ *   2. Раздел называется «Антиспам»: он показывает работу фильтра и
+ *      позволяет ею управлять, а прежнее «Спам» читалось как папка со
+ *      спамом — заказчик так его и понял.
+ *   3. У порогов НЕТ кнопки сохранения: контроллер rspamd их менять не
  *      даёт, и ложная кнопка была бы хуже её отсутствия. Вместо неё —
- *      путь к файлу и команда применения.
- *   3. Раздел «Наблюдение» поднимает плохое наверх и честно перечисляет
+ *      объяснение причины, путь к файлу и команда применения.
+ *   4. Раздел «Наблюдение» поднимает плохое наверх и честно перечисляет
  *      то, чего он проверить не может.
- *   4. Удаление записи из списка уходит строкой запроса, а не частью
+ *   5. Удаление записи из списка уходит строкой запроса, а не частью
  *      пути: в записях бывают косые черты (подсети).
  */
 import { readFileSync } from 'node:fs';
@@ -20,7 +23,7 @@ import { describe, expect, it } from 'vitest';
 import { NAV_ITEMS, visibleNav } from '../src/lib/access';
 import { breadcrumbsFor } from '../src/lib/breadcrumbs';
 import { byGroup, problemsFirst } from '../src/pages/MonitoringPage';
-import { entryPlaceholder, formatUptime } from '../src/pages/SpamPage';
+import { entryPlaceholder, filterEntries, formatUptime, scoreText } from '../src/pages/SpamPage';
 import type { HealthCheck, Permission } from '../src/api/types';
 
 const file = (relative: string): string =>
@@ -40,19 +43,23 @@ describe('оба раздела перестали быть заглушками
 
   it('пункты меню видны дежурному и не помечены «скоро»', () => {
     const titles = visibleNav(READONLY).map((i) => i.title);
-    expect(titles).toContain('Спам');
+    // Именно «Антиспам»: раздел управляет фильтром, а не показывает спам.
+    expect(titles).toContain('Антиспам');
+    expect(titles).not.toContain('Спам');
     expect(titles).toContain('Наблюдение');
     expect(NAV_ITEMS.find((i) => i.to === '/spam')?.stub).toBeFalsy();
     expect(NAV_ITEMS.find((i) => i.to === '/monitoring')?.stub).toBeFalsy();
   });
 
   it('в крошках оба раздела названы по-русски', () => {
-    expect(breadcrumbsFor('/spam').at(-1)?.title).toBe('Спам');
+    // Крошка обязана совпадать с пунктом меню: разные имена одного раздела
+    // читаются как два разных места.
+    expect(breadcrumbsFor('/spam').at(-1)?.title).toBe('Антиспам');
     expect(breadcrumbsFor('/monitoring').at(-1)?.title).toBe('Наблюдение');
   });
 });
 
-describe('спам: честность вместо ложных кнопок', () => {
+describe('антиспам: честность вместо ложных кнопок', () => {
   const source = file('src/pages/SpamPage.tsx');
   const client = file('src/api/client.ts');
 
@@ -60,9 +67,30 @@ describe('спам: честность вместо ложных кнопок', 
     // Ни одного вызова, который бы делал вид, что пороги можно записать.
     expect(client).not.toMatch(/spam(Save|Set)Thresholds/u);
     expect(client).not.toMatch(/saveactions/iu);
-    // Зато объяснение с сервера показывается, а не выбрасывается.
-    expect(source).toContain('thresholdsNote');
-    expect(source).toContain('settingsNote');
+    // Зато причина и способ изменить показываются, а не выбрасываются.
+    // Прежде на экране были голые числа и одна строка примечания — раздел
+    // из-за этого выглядел настройкой, в которой ничего не настраивается.
+    expect(source).toContain('whyReadonly');
+    expect(source).toContain('howTo.file');
+    expect(source).toContain('howTo.command');
+  });
+
+  it('каждый порог объясняет, что произойдёт с письмом и куда его двигать', () => {
+    // Число без последствий настройкой не является: «6» не отвечает ни на
+    // один вопрос, с которым к порогам приходят.
+    expect(source).toContain('item.effect');
+    expect(source).toContain('item.higher');
+    expect(source).toContain('item.lower');
+    // Выключенный порог обязан сказать, чем это оборачивается.
+    expect(source).toContain('item.off');
+  });
+
+  it('пороги показаны для обоих видов отправителей', () => {
+    // У писем своих аутентифицированных отправителей пороги другие, и без
+    // второго набора экран не объясняет, почему письмо сотрудника с той же
+    // оценкой в спам не ушло.
+    expect(source).toContain('data.profiles.map');
+    expect(source).toContain('profile.warnings');
   });
 
   it('раздел показывает, что счётчики обнуляются при перезапуске', () => {
@@ -91,11 +119,48 @@ describe('спам: честность вместо ложных кнопок', 
   });
 });
 
-describe('спам: мелочи интерфейса', () => {
+describe('антиспам: списки таблицами на вкладках', () => {
+  const source = file('src/pages/SpamPage.tsx');
+
+  it('списки показаны таблицей, а не столбиком строк', () => {
+    // Раньше восемь списков шли подряд панелями со списком <li>: найти в
+    // сотне разрешённых адресов нужный можно было только поиском браузера.
+    expect(source).toContain('function ListTable');
+    expect(source).not.toContain('styles.entries');
+  });
+
+  it('у списка есть поиск и вкладка на каждый список', () => {
+    expect(source).toContain('filterEntries');
+    expect(source).toContain('Поиск по списку');
+    expect(source).toContain('label="Списки антиспама"');
+  });
+
+  it('пустой список объясняет, зачем он нужен, а не пишет «пусто»', () => {
+    expect(source).toContain('list.purpose');
+    expect(source).toContain('list.example');
+    expect(source).not.toContain('Список пуст');
+  });
+
+  it('поиск идёт подстрокой и без учёта регистра', () => {
+    // Ищут обычно по домену внутри адреса — «кто разрешён из partner».
+    const entries = ['ivan@Partner.example', 'boss@other.example', '203.0.113.0/24'];
+    expect(filterEntries(entries, 'partner')).toEqual(['ivan@Partner.example']);
+    expect(filterEntries(entries, ' 0/24 ')).toEqual(['203.0.113.0/24']);
+    // Пустой запрос ничего не прячет.
+    expect(filterEntries(entries, '   ')).toHaveLength(3);
+  });
+});
+
+describe('антиспам: мелочи интерфейса', () => {
   it('подсказка ввода своя у каждого вида записи', () => {
     expect(entryPlaceholder('address')).toContain('@');
     expect(entryPlaceholder('domain')).not.toContain('@');
     expect(entryPlaceholder('ip')).toContain('/');
+  });
+
+  it('вес правила всегда со знаком: без плюса минус читается как опечатка', () => {
+    expect(scoreText(12)).toBe('+12');
+    expect(scoreText(-6)).toBe('-6');
   });
 
   it('время работы читается словами, а не в секундах', () => {

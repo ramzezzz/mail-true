@@ -27,7 +27,7 @@ const TITLES: Readonly<Record<string, string>> = {
   '/logs': 'Журналы почты',
   '/branding': 'Оформление входа',
   '/sender-logos': 'Логотипы доменов',
-  '/spam': 'Спам',
+  '/spam': 'Антиспам',
   '/monitoring': 'Наблюдение',
   '/backups': 'Резервные копии',
   '/migrate': 'Перенос почты',

@@ -1271,7 +1271,7 @@ export interface MigrationListInput {
 }
 
 /* ================================================================== */
-/* Спам: статистика, списки, обучение                                  */
+/* Антиспам: статистика, пороги, списки, обучение                      */
 /* ================================================================== */
 
 /** Сколько раз сработало правило rspamd и сколько оно весит. */
@@ -1317,10 +1317,6 @@ export interface SpamOverview {
   periodNote: string;
   collectingSince: string | null;
   manualLearns: { spam: number; ham: number };
-  /** Действующие пороги; null у действия означает «выключено». */
-  thresholds: Record<string, number | null>;
-  thresholdsNote: string;
-  settingsNote: string;
   symbols: SpamSymbol[];
   symbolsNote: string;
   selfProbeNote: string;
@@ -1358,10 +1354,66 @@ export interface SpamList {
   score: number;
   editable: boolean;
   hint: string;
+  /** Зачем список заводят — текст для пустой таблицы. */
+  purpose: string;
+  /** Пример записи: и в подсказке поля ввода, и в пустой таблице. */
+  example: string;
   file: string;
   entries: string[];
   /** Почему список не прочитан; null — прочитан. */
   problem: string | null;
+}
+
+/* ------------------------------------------------------------------ */
+/* Пороги                                                              */
+/* ------------------------------------------------------------------ */
+
+/** Один рубеж: с какого балла что происходит и чем грозит сдвиг. */
+export interface SpamThresholdItem {
+  id: string;
+  title: string;
+  /** Балл, с которого действие срабатывает; null — действие выключено. */
+  value: number | null;
+  effect: string;
+  visible: string;
+  higher: string;
+  lower: string;
+  off: string;
+  /** Рекомендуемый коридор [от, до]; null — рекомендации нет. */
+  advice: [number, number] | null;
+  /** Значение вне коридора: повод перепроверить, а не ошибка. */
+  unusual: boolean;
+}
+
+/**
+ * Набор порогов для одного вида отправителей.
+ *
+ * Их два, и это не украшение: у писем собственных аутентифицированных
+ * отправителей пороги свои, более мягкие, и без второго профиля экран не
+ * объясняет, почему письмо сотрудника с той же оценкой в спам не ушло.
+ */
+export interface SpamThresholdProfile {
+  id: 'common' | 'own';
+  title: string;
+  note: string;
+  items: SpamThresholdItem[];
+  /** Противоречия внутри набора — то, чего не видно по числам порознь. */
+  warnings: string[];
+  /** true — числа получены прогоном пробного письма, а не у контроллера. */
+  measured: boolean;
+  problem: string | null;
+}
+
+export interface SpamThresholds {
+  available: boolean;
+  unavailable: string | null;
+  profiles: SpamThresholdProfile[];
+  /** Всегда false: почему — в whyReadonly, и это объяснение обязано быть видно. */
+  editable: boolean;
+  whyReadonly: string;
+  howTo: { file: string; format: string; command: string; note: string };
+  probeNote: string;
+  scaleNote: string;
 }
 
 export interface SpamListsResponse {

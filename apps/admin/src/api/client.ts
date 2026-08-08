@@ -77,6 +77,7 @@ import type {
   SpamListsResponse,
   SpamOverview,
   SpamSettings,
+  SpamThresholds,
   SignatureBulkPreview,
   SignatureBulkRequest,
   SignatureBulkResult,
@@ -435,6 +436,15 @@ export const api = {
    * то, что кто-то вписал в файл руками.
    */
   spamOverview: (hours: number) => get<SpamOverview>(`/spam/overview${query({ hours })}`),
+  /**
+   * Пороги — только чтение, и метода записи здесь нет намеренно.
+   *
+   * Контроллер rspamd сохраняет пороги лишь при настроенном dynamic_conf,
+   * которого в сборке нет, а обходной путь завёл бы второй источник истины
+   * поверх infra/rspamd/local.d/actions.conf. Ответ объясняет каждый порог
+   * и печатает точный путь и команду вместо ложной кнопки «Сохранить».
+   */
+  spamThresholds: () => get<SpamThresholds>('/spam/thresholds'),
   spamHistory: (params: { limit?: number; spamOnly?: boolean }) =>
     get<SpamHistory>(`/spam/history${query(params)}`),
   spamLists: () => get<SpamListsResponse>('/spam/lists'),

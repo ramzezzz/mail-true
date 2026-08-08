@@ -1,5 +1,5 @@
 /**
- * Раздел «Спам»: что фильтр сделал, по каким спискам и как это изменить.
+ * Раздел «Антиспам»: что фильтр сделал, по каким спискам и как это изменить.
  *
  * ------------------------------------------------------------------
  * ПРАВА
@@ -28,9 +28,16 @@
  * Изменения порогов. Управляющий интерфейс rspamd на этой сборке его не
  * даёт (подробно — в rspamd.ts), а если бы давал, писал бы пороги в
  * отдельный скрытый файл поверх infra/rspamd/local.d/actions.conf — и
- * правка actions.conf молча переставала бы действовать. Пороги
- * показываются на чтение вместе с точным указанием, где они правятся.
- * Ложной кнопки «сохранить» в разделе нет намеренно.
+ * правка actions.conf молча переставала бы действовать. Ложной кнопки
+ * «сохранить» в разделе нет намеренно.
+ *
+ * Но одного «нельзя» мало: раньше пороги отдавались голыми числами, и
+ * раздел получался бесполезным — четыре плитки, про которые непонятно ни
+ * что они делают, ни куда их двигать. Поэтому появился отдельный ответ
+ * GET /spam/thresholds: он объясняет каждый рубеж, показывает пороги ОБОИХ
+ * профилей (общий и «свой аутентифицированный отправитель», второй —
+ * измерением), ищет противоречия между порогами и печатает точный путь и
+ * команду для правки. Подробности — в spam-thresholds.ts.
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -47,6 +54,11 @@ import {
 } from '../rspamd.js';
 import { checkEntry, findSpamList, matchMapId, SPAM_LISTS } from '../spam-lists.js';
 import { spamOf, SpamStore } from '../spam-store.js';
+import {
+  describeThresholds,
+  thresholdProbeMessage,
+  thresholdWarnings,
+} from '../spam-thresholds.js';
 
 const windowSchema = z.object({
   hours: z.coerce
@@ -187,15 +199,13 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       bayes: Array<{ symbol: string; type: string; revision: number }>;
     } | null = null;
     let symbols: Array<{ symbol: string; weight: number; hits: number }> = [];
-    let thresholds: Record<string, number | null> = {};
     let unavailable: string | null = null;
 
     try {
-      const [stat, counters, actions] = await Promise.all([
-        rspamd.stat(),
-        rspamd.counters(),
-        rspamd.actions(),
-      ]);
+      // Порогов здесь больше нет: они целиком переехали в /spam/thresholds
+      // вместе с объяснением каждого. Держать их в двух ответах значило бы
+      // однажды разойтись формулировками про одно и то же число.
+      const [stat, counters] = await Promise.all([rspamd.stat(), rspamd.counters()]);
       live = {
         version: stat.version,
         uptimeSeconds: stat.uptimeSeconds,
@@ -213,21 +223,6 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
         weight: c.weight,
         hits: c.hits,
       }));
-      /*
-       * «no action» из списка убираем: это не порог, а название исхода
-       * «ничего не делать», и порога у него не бывает по устройству
-       * rspamd. На экране оно выглядело как выключенная настройка —
-       * то есть предлагало включить то, чего не существует.
-       *
-       * Порядок: сначала настроенные, потом выключенные. Иначе четыре
-       * «выключено» стоят перед двумя числами, ради которых сюда и
-       * смотрят.
-       */
-      thresholds = Object.fromEntries(
-        Object.entries(actions)
-          .filter(([name]) => name !== 'no action')
-          .sort(([, a], [, b]) => (a === null ? 1 : 0) - (b === null ? 1 : 0)),
-      );
     } catch (err) {
       unavailable = err instanceof RspamdUnavailableError ? err.message : (err as Error).message;
     }
@@ -256,17 +251,6 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       collectingSince,
       /** Обучение из панели — по журналу аудита, а не по счётчику rspamd. */
       manualLearns: manual,
-      thresholds,
-      thresholdsNote:
-        'Пороги отдаются на чтение: управляющий интерфейс rspamd их менять не позволяет, а ' +
-        'обходной путь записал бы их в отдельный файл поверх actions.conf — тогда в ' +
-        'настройке появилось бы два источника истины. Правятся в ' +
-        'infra/rspamd/local.d/actions.conf, применяются без простоя командой ' +
-        'docker compose -f infra/docker-compose.yml kill -s HUP rspamd',
-      settingsNote:
-        'У писем НАШИХ аутентифицированных отправителей пороги свои, более мягкие, и часть ' +
-        'внешних проверок для них не выполняется вовсе (infra/rspamd/local.d/settings.conf). ' +
-        'Увидеть эти пороги можно проверкой письма ниже, выбрав «от своего пользователя»',
       symbols,
       symbolsNote:
         'Срабатывания правил считает сам rspamd — с момента запуска процесса, а не за ' +
@@ -342,6 +326,129 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /* ---------------------------------------------------------------- */
+  /* Пороги                                                             */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Пороги с объяснением: что происходит на каждом рубеже и чем грозит сдвиг.
+   *
+   * Отдельным запросом, а не частью сводки, ровно по одной причине: здесь
+   * есть ИЗМЕРЕНИЕ. Чтобы узнать пороги профиля «свой отправитель», надо
+   * прогнать через rspamd пробное письмо, а это лишняя проверка в его
+   * счётчиках. В сводке она делалась бы при каждом открытии раздела и на
+   * каждое переключение периода; здесь — только когда человек открыл
+   * вкладку «Пороги», то есть когда за неё есть чем платить.
+   *
+   * Право — overview.read: числа ничего не раскрывают о переписке, а
+   * вопрос «почему письмо ушло в спам» задают в первую очередь дежурному.
+   */
+  app.get('/spam/thresholds', { preHandler: requireAdmin(app, 'overview.read') }, async () => {
+    let common: Record<string, number | null> = {};
+    let unavailable: string | null = null;
+    try {
+      common = await rspamd.actions();
+    } catch (err) {
+      unavailable = err instanceof RspamdUnavailableError ? err.message : (err as Error).message;
+    }
+
+    /*
+     * Пороги своих отправителей — измерением, потому что иначе никак:
+     * профили настроек (infra/rspamd/local.d/settings.conf) контроллер не
+     * показывает. Отказ измерения не должен ронять весь ответ: общие
+     * пороги — главное, ради чего сюда пришли, и терять их из-за неудачной
+     * пробы нельзя.
+     */
+    let own: Record<string, number | null> = {};
+    let ownProblem: string | null = unavailable;
+    if (unavailable === null) {
+      const probeSender = `postmaster@${ctx.config.MAIL_DOMAIN}`;
+      try {
+        const verdict = await rspamd.check(thresholdProbeMessage(ctx.config.MAIL_DOMAIN), {
+          ip: '127.0.0.1',
+          from: probeSender,
+          rcpt: probeSender,
+          // Аутентифицированного отправителя rspamd узнаёт по заголовку
+          // User — именно по нему срабатывает профиль own_users.
+          user: probeSender,
+        });
+        own = verdict.thresholds;
+      } catch (err) {
+        ownProblem = err instanceof Error ? err.message : String(err);
+      }
+    }
+
+    return {
+      available: unavailable === null,
+      unavailable,
+      /**
+       * Два профиля, а не один набор чисел. Раньше раздел показывал только
+       * общие пороги, и на вопрос «почему письмо нашего сотрудника не
+       * ушло в спам, хотя набрало восемь баллов» ответить по экрану было
+       * нельзя: у своих отправителей порог другой, и об этом нигде не
+       * говорилось.
+       */
+      profiles: [
+        {
+          id: 'common',
+          title: 'Письма извне',
+          note:
+            'Общие пороги: действуют на всю почту, приходящую из интернета. Заданы в ' +
+            'infra/rspamd/local.d/actions.conf.',
+          items: describeThresholds(common),
+          warnings: thresholdWarnings(common),
+          measured: false,
+          problem: unavailable,
+        },
+        {
+          id: 'own',
+          title: 'Письма своих аутентифицированных отправителей',
+          note:
+            'Для писем, отправленных через submission с логином и паролем, пороги свои — ' +
+            'заметно мягче, и часть внешних проверок для них не выполняется вовсе ' +
+            '(infra/rspamd/local.d/settings.conf). Чтобы письмо сотрудника не уехало в спам ' +
+            'из-за форматирования.',
+          items: describeThresholds(own),
+          warnings: thresholdWarnings(own),
+          /** Измерено пробным письмом, а не прочитано у контроллера. */
+          measured: ownProblem === null,
+          problem: ownProblem,
+        },
+      ],
+      /**
+       * Прямой ответ на «почему нельзя нажать и сохранить». Не отговорка:
+       * ниже стоит ровно то, что надо сделать вместо кнопки.
+       */
+      editable: false,
+      whyReadonly:
+        'Пороги из панели не записываются, и это не осторожность, а отсутствие места для ' +
+        'записи. Контроллер rspamd сохраняет пороги только при настроенном dynamic_conf, ' +
+        'которого в сборке нет; а если бы он был, пороги легли бы в отдельный файл ПОВЕРХ ' +
+        'actions.conf — и правка самого actions.conf молча перестала бы действовать. Сам ' +
+        'файл серверу приложения недоступен: каталог local.d примонтирован в контейнер ' +
+        'rspamd только на чтение. Списки ниже правятся именно потому, что их пишет сам ' +
+        'rspamd по своему запросу; у порогов такого механизма нет.',
+      howTo: {
+        file: 'infra/rspamd/local.d/actions.conf',
+        format: 'reject = 15;   add_header = 6;   greylist = null;',
+        command: 'docker compose -f infra/docker-compose.yml kill -s HUP rspamd',
+        note:
+          'Формат строгий: «имя = значение;», по одному порогу на строку. null означает ' +
+          '«действие выключено». Перезапуск не нужен — сигнал HUP применяет правку без ' +
+          'простоя, почта в этот момент не теряется.',
+      },
+      probeNote:
+        'Пороги своих отправителей измеряются пробным письмом при каждом открытии этой ' +
+        'вкладки: другого способа их узнать у панели нет. Письмо никуда не доставляется и ' +
+        'ничему не обучает, но в счётчик проверенных писем попадает.',
+      scaleNote:
+        'Баллы складываются из всех сработавших правил: проверок подписи и репутации, ' +
+        'внешних списков, ваших списков ниже и обученного классификатора. Обычное деловое ' +
+        'письмо со ссылками и картинками набирает 2–4 балла — поэтому порог пометки ниже ' +
+        'четырёх опасен даже на самом спокойном сервере.',
+    };
+  });
+
+  /* ---------------------------------------------------------------- */
   /* Списки                                                             */
   /* ---------------------------------------------------------------- */
 
@@ -377,6 +484,10 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
           score: spec.score,
           editable: spec.editable,
           hint: spec.hint,
+          // Зачем список нужен и пример записи: без них пустая таблица
+          // говорит человеку только «здесь ничего нет».
+          purpose: spec.purpose,
+          example: spec.example,
           file: spec.file,
           entries,
           problem,
