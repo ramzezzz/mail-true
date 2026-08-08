@@ -133,7 +133,10 @@ describe('состояния различимы', () => {
      */
     // Файл ищем от рабочего каталога вверх: в jsdom `import.meta.url` —
     // адрес http, а не файла, и обычный приём соседних тестов тут не годится.
-    const registry = readFileSync(repoFile('apps/api/src/admin/server-settings-registry.ts'), 'utf8');
+    const registry = readFileSync(
+      repoFile('apps/api/src/admin/server-settings-registry.ts'),
+      'utf8',
+    );
     const groups = new Set(
       [...registry.matchAll(/group: '([a-z]+)'/gu)].map((match) => match[1] as SettingGroup),
     );
@@ -148,7 +151,10 @@ describe('состояния различимы', () => {
         `группы «${group}» и «${already}» показываются одинаково: «${label.text}»`,
       ).toBeUndefined();
       labels.set(label.text, group);
-      expect(FILTER_LABELS[group as SettingFilter], `для группы «${group}» нет отбора`).toBeTruthy();
+      expect(
+        FILTER_LABELS[group as SettingFilter],
+        `для группы «${group}» нет отбора`,
+      ).toBeTruthy();
     }
   });
 

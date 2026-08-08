@@ -241,7 +241,9 @@ export function BrandingPage() {
             style={{ maxWidth: 620, minHeight: 90 }}
             value={footer}
             disabled={!writable}
-            placeholder={'Поддержка: +7 000 000-00-00, доб. 123\nОбращения — через заявку в служебной системе'}
+            placeholder={
+              'Поддержка: +7 000 000-00-00, доб. 123\nОбращения — через заявку в служебной системе'
+            }
             onChange={(e) => setFooter(e.target.value)}
           />
         </Field>

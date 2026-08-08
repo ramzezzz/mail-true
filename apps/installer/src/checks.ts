@@ -438,10 +438,7 @@ async function staged<T>(
   }
 }
 
-export async function runChecks(
-  ctx: CheckContext,
-  watch?: CheckWatcher,
-): Promise<CheckResult[]> {
+export async function runChecks(ctx: CheckContext, watch?: CheckWatcher): Promise<CheckResult[]> {
   const [memory, disk, docker, ports, outbound] = await Promise.all([
     staged(watch, { id: 'memory', title: 'Оперативная память' }, () => checkMemory(ctx)),
     staged(watch, { id: 'disk', title: 'Место на диске' }, () => checkDisk(ctx)),

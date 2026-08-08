@@ -1,7 +1,7 @@
 /**
  * Генератор слоя дизайн-токенов.
  *
- * Читает research/mailru/design-tokens-raw.json (полная выгрузка CSS-переменных
+ * Читает brand/reference/design-tokens-raw.json (полная выгрузка CSS-переменных
  * с живого e.mail.ru, ~1500 переменных) и порождает:
  *
  *   src/styles/tokens.css      — отобранное подмножество в нашем пространстве
@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RAW_PATH = join(HERE, '../../../research/mailru/design-tokens-raw.json');
+const RAW_PATH = join(HERE, '../../../brand/reference/design-tokens-raw.json');
 const OUT_CSS = join(HERE, '../src/styles/tokens.css');
 const OUT_MAP = join(HERE, '../src/styles/tokens.map.json');
 
@@ -256,7 +256,7 @@ export function generateCss(tokens) {
 
   let css = `/*
  * СГЕНЕРИРОВАНО СКРИПТОМ — НЕ ПРАВИТЬ РУКАМИ.
- * Источник: research/mailru/design-tokens-raw.json (выгрузка с живого e.mail.ru).
+ * Источник: brand/reference/design-tokens-raw.json (выгрузка с живого e.mail.ru).
  * Генератор: apps/web/scripts/build-tokens.mjs.
  * Карта соответствия «--mt-* → исходное имя»: src/styles/tokens.map.json.
  *

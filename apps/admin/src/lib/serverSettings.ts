@@ -174,13 +174,7 @@ export function valueText(value: SettingValue | null): string {
  * настройки, из-за которых он нужен, а не все 59 обещаний.
  */
 export type SettingFilter =
-  | 'all'
-  | 'live'
-  | 'restart'
-  | 'recreate'
-  | 'pending'
-  | 'locked'
-  | 'changed';
+  'all' | 'live' | 'restart' | 'recreate' | 'pending' | 'locked' | 'changed';
 
 export const FILTER_LABELS: Readonly<Record<SettingFilter, string>> = {
   all: 'Все',

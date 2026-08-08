@@ -379,7 +379,10 @@ export function LogsPage() {
           умолчанию, но не выброшены: иногда нужно убедиться, что служба
           вообще отвечала.
         */}
-        <label className={styles.auto} title="Отчёты проверок живости и внутренние соединения служб">
+        <label
+          className={styles.auto}
+          title="Отчёты проверок живости и внутренние соединения служб"
+        >
           <input
             type="checkbox"
             checked={serviceNoise}

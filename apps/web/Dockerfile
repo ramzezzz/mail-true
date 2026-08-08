@@ -2,7 +2,7 @@
 #
 # Контекст сборки — корень репозитория (npm workspaces): интерфейсу нужен
 # общий пакет packages/shared, а генератору дизайн-токенов — выгрузка
-# research/mailru/design-tokens-raw.json.
+# brand/reference/design-tokens-raw.json.
 #
 # Итоговый образ — nginx со статикой: ни Node, ни node_modules, ни исходников.
 
@@ -29,7 +29,7 @@ WORKDIR /repo
 COPY tsconfig.base.json ./
 COPY packages/shared ./packages/shared
 # Нужен генератору apps/web/scripts/build-tokens.mjs
-COPY research/mailru/design-tokens-raw.json ./research/mailru/
+COPY brand/reference/design-tokens-raw.json ./brand/reference/
 COPY apps/web ./apps/web
 RUN npm run build --workspace @mail-true/web \
     # Карты кода наружу не отдаём: это +1.7 МБ к образу и исходники в открытом виде

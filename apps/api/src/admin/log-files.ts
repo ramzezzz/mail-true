@@ -24,7 +24,8 @@ import { createReadStream } from 'node:fs';
 import { open, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ApiError } from '../errors.js';
-import { isServiceNoise,
+import {
+  isServiceNoise,
   isLogSource,
   levelAtLeast,
   parseLogLine,

@@ -28,7 +28,7 @@ FROM deps AS build
 WORKDIR /repo
 COPY tsconfig.base.json ./
 COPY packages/shared ./packages/shared
-COPY research/mailru/design-tokens-raw.json ./research/mailru/
+COPY brand/reference/design-tokens-raw.json ./brand/reference/
 COPY apps/web ./apps/web
 COPY apps/admin ./apps/admin
 # Слой дизайн-токенов порождается генератором, а не пишется руками:

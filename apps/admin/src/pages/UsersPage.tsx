@@ -537,7 +537,9 @@ function CreateUserModal({
       */}
       <Field
         label="Пароль"
-        hint={passwordProblem ?? 'Оставьте пустым — сгенерируем и покажем один раз. Минимум 8 знаков'}
+        hint={
+          passwordProblem ?? 'Оставьте пустым — сгенерируем и покажем один раз. Минимум 8 знаков'
+        }
       >
         <div className="mt-input-with-action">
           <input
