@@ -479,6 +479,8 @@ export const api = {
     source: string;
     level?: string | undefined;
     search?: string | undefined;
+    /** Показывать ли отчёты проверок живости. По умолчанию скрыты. */
+    serviceNoise?: boolean | undefined;
     after: number;
     limit?: number | undefined;
     fileId?: string | undefined;
