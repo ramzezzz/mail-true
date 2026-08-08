@@ -211,7 +211,10 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
    * без чего продукт не работает вовсе, — антиспама и отправки здесь нет.
    */
   app.get('/healthz', { config: { rateLimit: false } }, async (_request, reply) => {
-    const report = await app.health.report();
+    // Только критичные части: см. разбор в reportCritical(). Полный обход
+    // здесь означал соединение с Postfix и Dovecot каждые десять секунд —
+    // и восемь тысяч служебных строк в сутки в журналах почты.
+    const report = await app.health.reportCritical();
     const broken = brokenCriticalParts(report);
     if (broken.length > 0) {
       void reply.status(503);

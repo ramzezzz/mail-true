@@ -24,7 +24,7 @@ import { createReadStream } from 'node:fs';
 import { open, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ApiError } from '../errors.js';
-import {
+import { isServiceNoise,
   isLogSource,
   levelAtLeast,
   parseLogLine,
@@ -68,6 +68,13 @@ export interface LogLine extends LogEntry {
 
 export interface ReadLogOptions {
   levelAtMost?: LogLevel;
+  /**
+   * Показывать ли служебные строки: отчёты проверок живости и внутренние
+   * обращения служб друг к другу. Отсев идёт ЗДЕСЬ, а не в маршруте, —
+   * иначе страница на двести строк возвращала бы пять: остальное съели бы
+   * отчёты системы о самой себе, а бюджет просмотра уже был бы потрачен.
+   */
+  serviceNoise?: boolean;
   /** Подстрока для поиска, регистр не важен. */
   search?: string | undefined;
   limit: number;
@@ -167,6 +174,7 @@ export async function readLogPage(
 
   const threshold = options.levelAtMost ?? 'debug';
   const needle = options.search?.trim().toLowerCase() ?? '';
+  const keepNoise = options.serviceNoise === true;
 
   const handle = await open(info.path, 'r');
   try {
@@ -223,6 +231,7 @@ export async function readLogPage(
         const entry = parseLogLine(source, raw.slice(0, MAX_LINE_CHARS), now);
         if (!levelAtLeast(entry.level, threshold)) continue;
         if (needle !== '' && !raw.toLowerCase().includes(needle)) continue;
+        if (!keepNoise && isServiceNoise(entry.text)) continue;
         items.push({ ...entry, offset: line.offset });
         lowestReturned = line.offset;
       }
@@ -319,6 +328,8 @@ export interface TailLogOptions {
   after: number;
   levelAtMost?: LogLevel;
   search?: string | undefined;
+  /** Показывать ли служебные строки — см. пояснение в ReadLogOptions. */
+  serviceNoise?: boolean;
   /** Сколько строк отдать самое большее. */
   limit: number;
   /** Опознаватель файла из прошлого ответа — ловит проворот журнала. */
@@ -373,6 +384,7 @@ export async function readLogTail(
 
   const threshold = options.levelAtMost ?? 'debug';
   const needle = options.search?.trim().toLowerCase() ?? '';
+  const keepNoise = options.serviceNoise === true;
   const maxBytes = options.maxBytes ?? SCAN_BUDGET_BYTES;
 
   const { lines, nextOffset } = await readNewLinesWithOffsets(info.path, from, maxBytes);
@@ -387,6 +399,7 @@ export async function readLogTail(
     const entry = parseLogLine(source, line.text.slice(0, MAX_LINE_CHARS), now);
     if (!levelAtLeast(entry.level, threshold)) continue;
     if (needle !== '' && !line.text.toLowerCase().includes(needle)) continue;
+    if (!keepNoise && isServiceNoise(entry.text)) continue;
     items.push({ ...entry, offset: line.offset });
   }
 

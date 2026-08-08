@@ -97,6 +97,14 @@ export function LogsPage() {
   const [source, setSource] = useState<string>('postfix');
   const [level, setLevel] = useState<LogLevel>('debug');
   const [search, setSearch] = useState('');
+  /*
+   * Служебные строки скрыты по умолчанию. Их пишет система про саму себя:
+   * проверки живости стучатся в порты Dovecot и Postfix, те записывают
+   * каждый стук. На одно настоящее письмо приходятся десятки таких строк,
+   * и живая доставка в них тонет. Скрыты, а не выброшены: иногда нужно
+   * убедиться, что служба вообще отвечала.
+   */
+  const [serviceNoise, setServiceNoise] = useState(false);
   const [applied, setApplied] = useState('');
 
   // Поиск с задержкой: каждый набранный символ иначе означал бы новый
@@ -149,6 +157,7 @@ export function LogsPage() {
         source,
         level,
         search: applied || undefined,
+        serviceNoise,
         limit: PAGE_SIZE,
       });
       scrollPlan.current = { kind: 'bottom' };
@@ -169,7 +178,7 @@ export function LogsPage() {
     } finally {
       setPending(false);
     }
-  }, [source, level, applied]);
+  }, [source, level, applied, serviceNoise]);
 
   useEffect(() => {
     void reload();
@@ -187,6 +196,7 @@ export function LogsPage() {
         source,
         level,
         search: applied || undefined,
+        serviceNoise,
         limit: PAGE_SIZE,
         before,
         fileId: loaded.fileId,
@@ -206,7 +216,7 @@ export function LogsPage() {
     } finally {
       setOlderPending(false);
     }
-  }, [applied, level, loaded.fileId, loaded.olderBefore, olderPending, source]);
+  }, [applied, level, loaded.fileId, loaded.olderBefore, olderPending, source, serviceNoise]);
 
   /* --- Дочитывание нового -------------------------------------------- */
   const pollOnce = useCallback(async () => {
@@ -216,6 +226,7 @@ export function LogsPage() {
         source,
         level,
         search: applied || undefined,
+        serviceNoise,
         after: loaded.after,
         limit: PAGE_SIZE,
         fileId: loaded.fileId,
@@ -259,7 +270,7 @@ export function LogsPage() {
       // и продолжим — журнал мог просто провернуться под нами.
       if (err instanceof ApiError && err.status >= 500) setError(err);
     }
-  }, [applied, level, loaded.after, loaded.fileId, source]);
+  }, [applied, level, loaded.after, loaded.fileId, source, serviceNoise]);
 
   useEffect(() => {
     if (!auto) return;
@@ -360,6 +371,21 @@ export function LogsPage() {
         <label className={styles.auto}>
           <input type="checkbox" checked={auto} onChange={(e) => toggleAuto(e.target.checked)} />
           <span>Автообновление</span>
+        </label>
+        {/*
+          Служебные строки — то, что система пишет про саму себя: проверка
+          живости стучится в порты Dovecot и Postfix, те записывают каждый
+          стук. На одно настоящее письмо их приходятся десятки. Скрыты по
+          умолчанию, но не выброшены: иногда нужно убедиться, что служба
+          вообще отвечала.
+        */}
+        <label className={styles.auto} title="Отчёты проверок живости и внутренние соединения служб">
+          <input
+            type="checkbox"
+            checked={serviceNoise}
+            onChange={(e) => setServiceNoise(e.target.checked)}
+          />
+          <span>Служебные</span>
         </label>
         <ToolbarSpacer />
         <Button mode="secondary" size="s" onClick={() => void reload()}>

@@ -602,6 +602,8 @@ export interface LogSourcesResponse {
 }
 
 export interface LogLine {
+  /** Строка написана системой про саму себя: проверка живости, служебное соединение. */
+  service?: boolean;
   /** Смещение строки в файле — из него получается курсор. */
   offset: number;
   level: 'error' | 'warn' | 'info' | 'debug';

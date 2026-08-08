@@ -219,6 +219,11 @@ export class HealthMonitor {
   #cachedAt = 0;
   #inflight: Promise<HealthReport> | null = null;
 
+  /** Отдельный кэш короткого отчёта — см. reportCritical(). */
+  #cachedCritical: HealthReport | null = null;
+  #cachedCriticalAt = 0;
+  #inflightCritical: Promise<HealthReport> | null = null;
+
   constructor(options: HealthMonitorOptions = {}) {
     this.#ttlMs = options.ttlMs ?? 2000;
     this.#timeoutMs = options.timeoutMs ?? 3000;
@@ -250,16 +255,65 @@ export class HealthMonitor {
     return this.#inflight;
   }
 
-  async #run(): Promise<HealthReport> {
-    const parts = await Promise.all(this.#parts.map((part) => this.#runOne(part)));
+  /**
+   * ТОЛЬКО КРИТИЧНЫЕ ЧАСТИ — для пробы контейнера.
+   *
+   * Проба /healthz решает единственный вопрос: принимать ли запросы. На
+   * него отвечают критичные части, и только они. Некритичные (отправка
+   * через Postfix, чтение через Dovecot, антиспам) в этот ответ не
+   * входили никогда — но проверялись, потому что отчёт собирался целиком.
+   *
+   * Стоило это дорого и не деньгами, а журналом. Контейнер дёргает пробу
+   * каждые десять секунд, кэш живёт две; значит каждые десять секунд
+   * открывалось и закрывалось соединение с Postfix и с Dovecot. В
+   * «Журналах почты» это выглядело так:
+   *
+   *   connect from mailtrue-api-1[172.28.0.9]
+   *   disconnect from mailtrue-api-1[172.28.0.9] quit=1 commands=1
+   *
+   * — восемь с половиной тысяч пар строк в сутки, среди которых человек
+   * ищет настоящую доставку. Собственный служебный шум вытеснял из
+   * журнала то, ради чего журнал и заведён.
+   *
+   * Полная картина никуда не делась: её собирает /health (для человека)
+   * и раздел «Наблюдение» — там она и нужна, и запрашивается по делу.
+   */
+  async reportCritical(): Promise<HealthReport> {
+    // Полный отчёт свежее короткого — он и точнее: берём его, если есть.
+    const full = this.#cached;
+    if (full && this.#now() - this.#cachedAt < this.#ttlMs) return full;
+
+    const short = this.#cachedCritical;
+    if (short && this.#now() - this.#cachedCriticalAt < this.#ttlMs) return short;
+
+    this.#inflightCritical ??= this.#run({ criticalOnly: true }).finally(() => {
+      this.#inflightCritical = null;
+    });
+    return this.#inflightCritical;
+  }
+
+  async #run(opts?: { criticalOnly?: boolean }): Promise<HealthReport> {
+    const criticalOnly = opts?.criticalOnly === true;
+    const wanted = criticalOnly ? this.#parts.filter((p) => p.critical) : this.#parts;
+    const parts = await Promise.all(wanted.map((part) => this.#runOne(part)));
     const report: HealthReport = {
       status: statusOf(parts),
       uptimeSeconds: Math.round(this.#uptime()),
       checkedAt: new Date(this.#now()).toISOString(),
       parts,
     };
-    this.#cached = report;
-    this.#cachedAt = this.#now();
+    /*
+     * Короткий отчёт в общий кэш НЕ кладём: /health и «Наблюдение» ждут
+     * перечень всех частей, а получили бы огрызок из критичных — и это
+     * читалось бы как «остальные части исчезли».
+     */
+    if (criticalOnly) {
+      this.#cachedCritical = report;
+      this.#cachedCriticalAt = this.#now();
+    } else {
+      this.#cached = report;
+      this.#cachedAt = this.#now();
+    }
     return report;
   }
 

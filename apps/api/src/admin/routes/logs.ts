@@ -23,9 +23,15 @@ import {
   readLogPage,
   readLogTail,
 } from '../log-files.js';
-import { LOG_LEVELS, LOG_SOURCES, type LogSource } from '../mail-log.js';
+import { isServiceNoise, LOG_LEVELS, LOG_SOURCES, type LogSource } from '../mail-log.js';
 
 const querySchema = z.object({
+  /**
+   * Показывать ли служебные строки: отчёты проверок живости и
+   * внутренние обращения служб друг к другу. По умолчанию скрыты —
+   * на одно письмо их приходятся десятки, и живая доставка тонет.
+   */
+  serviceNoise: z.coerce.boolean().default(false),
   source: z.enum(['postfix', 'dovecot', 'api']).default('postfix'),
   /** Порог важности: выбранный уровень и всё, что важнее. */
   level: z.enum(['error', 'warn', 'info', 'debug']).default('debug'),
@@ -45,6 +51,7 @@ const querySchema = z.object({
  * строки между опросами. Здесь курсор точный — место в байтах.
  */
 const tailSchema = z.object({
+  serviceNoise: z.coerce.boolean().default(false),
   source: z.enum(['postfix', 'dovecot', 'api']).default('postfix'),
   level: z.enum(['error', 'warn', 'info', 'debug']).default('debug'),
   search: z.string().trim().max(200).optional(),
@@ -91,6 +98,7 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
     const page = await readLogPage(dir, q.source as LogSource, {
       levelAtMost: q.level,
       search: q.search,
+      serviceNoise: q.serviceNoise,
       limit: q.limit,
       before: q.before,
       fileId: q.fileId,
@@ -104,6 +112,7 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
         component: item.component,
         queueId: item.queueId,
         text: item.text,
+        service: isServiceNoise(item.text),
       })),
       nextBefore: page.nextBefore,
       /** С этого места дочитываются новые строки при автообновлении. */
@@ -127,6 +136,7 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
       after: q.after,
       levelAtMost: q.level,
       search: q.search,
+      serviceNoise: q.serviceNoise,
       limit: q.limit,
       fileId: q.fileId,
     });
@@ -139,6 +149,7 @@ export async function adminLogRoutes(app: FastifyInstance): Promise<void> {
         component: item.component,
         queueId: item.queueId,
         text: item.text,
+        service: isServiceNoise(item.text),
       })),
       nextAfter: tail.nextAfter,
       fileId: tail.fileId,
