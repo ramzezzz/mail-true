@@ -65,20 +65,33 @@
 }
 
 /* Строка «показатель — полоса — число» в карточке ресурсов. */
+/*
+ * Показатели ресурсов — рядом, а не столбиком.
+ *
+ * Пока это были полосы во всю ширину, они и стояли столбиком: полосе
+ * нужна длина. Кольцу длина не нужна, и пять колец в ряд сравниваются
+ * одним взглядом — ради этого замена и делалась. Ширина колонки задана
+ * минимумом, чтобы на узком экране ряд сам сложился в два.
+ */
 .gauges {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px 10px;
+  align-items: start;
 }
 
+/* Карточка показателя: заголовок, кольцо, число, источник. */
 .gauge {
   display: grid;
   gap: 3px;
+  justify-items: center;
+  text-align: center;
 }
 
 .gaugeHead {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
   font-size: 12px;
 }

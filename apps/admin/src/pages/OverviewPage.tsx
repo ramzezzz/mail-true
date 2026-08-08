@@ -41,7 +41,7 @@ import type {
   UserTrafficSort,
 } from '../api/types';
 import { PageTitle, CenteredSpinner } from '../app/AdminLayout';
-import { BarChart, DonutChart, LineChart, Meter } from '../components/Charts';
+import { BarChart, DonutChart, LineChart, Meter, Ring } from '../components/Charts';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, DnsBadge, ErrorNotice, Notice, Panel, Tile, Tiles } from '../components/ui';
 import { loadAutoRefresh, saveAutoRefresh, shouldPoll } from '../lib/autoRefresh';
@@ -428,13 +428,21 @@ function Gauge({
     <div className={styles.gauge}>
       <div className={styles.gaugeHead}>
         <span className={styles.gaugeTitle}>{title}</span>
-        <span className={styles.gaugeNumber}>{text}</span>
       </div>
-      <Meter
+      {/*
+        Кольцо вместо полосы. Полоса занимала всю ширину карточки и всё
+        равно читалась хуже: доля на ней оценивается на глаз по длине, а
+        у кольца заполненность видна целиком, и число стоит в середине —
+        там, куда и смотрят. Показателей на дашборде пять в ряд, и пять
+        колец сравниваются между собой одним взглядом.
+      */}
+      <Ring
         percent={percent}
         hue={hue}
+        title={title}
         label={percent === null ? '—' : `${Math.round(percent)}%`}
       />
+      <div className={styles.gaugeNumber}>{text}</div>
       {/* Источник числа стоит рядом с числом. Иначе «занято 42 %» не
           отвечает на вопрос «чего именно и по чьим данным» — а на
           дашборде это первый же вопрос. */}

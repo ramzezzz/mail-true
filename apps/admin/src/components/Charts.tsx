@@ -688,4 +688,73 @@ export function Meter({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Кольцевой показатель                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Одно значение в процентах — кольцом.
+ *
+ * Отличается от DonutChart тем, что показывает НЕ доли одного целого, а
+ * заполненность: сколько занято из ста процентов. Дуга идёт от
+ * двенадцати часов по часовой стрелке — так её и читают.
+ *
+ * Значение внутри кольца, а не сбоку: у показателя есть заголовок и
+ * подпись об источнике, и число, стоящее рядом с ними в строку, теряется
+ * между ними. В середине кольца оно единственное.
+ *
+ * `percent === null` — «не измеряли»: кольцо остаётся пустым, и это
+ * честнее нуля. Ноль означал бы «измерили и получили ноль».
+ */
+export function Ring({
+  percent,
+  hue,
+  label,
+  title,
+}: {
+  percent: number | null;
+  hue: ChartSeries['hue'];
+  label: ReactNode;
+  title?: string;
+}) {
+  const value = percent === null ? 0 : Math.min(100, Math.max(0, percent));
+  // Радиус и толщина подобраны так, чтобы кольцо оставалось читаемым в
+  // сетке показателей: тонкая дуга на светлом фоне сливается с трактом.
+  const radius = 30;
+  const circumference = 2 * Math.PI * radius;
+  const filled = (circumference * value) / 100;
+
+  return (
+    <svg
+      viewBox="0 0 76 76"
+      className={styles.ring}
+      role="img"
+      aria-label={title ?? (percent === null ? 'не измеряли' : `${Math.round(value)}%`)}
+    >
+      <circle className={styles.ringTrack} cx="38" cy="38" r={radius} />
+      {percent !== null && (
+        <circle
+          className={styles.ringValue}
+          cx="38"
+          cy="38"
+          r={radius}
+          stroke={hueVar(hue)}
+          strokeDasharray={`${String(filled)} ${String(circumference)}`}
+          // Поворот на четверть: дуга начинается сверху, а не справа.
+          transform="rotate(-90 38 38)"
+        />
+      )}
+      <text
+        className={styles.ringText}
+        x="38"
+        y="38"
+        textAnchor="middle"
+        dominantBaseline="central"
+      >
+        {label}
+      </text>
+    </svg>
+  );
+}
+
 export const chartStyles = styles;

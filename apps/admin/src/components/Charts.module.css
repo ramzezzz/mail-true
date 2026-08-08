@@ -143,6 +143,37 @@
   border-radius: 4px;
 }
 
+/* --- Кольцевой показатель --------------------------------------- */
+
+.ring {
+  display: block;
+  width: 100%;
+  max-width: 108px;
+  height: auto;
+  margin: 0 auto;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: var(--mt-chart-grid);
+  stroke-width: 8;
+}
+
+.ringValue {
+  fill: none;
+  stroke-width: 8;
+  /* Скруглённый конец дуги: у маленьких значений прямой срез читается
+     как обрубок, а не как начало шкалы. */
+  stroke-linecap: round;
+}
+
+.ringText {
+  fill: var(--mt-color-text-primary);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 .meterValue {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
