@@ -75,6 +75,30 @@ server {
     listen 443 ssl default_server;
     server_name ${MAIL_DOMAIN} mail.${MAIL_DOMAIN} _;
 
+    # ------------------------------------------------------------------
+    # HTTP → HTTPS на боевом сервере
+    # ------------------------------------------------------------------
+    # Без этого вход по http выглядит сломанным необъяснимо: страница
+    # открывается, пароль принимается, а потом снова форма входа. Причина
+    # не видна ниоткуда — cookie сессии отдаётся с флагом Secure
+    # (COOKIE_SECURE=true), и по HTTP браузер её просто не сохраняет.
+    # Неверный пароль при этом честно ругается, отчего кажется, что дело
+    # в чём угодно, только не в схеме адреса.
+    #
+    # Переключателем, а не жёстко: на стенде разработки всё ходит по
+    # http://localhost:8080, и постоянный редирект сломал бы и работу,
+    # и проверки. FORCE_HTTPS=1 ставит install/compose.prod.yml.
+    #
+    # ACME-проверка Let's Encrypt обязана остаться на HTTP: она приходит
+    # именно на 80-й порт, и редирект сорвал бы выпуск сертификата.
+    set $mt_redirect "${FORCE_HTTPS}$scheme";
+    if ($uri ~ ^/\.well-known/acme-challenge/) {
+        set $mt_redirect "acme";
+    }
+    if ($mt_redirect = "1http") {
+        return 301 https://$host$request_uri;
+    }
+
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
     http2 on;
@@ -203,6 +227,18 @@ server {
     listen 443 ssl;
     server_name admin.${MAIL_DOMAIN};
 
+    # HTTP → HTTPS, по той же причине, что и у почты: cookie сессии
+    # отдаётся с флагом Secure, и по HTTP вход молча не работает.
+    # ACME сюда не приходит (сертификат выпускается на почтовом имени),
+    # но исключение оставлено ради единообразия правил.
+    set $mt_redirect "${FORCE_HTTPS}$scheme";
+    if ($uri ~ ^/\.well-known/acme-challenge/) {
+        set $mt_redirect "acme";
+    }
+    if ($mt_redirect = "1http") {
+        return 301 https://$host$request_uri;
+    }
+
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
     http2 on;
@@ -273,6 +309,89 @@ server {
     # Всё остальное из /api/ на этом имени хоста не существует. Без явного
     # 404 такой запрос уходил бы в статику админки и возвращал её index.html
     # с кодом 200 — вид, будто маршрут есть.
+    location /api/ {
+        return 404;
+    }
+
+    location / {
+        set $admin_upstream http://admin:8080;
+        proxy_pass $admin_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+    }
+}
+
+# ------------------------------------------------------------------
+# РЕЗЕРВНЫЙ ВХОД В ПАНЕЛЬ: по адресу сервера, без DNS
+# ------------------------------------------------------------------
+# Панель отвечает только на имя admin.<домен>, и это правильно: по IP
+# отдаётся почта, а не управление сервером. Но пока DNS-записи не
+# разошлись (или домен вообще внутренний, вроде home.local), войти в
+# панель нельзя ниоткуда, кроме машины с правкой hosts. Сервер при этом
+# работает — просто управлять им нечем.
+#
+# Поэтому здесь второй вход: по адресу, без имени. У него ДВА рубежа,
+# и оба нужны.
+#
+#  1. Порт публикуется только на локальном адресе сервера
+#     (ADMIN_LOCAL_BIND в infra/.env, по умолчанию 127.0.0.1). Это и
+#     есть главная защита: из интернета к порту просто не подключиться.
+#  2. Список сетей ниже. Он не заменяет первый рубеж, а страхует его —
+#     на случай, если порт откроют шире, чем собирались.
+#
+# Почему одного списка мало: при публикации порта средствами Docker
+# адрес клиента в отдельных конфигурациях подменяется адресом шлюза
+# сети контейнеров (172.28.0.1). Он попадает в 172.16.0.0/12, то есть
+# «разрешено всем изнутри» превратилось бы в «разрешено всем вообще».
+# Привязка к адресу от этого не зависит.
+# ------------------------------------------------------------------
+server {
+    listen 8081 ssl;
+    http2 on;
+    server_name _;
+
+    ssl_certificate     /certs/mail.crt;
+    ssl_certificate_key /certs/mail.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:4m;
+    ssl_session_timeout 1h;
+
+    server_tokens off;
+    client_max_body_size 16m;
+
+    allow 127.0.0.0/8;
+    allow ::1/128;
+    allow 10.0.0.0/8;
+    allow 172.16.0.0/12;
+    allow 192.168.0.0/16;
+    allow 169.254.0.0/16;
+    allow fc00::/7;
+    allow fe80::/10;
+    deny all;
+
+    # HSTS здесь НЕ ставится намеренно: сертификат на имя, а входят по
+    # адресу — браузер и так покажет предупреждение, а закреплять за
+    # адресом обязательный HTTPS на год незачем.
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options        "DENY" always;
+    add_header Referrer-Policy        "same-origin" always;
+    add_header X-Robots-Tag           "noindex, nofollow" always;
+
+    location /api/admin/ {
+        set $api_upstream http://api:3000;
+        proxy_pass $api_upstream$request_uri;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection        "";
+        proxy_request_buffering off;
+        proxy_read_timeout 120s;
+    }
+
     location /api/ {
         return 404;
     }
