@@ -29,6 +29,35 @@ bash infra/test-delivery.sh           # сквозная проверка дос
 | admin      | сборка `apps/admin/Dockerfile` (nginx:1.27-alpine)   | Собранная Vite админка (статика)                                                                                                                                                 |
 | nginx      | nginx:1.27-alpine                                    | Единственный вход HTTP/HTTPS: почта (`<домен>`, `mail.<домен>`), админка (`admin.<домен>`), автонастройка (`autoconfig.<домен>`, `autodiscover.<домен>`, `/.well-known/`)        |
 | clamav     | clamav/clamav:1.4_base                               | Антивирус. **Выключен по умолчанию** (профиль `clamav`): с базами занимает ~1 ГБ памяти. Включение — `CLAMAV_ENABLED=true` + `--profile clamav`, см. `docs/antispam.md`          |
+| service-agent | сборка `infra/service-agent` (docker:cli + perl)  | Единственная служба с сокетом Docker. Умеет закрытый список операций над закрытым списком служб; подробности ниже                                                                 |
+| fail2ban   | сборка `infra/fail2ban` (debian bookworm)            | Защита от подбора паролей: читает журналы и закрывает адресу доступ ко всем портам. Сеть хоста + NET_ADMIN, включена по умолчанию — см. `docs/install.md`                        |
+
+### Посредник служб (`service-agent`)
+
+Сокет Docker равносилен правам root на всей машине, и серверу приложения —
+тому, что принимает запросы из интернета и разбирает чужие письма, — его
+давать нельзя. Поэтому сокет выдан отдельной службе на Perl (`agent.pl`),
+у которой:
+
+- **закрытый список служб** (`%SERVICES`) и разрешённых над ними действий:
+  перезапуск и пересоздание. Имя из запроса не подставляется в команду —
+  оно ищется в списке, и наружу идёт значение ключа списка, а не строка
+  клиента;
+- **закрытый список ключей** `infra/.env`, свой у каждой службы (`%ENV_KEYS`):
+  записать пароль базы «через autoconfig» посредник не даст — такого ключа в
+  его списке нет. Держите **по одной записи на службу**: в Perl побеждает
+  последняя, и вторая запись молча отменяет разрешения первой;
+- **никакой сборки образов**: у compose всегда стоит `--no-build`. Сборка
+  выполняла бы Dockerfile из каталога проекта, то есть была бы обходным путём
+  к «выполнить что угодно»;
+- **общий секрет** `SERVICE_AGENT_TOKEN` в заголовке каждого запроса; без
+  секрета в окружении посредник не открывает порт вовсе.
+
+Операции: `/healthz`, `/status`, `/restart`, `/recreate`, `/stack` (состояние
+и память контейнеров), `/dkim` (готовая DNS-запись подписи), `/certbot`
+(выпуск Let's Encrypt через webroot), `/env-unset` (убрать ключ при возврате
+настройки к умолчанию), `/audit` (на каких адресах слушают порты и права
+`infra/.env` — только вердикты и числа, без значений).
 
 ## Порты на хосте (все на 127.0.0.1)
 
@@ -47,6 +76,11 @@ bash infra/test-delivery.sh           # сквозная проверка дос
 | 5432  | postgres   | PostgreSQL (для веб-приложения)                                                                |
 | 6380  | redis      | Redis (**6380**, т.к. 6379 на dev-машине занят чужим Redis; внутри docker-сети — `redis:6379`) |
 | 11334 | rspamd     | Веб-интерфейс/API rspamd (пароль `RSPAMD_PASSWORD`)                                            |
+| 8081  | nginx      | Резервный вход в панель по адресу сервера, без DNS. Слушает только там, куда его привязали (`ADMIN_LOCAL_BIND`, по умолчанию 127.0.0.1), и отвечает только частным сетям |
+
+Порт посредника служб (`SERVICE_AGENT_PORT`, по умолчанию 11346) наружу не
+публикуется вовсе: к нему обращается только сервер приложения изнутри сети
+стека. Публикация свела бы на нет всю затею с закрытым списком операций.
 
 ## Веб-интерфейс: кто что отдаёт
 
@@ -192,6 +226,32 @@ bash infra/scripts/create-mailbox.sh user@mail.local 'пароль' [SHA512-CRYP
   `AI_ENCRYPTION_KEY`, `EXTERNAL_ACCOUNTS_KEY`) — только в `infra/.env`;
   в compose они подставляются переменными, в открытом виде их нет нигде.
   Без `SESSION_SECRET` стек намеренно не поднимается.
+- **Перевыпуск секретов из панели.** Три из них выпускаются заново кнопкой
+  («Настройки сервера» → «Перевыпуск секретов»): `SESSION_SECRET`,
+  `QUEUE_AGENT_TOKEN`, `RSPAMD_PASSWORD`. Значение рождается на сервере,
+  уходит в `infra/.env` через посредника и не показывается никому — ни в
+  ответе, ни в журнале аудита.
+
+  Ключи шифрования кнопкой **не** перевыпускаются: `ADMIN_SESSION_SECRET`,
+  `AI_ENCRYPTION_KEY`, `EXTERNAL_ACCOUNTS_KEY` закрывают уже записанное в
+  базу (пароли импорта, пароли заданий переноса, ключи доступа к сервисам
+  ИИ, приватный ключ DKIM при смене домена). Новый ключ не меняет замок, а
+  делает содержимое нечитаемым навсегда.
+
+  Отдельная тонкость: `ADMIN_SESSION_SECRET` — вопреки имени НЕ подпись
+  сессий панели (cookie обеих частей подписаны общим `SESSION_SECRET`), а
+  ключ шифрования. Если он не задан, шифрование идёт на `SESSION_SECRET`, и
+  тогда перевыпуск подписи сессий отказывает — иначе он унёс бы с собой
+  расшифровку данных.
+- **База стран для проверки входа** (необязательная): `infra/data/geoip/`,
+  смонтирована в `api` как `/srv/geoip` только на чтение. Скачивается
+  отдельно — `install/fetch-geoip.sh` (DB-IP Country Lite, CC BY 4.0).
+  Управляется `GEOIP_LOGIN_POLICY` (`off`/`log`/`allow`) и
+  `GEOIP_ALLOWED_COUNTRIES`. Без базы вход работает как раньше.
+- **Подтверждение домена для Let's Encrypt**: named volume
+  `mailtrue_acme-challenge`. Файл кладёт certbot (одноразовым контейнером
+  через посредника), а раздаёт nginx по `/.well-known/acme-challenge/` —
+  поэтому выпуск сертификата из панели не гасит веб-вход.
 - Индексы Dovecot, включая полнотекстовый индекс Xapian: named volume
   `mailtrue_mailindex` (`/var/mail/index/<домен>/<логин>/xapian-indexes`).
   Вынесены из Maildir, чтобы не попадать в подсчёт квоты; переживают
@@ -229,11 +289,28 @@ docker compose -f infra/docker-compose.yml exec dovecot doveadm search -u test@m
 docker compose -f infra/docker-compose.yml exec dovecot doveadm quota get -u test@mail.local             # занятое место/лимит
 bash infra/scripts/fts-reindex.sh [--purge] [ящик]                                                       # переиндексация поиска
 docker compose -f infra/docker-compose.yml exec postgres psql -U mailserver mailserver                   # SQL-консоль
+bash install/selfcheck.sh                                                                                # полная проверка сервера
+bash install/fetch-geoip.sh                                                                              # база стран для проверки входа
+docker compose -f infra/docker-compose.yml exec fail2ban fail2ban-client status                          # какие камеры работают
+docker compose -f infra/docker-compose.yml exec fail2ban fail2ban-client status mailtrue-dovecot         # кто забанен
+docker compose -f infra/docker-compose.yml exec fail2ban fail2ban-client unban <адрес>                   # снять бан
+```
+
+Проверить, что бан действительно действует (а не просто числится): правило
+обязано стоять в цепочке `DOCKER-USER` — трафик к портам контейнеров идёт
+через неё, а не через `INPUT`.
+
+```bash
+docker compose -f infra/docker-compose.yml exec fail2ban fail2ban-client set mailtrue-dovecot banip 203.0.113.7
+iptables -n -L DOCKER-USER | grep f2b-
+docker compose -f infra/docker-compose.yml exec fail2ban fail2ban-client unban 203.0.113.7
 ```
 
 ## Отличия dev от прода (что поменять на Ubuntu Server 22)
 
-- Сертификаты: заменить самоподписанные на Let's Encrypt.
+- Сертификаты: заменить самоподписанные на Let's Encrypt — при установке,
+  кнопкой в панели («Сертификат» → «Выпустить Let's Encrypt») или своим
+  сертификатом там же.
 - `disable_plaintext_auth = yes` в dovecot (сейчас `no` для удобства dev).
 - Публиковать порты на внешний интерфейс (сейчас всё на 127.0.0.1).
 - Прописать DNS: MX, SPF, DMARC и DKIM TXT из `*.dns.txt`, плюс `mail.<домен>`
