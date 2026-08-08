@@ -118,8 +118,12 @@ my %SERVICES = (
 # посредника от опечатки: такого ключа в его списке нет.
 my %ENV_KEYS = (
     rspamd     => { CLAMAV_ENABLED => 1 },
+    # BIND_ADDRESS публикует порты: его читает compose при создании
+    # контейнера, и правится он вместе с пересозданием.
+    postfix    => { BIND_ADDRESS => 1 },
+    nginx      => { BIND_ADDRESS => 1 },
     unbound    => { UNBOUND_LOG_QUERIES => 1, UNBOUND_DNSSEC => 1 },
-    dovecot    => { DOVECOT_DISABLE_PLAINTEXT_AUTH => 1 },
+    dovecot    => { DOVECOT_DISABLE_PLAINTEXT_AUTH => 1, BIND_ADDRESS => 1 },
     autoconfig => {
         PROVIDER_NAME                  => 1,
         PROVIDER_SHORT_NAME            => 1,
@@ -145,6 +149,9 @@ my %ENV_KEYS = (
     # то, ради чего в .env писать не нужно. Совпадение этого списка с
     # перечнем настроек проверяется в обе стороны (server-settings.test.ts).
     api => {
+        # Потолок кучи V8: читается процессом Node при запуске, до того как
+        # появится код, способный сходить в базу, — значит только окружение.
+        API_NODE_OPTIONS           => 1,
         AUTOCONFIG_IMAPS_PORT      => 1,
         AUTOCONFIG_SUBMISSION_PORT => 1,
         AUTOCONFIG_POP3S_PORT      => 1,
