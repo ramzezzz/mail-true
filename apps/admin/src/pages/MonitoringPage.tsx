@@ -29,14 +29,14 @@
  * прочитался бы как «проверено всё».
  */
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
 import { api } from '../api/client';
 import type { CheckState, CheckSummary, HealthCheck } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { Table, TableWrap, tableStyles } from '../components/Table';
-import { Badge, ErrorNotice, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
+import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import { formatDateTime, formatRelative } from '../lib/format';
 import styles from './MonitoringPage.module.css';
 
@@ -138,6 +138,17 @@ export function MonitoringPage() {
   const failures = useQuery({
     queryKey: ['monitoring-failures', hours],
     queryFn: () => api.monitoringFailures(hours),
+  });
+
+  /*
+   * Сквозная проверка доставки — единственное на этом экране, что
+   * запускается вручную. Она отправляет НАСТОЯЩЕЕ письмо, а раздел
+   * открывают вкладками и держат часами: фоновый запуск завалил бы ящик
+   * письмами собственного мониторинга.
+   */
+  const [roundtripMailbox, setRoundtripMailbox] = useState('');
+  const roundtrip = useMutation({
+    mutationFn: (mailbox: string) => api.monitoringRoundtrip(mailbox),
   });
 
   const refreshing = health.isFetching || expiry.isFetching || failures.isFetching;
@@ -296,6 +307,64 @@ export function MonitoringPage() {
               </Table>
             </TableWrap>
           </div>
+        )}
+      </Panel>
+
+      <Panel title="Сквозная проверка доставки">
+        <p className={styles.note}>
+          Отправляет письмо в указанный ящик тем же путём, которым это делают почтовые программы, и
+          ищет его через IMAP — глазами получателя. Остальные проверки этого раздела отвечают про
+          части (порт отвечает, служба поднята); вместе они НЕ означают, что письмо дойдёт: между
+          «Postfix принял» и «письмо в ящике» стоят доставка Dovecot, квота, личные правила
+          фильтрации и подпись DKIM. Письмо удаляется сразу после проверки. Пароль владельца ящика
+          не нужен.
+        </p>
+        <Field
+          label="Ящик для проверки"
+          hint="Существующий ящик на этом сервере, например admin@example.org"
+        >
+          <input
+            className="mt-input"
+            type="email"
+            value={roundtripMailbox}
+            placeholder="admin@example.org"
+            onChange={(e) => {
+              setRoundtripMailbox(e.target.value);
+            }}
+          />
+        </Field>
+        <Toolbar>
+          <Button
+            onClick={() => {
+              roundtrip.mutate(roundtripMailbox.trim());
+            }}
+            disabled={roundtrip.isPending || roundtripMailbox.trim() === ''}
+          >
+            {roundtrip.isPending ? 'Проверяем — до 45 секунд…' : 'Отправить проверочное письмо'}
+          </Button>
+        </Toolbar>
+        {roundtrip.error && <ErrorNotice error={roundtrip.error} />}
+        {roundtrip.data && (
+          <>
+            <Notice tone={roundtrip.data.ok ? 'success' : 'error'}>
+              {roundtrip.data.ok
+                ? `Письмо прошло весь путь до ящика ${roundtrip.data.mailbox}` +
+                  (roundtrip.data.seconds === null ? '' : ` за ${String(roundtrip.data.seconds)} с`)
+                : 'Письмо не прошло весь путь — смотрите, на каком шаге оборвалось'}
+            </Notice>
+            <ul className={styles.shellOnly}>
+              {roundtrip.data.steps.map((step) => (
+                <li key={step.id}>
+                  <span className={styles.shellOnlyTitle}>
+                    <Badge tone={STATE_TONE[step.state]}>{STATE_LABEL[step.state]}</Badge>{' '}
+                    {step.title}
+                  </span>
+                  <span className={styles.hint}>{step.detail}</span>
+                  {step.hint !== undefined && <span className={styles.hint}>{step.hint}</span>}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </Panel>
 

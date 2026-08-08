@@ -24,7 +24,10 @@ import {
   RENEW_COMMAND,
 } from '../cert-renewal.js';
 import { FlowStore } from '../flow-store.js';
-import { requireAdmin } from '../guard.js';
+import { loadAccountsConfig } from '../../accounts/config.js';
+import { ApiError } from '../../errors.js';
+import { audit, requireAdmin } from '../guard.js';
+import { runRoundtrip } from '../mail-roundtrip.js';
 import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
 import { RspamdClient } from '../rspamd.js';
 import { checkAntispam, checkResolver } from '../services.js';
@@ -492,6 +495,77 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
         'делает install/selfcheck.sh на самом сервере',
     };
   });
+
+  /* ---------------------------------------------------------------- */
+  /* Сквозная проверка доставки                                         */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * Последний пункт из списка «чего этот раздел не проверяет» — и
+   * единственный, который нельзя было закрыть просто добавив проверку в
+   * общую сводку. Она отправляет НАСТОЯЩЕЕ письмо, а раздел открывают
+   * вкладками и держат часами: фоновая отправка превратила бы почтовый
+   * сервер в свалку собственного мусора.
+   *
+   * Поэтому отдельная кнопка и осознанное нажатие. Ограничение частоты —
+   * три запуска в минуту: проверка идёт до сорока пяти секунд, и чаще её
+   * нажимать незачем даже нарочно.
+   *
+   * Право спрашивается не «посмотреть», а «перезапускать службы»: это
+   * действие, меняющее состояние сервера, пусть и обратимо.
+   */
+  app.post<{ Body: unknown }>(
+    '/monitoring/mail-roundtrip',
+    {
+      preHandler: requireAdmin(app, 'services.restart'),
+      config: { rateLimit: { max: 3, timeWindow: 60_000 } },
+    },
+    async (request) => {
+      const { mailbox } = z
+        .object({ mailbox: z.string().trim().min(3).max(320).email() })
+        .parse(request.body);
+
+      const accounts = loadAccountsConfig();
+      if (accounts.DOVECOT_MASTER_USER === '' || accounts.DOVECOT_MASTER_PASSWORD === '') {
+        // Пароль владельца ящика для этого не спрашивается и не хранится,
+        // поэтому без служебного пользователя проверять нечем.
+        throw new ApiError(
+          503,
+          'MASTER_NOT_CONFIGURED',
+          'Сквозная проверка требует служебного пользователя Dovecot: задайте ' +
+            'DOVECOT_MASTER_USER и DOVECOT_MASTER_PASSWORD в infra/.env и пересоздайте службы.',
+        );
+      }
+
+      const result = await runRoundtrip(mailbox, {
+        smtp: {
+          host: apiConfig.SMTP_HOST,
+          port: apiConfig.SMTP_PORT,
+          rejectUnauthorized: apiConfig.TLS_REJECT_UNAUTHORIZED,
+        },
+        imap: {
+          host: apiConfig.IMAP_HOST,
+          port: apiConfig.IMAP_PORT,
+          secure: apiConfig.IMAP_SECURE,
+          rejectUnauthorized: apiConfig.TLS_REJECT_UNAUTHORIZED,
+        },
+        master: {
+          user: accounts.DOVECOT_MASTER_USER,
+          password: accounts.DOVECOT_MASTER_PASSWORD,
+          separator: accounts.DOVECOT_MASTER_SEPARATOR,
+        },
+      });
+
+      await audit(ctx, request, {
+        action: 'monitoring.roundtrip',
+        targetType: 'mailbox',
+        targetLabel: mailbox,
+        after: { ok: result.ok, seconds: result.seconds },
+      });
+
+      return result;
+    },
+  );
 
   /* ---------------------------------------------------------------- */
   /* Сертификаты и DNS                                                  */

@@ -46,6 +46,7 @@ import type {
   MigrationStarted,
   DomainChangeJob,
   DomainChangeOverview,
+  MailRoundtrip,
   MonitoringExpiry,
   MonitoringFailures,
   MonitoringHealth,
@@ -473,6 +474,13 @@ export const api = {
   monitoringExpiry: () => get<MonitoringExpiry>('/monitoring/expiry'),
   monitoringFailures: (hours: number) =>
     get<MonitoringFailures>(`/monitoring/failures${query({ hours })}`),
+  /*
+   * Сквозная проверка доставки. Отдельным запросом и только по нажатию:
+   * она отправляет настоящее письмо, поэтому в общий опрос экрана её
+   * класть нельзя — раздел держат открытым часами.
+   */
+  monitoringRoundtrip: (mailbox: string) =>
+    post<MailRoundtrip>('/monitoring/mail-roundtrip', { mailbox }),
 
   /* --- журналы служб --- */
   logSources: () => get<LogSourcesResponse>('/logs/sources'),

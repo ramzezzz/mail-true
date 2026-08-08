@@ -1488,6 +1488,23 @@ export interface MonitoringHealth {
   shellOnlyNote: string;
 }
 
+/** Один шаг сквозной проверки доставки: отправка, доставка, подпись, уборка. */
+export interface MailRoundtripStep {
+  id: 'send' | 'deliver' | 'dkim' | 'cleanup';
+  title: string;
+  state: 'ok' | 'warn' | 'fail';
+  detail: string;
+  hint?: string;
+}
+
+export interface MailRoundtrip {
+  ok: boolean;
+  mailbox: string;
+  /** Сколько секунд письмо шло до ящика; null — не дошло. */
+  seconds: number | null;
+  steps: MailRoundtripStep[];
+}
+
 export interface MonitoringExpiry {
   takenAt: string;
   warnDays: number;
