@@ -54,11 +54,23 @@ info "Каталог проекта: $REPO_DIR"
 # ==================================================================
 step "1. Docker"
 # ==================================================================
+# Проверка появилась вместе с автоматической заменой snap-Docker и
+# отключением чужого MTA: без root они молча ничего не сделают, а
+# человек будет смотреть на непонятную ошибку следующего шага.
+if [ "$(id -u)" -ne 0 ]; then
+    die "запускать нужно от root: sudo bash install/web-install.sh"
+fi
+
 have docker || die "Docker не установлен.
        Мастер первого запуска работает внутри контейнера, поэтому Docker нужен
        до него. Поставить его умеет консольный установщик:
          sudo bash install/install.sh --prepare-only
        либо вручную: https://docs.docker.com/engine/install/"
+
+# Snap-Docker отвечает на всё, что мы спрашиваем ниже, и при этом не видит
+# каталога проекта — установка падала на шаге 3 с «no such file or
+# directory» про файл, лежащий на месте. Заменяем на официальный сами.
+ensure_docker_native
 
 docker info >/dev/null 2>&1 || die "демон Docker не отвечает — проверьте: systemctl status docker"
 ok "Docker работает ($(docker version --format '{{.Server.Version}}' 2>/dev/null))"
@@ -67,6 +79,12 @@ COMPOSE_VER="$(docker compose version --short 2>/dev/null | tr -d 'v' || true)"
 [ -n "$COMPOSE_VER" ] || die "нет плагина docker compose (пакет docker-compose-plugin)"
 version_ge "$COMPOSE_VER" 2.24 || die "docker compose $COMPOSE_VER слишком старый, нужен от 2.24"
 ok "docker compose $COMPOSE_VER"
+
+require_docker_sees_repo
+
+# Чужой почтовый сервер держит 25-й порт: мастер поднимет стек в конце
+# работы, и упереться в это лучше сейчас, а не через десять минут.
+handle_foreign_mta
 
 # ==================================================================
 step "2. Заготовка infra/.env"

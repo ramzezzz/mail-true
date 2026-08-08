@@ -922,6 +922,228 @@ version_ge() {
     [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]
 }
 
+# ------------------------------------------------------------------
+# ВИДИТ ЛИ DOCKER КАТАЛОГ ПРОЕКТА
+#
+# Поймано на живой установке. `snap install docker` (пакет Canonical)
+# ставит Docker в изоляции snap, а ей видны только домашние каталоги:
+# /opt для неё не существует. Выглядит это дико и уводит в сторону —
+# файл лежит на месте, `ls -la infra/docker-compose.yml` его показывает,
+# а docker отвечает:
+#
+#   open /opt/mailtrue/infra/docker-compose.yml: no such file or directory
+#
+# Человек идёт искать пропавший файл (его нет смысла искать) вместо того
+# чтобы менять Docker. Причём проверки выше рапортуют «Docker работает» —
+# он и правда работает, просто не там, где лежит проект.
+#
+# Проверяем не «snap ли это», а ровно то, что нужно: может ли docker
+# прочитать файл из каталога проекта. Так ловится и любая другая
+# изоляция — контейнеризованный CLI, чужой namespace, права.
+#
+# Дальше по-другому и нельзя: конфигурация Postfix, Dovecot и Rspamd
+# монтируется в контейнеры прямо отсюда, каталогами. Не видит файла —
+# не увидит и конфигов, и стек развалится на первом же контейнере.
+# ------------------------------------------------------------------
+
+# docker_from_snap — Docker поставлен из snap?
+docker_from_snap() {
+    local bin real
+    bin="$(command -v docker 2>/dev/null || true)"
+    [ -n "$bin" ] || return 1
+    real="$(readlink -f "$bin" 2>/dev/null || true)"
+    case "$bin$real" in */snap/*) return 0 ;; esac
+    have snap && snap list docker >/dev/null 2>&1
+}
+
+# docker_sees_repo — 0, если docker читает файлы из каталога проекта.
+docker_sees_repo() {
+    local probe="$REPO_DIR/.mt-docker-probe.yml" out rc
+    printf 'services:\n  probe:\n    image: hello-world\n' > "$probe" 2>/dev/null || return 0
+    out="$(docker compose -f "$probe" config -q 2>&1)"
+    rc=$?
+    rm -f "$probe"
+    [ "$rc" -eq 0 ] && return 0
+    # Не всякая ошибка означает невидимость: у compose своих поводов хватает.
+    # Реагируем только на «файла нет» и «доступа нет» — их проба вызвать
+    # не может, файл только что записан рядом.
+    case "$out" in
+        *'no such file'*|*'No such file'*|*'not found'*|*'permission denied'*|*'Permission denied'*)
+            return 1
+            ;;
+    esac
+    return 0
+}
+
+# require_docker_sees_repo — проверка с внятным объяснением вместо «нет файла».
+require_docker_sees_repo() {
+    if docker_sees_repo; then
+        ok "Docker читает каталог проекта"
+        return 0
+    fi
+    if docker_from_snap; then
+        die "Docker установлен из snap, а snap-пакету видны только домашние каталоги —
+       каталога $REPO_DIR для него не существует.
+
+       Со стороны это выглядит так, будто пропали файлы: они на месте, но
+       docker отвечает «no such file or directory». Стек в таком Docker не
+       поднимется в принципе — конфигурация Postfix, Dovecot и Rspamd
+       монтируется в контейнеры прямо из этого каталога.
+
+       Замените Docker на официальный:
+         sudo snap remove --purge docker
+         curl -fsSL https://get.docker.com | sudo sh
+       и повторите запуск."
+    fi
+    die "Docker не может прочитать файлы из каталога $REPO_DIR.
+
+       Проверьте, что docker работает на этой же машине и от имени
+       пользователя, которому виден этот каталог:
+         docker context ls
+         sudo docker compose -f '$COMPOSE_FILE' config -q"
+}
+
+# ------------------------------------------------------------------
+# Установка официального Docker (репозиторий download.docker.com).
+# Живёт здесь, а не в install.sh: тем же самым лечится snap-Docker,
+# а на него натыкается и мастер первого запуска (web-install.sh).
+# ------------------------------------------------------------------
+install_docker() {
+    step "Установка Docker"
+    have apt-get || die "нет apt-get — поставьте Docker вручную: https://docs.docker.com/engine/install/"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq ca-certificates curl gnupg >/dev/null
+    install -m 0755 -d /etc/apt/keyrings
+    local repo_id="${OS_ID:-ubuntu}"
+    case "$repo_id" in ubuntu|debian) : ;; *) repo_id=ubuntu ;; esac
+    curl -fsSL "https://download.docker.com/linux/$repo_id/gpg" -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    local codename
+    codename="${VERSION_CODENAME:-jammy}"
+    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+        "$(dpkg --print-architecture)" "$repo_id" "$codename" > /etc/apt/sources.list.d/docker.list
+    apt-get update -qq
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    if have systemctl; then
+        systemctl enable --now docker >/dev/null 2>&1 || true
+    fi
+    ok "Docker установлен"
+}
+
+# ------------------------------------------------------------------
+# ensure_docker_native — снять snap-Docker и поставить официальный.
+#
+# Установщик не оставляет это человеку: сам snap-Docker выглядит рабочим
+# («Docker работает (29.6.1)»), а установка падает через шаг с сообщением
+# про несуществующий файл. Разбираться в этом человеку не за что.
+#
+# Единственное, чего мы делать не вправе, — молча снести чужие контейнеры:
+# `snap remove --purge` уносит вместе с пакетом всё, что в нём работало.
+# Поэтому: пусто — чиним сразу; есть чужое — спрашиваем, а в
+# неинтерактивном режиме отказываемся и объясняем.
+# ------------------------------------------------------------------
+ensure_docker_native() {
+    docker_from_snap || return 0
+
+    local containers=''
+    containers="$(docker ps -aq 2>/dev/null | grep -c . || true)"
+    containers="${containers:-0}"
+
+    warn "Docker установлен из snap — с ним почтовый сервер работать не будет"
+    hint "snap-пакету видны только домашние каталоги: каталога $REPO_DIR"
+    hint "для него не существует, а конфигурация Postfix, Dovecot и Rspamd"
+    hint "монтируется в контейнеры прямо оттуда"
+
+    if [ "$containers" != "0" ]; then
+        hint "в snap-Docker сейчас $containers контейнер(ов) — при замене они пропадут"
+        if ! confirm "Снять snap-Docker вместе с его контейнерами и поставить официальный?"; then
+            die "установка прервана: snap-Docker несовместим с почтовым сервером.
+       Перенесите нужное из его контейнеров и повторите запуск, либо
+       сделайте замену вручную:
+         sudo snap remove --purge docker
+         curl -fsSL https://get.docker.com | sudo sh"
+        fi
+    else
+        info "чужих контейнеров в нём нет — заменяем на официальный Docker"
+    fi
+
+    have snap || die "snap-Docker найден, но команды snap нет — уберите его вручную"
+    snap remove --purge docker >/dev/null 2>&1 || snap remove docker >/dev/null 2>&1 ||
+        die "не удалось снять snap-Docker: sudo snap remove --purge docker"
+    ok "snap-Docker снят"
+
+    # Ссылки /snap/bin остаются в PATH текущей оболочки — обновляем поиск.
+    hash -r 2>/dev/null || true
+    install_docker
+
+    docker info >/dev/null 2>&1 ||
+        die "официальный Docker установлен, но демон не отвечает: systemctl status docker"
+}
+
+# ------------------------------------------------------------------
+# ЧУЖОЙ ПОЧТОВЫЙ СЕРВЕР НА МАШИНЕ
+#
+# Ubuntu ставит postfix или exim4 «прицепом» к другим пакетам, и он
+# молча занимает 25-й порт (а postfix — ещё и 465-й). Наш Postfix в
+# контейнере эти порты не получит, и стек не поднимется.
+#
+# Отключаем сами: это обратимо (служба остаётся в системе, включается
+# обратно одной командой), а без этого установка всё равно упирается в
+# занятый порт. Пакет НЕ удаляем — удаление необратимо, о нём только
+# говорим.
+# ------------------------------------------------------------------
+handle_foreign_mta() {
+    local units='postfix exim4 sendmail opensmtpd nullmailer msmtpd'
+    local unit active='' installed=''
+
+    for unit in $units; do
+        if have systemctl && systemctl is-active --quiet "$unit" 2>/dev/null; then
+            active="$active $unit"
+        elif have dpkg-query && dpkg-query -W -f='${Status}' "$unit" 2>/dev/null | grep -q 'ok installed'; then
+            installed="$installed $unit"
+        fi
+    done
+
+    if [ -n "$active" ] && [ "$(id -u)" -ne 0 ]; then
+        # Бывает в --prepare-only: проверки разрешено гонять и не от root.
+        warn "на сервере уже работает почтовая служба:$active"
+        hint "отключить её без root нельзя — сделайте это перед установкой:"
+        for unit in $active; do hint "  sudo systemctl disable --now $unit"; done
+        return 0
+    fi
+
+    if [ -n "$active" ]; then
+        warn "на сервере уже работает почтовая служба:$active"
+        hint "она держит 25-й порт, и наш Postfix не запустится — отключаем"
+        local failed=''
+        for unit in $active; do
+            if systemctl disable --now "$unit" >/dev/null 2>&1; then
+                ok "служба $unit остановлена и убрана из автозапуска"
+            else
+                failed="$failed $unit"
+            fi
+        done
+        if [ -n "$failed" ]; then
+            fail "не удалось отключить:$failed"
+            hint "сделайте вручную и повторите запуск:"
+            for unit in $failed; do hint "  systemctl disable --now $unit"; done
+            if ! confirm "Продолжить установку несмотря на это?"; then
+                die "установка прервана: сначала уберите чужой почтовый сервер"
+            fi
+        else
+            hint "пакеты остались в системе; если они не нужны:$active — apt-get purge -y$active"
+        fi
+        # Порт освобождается не мгновенно: дать службе доиграть остановку.
+        sleep 1
+    elif [ -n "$installed" ]; then
+        warn "установлены пакеты почтовых служб:$installed (сейчас не запущены)"
+        hint "если они вам не нужны, лучше убрать: apt-get purge -y$installed"
+    else
+        ok "чужих почтовых служб (postfix/exim/sendmail) не установлено"
+    fi
+}
+
 # require_root — установщику нужен root (docker, apt, порты <1024, certbot).
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then

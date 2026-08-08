@@ -183,6 +183,14 @@ else
     hint "образы стека занимают около 1.5 ГБ, остальное — письма и индексы поиска"
 fi
 
+# --- Чужой MTA -----------------------------------------------------
+# Идёт ДО проверки портов, а не после неё. Раньше было наоборот, и на
+# машине с системным Postfix человек сначала получал вопрос «порт 25
+# занят процессом master, всё равно продолжать?», отвечал «нет» — и
+# установка обрывалась, так и не показав, что это за «master» и что с
+# ним делать. Совет печатался следующим шагом, до которого не доходило.
+handle_foreign_mta
+
 # --- Порты ---------------------------------------------------------
 STACK_RUNNING=0
 if have docker && docker compose -f "$COMPOSE_FILE" ps -q 2>/dev/null | grep -q .; then
@@ -212,55 +220,21 @@ else
             BUSY_FOREIGN=1
         fi
     done
-    # 465 стек пока не слушает — просто предупреждаем, если он кем-то занят
-    if [ -n "$(port_listener 465)" ]; then
-        info "порт 465 кем-то занят; стек его не использует (см. docs/install.md)"
-    fi
     if [ "$BUSY_FOREIGN" = "1" ]; then
         # Раньше здесь было только предупреждение, и установка шла дальше
         # до падения `docker compose up` с сырой ошибкой про занятый порт.
         # Спрашиваем: продолжать почти всегда бессмысленно.
         fail "часть портов занята чужими процессами — стек не сможет их открыть"
-        hint "посмотреть кто: ss -ltnp | grep -E ':(25|80|443|143|993|110|995|587)\\b'"
+        # Список для подсказки строится из MT_REQUIRED_PORTS, а не пишется
+        # руками: переписанный отдельно, он уже разошёлся с проверкой —
+        # 465-й проверяли, а в подсказке его не было.
+        PORTS_RE="$(printf '%s|' "${MT_REQUIRED_PORTS[@]}")"
+        hint "посмотреть кто: ss -ltnp | grep -E ':(${PORTS_RE%|})\\b'"
         hint "освободите порты или запустите с --skip-port-check, если знаете, что делаете"
         if ! confirm "Всё равно продолжить установку (стек, скорее всего, не поднимется)?"; then
             die "установка прервана: сначала освободите занятые порты"
         fi
     fi
-fi
-
-# --- Чужой MTA -----------------------------------------------------
-# Ubuntu ставит postfix или exim4 «прицепом» к другим пакетам, и он
-# молча занимает 25-й порт. Ищем и запущенные службы, и просто
-# установленные: остановленный сегодня MTA запустится при перезагрузке.
-FOREIGN_MTA=''
-FOREIGN_INSTALLED=''
-for unit in postfix exim4 sendmail opensmtpd nullmailer msmtpd; do
-    if have systemctl && systemctl is-active --quiet "$unit" 2>/dev/null; then
-        FOREIGN_MTA="$FOREIGN_MTA $unit"
-    elif have dpkg-query && dpkg-query -W -f='${Status}' "$unit" 2>/dev/null | grep -q 'ok installed'; then
-        FOREIGN_INSTALLED="$FOREIGN_INSTALLED $unit"
-    fi
-done
-if [ -z "$FOREIGN_MTA" ] && [ -n "$FOREIGN_INSTALLED" ]; then
-    warn "установлены пакеты почтовых служб:$FOREIGN_INSTALLED (сейчас не запущены)"
-    hint "после перезагрузки они могут занять 25-й порт и сломать приём почты"
-    hint "лучше убрать заранее: apt-get purge -y$FOREIGN_INSTALLED"
-fi
-if [ -n "$FOREIGN_MTA" ]; then
-    fail "на сервере уже работает почтовая служба:$FOREIGN_MTA"
-    hint "Ubuntu часто ставит postfix или exim4 вместе с другими пакетами."
-    hint "Он держит порт 25, и наш Postfix не запустится. Отключите его:"
-    for unit in $FOREIGN_MTA; do
-        hint "  systemctl disable --now $unit"
-    done
-    hint "Если чужой MTA нужен — перенесите его на другой порт или уберите совсем:"
-    hint "  apt-get purge -y$FOREIGN_MTA"
-    if ! confirm "Продолжить установку несмотря на это?"; then
-        die "установка прервана: сначала уберите чужой MTA"
-    fi
-elif [ -z "$FOREIGN_INSTALLED" ]; then
-    ok "чужих почтовых служб (postfix/exim/sendmail) не установлено"
 fi
 
 # --- Исходящий 25-й порт -------------------------------------------
@@ -294,28 +268,8 @@ fi
 step "2. Docker"
 # ==================================================================
 
-install_docker() {
-    step "2.1 Установка Docker"
-    have apt-get || die "нет apt-get — поставьте Docker вручную: https://docs.docker.com/engine/install/"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq ca-certificates curl gnupg >/dev/null
-    install -m 0755 -d /etc/apt/keyrings
-    local repo_id="${OS_ID:-ubuntu}"
-    case "$repo_id" in ubuntu|debian) : ;; *) repo_id=ubuntu ;; esac
-    curl -fsSL "https://download.docker.com/linux/$repo_id/gpg" -o /etc/apt/keyrings/docker.asc
-    chmod a+r /etc/apt/keyrings/docker.asc
-    local codename
-    codename="${VERSION_CODENAME:-jammy}"
-    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
-        "$(dpkg --print-architecture)" "$repo_id" "$codename" > /etc/apt/sources.list.d/docker.list
-    apt-get update -qq
-    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
-    if have systemctl; then
-        systemctl enable --now docker >/dev/null 2>&1 || true
-    fi
-    ok "Docker установлен"
-}
+# install_docker живёт в install/lib/common.sh: тем же самым лечится
+# snap-Docker, а на него натыкается и мастер первого запуска.
 
 # В режиме --prepare-only Docker не обязателен: там только проверки,
 # секреты и конфигурация — их удобно готовить и на машине без Docker.
@@ -326,6 +280,19 @@ docker_problem() {
     fi
     die "$1"
 }
+
+# Snap-Docker выглядит совершенно рабочим — и версию покажет, и `docker
+# info` ответит, — но каталога проекта не видит, и установка падает через
+# шаг на «no such file or directory». Меняем его на официальный ДО всех
+# остальных проверок; подробности и разбор — в install/lib/common.sh.
+if [ "$SKIP_DOCKER_INSTALL" = "1" ]; then
+    if docker_from_snap; then
+        warn "Docker из snap: он не видит $REPO_DIR, стек не поднимется"
+        hint "замена пропущена по --skip-docker-install"
+    fi
+else
+    ensure_docker_native
+fi
 
 DOCKER_READY=0
 if have docker && docker info >/dev/null 2>&1; then
@@ -362,6 +329,15 @@ if [ "$DOCKER_READY" = "1" ]; then
         ok "docker compose $COMPOSE_VER"
     else
         docker_problem "docker compose $COMPOSE_VER слишком старый, нужен от $MT_MIN_COMPOSE (install/compose.prod.yml использует тег !override)"
+    fi
+
+    # Видит ли docker каталог проекта. После замены snap-Docker выше это
+    # почти всегда так, но остаётся экзотика — удалённый контекст, чужой
+    # namespace, права: пусть она выясняется здесь, а не при подъёме стека.
+    if [ "$PREPARE_ONLY" = "1" ]; then
+        docker_sees_repo || warn "Docker не видит файлы в $REPO_DIR — при подъёме стека это станет ошибкой"
+    else
+        require_docker_sees_repo
     fi
 fi
 
