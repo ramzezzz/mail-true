@@ -29,7 +29,7 @@ import {
   LOGO_MIN_HEIGHT,
   LOGO_MIN_WIDTH,
 } from '../branding-image.js';
-import { BRANDING_NAME_MAX, type BrandingState } from '../branding.js';
+import { BRANDING_FOOTER_MAX, BRANDING_NAME_MAX, type BrandingState } from '../branding.js';
 
 /** Адрес логотипа с отпечатком: смена файла меняет адрес, кэш не врёт. */
 export function logoUrl(state: BrandingState): string | null {
@@ -40,6 +40,7 @@ function toDto(state: BrandingState): Record<string, unknown> {
   return {
     companyName: state.companyName,
     productName: state.productName,
+    loginFooter: state.loginFooter,
     logo: state.logo
       ? {
           url: logoUrl(state),
@@ -61,6 +62,7 @@ function toDto(state: BrandingState): Record<string, unknown> {
       maxHeight: LOGO_MAX_HEIGHT,
       formats: Object.values(LOGO_FORMATS).map((f) => f.title),
       nameMax: BRANDING_NAME_MAX,
+      footerMax: BRANDING_FOOTER_MAX,
     },
   };
 }
@@ -68,6 +70,9 @@ function toDto(state: BrandingState): Record<string, unknown> {
 const textsSchema = z.object({
   companyName: z.string().max(200).nullable().optional(),
   productName: z.string().max(200).nullable().optional(),
+  // Предел здесь грубый: настоящий (и объяснение, почему столько)
+  // живёт в branding.ts рядом с самой чисткой текста.
+  loginFooter: z.string().max(2000).nullable().optional(),
 });
 
 export async function adminBrandingRoutes(app: FastifyInstance): Promise<void> {
@@ -200,13 +205,22 @@ export async function adminBrandingRoutes(app: FastifyInstance): Promise<void> {
     const state = await branding.saveTexts({
       ...(body.companyName !== undefined ? { companyName: body.companyName } : {}),
       ...(body.productName !== undefined ? { productName: body.productName } : {}),
+      ...(body.loginFooter !== undefined ? { loginFooter: body.loginFooter } : {}),
     });
     await audit(ctx, request, {
       action: 'branding.texts',
       targetType: 'branding',
       targetLabel: state.companyName ?? state.productName ?? 'подписи входа',
-      before: { companyName: before.companyName, productName: before.productName },
-      after: { companyName: state.companyName, productName: state.productName },
+      before: {
+        companyName: before.companyName,
+        productName: before.productName,
+        loginFooter: before.loginFooter,
+      },
+      after: {
+        companyName: state.companyName,
+        productName: state.productName,
+        loginFooter: state.loginFooter,
+      },
     });
     return toDto(state);
   });

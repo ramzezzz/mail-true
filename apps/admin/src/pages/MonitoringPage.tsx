@@ -92,11 +92,23 @@ function SummaryLine({ summary }: { summary: CheckSummary }) {
 function ChecksTable({ checks }: { checks: readonly HealthCheck[] }) {
   return (
     <TableWrap>
+      {/*
+        Ширины колонок заданы явно. Каждая группа проверок — своя таблица,
+        и без этого ширина первой колонки считалась по её собственному
+        самому длинному названию: плашки «в порядке» вставали на разной
+        горизонтали в «Службах», «Очереди», «Месте» и «Сертификатах» —
+        глазу приходилось искать их заново в каждой группе.
+      */}
       <Table>
+        <colgroup>
+          <col className={styles.colTitle} />
+          <col className={styles.colState} />
+          <col />
+        </colgroup>
         <tbody>
           {checks.map((check) => (
             <tr key={check.id}>
-              <td className={tableStyles.nowrap}>{check.title}</td>
+              <td>{check.title}</td>
               <td className={tableStyles.nowrap}>
                 <StateBadge state={check.state} />
               </td>

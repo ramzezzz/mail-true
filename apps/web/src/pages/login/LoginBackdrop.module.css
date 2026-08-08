@@ -191,6 +191,19 @@
   animation: mtPulse 4s ease-in-out infinite;
 }
 
+/*
+ * Фирменный знак в середине. Меньше самого кружка: знак должен лежать
+ * внутри свечения, а не подпирать его края. Тень мягкая — на светлом
+ * ядре кружка белая галочка иначе теряется.
+ */
+.centerImage {
+  width: 55%;
+  height: 55%;
+  object-fit: contain;
+  border-radius: 22%;
+  filter: drop-shadow(0 2px 6px rgba(6, 20, 44, 0.45));
+}
+
 .orbit {
   position: absolute;
   inset: 0;

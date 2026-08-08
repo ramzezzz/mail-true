@@ -28,12 +28,15 @@ export interface BrandingLogo {
 export interface Branding {
   companyName: string | null;
   productName: string | null;
+  /** Свой текст в подвале страницы входа. null — строки продукта. */
+  loginFooter: string | null;
   logo: BrandingLogo | null;
 }
 
 export const DEFAULT_BRANDING: Branding = {
   companyName: null,
   productName: null,
+  loginFooter: null,
   logo: null,
 };
 
@@ -51,6 +54,7 @@ export async function fetchBranding(signal?: AbortSignal): Promise<Branding> {
     return {
       companyName: typeof body.companyName === 'string' ? body.companyName : null,
       productName: typeof body.productName === 'string' ? body.productName : null,
+      loginFooter: typeof body.loginFooter === 'string' ? body.loginFooter : null,
       logo:
         body.logo && typeof body.logo.url === 'string'
           ? {

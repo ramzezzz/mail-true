@@ -35,6 +35,7 @@ const DIGITS = /^-?\d{1,10}$/u;
 
 /** Показываем полученное, но коротко и без управляющих знаков. */
 function quote(raw: string): string {
+  // eslint-disable-next-line no-control-regex
   const clean = raw.replace(/[\u0000-\u001f\u007f]/gu, ' ').trim();
   return clean.length > 40 ? `${clean.slice(0, 40)}…` : clean;
 }

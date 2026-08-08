@@ -820,11 +820,15 @@ export interface BrandingLimits {
   maxHeight: number;
   formats: string[];
   nameMax: number;
+  /** Предел на свой текст в подвале входа. */
+  footerMax: number;
 }
 
 export interface BrandingSettings {
   companyName: string | null;
   productName: string | null;
+  /** Свой текст в подвале страницы входа. null — строки продукта. */
+  loginFooter: string | null;
   logo: {
     /** Адрес с отпечатком содержимого: смена файла меняет адрес. */
     url: string;

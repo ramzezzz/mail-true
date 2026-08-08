@@ -110,6 +110,7 @@ function sampleBackup(): SettingsBackupFile {
       branding: {
         companyName: 'ООО «Старая»',
         productName: null,
+        loginFooter: null,
         logo: null,
         logoBase64: null,
       },

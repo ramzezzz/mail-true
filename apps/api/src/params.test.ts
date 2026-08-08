@@ -60,6 +60,7 @@ test('слишком большой номер отвергается до ба�
 
 test('в отказ не попадают управляющие знаки и простыни', () => {
   const err = refusal(`ab\u0007cd${'я'.repeat(200)}`);
+  // eslint-disable-next-line no-control-regex
   assert.doesNotMatch(err.message, /[\u0000-\u001f]/u, 'управляющие знаки утекли в ответ');
   assert.ok(err.message.length < 200, 'ответ раздут переданной простынёй');
 });

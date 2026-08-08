@@ -183,6 +183,7 @@ test('логотип из копии проверяется так же, как 
       store.importSnapshot({
         companyName: null,
         productName: null,
+        loginFooter: null,
         logoBase64: evil.toString('base64'),
       }),
     (err: unknown) => {

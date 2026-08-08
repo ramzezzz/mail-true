@@ -49,6 +49,12 @@ export interface BrandingState {
   companyName: string | null;
   /** Название сервиса: заменяет «Mail.True» в подписях, если задано. */
   productName: string | null;
+  /**
+   * Текст в подвале страницы входа. Пусто — стандартные строки продукта.
+   * Место заметное: его читают, пока вводят пароль, и организациям туда
+   * нужны свои слова — телефон поддержки, номер распоряжения, что угодно.
+   */
+  loginFooter: string | null;
   logo: BrandingLogo | null;
 }
 
@@ -68,12 +74,18 @@ export interface BrandingSnapshot extends BrandingState {
 export interface BrandingRestoreInput {
   companyName: string | null;
   productName: string | null;
+  /**
+   * Необязательно: копии, снятые до появления подвала, обязаны
+   * восстанавливаться. Их отсутствие означает «строки продукта».
+   */
+  loginFooter?: string | null;
   logoBase64: string | null;
 }
 
 export const EMPTY_BRANDING: BrandingState = {
   companyName: null,
   productName: null,
+  loginFooter: null,
   logo: null,
 };
 
@@ -82,6 +94,13 @@ const LOGO_BASE = 'logo';
 
 /** Пределы на подписи. Длинное название ломает вёрстку карточки входа. */
 export const BRANDING_NAME_MAX = 64;
+
+/**
+ * Подвал длиннее названия: туда пишут телефон поддержки и порядок
+ * обращения, а это не помещается в одну короткую строку. Но и не текст
+ * договора: страницу входа не листают.
+ */
+export const BRANDING_FOOTER_MAX = 400;
 
 export class BrandingStore {
   constructor(private readonly dir: string) {}
@@ -110,6 +129,7 @@ export class BrandingStore {
       return {
         companyName: typeof parsed.companyName === 'string' ? parsed.companyName : null,
         productName: typeof parsed.productName === 'string' ? parsed.productName : null,
+        loginFooter: typeof parsed.loginFooter === 'string' ? parsed.loginFooter : null,
         logo: isLogo(parsed.logo) ? parsed.logo : null,
       };
     } catch {
@@ -185,6 +205,7 @@ export class BrandingStore {
   async saveTexts(patch: {
     companyName?: string | null;
     productName?: string | null;
+    loginFooter?: string | null;
   }): Promise<BrandingState> {
     const state = await this.read();
     const next = { ...state };
@@ -192,6 +213,7 @@ export class BrandingStore {
       next.companyName = normalizeName(patch.companyName, 'компании');
     if (patch.productName !== undefined)
       next.productName = normalizeName(patch.productName, 'сервиса');
+    if (patch.loginFooter !== undefined) next.loginFooter = normalizeFooter(patch.loginFooter);
     return this.writeState(next);
   }
 
@@ -219,6 +241,7 @@ export class BrandingStore {
     return this.saveTexts({
       companyName: snapshot.companyName ?? null,
       productName: snapshot.productName ?? null,
+      loginFooter: snapshot.loginFooter ?? null,
     });
   }
 
@@ -275,6 +298,32 @@ function normalizeName(value: string | null, what: string): string | null {
     throw new BadRequestError(
       `Название ${what} длиной ${clean.length} знаков не поместится в карточку входа: ` +
         `предел ${BRANDING_NAME_MAX}.`,
+    );
+  }
+  return clean;
+}
+
+/**
+ * Текст подвала страницы входа.
+ *
+ * Отличается от названий двумя вещами. Во-первых, он длиннее: туда пишут
+ * телефон поддержки, порядок обращения, номер распоряжения — одной
+ * строкой это не сказать. Во-вторых, в нём осмысленны переводы строк, и
+ * потому «\n» здесь остаётся, тогда как остальные управляющие символы
+ * вырезаются: они невидимы и ломают вёрстку.
+ *
+ * Разметку не принимаем НИКАКУЮ: это чужой текст на странице, которую
+ * видит неаутентифицированный посетитель, и место для тега <script> там
+ * последнее, где его хочется искать. Показывается он обычным текстом.
+ */
+function normalizeFooter(value: string | null): string | null {
+  if (value === null) return null;
+  // eslint-disable-next-line no-control-regex
+  const clean = value.replace(/[\u0000-\u0009\u000b-\u001f\u007f]/gu, '').trim();
+  if (clean === '') return null;
+  if (clean.length > BRANDING_FOOTER_MAX) {
+    throw new BadRequestError(
+      `Текст подвала длиной ${clean.length} знаков слишком велик: предел ${BRANDING_FOOTER_MAX}.`,
     );
   }
   return clean;

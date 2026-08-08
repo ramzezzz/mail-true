@@ -51,6 +51,7 @@ export function BrandingPage() {
   const [flash, setFlash] = useState<string | null>(null);
   const [company, setCompany] = useState('');
   const [product, setProduct] = useState('');
+  const [footer, setFooter] = useState('');
 
   const branding = useQuery({ queryKey: ['branding'], queryFn: () => api.branding() });
 
@@ -62,7 +63,8 @@ export function BrandingPage() {
     if (!loaded) return;
     setCompany(loaded.companyName ?? '');
     setProduct(loaded.productName ?? '');
-  }, [loaded?.companyName, loaded?.productName]); // eslint-disable-line react-hooks/exhaustive-deps
+    setFooter(loaded.loginFooter ?? '');
+  }, [loaded?.companyName, loaded?.productName, loaded?.loginFooter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const settle = (state: BrandingSettings, message: string): void => {
     queryClient.setQueryData(['branding'], state);
@@ -84,6 +86,7 @@ export function BrandingPage() {
       api.saveBrandingTexts({
         companyName: company.trim() === '' ? null : company.trim(),
         productName: product.trim() === '' ? null : product.trim(),
+        loginFooter: footer.trim() === '' ? null : footer,
       }),
     onSuccess: (state) => settle(state, 'Подписи сохранены.'),
   });
@@ -220,6 +223,26 @@ export function BrandingPage() {
             value={product}
             disabled={!writable}
             onChange={(e) => setProduct(e.target.value)}
+          />
+        </Field>
+        {/* Подвал: несколько строк, поэтому textarea. Разметка не
+            принимается — текст показывается как есть, а страницу входа
+            видит тот, кто ещё не вошёл. */}
+        <Field
+          label="Текст в подвале страницы входа"
+          hint={
+            limits?.footerMax
+              ? `Не длиннее ${String(limits.footerMax)} знаков. Пусто — строки продукта. Переводы строк сохраняются.`
+              : 'Пусто — строки продукта.'
+          }
+        >
+          <textarea
+            className="mt-textarea"
+            style={{ maxWidth: 620, minHeight: 90 }}
+            value={footer}
+            disabled={!writable}
+            placeholder={'Поддержка: +7 000 000-00-00, доб. 123\nОбращения — через заявку в служебной системе'}
+            onChange={(e) => setFooter(e.target.value)}
           />
         </Field>
         {writable && (

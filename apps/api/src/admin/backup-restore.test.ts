@@ -39,6 +39,7 @@ function backupWithBranding(): SettingsBackupFile {
       branding: {
         companyName: 'ООО «Ромашка»',
         productName: null,
+        loginFooter: null,
         logo: null,
         // Байты, которые не опознаются ни одним из разрешённых форматов:
         // именно на них спотыкается inspectLogo при восстановлении.

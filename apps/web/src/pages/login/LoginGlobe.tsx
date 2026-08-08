@@ -52,10 +52,20 @@ export const MAIL_GLOBE_ICONS: readonly LoginGlobeIcon[] = [
   'settings',
 ].map((name) => ({ id: name, href: `${SPRITE}#icon-${name}` }));
 
-/** Знак в середине сферы на входе в почту. */
+/**
+ * Знак в середине сферы — фирменный, а не ещё одна папка.
+ *
+ * Раньше в середине стоял значок «Входящие»: тот же символ, что и на
+ * орбите вокруг, только крупнее. Середина сцены — самое заметное место
+ * страницы входа, и занимать его повтором соседнего значка незачем.
+ *
+ * Здесь адрес ФАЙЛА, а не символа спрайта (в нём нет «#»), и рисуется он
+ * картинкой: знак цветной — синий квадрат с белой галочкой, — а символы
+ * спрайта одноцветные и красятся currentColor.
+ */
 export const MAIL_GLOBE_CENTER: LoginGlobeIcon = {
-  id: 'folder-inbox',
-  href: `${SPRITE}#icon-folder-inbox`,
+  id: 'brand-mark',
+  href: '/brand/mark.svg',
 };
 
 /**
@@ -202,9 +212,15 @@ export function LoginGlobe({
         </div>
 
         <div className={`${styles.node} ${styles.nodeCenter}`}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <use href={center.href} />
-          </svg>
+          {/* Файл — картинкой, символ спрайта — через <use>: у фирменного
+              знака свои цвета, и одноцветный currentColor его бы стёр. */}
+          {center.href.includes('#') ? (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <use href={center.href} />
+            </svg>
+          ) : (
+            <img className={styles.centerImage} src={center.href} alt="" aria-hidden="true" />
+          )}
         </div>
       </div>
     </div>

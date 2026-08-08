@@ -516,8 +516,11 @@ export const api = {
   },
   /** «Вернуть стандартный». Обязательная кнопка: OEM не должен быть в один конец. */
   resetLogo: () => del<BrandingSettings>('/branding/logo'),
-  saveBrandingTexts: (body: { companyName?: string | null; productName?: string | null }) =>
-    patch<BrandingSettings>('/branding', body),
+  saveBrandingTexts: (body: {
+    companyName?: string | null;
+    productName?: string | null;
+    loginFooter?: string | null;
+  }) => patch<BrandingSettings>('/branding', body),
 
   /* --- логотипы доменов отправителей --- */
   senderLogos: (params: { q?: string; limit: number; offset: number }) =>
