@@ -218,7 +218,9 @@ function ResourcesSection({ hours, poll }: { hours: number; poll: number | false
   });
 
   const data = resources.data;
-  const points = history.data?.points ?? [];
+  // Через useMemo, а не `?? []`: голый запасной массив каждый раз новый,
+  // и стоящий ниже расчёт подписей пересчитывался бы на каждой отрисовке.
+  const points = useMemo(() => history.data?.points ?? [], [history.data]);
   const labels = useMemo(() => points.map((p) => timeLabel(p.at, hours)), [points, hours]);
 
   const disk = data?.volumes[0] ?? null;

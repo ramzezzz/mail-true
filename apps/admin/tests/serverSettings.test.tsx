@@ -2,11 +2,11 @@
  * Раздел «Настройки сервера».
  *
  * Проверки закрывают ровно то, чем этот раздел может соврать, а врать
- * ему есть чем: настроек 133, и три их состояния похожи друг на друга.
+ * ему есть чем: настроек 133, и состояния их похожи друг на друга.
  *
  *   1. Пункт меню появляется ВМЕСТЕ С ПРАВОМ: роль без serversettings.read
  *      раздела не видит вовсе.
- *   2. Три состояния названы РАЗНЫМИ словами, а «ждёт перезапуска» —
+ *   2. Состояния названы РАЗНЫМИ словами, а «ждёт перезапуска» —
  *      признак отдельный от «нужен перезапуск»: первый требует действия,
  *      второй нет, и отбор в списке у них разный.
  *   3. Запертая настройка показывает ПРИЧИНУ текстом, а не серым цветом,
@@ -18,6 +18,7 @@
  *
  * @vitest-environment jsdom
  */
+import { existsSync, readFileSync } from 'node:fs';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -35,9 +36,26 @@ import {
   unitLabel,
   validate,
   valueText,
+  type SettingFilter,
 } from '../src/lib/serverSettings';
 import { SettingRow } from '../src/pages/ServerSettingsPage';
-import type { Permission, ServerSetting, ServerSettingsSection } from '../src/api/types';
+import type {
+  Permission,
+  ServerSetting,
+  ServerSettingsSection,
+  SettingGroup,
+} from '../src/api/types';
+
+/** Путь к файлу монорепозитория: ищем корень вверх от рабочего каталога. */
+function repoFile(relative: string): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 6; i += 1) {
+    const candidate = `${dir}/${relative}`;
+    if (existsSync(candidate)) return candidate;
+    dir = `${dir}/..`;
+  }
+  throw new Error(`не найден файл ${relative} — проверка смотрит не туда`);
+}
 
 const READONLY: Permission[] = ['overview.read', 'users.read', 'audit.read', 'branding.read'];
 const OWNER: Permission[] = [...READONLY, 'serversettings.read', 'serversettings.write'];
@@ -91,16 +109,47 @@ describe('пункт меню появляется вместе с правом'
   });
 });
 
-describe('три состояния различимы', () => {
-  it('у каждого своя подпись и свой цвет', () => {
+describe('состояния различимы', () => {
+  it('у каждого своя подпись', () => {
     const live = stateLabel(setting({ group: 'live' }));
     const restart = stateLabel(setting({ group: 'restart', requiresRestart: true }));
+    const recreate = stateLabel(setting({ group: 'recreate', requiresRestart: true }));
     const locked = stateLabel(setting({ group: 'locked', editable: false, reason: 'потому что' }));
 
     expect(live.text).toBe('действует сразу');
     expect(restart.text).toBe('нужен перезапуск');
+    expect(recreate.text).toBe('нужно пересоздать контейнер');
     expect(locked.text).toBe('не меняется из веба');
     expect(new Set([live.tone, restart.tone, locked.tone]).size).toBe(3);
+  });
+
+  it('ни одна группа с сервера не остаётся без своей подписи', () => {
+    /*
+     * Так и вышло с `recreate`: раздел писался на три группы, четвёртую
+     * добавили позже — и пятнадцать настроек, которым нужно ПЕРЕСОЗДАНИЕ
+     * контейнера, показывались успокаивающим «действует сразу», мимо
+     * фильтра и мимо всех плиток. Список групп берём из реестра сервера:
+     * появится пятая — проверка упадёт здесь, а не у человека на экране.
+     */
+    // Файл ищем от рабочего каталога вверх: в jsdom `import.meta.url` —
+    // адрес http, а не файла, и обычный приём соседних тестов тут не годится.
+    const registry = readFileSync(repoFile('apps/api/src/admin/server-settings-registry.ts'), 'utf8');
+    const groups = new Set(
+      [...registry.matchAll(/group: '([a-z]+)'/gu)].map((match) => match[1] as SettingGroup),
+    );
+    expect(groups.size).toBeGreaterThanOrEqual(4);
+
+    const labels = new Map<string, SettingGroup>();
+    for (const group of groups) {
+      const label = stateLabel(setting({ group }));
+      const already = labels.get(label.text);
+      expect(
+        already,
+        `группы «${group}» и «${already}» показываются одинаково: «${label.text}»`,
+      ).toBeUndefined();
+      labels.set(label.text, group);
+      expect(FILTER_LABELS[group as SettingFilter], `для группы «${group}» нет отбора`).toBeTruthy();
+    }
   });
 
   it('у запертой в подсказке стоит причина, а не общие слова', () => {

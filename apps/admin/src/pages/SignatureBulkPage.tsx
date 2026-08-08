@@ -43,7 +43,10 @@ export function SignatureBulkPage() {
   const { can } = useSession();
   const location = useLocation();
   /** Отмеченные в списке ящики приезжают сюда из раздела «Пользователи». */
-  const preselected = (location.state as { ids?: number[] } | null)?.ids ?? [];
+  const preselected = useMemo(
+    () => (location.state as { ids?: number[] } | null)?.ids ?? [],
+    [location.state],
+  );
 
   const [scope, setScope] = useState<'selected' | 'domain'>(
     preselected.length > 0 ? 'selected' : 'domain',

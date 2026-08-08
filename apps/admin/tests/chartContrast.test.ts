@@ -49,7 +49,6 @@ import {
   chartColor,
   chartPatternInk,
   seriesOf,
-  type ChartHue,
   type ChartSurface,
 } from '../src/lib/chartSeries';
 

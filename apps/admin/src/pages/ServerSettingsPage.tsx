@@ -77,6 +77,7 @@ const FILTERS: readonly SettingFilter[] = [
   'all',
   'live',
   'restart',
+  'recreate',
   'pending',
   'locked',
   'changed',
@@ -240,6 +241,7 @@ export function ServerSettingsPage() {
           <Tile value={counts.total} label="настроек всего" />
           <Tile value={counts.live} label="действуют сразу" />
           <Tile value={counts.restart} label="нужен перезапуск" />
+          <Tile value={counts.recreate} label="нужно пересоздать контейнер" />
           <Tile value={counts.locked} label="не меняются из веба" />
           <Tile value={counts.overridden} label="задано в панели" />
         </Tiles>
@@ -258,6 +260,13 @@ export function ServerSettingsPage() {
             <br />
             Сервер читает такое значение один раз при старте. Сохранить можно когда угодно, но до
             перезапуска контейнера <b>api</b> действует прежнее.
+          </div>
+          <div className={styles.legendItem}>
+            <Badge tone="warn">нужно пересоздать контейнер</Badge>
+            <br />
+            Такое значение контейнер получает при создании, поэтому обычного перезапуска мало.
+            Пересоздание идёт из того же образа: данные и почта на месте, служба недоступна те же
+            несколько секунд.
           </div>
           <div className={styles.legendItem}>
             <Badge tone="muted">не меняется из веба</Badge>

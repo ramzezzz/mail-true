@@ -2,15 +2,19 @@
  * Разбор настроек сервера для экрана «Настройки сервера».
  *
  * Здесь только чистые функции — без React и без запросов, — потому что
- * главное в этом разделе не разметка, а РАЗЛИЧЕНИЕ ТРЁХ СОСТОЯНИЙ, и
+ * главное в этом разделе не разметка, а РАЗЛИЧЕНИЕ СОСТОЯНИЙ, и
  * ошибиться в них дороже всего. Разделив, их можно проверить тестами.
  *
  * ------------------------------------------------------------------
- * ТРИ СОСТОЯНИЯ И ЧЕТВЁРТЫЙ ПРИЗНАК
+ * ЧЕТЫРЕ СОСТОЯНИЯ И ПЯТЫЙ ПРИЗНАК
  * ------------------------------------------------------------------
  *   live    — сохранил и работает.
  *   restart — ОБЕЩАНИЕ: подействует после перезапуска. Свойство самой
  *             настройки, верно всегда, даже когда её никто не трогал.
+ *   recreate — то же обещание, но перезапуска мало: значение задаётся
+ *             контейнеру при создании, и менять его — пересоздавать
+ *             контейнер. Разговор с человеком другой, поэтому и
+ *             состояние отдельное.
  *   locked  — из веба не меняется, и рядом обязана стоять ПРИЧИНА.
  *
  * И отдельно от них — pendingRestart. Это не состояние настройки, а ФАКТ
@@ -42,6 +46,14 @@ export function stateLabel(setting: ServerSetting): SettingStateLabel {
       text: 'не меняется из веба',
       tone: 'muted',
       title: setting.reason ?? 'Значение показано для справки.',
+    };
+  }
+  if (setting.group === 'recreate') {
+    return {
+      text: 'нужно пересоздать контейнер',
+      tone: 'warn',
+      title:
+        'Значение задаётся контейнеру при создании, поэтому обычного перезапуска мало: контейнер пересоздаётся из того же образа.',
     };
   }
   if (setting.group === 'restart') {
@@ -161,12 +173,20 @@ export function valueText(value: SettingValue | null): string {
  * по нему приходят из плашки «нужен перезапуск», и там нужны те самые
  * настройки, из-за которых он нужен, а не все 59 обещаний.
  */
-export type SettingFilter = 'all' | 'live' | 'restart' | 'pending' | 'locked' | 'changed';
+export type SettingFilter =
+  | 'all'
+  | 'live'
+  | 'restart'
+  | 'recreate'
+  | 'pending'
+  | 'locked'
+  | 'changed';
 
 export const FILTER_LABELS: Readonly<Record<SettingFilter, string>> = {
   all: 'Все',
   live: 'Действуют сразу',
   restart: 'Нужен перезапуск',
+  recreate: 'Нужно пересоздать контейнер',
   pending: 'Ждут перезапуска',
   locked: 'Не меняются из веба',
   changed: 'Заданные в панели',
@@ -178,6 +198,8 @@ function matchesFilter(setting: ServerSetting, filter: SettingFilter): boolean {
       return setting.group === 'live';
     case 'restart':
       return setting.group === 'restart';
+    case 'recreate':
+      return setting.group === 'recreate';
     case 'pending':
       return setting.pendingRestart;
     case 'locked':
