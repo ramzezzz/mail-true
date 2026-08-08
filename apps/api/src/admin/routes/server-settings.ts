@@ -381,6 +381,17 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
             'а не потери данных.',
         );
       }
+      /*
+       * Проверка, зависящая от настройки сервера, а не от самого секрета.
+       *
+       * Идёт ДО посредника и до генерации: отказ должен объяснять
+       * причину, а не оставлять после себя новый секрет в файле.
+       */
+      const blocked = secret.guard?.(process.env);
+      if (blocked !== undefined && blocked !== null) {
+        throw new BadRequestError(blocked);
+      }
+
       const agent = ctx.serviceAgent;
       if (!agent || !agent.configured) {
         throw new BadRequestError(

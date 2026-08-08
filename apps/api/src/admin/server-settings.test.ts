@@ -350,6 +350,53 @@ void test('перевыпуск секретов: только секреты, �
   }
 });
 
+void test('ключи шифрования не перевыпускаются: ими закрыто уже записанное', () => {
+  /*
+   * Поймано живьём и стоило бы данных. В списке перевыпускаемых стоял
+   * ADMIN_SESSION_SECRET — по имени он читается как «подпись сессий
+   * панели». На деле cookie панели подписана общим SESSION_SECRET, а
+   * этим ключом ЗАШИФРОВАНЫ пароли импорта, пароли исходных ящиков в
+   * заданиях переноса и приватный ключ DKIM при смене домена. Кнопка
+   * ничего из обещанного не делала (проверено: старая cookie после
+   * перевыпуска продолжала работать) и молча делала бы зашифрованное
+   * нечитаемым навсегда.
+   *
+   * Отсюда правило: ключ, которым что-то ЗАШИФРОВАНО в базе, в этот
+   * список не попадает. Решение принимается по тому, кто ключ читает,
+   * а не по тому, как он назван.
+   */
+  const encryptionKeys = [
+    'ADMIN_SESSION_SECRET',
+    'AI_ENCRYPTION_KEY',
+    'EXTERNAL_ACCOUNTS_KEY',
+    'PUSH_VAPID_PRIVATE_KEY',
+  ];
+  const wrong = ROTATABLE_SECRETS.filter((s) => encryptionKeys.includes(s.key)).map((s) => s.key);
+  assert.deepEqual(
+    wrong,
+    [],
+    'Этими ключами зашифрованы данные в базе — перевыпуск делает их нечитаемыми: ' +
+      wrong.join(', '),
+  );
+});
+
+void test('подпись сессий не перевыпускается, пока она же служит ключом шифрования', () => {
+  // На сервере без отдельного ADMIN_SESSION_SECRET шифрование идёт на
+  // SESSION_SECRET (admin/config.ts, importSecret). Там перевыпуск — та
+  // же потеря данных, только с другой стороны.
+  const session = ROTATABLE_SECRETS.find((s) => s.key === 'SESSION_SECRET');
+  assert.ok(session, 'SESSION_SECRET должен быть в списке перевыпускаемых');
+  assert.ok(session.guard, 'у SESSION_SECRET обязана быть проверка перед перевыпуском');
+
+  const blocked = session.guard({} as NodeJS.ProcessEnv);
+  assert.ok(blocked, 'без ADMIN_SESSION_SECRET перевыпуск обязан отказывать');
+  // Отказ обязан говорить, что делать: «нельзя» без выхода — тупик.
+  assert.match(blocked, /ADMIN_SESSION_SECRET/);
+
+  const allowed = session.guard({ ADMIN_SESSION_SECRET: 'x'.repeat(40) } as NodeJS.ProcessEnv);
+  assert.equal(allowed, null, 'с отдельным ключом шифрования перевыпуск разрешён');
+});
+
 void test('новый секрет проходит собственную проверку схемы', () => {
   /*
    * SESSION_SECRET проверяется схемой на минимум 32 символа. Секрет
