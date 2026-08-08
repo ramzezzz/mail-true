@@ -62,7 +62,7 @@ export async function accountsRoutes(app: FastifyInstance): Promise<void> {
         if (!ready) {
           logger.error(
             'Таблиц внешних ящиков нет. Примените ' +
-              'infra/postgres/migrations/0005_settings_accounts.sql к работающей базе.',
+              'infra/postgres/migrations/0001_baseline.sql к работающей базе.',
           );
           return;
         }

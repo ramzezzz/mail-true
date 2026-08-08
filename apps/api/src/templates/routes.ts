@@ -60,7 +60,7 @@ import {
 /** Подсказка, если миграцию 0026 ещё не применили. */
 export const TEMPLATES_MIGRATION_HINT =
   'Таблиц шаблонов писем нет. Примените ' +
-  'infra/postgres/migrations/0026_mail_templates.sql к работающей базе.';
+  'infra/postgres/migrations/0001_baseline.sql к работающей базе.';
 
 /** Возможности нет, потому что базы нет вовсе. */
 export const TEMPLATES_NO_DATABASE =

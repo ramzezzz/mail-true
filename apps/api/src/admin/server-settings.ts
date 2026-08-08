@@ -260,7 +260,7 @@ export class ServerSettings {
             this.#warnedMissingTable = true;
             this.#logger?.warn(
               'Таблицы настроек сервера нет. Примените ' +
-                'infra/postgres/migrations/0034_server_settings.sql — до этого раздел ' +
+                'infra/postgres/migrations/0001_baseline.sql — до этого раздел ' +
                 '«Настройки сервера» покажет значения из окружения и не даст их менять.',
             );
           }
@@ -516,7 +516,7 @@ export async function applyStoredEnv(opts: ApplyStoredEnvOptions): Promise<numbe
     if (isUndefinedTable(err)) {
       opts.onWarn?.(
         'Таблицы настроек сервера нет — работаем по infra/.env. Примените ' +
-          'infra/postgres/migrations/0034_server_settings.sql.',
+          'infra/postgres/migrations/0001_baseline.sql.',
       );
       return 0;
     }

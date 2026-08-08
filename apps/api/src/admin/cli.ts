@@ -55,7 +55,7 @@ async function main(): Promise<void> {
         process.stdout.write(
           ready
             ? 'Схема админки на месте (таблица admin_users существует)\n'
-            : 'Схема админки НЕ применена: выполните infra/postgres/migrations/0003_admin.sql\n',
+            : 'Схема админки НЕ применена: выполните infra/postgres/migrations/0001_baseline.sql\n',
         );
         process.exit(ready ? 0 : 3);
         break;

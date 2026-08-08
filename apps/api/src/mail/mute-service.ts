@@ -64,7 +64,7 @@ export class MuteUnavailableError extends ApiError {
 
 export const MUTE_MIGRATION_HINT =
   'Заглушить переписку нельзя: не применена миграция ' +
-  'infra/postgres/migrations/0029_muted_threads.sql. Почта работает как обычно.';
+  'infra/postgres/migrations/0001_baseline.sql. Почта работает как обычно.';
 
 /** Заглушённая переписка в форме, которую читает интерфейс. */
 export interface MutedThreadItem {

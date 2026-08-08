@@ -69,7 +69,7 @@ export class AccountsUnavailableError extends ApiError {
 
 export const MIGRATION_HINT =
   'Таблиц внешних ящиков нет. Примените ' +
-  'infra/postgres/migrations/0005_settings_accounts.sql к работающей базе.';
+  'infra/postgres/migrations/0001_baseline.sql к работающей базе.';
 
 export interface AccountsServiceOptions {
   config: AccountsConfig;

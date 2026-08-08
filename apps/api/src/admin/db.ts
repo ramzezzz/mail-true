@@ -305,7 +305,7 @@ export class AdminDb {
       if (!isUndefinedColumn(err)) throw err;
       this.opts.logger.warn(
         { ...errorInfo(err) },
-        'В admin_users нет столбца theme: примените infra/postgres/migrations/0009_admin_appearance.sql. Панель работает с темой по умолчанию.',
+        'В admin_users нет столбца theme: примените infra/postgres/migrations/0001_baseline.sql. Панель работает с темой по умолчанию.',
       );
       return null;
     }

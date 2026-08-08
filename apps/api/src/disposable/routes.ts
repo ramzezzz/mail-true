@@ -25,7 +25,7 @@ export const DISPOSABLE_NO_DATABASE =
 
 export const DISPOSABLE_MIGRATION_HINT =
   'Одноразовые адреса недоступны: не применена миграция ' +
-  'infra/postgres/migrations/0028_disposable_aliases.sql';
+  'infra/postgres/migrations/0001_baseline.sql';
 
 export interface DisposableDeps {
   /** Хранилище; null — возможности нет, причина в `unavailableReason`. */

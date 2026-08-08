@@ -102,7 +102,7 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
     if (store === null) {
       throw new ServiceAgentUnavailableError(
         'Перезапуск из панели недоступен: не применена миграция ' +
-          'infra/postgres/migrations/0035_service_restarts.sql. Без неё некуда записать, ' +
+          'infra/postgres/migrations/0001_baseline.sql. Без неё некуда записать, ' +
           'чем кончился перезапуск, а перезапускать вслепую нельзя.',
       );
     }

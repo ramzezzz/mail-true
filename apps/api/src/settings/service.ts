@@ -184,7 +184,7 @@ export class SettingsService {
 }
 
 export const MIGRATION_HINT =
-  'Таблиц настроек нет. Примените infra/postgres/migrations/0005_settings_accounts.sql ' +
+  'Таблиц настроек нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
   'к работающей базе — до этого настройки и фильтры недоступны.';
 
 /**
@@ -196,4 +196,4 @@ export const MIGRATION_HINT =
  */
 export const APPEARANCE_MIGRATION_HINT =
   'Оформление не запоминается: в таблице настроек нет колонок theme/wallpaper. ' +
-  'Примените infra/postgres/migrations/0010_appearance.sql к работающей базе.';
+  'Примените infra/postgres/migrations/0001_baseline.sql к работающей базе.';

@@ -32,7 +32,7 @@ import type { MailSession } from '../types.js';
 /** Подсказка, если миграцию 0027 ещё не применили. */
 export const SAVED_SEARCHES_MIGRATION_HINT =
   'Таблицы сохранённых запросов нет. Примените ' +
-  'infra/postgres/migrations/0027_saved_searches.sql к работающей базе.';
+  'infra/postgres/migrations/0001_baseline.sql к работающей базе.';
 
 const draftSchema = z.object({
   name: z.string().min(1).max(MAX_SAVED_SEARCH_NAME_LENGTH),

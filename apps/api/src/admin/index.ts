@@ -328,7 +328,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     .then((ready) => {
       if (!ready) {
         logger.error(
-          'Таблиц админки нет. Примените infra/postgres/migrations/0003_admin.sql ' +
+          'Таблиц админки нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
             'к работающей базе — до этого админка работать не будет.',
         );
       } else if (!adminConfig.masterConfigured) {
@@ -359,7 +359,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.error(
           'Таблиц истории доставки нет. Примените ' +
-            'infra/postgres/migrations/0007_mail_flow.sql — до этого раздел ' +
+            'infra/postgres/migrations/0001_baseline.sql — до этого раздел ' +
             '«Почтовый поток» покажет только очередь, без обработанных писем.',
         );
         return;
@@ -379,7 +379,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.error(
           'Таблицы снимков показателей нет. Примените ' +
-            'infra/postgres/migrations/0011_metrics.sql — до этого дашборд покажет ' +
+            'infra/postgres/migrations/0001_baseline.sql — до этого дашборд покажет ' +
             'состояние «прямо сейчас», но без графиков за прошедшие часы.',
         );
         // Один проход всё же делаем: он наполняет «прямо сейчас».
@@ -405,7 +405,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.warn(
           'Таблиц переноса почты нет. Примените ' +
-            'infra/postgres/migrations/0013_migration_jobs.sql — до этого раздел ' +
+            'infra/postgres/migrations/0001_baseline.sql — до этого раздел ' +
             '«Перенос почты» будет отвечать 503 с объяснением.',
         );
         return;
@@ -434,7 +434,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.warn(
           'Таблицы снимков антиспама нет. Примените ' +
-            'infra/postgres/migrations/0022_rspamd_stats.sql — до этого раздел «Спам» ' +
+            'infra/postgres/migrations/0001_baseline.sql — до этого раздел «Спам» ' +
             'покажет состояние «прямо сейчас», но без сравнения с прошлыми часами.',
         );
         return;
@@ -476,7 +476,7 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
       if (!ready) {
         logger.warn(
           'Таблицы журнала перезапусков нет. Примените ' +
-            'infra/postgres/migrations/0035_service_restarts.sql — до этого кнопки ' +
+            'infra/postgres/migrations/0001_baseline.sql — до этого кнопки ' +
             '«применить настройку» будут отвечать 503 с объяснением.',
         );
         return;

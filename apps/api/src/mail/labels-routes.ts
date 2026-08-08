@@ -45,7 +45,7 @@ import type { MailSession } from '../types.js';
 
 /** Подсказка, если миграцию 0018 ещё не применили. */
 export const LABELS_MIGRATION_HINT =
-  'Таблицы меток нет. Примените infra/postgres/migrations/0018_mail_labels.sql ' +
+  'Таблицы меток нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
   'к работающей базе.';
 
 const messageIdSchema = z.string().min(3).max(MAX_ENTITY_ID_LENGTH);

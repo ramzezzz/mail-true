@@ -97,7 +97,7 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
         reason:
           ctx.reasons.access ??
           'История входов недоступна: не применена миграция ' +
-            'infra/postgres/migrations/0023_mailbox_access_log.sql',
+            'infra/postgres/migrations/0001_baseline.sql',
         items: [],
         retentionDays: ctx.settings.MAILBOX_ACCESS_LOG_DAYS,
         hasMore: false,
@@ -148,7 +148,7 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
         reason:
           ctx.reasons.export ??
           'Выгрузка недоступна: не применена миграция ' +
-            'infra/postgres/migrations/0024_mailbox_exports.sql',
+            'infra/postgres/migrations/0001_baseline.sql',
       };
     }
     if (!ctx.exportRunner) {
@@ -281,7 +281,7 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
         reason:
           ctx.reasons.recovery ??
           'Восстановление недоступно: не применена миграция ' +
-            'infra/postgres/migrations/0025_trash_recovery.sql',
+            'infra/postgres/migrations/0001_baseline.sql',
       };
     }
     return { available: true, reason: null };

@@ -80,7 +80,7 @@ export function logoVersion(domain: string, bytes: Buffer | null): string {
 }
 
 // Описание таблицы sender_logo_cache живёт в
-// infra/postgres/migrations/0021_code_created_tables.sql, а не здесь.
+// infra/postgres/migrations/0001_baseline.sql, а не здесь.
 // Держать его в двух местах — это схема, которая зависит от того, что
 // случилось раньше: миграция или первое обращение кода.
 
@@ -189,7 +189,7 @@ export class LogoStore {
       if (!this.#schemaOk) {
         this.#logger.warn(
           'Нет таблицы sender_logo_cache — логотипы отправителей показываться не будут. ' +
-            'Примените infra/postgres/migrations/0021_code_created_tables.sql ' +
+            'Примените infra/postgres/migrations/0001_baseline.sql ' +
             '(это делает install/install.sh).',
         );
       }

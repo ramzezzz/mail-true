@@ -85,7 +85,7 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
       .then((ready) => {
         if (!ready) {
           logger.error(
-            'Таблиц помощника ИИ нет. Примените infra/postgres/migrations/0004_ai.sql ' +
+            'Таблиц помощника ИИ нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
               'к работающей базе — до этого помощник будет отвечать «выключено».',
           );
         } else if (!keyBox) {

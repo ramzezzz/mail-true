@@ -92,7 +92,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       .then((ready) => {
         if (!ready) {
           logger.error(
-            'Таблиц настроек нет. Примените infra/postgres/migrations/0005_settings_accounts.sql ' +
+            'Таблиц настроек нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
               'к работающей базе — до этого настройки и фильтры недоступны.',
           );
         }
@@ -209,7 +209,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           if (!remembers) {
             logger.warn(
               'Собственные адреса сервера не запоминаются: примените ' +
-                'infra/postgres/migrations/0036_api_service_addresses.sql. ' +
+                'infra/postgres/migrations/0001_baseline.sql. ' +
                 'После пересборки контейнера служебные подключения веб-интерфейса ' +
                 'в разделе «Вход и действия» будут выглядеть входами по IMAP.',
             );
@@ -263,7 +263,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         } else {
           recovery.disable(
             'Восстановление после очистки корзины недоступно: не применена миграция ' +
-              'infra/postgres/migrations/0025_trash_recovery.sql. Очистка корзины ' +
+              'infra/postgres/migrations/0001_baseline.sql. Очистка корзины ' +
               'удаляет письма сразу, как и раньше.',
           );
           logger.warn(recovery.unavailableReason);

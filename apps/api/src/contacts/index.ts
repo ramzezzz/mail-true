@@ -102,7 +102,7 @@ export async function contactsRoutes(app: FastifyInstance): Promise<void> {
     try {
       if (!(await db.schemaReady())) {
         logger.error(
-          'Таблиц адресной книги нет. Примените infra/postgres/migrations/0017_contacts.sql ' +
+          'Таблиц адресной книги нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
             'к работающей базе — до этого адреса в поле «Кому» не подсказываются.',
         );
       }

@@ -523,7 +523,7 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         if (!ready) {
           snooze.disable(
             'Таблицы отложенных писем нет. Примените ' +
-              'infra/postgres/migrations/0015_snoozed_messages.sql к работающей базе.',
+              'infra/postgres/migrations/0001_baseline.sql к работающей базе.',
           );
           app.log.error(snooze.unavailableReason);
           return;

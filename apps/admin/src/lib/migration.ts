@@ -144,7 +144,7 @@ export function readinessProblems(settings: {
   }
   if (!settings.schemaReady) {
     problems.push(
-      'Не применена миграция infra/postgres/migrations/0013_migration_jobs.sql — заданиям ' +
+      'Не применена миграция infra/postgres/migrations/0001_baseline.sql — заданиям ' +
         'переноса негде храниться, и они не переживут перезапуск.',
     );
   }

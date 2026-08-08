@@ -200,7 +200,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
         await service.init();
       } else {
         logger.error(
-          'Таблиц уведомлений нет. Примените infra/postgres/migrations/0014_push_notifications.sql ' +
+          'Таблиц уведомлений нет. Примените infra/postgres/migrations/0001_baseline.sql ' +
             'к работающей базе — до этого уведомления работают только при открытой вкладке.',
         );
       }

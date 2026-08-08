@@ -136,11 +136,15 @@ for svc in postgres redis dovecot postfix; do
     [ "$state" = "running" ] && ok "$svc запущен" || { bad "$svc: ${state:-нет}"; }
 done
 
+# Базовая схема вместо прежнего 0003_admin.sql: 36 файлов свёрнуты в один,
+# и проверяем ровно то же свойство — схема накатывается на работающую базу
+# повторно и без вреда. Свойство важнее номера файла: обновление боевого
+# сервера начинается именно с повторного прогона.
 if "${COMPOSE[@]}" exec -T postgres psql -q -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-        < "$INFRA_DIR/postgres/migrations/0003_admin.sql" >/dev/null 2>&1; then
-    ok "миграция 0003 применена к работающей базе (повторно — без вреда)"
+        < "$INFRA_DIR/postgres/migrations/0001_baseline.sql" >/dev/null 2>&1; then
+    ok "базовая схема применена к работающей базе (повторно — без вреда)"
 else
-    bad "миграция 0003 не применилась"
+    bad "базовая схема не применилась"
 fi
 
 TABLES=$("${COMPOSE[@]}" exec -T postgres psql -tAq -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \

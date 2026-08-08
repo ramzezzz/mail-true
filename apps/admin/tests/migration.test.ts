@@ -226,7 +226,11 @@ describe('готовность раздела', () => {
     expect(problems).toHaveLength(3);
     expect(problems.join(' ')).toContain('DOVECOT_MASTER_USER');
     expect(problems.join(' ')).toContain('SESSION_SECRET');
-    expect(problems.join(' ')).toContain('0013_migration_jobs.sql');
+    // Файл называется точно, а не «примените миграции»: администратор,
+    // которому раздел недоступен, должен видеть, что именно выполнить.
+    // Раньше это был 0013_migration_jobs.sql — после свёртки 36 файлов в
+    // одну базовую схему таблицы заданий переезда заводит она же.
+    expect(problems.join(' ')).toContain('0001_baseline.sql');
   });
 
   it('когда всё настроено — препятствий нет', () => {

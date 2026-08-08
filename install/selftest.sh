@@ -397,8 +397,12 @@ t_no "нигде в install/ запрос с :'переменной' не под
 # CREATE INDEX держит запись в таблице до конца построения, а запускают
 # это обновлением РАБОТАЮЩЕГО сервера. Проверяем на mail_flow_events —
 # в неё непрерывно пишет сборщик журнала Postfix.
+# Ищем во ВСЕХ файлах миграций, включая legacy/: после свёртки схемы
+# индекс переехал из 0011_metrics.sql в базовую схему, а сам 0011 уехал
+# в legacy/ — им доводят серверы, пропустившие обновления, и там он
+# по-прежнему обязан строиться CONCURRENTLY.
 t_ok "индекс агрегатов почтового потока строится CONCURRENTLY" \
-    bash -c "grep -q 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_flow_agg' '$REPO_DIR/infra/postgres/migrations/0011_metrics.sql'"
+    bash -c "grep -rq 'CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_mail_flow_agg' '$REPO_DIR/infra/postgres/migrations/'"
 
 # Таблицы, которые заводил код на лету, не попадали ни в план обновления,
 # ни в проверку схемы (selfcheck берёт список из CREATE TABLE в миграциях).

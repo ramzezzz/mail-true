@@ -108,7 +108,7 @@ export class AwaitUnavailableError extends ApiError {
 
 export const AWAIT_MIGRATION_HINT =
   'Ждать ответа нельзя: не применена миграция ' +
-  'infra/postgres/migrations/0030_awaiting_replies.sql. Почта работает как обычно.';
+  'infra/postgres/migrations/0001_baseline.sql. Почта работает как обычно.';
 
 /** Строка подборки «Ждут ответа». */
 export interface AwaitingItem {
