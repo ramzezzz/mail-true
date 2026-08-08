@@ -23,6 +23,7 @@ import { ExportRunner } from './export-runner.js';
 import { OwnerDb } from './owner-db.js';
 import { ownerRoutes, type OwnerRoutesContext } from './owner-routes.js';
 import { RecoveryService } from './recovery-service.js';
+import { ServiceAddressBook } from './service-addresses.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -153,6 +154,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     },
     exportRunner: null,
     recovery,
+    serviceAddresses: new ServiceAddressBook(logger),
   };
 
   let accessJanitor: NodeJS.Timeout | null = null;
@@ -195,6 +197,24 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
                 );
             },
           };
+          /*
+           * Память о собственных адресах. Без неё раздел сравнивал бы
+           * адрес из журнала только с сегодняшними адресами процесса, и
+           * после пересборки контейнера вчерашние служебные подключения
+           * показывались бы обычными входами по IMAP (см.
+           * service-addresses.ts). Таблицы нет — работаем как раньше,
+           * на текущих адресах, и говорим об этом в журнал.
+           */
+          const remembers = await ownerCtx.serviceAddresses.attach(ownerDb);
+          if (!remembers) {
+            logger.warn(
+              'Собственные адреса сервера не запоминаются: примените ' +
+                'infra/postgres/migrations/0036_api_service_addresses.sql. ' +
+                'После пересборки контейнера служебные подключения веб-интерфейса ' +
+                'в разделе «Вход и действия» будут выглядеть входами по IMAP.',
+            );
+          }
+
           const sweep = () => {
             const edge = new Date(Date.now() - config.MAILBOX_ACCESS_LOG_DAYS * 24 * 3600_000);
             void ownerDb
@@ -202,6 +222,13 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
               .catch((err: unknown) =>
                 logger.warn(errorInfo(err), 'Уборка истории входов не удалась'),
               );
+            /*
+             * Адреса стареют вместе с историей, которую объясняют, и
+             * тем же сроком: строку, которую больше нечем объяснять,
+             * держать не нужно, а держать её вечно — значит однажды
+             * принять за себя чужую машину с тем же адресом.
+             */
+            void ownerCtx.serviceAddresses.purge(edge).then(() => ownerCtx.serviceAddresses.sync());
           };
           accessJanitor = setInterval(sweep, ACCESS_JANITOR_MS);
           accessJanitor.unref?.();

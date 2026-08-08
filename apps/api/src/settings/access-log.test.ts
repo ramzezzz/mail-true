@@ -18,6 +18,7 @@ import {
   markService,
   mergeAccessEvents,
   normalizeIp,
+  ownAddresses,
   parseDovecotAccess,
   parsePostfixAccess,
   resetOwnAddresses,
@@ -98,27 +99,45 @@ test('приём чужой почты на 25-м порту входом не �
   assert.equal(parsePostfixAccess(line, NOW), null);
 });
 
-test('подключение самого веб-интерфейса помечается служебным', () => {
-  resetOwnAddresses();
+/** Строка входа по IMAP с заданного адреса. */
+function imapLogin(rip: string): AccessEvent {
   const event = dovecotAccessFromParts(
     'imap-login',
-    'Login: user=<test@mail.local>, method=PLAIN, rip=127.0.0.1, lip=127.0.0.1',
+    `Login: user=<test@mail.local>, method=PLAIN, rip=${rip}, lip=172.31.0.54`,
     NOW,
   );
   assert.ok(event);
-  const marked = markService(event);
+  return event;
+}
+
+test('подключение самого веб-интерфейса помечается служебным', () => {
+  resetOwnAddresses();
+  const marked = markService(imapLogin('127.0.0.1'), ownAddresses());
   assert.equal(marked.service, true);
   assert.match(marked.detail, /[Сс]лужебное/);
 });
 
 test('вход с чужого адреса служебным не считается', () => {
   resetOwnAddresses();
-  const event = dovecotAccessFromParts(
-    'imap-login',
-    'Login: user=<test@mail.local>, method=PLAIN, rip=203.0.113.7, lip=172.31.0.54',
-    NOW,
-  );
-  assert.equal(markService(event!).service, false);
+  assert.equal(markService(imapLogin('203.0.113.7'), ownAddresses()).service, false);
+});
+
+/*
+ * ПЕРЕСБОРКА КОНТЕЙНЕРА. Docker выдаёт новому контейнеру следующий
+ * свободный адрес: процесс считает своим 172.28.0.7, а вчерашние строки
+ * журнала написаны про 172.28.0.2 — ровно это видно в dovecot.log на
+ * стенде. На прежнем коде (сравнение только с текущими интерфейсами)
+ * вчерашние служебные подключения превращались в «вход по IMAP из
+ * локальной сети», то есть раздел сам поднимал ложную тревогу.
+ */
+test('адрес прежнего контейнера остаётся служебным после пересборки', () => {
+  const remembered = new Set(['172.28.0.2', '172.28.0.7']);
+  const before = markService(imapLogin('172.28.0.2'), remembered);
+  assert.equal(before.service, true, 'вчерашнее подключение — тоже наше');
+  assert.equal(markService(imapLogin('172.28.0.7'), remembered).service, true);
+  // Обратный ход: чужая машина из той же подсети служебной не становится —
+  // помним АДРЕСА, а не подсеть стека, которая может совпасть с офисной
+  assert.equal(markService(imapLogin('172.28.0.55'), remembered).service, false);
 });
 
 test('адрес IPv4-в-IPv6 приводится к обычному виду', () => {

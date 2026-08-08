@@ -27,6 +27,7 @@ import type { SettingsConfig } from './config.js';
 import { ExportRunner, exportFileSize } from './export-runner.js';
 import { isUniqueViolation, type ExportRow, type OwnerStore } from './owner-db.js';
 import { DEFAULT_RECOVERY_DAYS, type RecoveryService } from './recovery-service.js';
+import type { ServiceAddressBook } from './service-addresses.js';
 
 /** Сколько событий истории отдаётся за один запрос. */
 const ACCESS_PAGE = 100;
@@ -45,6 +46,13 @@ export interface OwnerRoutesContext {
   reasons: { access: string | null; export: string | null; recovery: string | null };
   exportRunner: ExportRunner | null;
   recovery: RecoveryService;
+  /**
+   * Память о собственных адресах сервера приложения: по ней служебные
+   * подключения веб-интерфейса отличаются от входов человека. Читается на
+   * КАЖДЫЙ запрос, а не запоминается при сборке маршрутов, — список
+   * пополняется на ходу (см. service-addresses.ts).
+   */
+  serviceAddresses: ServiceAddressBook;
 }
 
 const accessQuery = z.object({
@@ -102,6 +110,7 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
       email: session.email,
       limit,
       own,
+      serviceAddresses: ctx.serviceAddresses.known,
       /*
        * Журналы служб подмешиваются только к ПЕРВОЙ странице.
        *

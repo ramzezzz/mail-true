@@ -50,6 +50,11 @@ export interface LogAccessOptions {
   email: string;
   /** Сколько событий нужно самое большее. */
   limit: number;
+  /**
+   * Адреса, с которых подключается сам сервер приложения, — ВСЕ, какие за
+   * ним знали, а не только сегодняшние (см. service-addresses.ts).
+   */
+  own: ReadonlySet<string>;
   now?: Date | undefined;
 }
 
@@ -102,7 +107,7 @@ export async function readLogAccess(
       if (!event) continue;
       // Второе, точное сравнение — см. пояснение в шапке файла.
       if (!sameMailbox(text, opts.email)) continue;
-      events.push(markService(event));
+      events.push(markService(event, opts.own));
       if (events.length >= opts.limit) break;
     }
     if (result.nextBefore === null) break;
@@ -139,7 +144,10 @@ export interface CollectAccessOptions {
   dir: string;
   email: string;
   limit: number;
+  /** Свои записи из таблицы истории. */
   own: AccessRow[];
+  /** Адреса самого сервера приложения — см. LogAccessOptions.own. */
+  serviceAddresses: ReadonlySet<string>;
   /** Читать ли журналы служб (на стенде без тома их просто нет). */
   withLogs: boolean;
   now?: Date | undefined;
@@ -157,7 +165,13 @@ export async function collectAccess(opts: CollectAccessOptions): Promise<AccessE
   const own = opts.own.map(toAccessEvent);
   if (!opts.withLogs) return mergeAccessEvents(own).slice(0, opts.limit);
 
-  const base = { dir: opts.dir, email: opts.email, limit: opts.limit, now: opts.now };
+  const base = {
+    dir: opts.dir,
+    email: opts.email,
+    limit: opts.limit,
+    own: opts.serviceAddresses,
+    now: opts.now,
+  };
   const [dovecot, postfix] = await Promise.all([
     readLogAccess('dovecot', base),
     readLogAccess('postfix', base),

@@ -407,6 +407,40 @@ export class OwnerDb implements OwnerStore {
     return result.rowCount ?? 0;
   }
 
+  /* --- Собственные адреса сервера приложения (миграция 0036) --- */
+
+  serviceAddressesReady(): Promise<boolean> {
+    return this.#tableExists('api_service_addresses');
+  }
+
+  /**
+   * Отметить адреса своими. Уже известный адрес не заводится заново — у
+   * него обновляется «когда видели в последний раз», по которому строка
+   * потом и стареет.
+   */
+  async rememberServiceAddresses(ips: readonly string[]): Promise<void> {
+    if (ips.length === 0) return;
+    await this.#query(
+      `INSERT INTO api_service_addresses (ip)
+       SELECT DISTINCT unnest($1::text[])
+       ON CONFLICT (ip) DO UPDATE SET last_seen = now()`,
+      [[...ips]],
+    );
+  }
+
+  async listServiceAddresses(): Promise<string[]> {
+    const rows = await this.#query<{ ip: string }>(`SELECT ip FROM api_service_addresses`);
+    return rows.map((row) => row.ip);
+  }
+
+  async purgeServiceAddresses(olderThan: Date): Promise<number> {
+    const result = await this.#pool.query(
+      `DELETE FROM api_service_addresses WHERE last_seen < $1`,
+      [olderThan.toISOString()],
+    );
+    return result.rowCount ?? 0;
+  }
+
   /* --- Выгрузка --- */
 
   async createExport(
