@@ -27,6 +27,9 @@
     errors: {},
     checks: null,
     checksRunning: false,
+    /** Что проверяется прямо сейчас и что уже отработало. */
+    checksNow: [],
+    checksDone: [],
     traces: [],
     looksConfigured: false,
     confirmOverwrite: false,
@@ -219,18 +222,29 @@
   // --- мастер ------------------------------------------------------
 
   function rail() {
+    // На экранах установки все вопросы уже позади, и текущий пункт —
+    // «Установка». Раньше подсветка оставалась на последнем отвеченном
+    // шаге: справа шла установка, а слева горели «Размеры и квоты».
+    var installing = state.screen === 'run' || state.screen === 'done';
     var items = state.steps.map(function (step, index) {
+      var passed = installing || index < state.stepIndex;
       var cls = 'rail__item';
-      if (index === state.stepIndex) cls += ' rail__item--current';
-      else if (index < state.stepIndex) cls += ' rail__item--done';
+      if (passed) cls += ' rail__item--done';
+      else if (index === state.stepIndex) cls += ' rail__item--current';
       return el('div', { class: cls }, [
-        el('span', { class: 'rail__num', text: index < state.stepIndex ? '✓' : String(index + 1) }),
+        el('span', { class: 'rail__num', text: passed ? '✓' : String(index + 1) }),
         el('span', { text: step.title }),
       ]);
     });
+    var lastCls = 'rail__item';
+    if (state.screen === 'done') lastCls += ' rail__item--done';
+    else if (installing) lastCls += ' rail__item--current';
     items.push(
-      el('div', { class: 'rail__item' }, [
-        el('span', { class: 'rail__num', text: String(state.steps.length + 1) }),
+      el('div', { class: lastCls }, [
+        el('span', {
+          class: 'rail__num',
+          text: state.screen === 'done' ? '✓' : String(state.steps.length + 1),
+        }),
         el('span', { text: 'Установка' }),
       ]),
     );
@@ -390,11 +404,33 @@
     ]);
   }
 
+  /**
+   * Пока идёт проверка, спрашиваем сервер, что он делает прямо сейчас.
+   * Проверка портов — девять запусков контейнера, исходящий 25-й ждёт
+   * ответа чужих MX: без этого экран полминуты выглядит зависшим.
+   */
+  function pollChecks() {
+    if (!state.checksRunning) return;
+    api('/api/checks/progress').then(function (res) {
+      if (!state.checksRunning) return;
+      if (res.status === 200) {
+        state.checksNow = res.data.running || [];
+        state.checksDone = res.data.done || [];
+        render();
+      }
+      window.setTimeout(pollChecks, 600);
+    });
+  }
+
   function runChecks() {
     state.checksRunning = true;
+    state.checksNow = [];
+    state.checksDone = [];
     render();
+    window.setTimeout(pollChecks, 300);
     api('/api/checks', { method: 'POST', body: state.answers }).then(function (res) {
       state.checksRunning = false;
+      state.checksNow = [];
       state.checks = res.status === 200 ? res.data.checks : null;
       if (res.status !== 200) state.globalError = res.data.message || 'Проверка не удалась.';
       render();
@@ -403,15 +439,28 @@
 
   function stepSystem(step) {
     var body = [];
-    if (state.checks === null) {
+    if (state.checksRunning) {
+      var now = state.checksNow || [];
       body.push(
-        el('p', {
-          class: 'muted',
-          text: state.checksRunning
-            ? 'Смотрим память, диск, версию Docker и занятость портов…'
-            : 'Проверка ещё не запускалась.',
-        }),
+        el('p', { class: 'progress-line' }, [
+          el('span', { class: 'spinner' }),
+          el('span', {
+            text: now.length
+              ? 'Проверяем: ' + now.join(', ')
+              : 'Смотрим память, диск, версию Docker и занятость портов…',
+          }),
+        ]),
       );
+      (state.checksDone || []).forEach(function (title) {
+        body.push(
+          el('div', { class: 'check check--ok' }, [
+            el('span', { class: 'check__mark', text: '✓' }),
+            el('div', {}, [el('div', { class: 'check__title', text: title })]),
+          ]),
+        );
+      });
+    } else if (state.checks === null) {
+      body.push(el('p', { class: 'muted', text: 'Проверка ещё не запускалась.' }));
     } else {
       state.checks.forEach(function (check) {
         body.push(checkRow(check));
@@ -435,12 +484,17 @@
             }),
           ])
         : null,
-      extraAction: el('button', {
-        class: 'btn--plain',
-        text: state.checksRunning ? 'Проверяем…' : 'Проверить снова',
-        disabled: state.checksRunning ? 'disabled' : null,
-        onclick: runChecks,
-      }),
+      extraAction: el(
+        'button',
+        {
+          class: 'btn--plain',
+          disabled: state.checksRunning ? 'disabled' : null,
+          onclick: runChecks,
+        },
+        state.checksRunning
+          ? [el('span', { class: 'spinner' }), el('span', { text: 'Проверяем…' })]
+          : [el('span', { text: 'Проверить снова' })],
+      ),
       nextLabel: 'Далее',
       canNext: !state.checksRunning && state.checks !== null,
       title: step.title,

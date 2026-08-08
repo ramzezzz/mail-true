@@ -129,6 +129,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const repoDir = deps.repo?.dir ?? '';
   const envPath = repoDir === '' ? '' : `${repoDir}/infra/.env`;
 
+  // Ход проверки системы: что выполняется сейчас и что уже отработало.
+  let checksRunning = new Set<string>();
+  let checksDone: string[] = [];
+
   async function currentState(): Promise<{
     mode: 'ready' | 'installed' | 'broken';
     message: string;
@@ -255,14 +259,40 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       label: field.label,
     })).filter((p) => p.port > 0);
 
-    const results: CheckResult[] = await runChecks({
-      repoDir,
-      repoMount: deps.config.MT_REPO_MOUNT,
-      containerId: deps.repo.containerId,
-      ports,
-      clamavWanted: answers.clamav,
-    });
+    // Что идёт прямо сейчас — экран спрашивает это отдельным запросом,
+    // пока ждёт ответа. Без такого доклада проверка портов и исходящего
+    // 25-го (полминуты молчания) выглядит зависанием.
+    checksRunning = new Set<string>();
+    checksDone = [];
+    const results: CheckResult[] = await runChecks(
+      {
+        repoDir,
+        repoMount: deps.config.MT_REPO_MOUNT,
+        containerId: deps.repo.containerId,
+        ports,
+        clamavWanted: answers.clamav,
+      },
+      (stage, phase) => {
+        if (phase === 'start') {
+          checksRunning.add(stage.title);
+        } else {
+          checksRunning.delete(stage.title);
+          if (!checksDone.includes(stage.title)) checksDone.push(stage.title);
+        }
+      },
+    );
+    checksRunning = new Set<string>();
     return { ok: true, checks: results };
+  });
+
+  /**
+   * Ход проверки системы. Отдельным ответом, а не потоком: проверок
+   * немного, идут они секунды, и обычный опрос здесь честнее и проще
+   * живого соединения, которое пришлось бы держать и переоткрывать.
+   */
+  app.get('/api/checks/progress', async (req, reply) => {
+    if (!authorize(req, reply)) return;
+    return { running: [...checksRunning], done: checksDone };
   });
 
   /**

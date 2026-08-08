@@ -249,7 +249,7 @@ async function probePort(image: string, port: number): Promise<string> {
   return `${out.stderr}\n${out.stdout}`.trim();
 }
 
-async function checkPorts(ctx: CheckContext): Promise<CheckResult[]> {
+async function checkPorts(ctx: CheckContext, watch?: CheckWatcher): Promise<CheckResult[]> {
   const image = await ownImage(ctx.containerId);
   const taken = await containerPorts();
   const results: CheckResult[] = [];
@@ -277,7 +277,12 @@ async function checkPorts(ctx: CheckContext): Promise<CheckResult[]> {
       });
       continue;
     }
+    // Каждый порт — отдельный запуск контейнера, и их девять: без
+    // доклада по одному экран полминуты показывал бы «Занятость портов».
+    const stage = { id: `port-${port}`, title: `Порт ${port} — ${label}` };
+    watch?.(stage, 'start');
     const failure = await probePort(image, port);
+    watch?.(stage, 'done');
     if (failure === '') {
       results.push({
         id: `port-${port}`,
@@ -401,13 +406,50 @@ export async function checkLetsEncrypt(repoDir: string, hostname: string): Promi
   };
 }
 
-export async function runChecks(ctx: CheckContext): Promise<CheckResult[]> {
+/**
+ * ЧТО ИДЁТ ПРЯМО СЕЙЧАС.
+ *
+ * Проверки занимают от секунды до полуминуты: каждый порт спрашивается у
+ * Docker отдельным запуском контейнера, а исходящий 25-й ждёт ответа
+ * чужих MX с таймаутом. Всё это время экран показывал одну неподвижную
+ * строку — и выглядело как зависание, тем более что кнопка тоже замирала.
+ *
+ * Поэтому проверки докладывают о себе: начали — сказали, закончили —
+ * сказали. Никакого поддельного процента: показывается ровно то, что
+ * выполняется в эту секунду.
+ */
+export interface CheckStage {
+  readonly id: string;
+  readonly title: string;
+}
+
+export type CheckWatcher = (stage: CheckStage, phase: 'start' | 'done') => void;
+
+async function staged<T>(
+  watch: CheckWatcher | undefined,
+  stage: CheckStage,
+  work: () => Promise<T>,
+): Promise<T> {
+  watch?.(stage, 'start');
+  try {
+    return await work();
+  } finally {
+    watch?.(stage, 'done');
+  }
+}
+
+export async function runChecks(
+  ctx: CheckContext,
+  watch?: CheckWatcher,
+): Promise<CheckResult[]> {
   const [memory, disk, docker, ports, outbound] = await Promise.all([
-    checkMemory(ctx),
-    checkDisk(ctx),
-    checkDocker(),
-    checkPorts(ctx),
-    checkOutbound25(ctx.repoDir),
+    staged(watch, { id: 'memory', title: 'Оперативная память' }, () => checkMemory(ctx)),
+    staged(watch, { id: 'disk', title: 'Место на диске' }, () => checkDisk(ctx)),
+    staged(watch, { id: 'docker', title: 'Docker и compose' }, () => checkDocker()),
+    staged(watch, { id: 'ports', title: 'Занятость портов' }, () => checkPorts(ctx, watch)),
+    staged(watch, { id: 'outbound', title: 'Исходящий 25-й порт' }, () =>
+      checkOutbound25(ctx.repoDir),
+    ),
   ]);
   return [memory, disk, ...docker, ...ports, outbound];
 }

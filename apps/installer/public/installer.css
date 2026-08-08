@@ -529,6 +529,22 @@ code {
   width: 210px;
 }
 
+/* Строка «идёт проверка»: кружок ожидания и что именно проверяется. */
+.progress-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink-soft);
+  margin: 0 0 14px;
+}
+
+/* Кнопка с кружком ожидания: «Проверяем…» рядом с вращением. */
+button .spinner {
+  margin-right: 8px;
+  width: 13px;
+  height: 13px;
+}
+
 .spinner {
   display: inline-block;
   width: 15px;
