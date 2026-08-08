@@ -10,6 +10,7 @@ import { api } from '../api/client';
 import type { MailUser, UserDeleteResult } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
+import { AddressInput } from '../components/AddressInput';
 import { QuotaInput } from '../components/QuotaInput';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { RowActions } from '../components/RowActions';
@@ -409,12 +410,33 @@ function CreateUserModal({
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordRepeat, setPasswordRepeat] = useState('');
+  const [passwordShown, setPasswordShown] = useState(false);
   const [quotaAmount, setQuotaAmount] = useState('1');
   const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
   const [generated, setGenerated] = useState<{ email: string; password: string } | null>(null);
 
+  // Домены для подстановки. Запрос тот же, что на странице, — react-query
+  // отдаёт его из кеша, второго обращения к серверу не будет.
+  const domainsQuery = useQuery({ queryKey: ['domains'], queryFn: () => api.domains() });
+  const domainNames = (domainsQuery.data?.items ?? []).map((d) => d.name);
+
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
   const emailProblem = addressProblemWhileTyping(email);
+  /*
+   * Пароль проверяем ЗДЕСЬ, а не только на сервере. Сервер отвечает
+   * отказом с разбором по полям, но узнавать «пароль короче 8 знаков»
+   * после нажатия «Создать» — лишний круг: правило известно заранее.
+   */
+  const passwordProblem =
+    password === ''
+      ? null
+      : password.length < 8
+        ? 'Пароль короче 8 знаков'
+        : passwordRepeat !== '' && password !== passwordRepeat
+          ? 'Пароли не совпадают'
+          : null;
+  const passwordMismatch = password !== '' && passwordRepeat !== password;
   const displayNameProblem = displayNameLengthProblem(displayName);
   const create = useMutation({
     mutationFn: () =>
@@ -469,6 +491,8 @@ function CreateUserModal({
               email.trim() === '' ||
               emailProblem !== null ||
               displayNameProblem !== null ||
+              passwordProblem !== null ||
+              (password !== '' && !passwordShown && passwordRepeat !== password) ||
               quotaBytes === null ||
               create.isPending
             }
@@ -480,13 +504,21 @@ function CreateUserModal({
       }
     >
       <ErrorNotice error={create.error} />
-      <Field label="Адрес" hint={emailProblem ?? 'Домен должен быть заведён в разделе «Домены»'}>
-        <input
-          className="mt-input mt-mono"
-          autoFocus
-          placeholder="ivan@mail.local"
+      {/*
+        Домен подставляется сам — из тех, что заведены в разделе «Домены».
+        Раньше здесь стояло одно поле с подсказкой «ivan@mail.local», и
+        подсказку принимали за настоящий домен: на свежем сервере с доменом
+        home.local ящик создавали как test@mail.local и получали отказ
+        «домен не заведён» — при том, что домен как раз спрашивали при
+        установке. Набирать руками то, что система знает, незачем.
+      */}
+      <Field label="Адрес" hint={emailProblem ?? 'Имя ящика — домен подставится сам'}>
+        <AddressInput
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={setEmail}
+          domains={domainNames}
+          autoFocus
+          placeholder="ivan"
         />
       </Field>
       <Field label="Отображаемое имя" {...(displayNameProblem ? { hint: displayNameProblem } : {})}>
@@ -497,13 +529,47 @@ function CreateUserModal({
           onChange={(e) => setDisplayName(e.target.value)}
         />
       </Field>
-      <Field label="Пароль" hint="Оставьте пустым — сгенерируем и покажем один раз">
-        <input
-          className="mt-input mt-mono"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+      {/*
+        Пароль скрыт, как ему и положено: раньше он набирался открытым
+        текстом на глазах у всех, кто стоит рядом. Показать — кнопкой,
+        она же снимает нужду в повторе, поэтому второе поле спрашивается
+        только пока пароль скрыт.
+      */}
+      <Field
+        label="Пароль"
+        hint={passwordProblem ?? 'Оставьте пустым — сгенерируем и покажем один раз. Минимум 8 знаков'}
+      >
+        <div className="mt-input-with-action">
+          <input
+            className="mt-input mt-mono"
+            type={passwordShown ? 'text' : 'password'}
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <Button
+            mode="secondary"
+            onClick={() => setPasswordShown((shown) => !shown)}
+            title={passwordShown ? 'Скрыть пароль' : 'Показать пароль'}
+          >
+            {passwordShown ? 'Скрыть' : 'Показать'}
+          </Button>
+        </div>
       </Field>
+      {password !== '' && !passwordShown && (
+        <Field
+          label="Повторите пароль"
+          {...(passwordMismatch && passwordRepeat !== '' ? { hint: 'Пароли не совпадают' } : {})}
+        >
+          <input
+            className="mt-input mt-mono"
+            type="password"
+            autoComplete="new-password"
+            value={passwordRepeat}
+            onChange={(e) => setPasswordRepeat(e.target.value)}
+          />
+        </Field>
+      )}
       <Field
         label="Квота"
         hint={

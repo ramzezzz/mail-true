@@ -1,0 +1,38 @@
+/* Ввод адреса: имя ящика и домен рядом, а не одной строкой с «@» руками. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.local {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.at {
+  color: var(--mt-color-text-secondary);
+  flex: 0 0 auto;
+}
+
+/* Домен списком — когда доменов несколько или адрес может быть внешним. */
+.domain {
+  flex: 0 1 auto;
+  min-width: 140px;
+  max-width: 55%;
+}
+
+/* Единственный домен менять не из чего: показываем как подпись. */
+.fixed {
+  flex: 0 1 auto;
+  color: var(--mt-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

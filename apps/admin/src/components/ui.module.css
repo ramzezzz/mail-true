@@ -93,6 +93,16 @@
   color: var(--mt-color-text-negative);
 }
 
+/* Разбор отказа по полям: «Пароль: короче 8 знаков». */
+.errorDetails {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.errorDetails li {
+  margin-top: 2px;
+}
+
 .notice_success {
   border-color: var(--mt-admin-ok);
   color: var(--mt-color-text-positive);

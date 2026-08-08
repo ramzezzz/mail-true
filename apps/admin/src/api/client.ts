@@ -89,12 +89,26 @@ import type {
 
 const BASE = '/api/admin';
 
+/** Разбор отказа по полям: что именно не подошло. */
+export interface ApiErrorDetail {
+  /** Имя поля в теле запроса: password, email, quotaBytes. */
+  path: string;
+  message: string;
+}
+
 /** Ошибка API: код и понятное сообщение с сервера. */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    /**
+     * Подробности отказа. Сервер их присылал всегда, а клиент выбрасывал —
+     * и человек видел «Некорректные данные запроса» без единого слова о
+     * том, что не так. На создании ящика это выглядело так: пароль «123»,
+     * форма молчит, ответ 400, в ответе — «пароль короче 8 знаков».
+     */
+    readonly details: readonly ApiErrorDetail[] = [],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -150,14 +164,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let code = 'ERROR';
     let message = response.statusText;
+    let details: ApiErrorDetail[] = [];
     try {
-      const body = (await response.json()) as { error?: string; message?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+        details?: ApiErrorDetail[];
+      };
       if (body.error) code = body.error;
       if (body.message) message = body.message;
+      if (Array.isArray(body.details)) details = body.details;
     } catch {
       /* тело не JSON — оставляем statusText */
     }
-    throw new ApiError(response.status, code, message);
+    throw new ApiError(response.status, code, message, details);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -538,14 +558,20 @@ export const api = {
     if (!response.ok) {
       let message = response.statusText;
       let code = 'ERROR';
+      let details: ApiErrorDetail[] = [];
       try {
-        const body = (await response.json()) as { error?: string; message?: string };
+        const body = (await response.json()) as {
+          error?: string;
+          message?: string;
+          details?: ApiErrorDetail[];
+        };
         if (body.message) message = body.message;
         if (body.error) code = body.error;
+        if (Array.isArray(body.details)) details = body.details;
       } catch {
         /* тело не JSON */
       }
-      throw new ApiError(response.status, code, message);
+      throw new ApiError(response.status, code, message, details);
     }
     const disposition = response.headers.get('Content-Disposition') ?? '';
     const found = /filename="([^"]+)"/u.exec(disposition);

@@ -6,6 +6,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
+import { ApiError } from '../api/client';
 import type { DnsStatus } from '../api/types';
 import styles from './ui.module.css';
 
@@ -73,6 +74,23 @@ export function Notice({
 }
 
 /** Ошибка запроса человеческим языком. */
+/**
+ * Человеческие имена полей запроса. Нужны для разбора отказа: сервер
+ * называет поле так, как оно зовётся в теле запроса («displayName»),
+ * а человек видел его на форме под другим именем.
+ */
+const FIELD_NAMES: Record<string, string> = {
+  email: 'Адрес',
+  password: 'Пароль',
+  displayName: 'Отображаемое имя',
+  quotaBytes: 'Размер ящика',
+  login: 'Логин',
+  source: 'Откуда',
+  destination: 'Куда',
+  domain: 'Домен',
+  name: 'Название',
+};
+
 export function ErrorNotice({ error }: { error: unknown }) {
   if (!error) return null;
   // Не Error и не строка — обычно это разобранное тело ответа. String()
@@ -83,7 +101,36 @@ export function ErrorNotice({ error }: { error: unknown }) {
       : typeof error === 'string'
         ? error
         : JSON.stringify(error);
-  return <Notice tone="error">{message}</Notice>;
+
+  /*
+   * Разбор по полям. Сервер присылал его всегда, а экран показывал одно
+   * общее «Некорректные данные запроса»: на создании ящика пароль «123»
+   * давал отказ без единого слова о причине, хотя в ответе лежало
+   * «пароль короче 8 знаков» с указанием поля.
+   */
+  const details =
+    error instanceof ApiError && error.details.length > 0 ? error.details : ([] as const);
+
+  return (
+    <Notice tone="error">
+      {message}
+      {details.length > 0 && (
+        <ul className={styles.errorDetails}>
+          {details.map((detail) => (
+            <li key={`${detail.path}:${detail.message}`}>
+              {detail.path === '' ? (
+                detail.message
+              ) : (
+                <>
+                  <b>{FIELD_NAMES[detail.path] ?? detail.path}</b>: {detail.message}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Notice>
+  );
 }
 
 /* ------------------------------------------------------------------ */

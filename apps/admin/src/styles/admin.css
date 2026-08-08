@@ -173,6 +173,18 @@ textarea {
   border-color: var(--mt-color-accent-blue);
 }
 
+/* Поле с кнопкой сбоку: пароль и кнопка «Показать». */
+.mt-input-with-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mt-input-with-action .mt-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .mt-textarea {
   min-height: 120px;
   resize: vertical;

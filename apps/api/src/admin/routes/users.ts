@@ -21,6 +21,7 @@ import { addressProblem, displayNameLengthProblem } from '@mail-true/shared';
 import { packResult, unpackResult, type ImportJobResult } from '../import-jobs.js';
 import { quarantineMaildir } from '../mailbox-cleanup.js';
 import { isUndefinedTable, type ImportJobRow, type MailUserRow } from '../db.js';
+import { pathId } from '../../params.js';
 
 /**
  * Форму и длину адреса здесь НЕ проверяем — этим занимается
@@ -41,7 +42,11 @@ const listQuerySchema = z.object({
 
 const createSchema = z.object({
   email: emailSchema,
-  password: z.string().min(8).max(1024).optional(),
+  password: z
+    .string()
+    .min(8, 'Пароль короче 8 знаков')
+    .max(1024, 'Пароль длиннее 1024 знаков')
+    .optional(),
   // См. пояснение к emailSchema: предел здесь грубый, настоящий — ниже.
   displayName: z.string().trim().max(1024).optional(),
   quotaBytes: z.coerce.number().int().min(0).optional(),
@@ -57,7 +62,11 @@ const patchSchema = z.object({
 });
 
 const passwordSchema = z.object({
-  password: z.string().min(8).max(1024).optional(),
+  password: z
+    .string()
+    .min(8, 'Пароль короче 8 знаков')
+    .max(1024, 'Пароль длиннее 1024 знаков')
+    .optional(),
 });
 
 const bulkSchema = z.object({
@@ -122,7 +131,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/:id',
     { preHandler: requireAdmin(app, 'users.read') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'ящика');
       const row = await ctx.db.findMailUserById(id);
       if (!row) throw new NotFoundError('Ящик не найден');
       const aliases = await ctx.db.listAliases({ search: row.email, limit: 100, offset: 0 });
@@ -145,7 +154,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/:id/usage',
     { preHandler: requireAdmin(app, 'users.read') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'ящика');
       const row = await ctx.db.findMailUserById(id);
       if (!row) throw new NotFoundError('Ящик не найден');
       if (!ctx.mailbox.configured) {
@@ -211,7 +220,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/:id',
     { preHandler: requireAdmin(app, 'users.write') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'ящика');
       const body = patchSchema.parse(request.body);
       if (body.displayName !== undefined && body.displayName !== null) {
         const tooLong = displayNameLengthProblem(body.displayName);
@@ -251,7 +260,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/:id/password',
     { preHandler: requireAdmin(app, 'users.password') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'ящика');
       const body = passwordSchema.parse(request.body ?? {});
       const row = await ctx.db.findMailUserById(id);
       if (!row) throw new NotFoundError('Ящик не найден');
@@ -299,7 +308,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/:id',
     { preHandler: requireAdmin(app, 'users.delete') },
     async (request) => {
-      const id = Number(request.params.id);
+      const id = pathId(request.params.id, 'ящика');
       const row = await ctx.db.findMailUserById(id);
       if (!row) throw new NotFoundError('Ящик не найден');
       const admin = currentAdmin(request);
@@ -659,7 +668,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     '/users/import/jobs/:id',
     { preHandler: requireAdmin(app, 'users.write') },
     async (request) => {
-      const row = await ctx.db.findImportJob(Number(request.params.id));
+      const row = await ctx.db.findImportJob(pathId(request.params.id, 'ящика'));
       if (!row) throw new NotFoundError('Задание импорта не найдено');
       const result = unpackResult(ctx.importBox, row.result_enc);
       return {

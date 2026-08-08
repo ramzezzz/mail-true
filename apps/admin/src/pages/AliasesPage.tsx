@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import type { Alias } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
+import { AddressInput } from '../components/AddressInput';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { RowActions } from '../components/RowActions';
 import { IconPower, IconTrash } from '../components/icons';
@@ -204,6 +205,10 @@ function AddAliasModal({ onClose, onAdded }: { onClose: () => void; onAdded: () 
   const [source, setSource] = useState('');
   const [destination, setDestination] = useState('');
 
+  // Те же домены, что и на странице: react-query отдаёт их из кеша.
+  const domainsQuery = useQuery({ queryKey: ['domains'], queryFn: () => api.domains() });
+  const domainNames = (domainsQuery.data?.items ?? []).map((d) => d.name);
+
   const add = useMutation({
     mutationFn: () =>
       api.createAlias(source.trim().toLowerCase(), destination.trim().toLowerCase()),
@@ -229,21 +234,26 @@ function AddAliasModal({ onClose, onAdded }: { onClose: () => void; onAdded: () 
       }
     >
       <ErrorNotice error={add.error} />
+      {/* Домен подставляется сам: набирать руками то, что заведено в
+          разделе «Домены», незачем — и опечатка в домене создавала бы
+          алиас, на который почта не придёт никогда. */}
       <Field label="Откуда" hint="Адрес в вашем домене — на него будут писать">
-        <input
-          className="mt-input mt-mono"
-          autoFocus
-          placeholder="info@mail.local"
+        <AddressInput
           value={source}
-          onChange={(e) => setSource(e.target.value)}
+          onChange={setSource}
+          domains={domainNames}
+          autoFocus
+          placeholder="info"
         />
       </Field>
+      {/* А здесь домен свободный: пересылать можно и на чужой ящик. */}
       <Field label="Куда" hint="Куда пересылать. Может быть и внешним адресом">
-        <input
-          className="mt-input mt-mono"
-          placeholder="ivan@mail.local"
+        <AddressInput
           value={destination}
-          onChange={(e) => setDestination(e.target.value)}
+          onChange={setDestination}
+          domains={domainNames}
+          placeholder="ivan"
+          allowExternal
         />
       </Field>
     </Modal>
