@@ -726,17 +726,44 @@ WANT_TABLES="$(grep -hoiE 'CREATE TABLE IF NOT EXISTS +(public\.)?[a-z_0-9]+' \
     "$INFRA_DIR"/postgres/migrations/*.sql 2>/dev/null |
     awk '{ t = tolower($NF); sub(/^public\./, "", t); print t }' | sort -u)"
 
-# Колонки, добавленные ALTER TABLE ... ADD COLUMN IF NOT EXISTS. Часть
-# нового (логотипы отправителей, оформление, отложенная отправка) — это
-# именно колонки в существующих таблицах, отсутствие таблицы их не поймает.
+# Колонки. Разбираются ТЕЛА CREATE TABLE, а не ALTER TABLE.
+#
+# Раньше здесь собирались только колонки из «ALTER TABLE ... ADD COLUMN IF
+# NOT EXISTS» — их и добавляли поздние миграции. После свёртки схемы в один
+# файл таких строк на верхнем уровне не осталось вовсе: каждая колонка
+# стоит в своём CREATE TABLE. Проверка при этом не сломалась и не
+# пожаловалась — она молча начала сверять ПУСТОЙ список и по-прежнему
+# писала «все таблицы и колонки на месте». Это худший вид поломки
+# проверки: она продолжает докладывать об успехе, перестав что-либо
+# проверять. Ловилось бы только глазами по числу в скобках.
+#
+# Теперь список полный: колонка, потерянная при ручной правке схемы или
+# недоехавшей миграции, видна независимо от того, каким файлом её завели.
+#
+# Разбор нарочно грубый — на уровне «первое слово строки внутри скобок».
+# Полноценный разбор SQL здесь не нужен и вреден: единственная его задача —
+# получить имена, а не понять типы. Пропускаются строки ограничений
+# (PRIMARY KEY, FOREIGN KEY, UNIQUE, CHECK, CONSTRAINT, EXCLUDE) — это не
+# колонки.
 WANT_COLUMNS="$(awk '
-    tolower($0) ~ /alter[ \t]+table/ {
-        line = tolower($0); sub(/.*alter[ \t]+table[ \t]+/, "", line)
-        sub(/^public\./, "", line); sub(/[^a-z_0-9].*$/, "", line)
+    # Начало таблицы: запоминаем имя и входим в тело.
+    tolower($0) ~ /create[ \t]+table[ \t]+(if[ \t]+not[ \t]+exists[ \t]+)?/ && !in_body {
+        line = tolower($0)
+        sub(/.*create[ \t]+table[ \t]+/, "", line)
+        sub(/^if[ \t]+not[ \t]+exists[ \t]+/, "", line)
+        sub(/^public\./, "", line)
+        sub(/[^a-z_0-9].*$/, "", line)
         tbl = line
+        if ($0 ~ /\(/) in_body = 1
+        next
     }
-    tolower($0) ~ /add[ \t]+column[ \t]+if[ \t]+not[ \t]+exists/ {
-        line = tolower($0); sub(/.*add[ \t]+column[ \t]+if[ \t]+not[ \t]+exists[ \t]+/, "", line)
+    in_body {
+        # Закрывающая скобка в начале строки — конец описания таблицы.
+        if ($0 ~ /^[ \t]*\)/) { in_body = 0; tbl = ""; next }
+        line = tolower($0)
+        sub(/^[ \t]+/, "", line)
+        # Ограничения таблицы — не колонки.
+        if (line ~ /^(primary|foreign|unique|check|constraint|exclude)[ \t(]/) next
         sub(/[^a-z_0-9].*$/, "", line)
         if (tbl != "" && line != "") print tbl "." line
     }
