@@ -455,6 +455,9 @@ sub handle {
         my $service = check_service($client, $params{service}, 'recreate') or return;
         return do_recreate($client, $service, $body);
     }
+    if ($method eq 'GET' && $path eq '/dkim') {
+        return do_dkim($client, $params{domain}, $params{selector});
+    }
     return reply($client, 404, { error => 'неизвестный запрос' });
 }
 
@@ -602,6 +605,48 @@ sub failure_detail {
       : ($state->{health} // '') eq 'unhealthy' ? 'контейнер поднялся, но его проба говорит «нездоров»'
       : 'служба не объявила себя готовой за ' . $WAIT_SECONDS . ' с';
     return $tail eq '' ? $what : "$what. Последние строки журнала:\n$tail";
+}
+
+# ------------------------------------------------------------------
+# ПУБЛИЧНАЯ ЧАСТЬ КЛЮЧА DKIM
+#
+# rspamd кладёт готовую строку DNS рядом с ключом:
+#   /var/lib/rspamd/dkim/<домен>.<селектор>.dns.txt
+# Панель показывала человеку этот путь и просила «скопируйте значение
+# p=» — то есть отправляла в консоль по SSH за строкой, которую машина
+# прочитает сама.
+#
+# Отдаётся ТОЛЬКО файл .dns.txt — публичная часть, та самая, что и так
+# уходит в общедоступный DNS. Приватный ключ (.key) лежит там же, и его
+# посредник не читает ни при каких параметрах: имя файла собирается
+# здесь, из запроса берутся лишь домен и селектор, и оба проверяются
+# по строгому образцу — ни косой черты, ни точек-переходов в них не
+# бывает по определению.
+# ------------------------------------------------------------------
+sub do_dkim {
+    my ($client, $domain, $selector) = @_;
+    $domain   = '' unless defined $domain;
+    $selector = '' unless defined $selector;
+    $domain   = lc $domain;
+    $selector = lc $selector;
+
+    unless ($domain =~ /\A[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+\z/) {
+        return reply($client, 400, { error => 'домен не похож на домен' });
+    }
+    unless ($selector =~ /\A[a-z0-9][a-z0-9_-]{0,31}\z/) {
+        return reply($client, 400, { error => 'селектор не похож на селектор' });
+    }
+
+    my $file = "/var/lib/rspamd/dkim/$domain.$selector.dns.txt";
+    my @argv = (compose_argv(), 'exec', '-T', 'rspamd', 'cat', $file);
+    my ($rc, $out, $err) = run(@argv);
+    if ($rc != 0) {
+        my $why = trim(($err || $out) || "код возврата $rc");
+        # Отсутствие файла — обычное дело: ключа для домена ещё нет.
+        my $code = $why =~ /No such file|не найден/i ? 404 : 500;
+        return reply($client, $code, { error => $why });
+    }
+    return reply($client, 200, { ok => \1, record => trim($out) });
 }
 
 sub do_restart {

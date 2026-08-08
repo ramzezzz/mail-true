@@ -436,6 +436,7 @@ function DkimModal({
 }) {
   const [selector, setSelector] = useState(domain.dkimSelector);
   const [key, setKey] = useState(domain.dkimPublicKey ?? '');
+  const [fetched, setFetched] = useState<string | null>(null);
 
   const save = useMutation({
     mutationFn: () =>
@@ -444,6 +445,22 @@ function DkimModal({
         dkimPublicKey: key.trim() === '' ? null : key.trim(),
       }),
     onSuccess: onSaved,
+  });
+
+  /*
+   * Ключ читается с сервера, а не переписывается человеком из файла
+   * внутри контейнера. Кнопкой, а не при открытии окна: это обращение к
+   * посреднику с сокетом Docker, и делать его молча на каждый показ
+   * незачем — а на серверах без посредника окно должно открываться и
+   * работать по-старому.
+   */
+  const pull = useMutation({
+    mutationFn: () => api.dkimRecord(domain.id),
+    onSuccess: (result) => {
+      setFetched(result.record);
+      if (result.publicKey !== '') setKey(result.publicKey);
+      if (result.selector !== '') setSelector(result.selector);
+    },
   });
 
   return (
@@ -461,17 +478,26 @@ function DkimModal({
         </>
       }
     >
-      <ErrorNotice error={save.error} />
+      <ErrorNotice error={save.error ?? pull.error} />
       <Notice tone="info">
-        Ключ генерирует rspamd. Готовую запись он кладёт в контейнер:
-        <br />
-        <code className="mt-mono">
-          /var/lib/rspamd/dkim/{domain.name}.{selector}.dns.txt
-        </code>
-        <br />
-        Скопируйте оттуда значение поля <code className="mt-mono">p=</code> — админка сверит его с
-        тем, что опубликовано в DNS.
+        Ключ генерирует rspamd на этом же сервере. Нажмите «Прочитать с сервера» — панель заберёт
+        готовое значение <code className="mt-mono">p=</code> сама и сверит его с тем, что
+        опубликовано в DNS.
+        <div style={{ marginTop: 8 }}>
+          <Button size="s" mode="secondary" disabled={pull.isPending} onClick={() => pull.mutate()}>
+            {pull.isPending ? 'Читаем…' : 'Прочитать с сервера'}
+          </Button>
+        </div>
       </Notice>
+      {fetched !== null && (
+        <Notice tone="success">
+          Прочитано с сервера. Готовая строка для DNS:
+          <br />
+          <code className="mt-mono" style={{ wordBreak: 'break-all' }}>
+            {fetched}
+          </code>
+        </Notice>
+      )}
       <Field label="Селектор">
         <input
           className="mt-input mt-mono"

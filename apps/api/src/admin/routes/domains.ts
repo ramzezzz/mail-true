@@ -23,6 +23,21 @@ import {
   type DnsCheckId,
   type DnsReport,
 } from '../dns.js';
+import { ServiceAgentUnavailableError } from '../service-agent.js';
+
+/**
+ * Значение p= из готовой строки rspamd.
+ *
+ * Строка приходит как «v=DKIM1; k=rsa; p=MIIBIjANBg…» и бывает разбита на
+ * куски кавычками — так её пишет rspamd для длинных ключей, и так её
+ * принимает BIND. В поле панели нужен один непрерывный ключ, поэтому
+ * кавычки и переводы строк убираются.
+ */
+export function publicKeyOf(record: string): string {
+  const flat = record.replace(/"/gu, '').replace(/\s+/gu, ' ');
+  const found = /p=([A-Za-z0-9+/=\s]+)/u.exec(flat);
+  return found ? found[1]!.replace(/\s+/gu, '') : '';
+}
 
 /** Какие записи можно перепроверить поштучно (проверка параметра пути). */
 const DNS_CHECK_IDS: readonly DnsCheckId[] = [
@@ -114,6 +129,47 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       const row = await ctx.db.findDomainById(pathId(request.params.id, 'домена'));
       if (!row) throw new NotFoundError('Домен не найден');
       return toDto(row, host);
+    },
+  );
+
+  /**
+   * ГОТОВАЯ ЗАПИСЬ DKIM — с сервера, а не из консоли.
+   *
+   * rspamd кладёт её файлом рядом с ключом, и раньше панель показывала
+   * человеку путь к этому файлу с просьбой «скопируйте значение p=». То
+   * есть предлагала зайти по SSH за строкой, которую машина читает сама.
+   *
+   * Читает посредник (service-agent): у сервера приложения нет и не будет
+   * доступа ни к сокету Docker, ни к тому rspamd — там лежат ПРИВАТНЫЕ
+   * ключи подписи. Посредник отдаёт только файл .dns.txt, то есть ровно
+   * ту часть, что и так уходит в общедоступный DNS.
+   */
+  app.get<{ Params: { id: string } }>(
+    '/domains/:id/dkim-record',
+    { preHandler: requireAdmin(app, 'domains.write') },
+    async (request) => {
+      const row = await ctx.db.findDomainById(pathId(request.params.id, 'домена'));
+      if (!row) throw new NotFoundError('Домен не найден');
+
+      const agent = ctx.serviceAgent;
+      if (!agent) {
+        throw new ServiceAgentUnavailableError(
+          'Посредник служб не настроен, поэтому прочитать ключ с сервера нечем. ' +
+            'Значение p= лежит в контейнере rspamd: ' +
+            `/var/lib/rspamd/dkim/${row.name}.${row.dkim_selector ?? 'mail'}.dns.txt`,
+        );
+      }
+
+      const selector = row.dkim_selector ?? 'mail';
+      const record = await agent.dkimRecord(row.name, selector);
+      return {
+        domain: row.name,
+        selector,
+        /** Строка целиком, как её написал rspamd: v=DKIM1; k=rsa; p=… */
+        record,
+        /** Только значение p= — его и просят вставить в поле. */
+        publicKey: publicKeyOf(record),
+      };
     },
   );
 

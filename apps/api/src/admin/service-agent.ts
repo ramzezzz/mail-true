@@ -154,6 +154,22 @@ export class ServiceAgent {
   }
 
   /**
+   * Готовая строка DNS для DKIM: то, что rspamd сам положил рядом с
+   * ключом. Публичная часть — та же, что потом уходит в общедоступный
+   * DNS; приватный ключ посредник не отдаёт ни при каких параметрах.
+   *
+   * Нужно, потому что панель до сих пор отправляла человека в консоль:
+   * «зайдите на сервер, откройте файл внутри контейнера rspamd,
+   * скопируйте оттуда p=». Установщик эту строку печатает сам — значит
+   * и панель может её показать.
+   */
+  async dkimRecord(domain: string, selector: string): Promise<string> {
+    const query = `domain=${encodeURIComponent(domain)}&selector=${encodeURIComponent(selector)}`;
+    const body = await this.call(`/dkim?${query}`, 'GET');
+    return typeof body.record === 'string' ? body.record : '';
+  }
+
+  /**
    * Перезапустить или пересоздать службу.
    *
    * Имя службы берётся из ОПИСАНИЯ (RestartTarget), а не из строки

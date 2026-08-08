@@ -343,6 +343,15 @@ export const api = {
   /* --- домены --- */
   domains: () => get<{ items: Domain[] }>('/domains'),
   createDomain: (name: string) => post<Domain>('/domains', { name }),
+  /**
+   * Готовая запись DKIM с сервера: панель больше не отправляет человека
+   * в консоль за строкой, которую машина читает сама.
+   */
+  dkimRecord: (id: number) =>
+    get<{ domain: string; selector: string; record: string; publicKey: string }>(
+      `/domains/${String(id)}/dkim-record`,
+    ),
+
   updateDomain: (
     id: number,
     body: { dkimSelector?: string; dkimPublicKey?: string | null; notes?: string | null },
