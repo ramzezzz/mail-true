@@ -69,6 +69,19 @@ export function UsersPage() {
   const [editing, setEditing] = useState<MailUser | null>(null);
   const [enterFor, setEnterFor] = useState<MailUser | null>(null);
   const [deleting, setDeleting] = useState<MailUser | null>(null);
+  /*
+   * Ящик, который собираются заблокировать.
+   *
+   * Блокировка срабатывала сразу, одним нажатием значка 26×26 вплотную к
+   * «Удалить». А последствие у неё не то, которое ожидают: карта Postfix
+   * отбирает адрес по `AND active`, то есть для внешнего мира ящик
+   * ПЕРЕСТАЁТ СУЩЕСТВОВАТЬ — отправитель получает «адреса не существует»,
+   * и письма за весь период блокировки не восстановить ничем. «Заблокирую,
+   * чтобы почта пока копилась» — самое частое ожидание, и оно неверное.
+   *
+   * Разблокировка вопросов не требует: она ничего не теряет.
+   */
+  const [blocking, setBlocking] = useState<MailUser | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [flash, setFlash] = useState<string | null>(null);
 
@@ -320,8 +333,10 @@ export function UsersPage() {
                               icon: user.active ? <IconLock /> : <IconUnlock />,
                               label: user.active ? 'Заблокировать' : 'Разблокировать',
                               danger: true,
-                              onClick: () =>
-                                toggleActive.mutate({ id: user.id, active: !user.active }),
+                              onClick: () => {
+                                if (user.active) setBlocking(user);
+                                else toggleActive.mutate({ id: user.id, active: true });
+                              },
                             },
                           ]
                         : []),
@@ -389,6 +404,17 @@ export function UsersPage() {
         />
       )}
       {enterFor && <EnterMailboxModal user={enterFor} onClose={() => setEnterFor(null)} />}
+      {blocking && (
+        <BlockUserModal
+          user={blocking}
+          pending={toggleActive.isPending}
+          onClose={() => setBlocking(null)}
+          onConfirm={() => {
+            toggleActive.mutate({ id: blocking.id, active: false });
+            setBlocking(null);
+          }}
+        />
+      )}
       {deleting && (
         <DeleteUserModal
           user={deleting}
@@ -901,6 +927,19 @@ function BulkModal({
       }
     >
       <ErrorNotice error={run.error} />
+      {mode === 'block' && (
+        <Notice tone="error">
+          {/*
+            Массовая блокировка отдела — самый дорогой случай: почта всех
+            этих людей начнёт отбиваться отказом «адреса не существует», и
+            письма за период не восстановить ничем.
+          */}
+          Входящая почта {pluralize(ids.length, 'этого ящика', 'этих ящиков', 'этих ящиков')}{' '}
+          перестанет приходить: отправители будут получать отказ «адреса не существует». Письма за
+          время блокировки восстановить будет нечем — они нигде не сохраняются. Если нужно только
+          закрыть доступ, а почту сохранить, смените пароль.
+        </Notice>
+      )}
       {mode === 'delete' && (
         <>
           <Notice tone="error">
@@ -1068,6 +1107,68 @@ function DeletionConsequences() {
  * Само удаление на сервере устроено правильно (карантин каталога, чистка
  * Dovecot, запись об удалении) — здесь только доступ к нему.
  */
+/**
+ * Подтверждение блокировки — с настоящим последствием, а не «вы уверены?».
+ *
+ * ------------------------------------------------------------------
+ * ЧТО ЗДЕСЬ ВАЖНО СКАЗАТЬ
+ * ------------------------------------------------------------------
+ * Блокировка не «приостанавливает» ящик и не копит почту. Карта Postfix
+ * отбирает адрес по `AND active` (infra/postfix/conf/pgsql/
+ * virtual_mailboxes.cf.template), то есть для внешнего мира ящик
+ * ПЕРЕСТАЁТ СУЩЕСТВОВАТЬ: отправитель получает отказ «адреса не
+ * существует», письмо к нему возвращается, и восстановить его потом
+ * нечем — оно нигде не сохранялось.
+ *
+ * Именно поэтому окно, а не мгновенное действие: значок 26×26 стоит
+ * вплотную к «Удалить», промах пальцем — обычное дело, а ожидание у
+ * человека ровно обратное («пусть пока копится»). На массовой блокировке
+ * отдела цена ошибки — вся входящая почта отдела за период.
+ */
+function BlockUserModal({
+  user,
+  pending,
+  onClose,
+  onConfirm,
+}: {
+  user: MailUser;
+  pending: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      title={`Заблокировать ${user.email}?`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button mode="secondary" onClick={onClose}>
+            Отмена
+          </Button>
+          <Button disabled={pending} onClick={onConfirm}>
+            {pending ? 'Блокируем…' : 'Заблокировать'}
+          </Button>
+        </>
+      }
+    >
+      <Notice tone="error">
+        Входящая почта перестанет приходить: отправители будут получать отказ «адреса не
+        существует», и письма за время блокировки восстановить будет нечем — они нигде не
+        сохраняются.
+      </Notice>
+      <p style={{ margin: '12px 0 0', lineHeight: 1.5 }}>
+        Ящик и его письма останутся на месте, вход в почту закроется сразу — в том числе в уже
+        открытых вкладках и почтовых программах. Разблокировка вернёт всё, кроме писем, которые
+        отбились за это время.
+      </p>
+      <p style={{ margin: '10px 0 0', lineHeight: 1.5 }}>
+        Если нужно только закрыть человеку доступ, а почту сохранить, — смените пароль: письма
+        продолжат приходить в ящик.
+      </p>
+    </Modal>
+  );
+}
+
 function DeleteUserModal({
   user,
   onClose,
