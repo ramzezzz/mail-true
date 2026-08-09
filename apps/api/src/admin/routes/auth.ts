@@ -238,7 +238,12 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
         ip: origin.ip,
         userAgent: origin.userAgent,
         oldValue: null,
-        newValue: null,
+        // Страна входа — там же, где и при отказе по стране (выше).
+        // Иначе GEOIP_LOGIN_POLICY=log, обещающий «определять и писать в
+        // журнал», для панели не писал ничего: страна вычислялась и
+        // выбрасывалась, а вход в ПАНЕЛЬ из чужой страны — как раз то
+        // событие, ради которого такой журнал заводят.
+        newValue: geo?.country ? { country: geo.country } : null,
       });
 
       return {

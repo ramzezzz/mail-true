@@ -106,7 +106,21 @@ export interface ScanResult {
   folders: ScanFolderStat[];
   /** Квота ящика по данным почтового сервера либо null, если её нет. */
   quota: { usedBytes: number; limitBytes: number } | null;
-  /** Когда осмотр был сделан (ISO) — показывается человеку. */
+  /**
+   * Отметка осмотра: время по ISO плюс порядковый номер через «#».
+   *
+   * Человеку она не показывается — сравнивается ТОЛЬКО на равенство: клиент
+   * присылает её обратно вместе с уборкой, и разошедшиеся отметки означают
+   * «числа пересобраны, убирать по старым нельзя» (см. scanAsSeen).
+   *
+   * Номер тут не для красоты. Одного времени не хватало: `toISOString()`
+   * округляет до миллисекунды, и два осмотра подряд — а после уборки как
+   * раз пересобирается второй — получали ОДИНАКОВУЮ отметку. Тогда старый
+   * снимок проходил проверку как свежий, и уборка шла по числам, которых
+   * на ящике уже нет: человек видел «убрать 40 писем», а уезжало другое
+   * количество. Проверка, которая ловит только медленный случай, — это
+   * проверка, которая не ловит.
+   */
   at: string;
 }
 
@@ -190,6 +204,9 @@ export interface ScanOptions {
  * ровно то же правило, что при снятии метки со всех писем
  * (mail/labels-routes.ts).
  */
+/** Номер осмотра в этом процессе — вторая половина отметки (см. ScanResult.at). */
+let scanSerial = 0;
+
 export async function scanMailbox(client: ImapFlow, opts: ScanOptions = {}): Promise<ScanResult> {
   const limit = opts.limit ?? SCAN_LIMIT;
   const folders = (await listFolders(client))
@@ -250,7 +267,7 @@ export async function scanMailbox(client: ImapFlow, opts: ScanOptions = {}): Pro
     truncated,
     folders: stats,
     quota: await readQuota(client),
-    at: new Date().toISOString(),
+    at: `${new Date().toISOString()}#${String((scanSerial += 1))}`,
   };
 }
 
