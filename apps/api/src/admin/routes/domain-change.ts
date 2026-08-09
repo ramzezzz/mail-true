@@ -290,7 +290,22 @@ export async function adminDomainChangeRoutes(app: FastifyInstance): Promise<voi
        * её как «нет такого ящика». Удаляется только пустой — непустой
        * унесло бы каскадом вместе с ящиками.
        */
-      const dropped = await dropTargetDomain(ctx.db, job.newDomain);
+      /*
+       * НЕ ТРОГАЕМ ДОМЕН, КОТОРЫЙ ЗАВЁЛ НЕ МЫ.
+       *
+       * План не отклоняется, если домен на сервере уже есть: он кладёт
+       * блокировку `domain-taken` и советует убрать домен вручную. То
+       * есть отменённое задание могло вовсе ничего не заводить — а
+       * уборка удаляла домен по имени, вместе со строкой `domain_settings`
+       * (каскадом): селектор, публичный ключ и готовая запись DKIM.
+       * Опубликованная в DNS запись переставала соответствовать, а
+       * Postfix — принимать почту для этого имени. В ответе это выглядело
+       * успешной уборкой: `target_domain_removed: true`.
+       *
+       * Признак «домен был чужим» лежит прямо в плане задания.
+       */
+      const wasTaken = (job.plan?.blockers ?? []).some((b) => b.id === 'domain-taken');
+      const dropped = wasTaken ? false : await dropTargetDomain(ctx.db, job.newDomain);
       await audit(ctx, request, {
         action: 'domainchange.cancel',
         targetType: 'domain',

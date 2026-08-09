@@ -20,8 +20,13 @@ export class ConflictError extends ApiError {
 
 /** Админка не настроена (нет подключения к базе или мастер-доступа Dovecot). */
 export class AdminUnavailableError extends ApiError {
-  constructor(message = 'Админка не настроена') {
-    super(503, 'ADMIN_UNAVAILABLE', message);
+  /**
+   * `details` — техническая причина (например, текст отказа Postgres).
+   * Нужен разделу «Наблюдение»: 503 говорит «зависимость отвалилась», а
+   * что именно, администратор должен прочитать, не идя в журнал сервера.
+   */
+  constructor(message = 'Админка не настроена', details?: unknown) {
+    super(503, 'ADMIN_UNAVAILABLE', message, details);
   }
 }
 

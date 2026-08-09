@@ -47,6 +47,14 @@ import {
   type HealthCheck,
 } from '../selfcheck.js';
 
+/**
+ * Сколько суток проверка DNS считается свежей.
+ *
+ * Неделя — тот срок, за который запись у регистратора успевают поменять,
+ * а панель об этом не узнаёт: сама она DNS не спрашивает.
+ */
+const DNS_FRESH_DAYS = 7;
+
 /** Сколько ждём ответа порта. Три секунды: это проверка, а не диагностика сети. */
 const PORT_TIMEOUT_MS = 3000;
 
@@ -749,11 +757,27 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
       // регистратора, и панель об этом не узнаёт, пока не спросит заново.
       const staleDays =
         checkedAt === null ? null : Math.floor((Date.now() - checkedAt.getTime()) / 86_400_000);
+      /*
+       * УСТАРЕВШАЯ ПРОВЕРКА НЕ БЫВАЕТ ЗЕЛЁНОЙ.
+       *
+       * Правило записано строкой выше, но в состояние не входило:
+       * `staleDays` попадал только в текст и в подсказку. Домен,
+       * проверенный полгода назад с итогом «всё в порядке», давал
+       * зелёную строку «Проверка 180 суток назад: все записи на месте» —
+       * то есть раздел уверял, что почта дойдёт, ничего об этом не зная.
+       * Записи меняют у регистратора, и панель узнаёт об этом, только
+       * когда спросит заново.
+       *
+       * Зелёной остаётся свежая проверка (моложе недели); всё, что
+       * старше, — жёлтая: не «сломано», а «неизвестно».
+       */
+      const fresh = staleDays !== null && staleDays < DNS_FRESH_DAYS;
+      const shown = checkedAt === null ? 'unknown' : state === 'ok' && !fresh ? 'warn' : state;
       return {
         id: `dns:${String(domain.id)}`,
         group: 'DNS',
         title: `Записи домена ${domain.name}`,
-        state: checkedAt === null ? 'unknown' : state,
+        state: shown,
         detail:
           checkedAt === null
             ? 'Ни разу не проверялись: неизвестно, дойдёт ли до нас почта и не уйдёт ли наша в спам'
@@ -763,9 +787,7 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
                 : overall === 'warn'
                   ? 'есть замечания'
                   : 'записи не настроены'),
-        ...(state === 'ok' && staleDays !== null && staleDays < 7
-          ? {}
-          : { hint: 'Проверить заново — в разделе «Домены и DNS»' }),
+        ...(state === 'ok' && fresh ? {} : { hint: 'Проверить заново — в разделе «Домены и DNS»' }),
       };
     });
 

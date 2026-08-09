@@ -77,6 +77,13 @@ class FakeDb {
   async findAdminById(id: number): Promise<Record<string, unknown>> {
     return { id, login: 'rukovodstvo', role: this.role, active: true };
   }
+  /** Ящики, которые прямо сейчас переносит другое задание. */
+  busyDestinations: string[] = [];
+
+  async listActiveMigrationDestinations(): Promise<string[]> {
+    return this.busyDestinations;
+  }
+
   async createMigrationJob(input: Record<string, unknown>): Promise<number> {
     this.createdJobs.push(input);
     return 42;
@@ -517,4 +524,34 @@ test('существующие включённые ящики попадают 
       'без номера строки связь с базой не заводится и проверка остаётся на словах',
     );
   }
+});
+
+/*
+ * Дедупликация переноса СНИМОЧНАЯ: список «чего ещё нет в приёмнике»
+ * собирается один раз на папку, до копирования. Два задания на один ящик,
+ * стартовавшие в одном окне, видят одинаково пустой приёмник и оба
+ * дописывают все письма — у человека каждое письмо в двух экземплярах, а
+ * отчёт «перенесено» удвоен. Через панель кнопку повтора при живом
+ * задании прячут, но на уровне API защиты не было вовсе.
+ */
+test('второй перенос в тот же ящик не принимается', async () => {
+  const { app, db, cookie } = await harness();
+  // Ящики из KERIO_CSV уже переносит другое задание.
+  db.busyDestinations = ['abird@novaya.ru'];
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs',
+    headers: { cookie },
+    payload: {
+      source: { host: 'kerio.staraya.ru', port: 993, secure: true },
+      list: { text: KERIO_CSV, destDomain: 'novaya.ru' },
+    },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match(response.json().message, /уже переносятся/);
+  // Задание не заведено: иначе работник забрал бы его следующим проходом,
+  // и письма скопировались бы по второму разу.
+  assert.equal(db.createdJobs.length, 0);
 });

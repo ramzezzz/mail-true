@@ -557,8 +557,28 @@ export function buildRestorePlan(
 
   if (wanted.has('branding')) {
     const branding = file.data.branding;
-    const has =
-      branding !== null && (branding.logoBase64 !== null || branding.companyName !== null);
+    /*
+     * Раздел ТРОГАЕТСЯ ЦЕЛИКОМ, если он вообще есть в копии.
+     *
+     * Раньше здесь проверялись только логотип и название организации, а
+     * применение (backup-store.ts) шло по одному условию «раздел есть» и
+     * записывало ВСЕ поля разом, включая название продукта и текст
+     * подвала страницы входа. Копия, снятая до появления подвала (или
+     * просто с пустыми полями), молча стирала со страницы входа название
+     * организации, название продукта и подвал — а там держат телефон
+     * поддержки и порядок обращения. План при этом показывал раздел
+     * пустым: «ничего не изменится».
+     */
+    const has = branding !== null;
+    const empties: string[] = [];
+    if (branding !== null) {
+      if (branding.logoBase64 === null && current.brandingLogo) {
+        empties.push('логотип будет заменён стандартным');
+      }
+      if (branding.companyName === null) empties.push('название организации будет стёрто');
+      if (branding.productName === null) empties.push('название продукта будет стёрто');
+      if (branding.loginFooter === null) empties.push('текст подвала страницы входа будет стёрт');
+    }
     sections.push({
       id: 'branding',
       title: SECTION_TITLES.branding,
@@ -566,8 +586,8 @@ export function buildRestorePlan(
       overwrite: has && current.brandingLogo ? ['логотип и подписи страницы входа'] : [],
       untouched: 0,
       warnings:
-        branding !== null && branding.logoBase64 === null && current.brandingLogo
-          ? ['В копии логотипа нет — действующий логотип будет заменён стандартным.']
+        empties.length > 0
+          ? [`В копии этих полей нет: ${empties.join('; ')}. Проверьте до восстановления.`]
           : [],
     });
   }

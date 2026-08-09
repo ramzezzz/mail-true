@@ -279,9 +279,31 @@ export async function moveDomainDirectories(
   return moved;
 }
 
-/** Возвращает перенесённые каталоги на место. Ошибки не бросает. */
-export async function rollbackMoves(moved: readonly MovedDirectory[]): Promise<void> {
+/**
+ * Возвращает перенесённые каталоги на место.
+ *
+ * Ошибки не бросает, но и НЕ ГЛОТАЕТ: список невозвращённых каталогов
+ * уходит наружу. Раньше результат `rename` никто не смотрел, а текст шага
+ * печатался безусловно — «Каталоги возвращены на место», «Ничего не
+ * потеряно». Это могло быть неправдой: пока адреса в базе ещё старые,
+ * Postfix продолжает доставлять почту на `логин@старый-домен` и заново
+ * создаёт каталог по прежнему пути. Обратный `rename` в такой каталог
+ * даёт ENOTEMPTY и молча гасился — почта всех ящиков оставалась под
+ * новым доменом, база указывала на старый, ящики выглядели пустыми, а
+ * панель уверяла, что всё на месте, и на диск идти незачем.
+ */
+export async function rollbackMoves(
+  moved: readonly MovedDirectory[],
+): Promise<{ restored: number; failed: MovedDirectory[] }> {
+  let restored = 0;
+  const failed: MovedDirectory[] = [];
   for (const item of [...moved].reverse()) {
-    await rename(item.to, item.from).catch(() => undefined);
+    try {
+      await rename(item.to, item.from);
+      restored += 1;
+    } catch {
+      failed.push(item);
+    }
   }
+  return { restored, failed };
 }

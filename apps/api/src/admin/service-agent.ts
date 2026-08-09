@@ -91,10 +91,31 @@ export class ServiceAgent {
     if (!this.configured) throw new ServiceAgentUnavailableError(NOT_CONFIGURED);
   }
 
+  /**
+   * Сколько ждать ЧИТАЮЩИЙ вызов.
+   *
+   * Посредник — строго последовательный цикл `accept` без ветвления: один
+   * запрос за раз. Пересоздание службы держит его на всё время
+   * `docker compose up -d` плюс ожидание готовности, и всё это время
+   * читающие `/healthz`, `/stack`, `/audit` стоят в очереди.
+   *
+   * Ждать их по общему пределу (150 секунд) нельзя: раздел «Наблюдение»
+   * — это то место, куда идут, когда что-то не так, в том числе когда
+   * подвис демон Docker (типичное состояние при забитом диске). У nginx
+   * на админских маршрутах стоит 120 секунд, и запрос просто возвращал
+   * 504: администратор терял раздел целиком, вместе с уже посчитанными
+   * пробами портов, очередью, диском и сертификатами.
+   *
+   * Десять секунд — заведомо больше, чем нужно исправному посреднику, и
+   * заведомо меньше терпения nginx.
+   */
+  private static readonly READ_TIMEOUT_MS = 10_000;
+
   private async call(
     path: string,
     method: 'GET' | 'POST',
     body?: URLSearchParams,
+    timeoutMs = this.timeoutMs,
   ): Promise<Record<string, unknown>> {
     this.assertConfigured();
     let response: Response;
@@ -106,7 +127,7 @@ export class ServiceAgent {
           ...(body ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
         },
         ...(body ? { body: body.toString() } : {}),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       warnOnce(this.failures, this.opts.logger, err, 'Посредник перезапуска не отвечает', { path });
@@ -140,7 +161,7 @@ export class ServiceAgent {
 
   /** Жив ли посредник и что он о себе знает. Ответ не кэшируется намеренно. */
   async health(): Promise<{ ok: boolean; project: string; error: string | null }> {
-    const body = await this.call('/healthz', 'GET');
+    const body = await this.call('/healthz', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
     return {
       ok: body.ok === true,
       project: typeof body.project === 'string' ? body.project : '',
@@ -165,7 +186,7 @@ export class ServiceAgent {
   async stack(): Promise<
     Array<ServiceState & { memory?: string; memPerc?: string; cpuPerc?: string }>
   > {
-    const body = await this.call('/stack', 'GET');
+    const body = await this.call('/stack', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
     const list = Array.isArray(body.services) ? body.services : [];
     return list.map((item) => {
       const row = item as Record<string, unknown>;
@@ -208,7 +229,7 @@ export class ServiceAgent {
       sameAsExample?: number;
     };
   }> {
-    return parseAudit(await this.call('/audit', 'GET'));
+    return parseAudit(await this.call('/audit', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS));
   }
 
   /**

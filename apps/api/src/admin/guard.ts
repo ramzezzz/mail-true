@@ -10,6 +10,7 @@ import type {
 } from 'fastify';
 import { UnauthorizedError } from '../errors.js';
 import { buildAuditRecord, type AuditInput, type AuditOrigin } from './audit.js';
+import { AdminUnavailableError } from './errors.js';
 import { assertPermission, type Permission } from './permissions.js';
 import { settingsOf } from './server-settings.js';
 import type { AdminContext, CurrentAdmin } from './types.js';
@@ -46,9 +47,29 @@ export async function loadAdminSession(
   const data = await ctx.sessions.get(unsigned.value);
   if (!data) throw new UnauthorizedError('Сессия админки истекла');
 
-  // Роль и активность перечитываем из базы: изменение прав должно
-  // действовать немедленно, а не после перелогина
-  const row = await ctx.db.findAdminById(data.adminId);
+  /*
+   * Роль и активность перечитываем из базы: изменение прав должно
+   * действовать немедленно, а не после перелогина.
+   *
+   * ОТКАЗ БАЗЫ — ЭТО НЕ «ВНУТРЕННЯЯ ОШИБКА», А ОТКАЗ ЗАВИСИМОСТИ.
+   * Раньше исключение отсюда уходило в общий обработчик и превращалось в
+   * `500 Внутренняя ошибка сервера` на КАЖДОМ админском запросе. Первым
+   * от этого страдал раздел «Наблюдение» — тот самый, который должен
+   * сказать, что именно сломалось: строка «Postgres» в нём берётся из
+   * отдельной пробы и была бы честно красной, но раздел не отрисовывался
+   * вовсе. Администратор видел «внутреннюю ошибку» вместо ответа на
+   * вопрос «что случилось».
+   */
+  let row: Awaited<ReturnType<typeof ctx.db.findAdminById>>;
+  try {
+    row = await ctx.db.findAdminById(data.adminId);
+  } catch (err) {
+    throw new AdminUnavailableError(
+      'База данных недоступна — панель работает не полностью. ' +
+        'Проверьте состояние Postgres в разделе «Наблюдение».',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   if (!row || !row.active) {
     await ctx.sessions.delete(unsigned.value);
     throw new UnauthorizedError('Учётная запись администратора отключена');

@@ -37,7 +37,13 @@ import {
 } from './server-settings-registry.js';
 import { generateSecret, ROTATABLE_SECRETS } from './secret-rotation.js';
 import { findTarget } from './restart-targets.js';
-import { parseSettingValue, ServerSettings, typedValue } from './server-settings.js';
+import {
+  applyRowsToEnv,
+  forgetStoredEnv,
+  parseSettingValue,
+  ServerSettings,
+  typedValue,
+} from './server-settings.js';
 
 /** Подделка базы: отдаёт заданные строки и помнит выполненные запросы. */
 class FakeDb {
@@ -610,6 +616,50 @@ void test('возврат к умолчанию убирает строку и �
   assert.equal(after.raw, '1073741824');
   assert.equal(after.source, 'env');
   assert.equal(db.rows.length, 0);
+});
+
+/*
+ * ГЛАВНАЯ ЛОВУШКА СБРОСА.
+ *
+ * При старте все незалоченные значения из базы подмешиваются прямо в
+ * `process.env` (applyStoredEnv) — так их видят те части сервера, которые
+ * читают окружение. После «вернуть к умолчанию» строка из базы уходила, а
+ * значение оставалось в окружении: сброс не возвращал НИЧЕГО.
+ *
+ * Для настройки группы «действует сразу» это значит, что она продолжала
+ * работать со старым значением до перезапуска процесса. А панель при этом
+ * подписывала его «из окружения (infra/.env)» — администратор шёл искать
+ * эту строку в файле и не находил.
+ */
+void test('сброс убирает значение и из окружения, куда его положил сам сервер', async () => {
+  const env: NodeJS.ProcessEnv = {};
+  const db = new FakeDb();
+  db.rows = [
+    {
+      key: 'ADMIN_SESSION_TTL_SECONDS',
+      value: '3600',
+      updated_by: 'osmotr',
+      updated_at: new Date(),
+    },
+  ];
+  // Так делает старт сервера: значения из базы попадают в окружение.
+  applyRowsToEnv([{ key: 'ADMIN_SESSION_TTL_SECONDS', value: '3600' }], env);
+  assert.equal(env.ADMIN_SESSION_TTL_SECONDS, '3600', 'значение не подмешалось — проверять нечего');
+
+  const settings = new ServerSettings({ db, env, cacheMs: 0 });
+  const { after } = await settings.reset('ADMIN_SESSION_TTL_SECONDS');
+
+  assert.equal(env.ADMIN_SESSION_TTL_SECONDS, undefined, 'значение осталось в окружении');
+  assert.equal(after.source, 'default', 'сброс вернул не умолчание, а прежнее значение');
+  assert.equal(after.raw, '28800');
+});
+
+void test('значение, прописанное человеком в infra/.env, сброс не трогает', () => {
+  // Оно и есть то умолчание, к которому возвращает сброс: удалять его
+  // значило бы стирать чужую настройку из файла.
+  const env: NodeJS.ProcessEnv = { ADMIN_SESSION_TTL_SECONDS: '7200' };
+  assert.equal(forgetStoredEnv('ADMIN_SESSION_TTL_SECONDS', env), false);
+  assert.equal(env.ADMIN_SESSION_TTL_SECONDS, '7200');
 });
 
 void test('настройку из группы locked записать нельзя', async () => {

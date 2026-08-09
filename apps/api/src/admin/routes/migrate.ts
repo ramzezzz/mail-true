@@ -398,6 +398,35 @@ export async function adminMigrateRoutes(app: FastifyInstance): Promise<void> {
       // Ящики-приёмники проверяются ДО постановки в очередь: см. resolveDestinations.
       const destIds = await resolveDestinations(ctx.db, parsed.rows);
 
+      /*
+       * ОДИН ЯЩИК — ОДНО ЖИВОЕ ЗАДАНИЕ.
+       *
+       * Дедупликация переноса снимочная: список «чего ещё нет в
+       * приёмнике» собирается ОДИН раз на папку, до копирования. Два
+       * задания, стартовавшие в одном окне, видят одинаково пустой ящик и
+       * оба дописывают все письма — у человека каждое письмо в двух
+       * экземплярах, а отчёт «перенесено» удвоен.
+       *
+       * Проверка была написана и применялась только при восстановлении из
+       * копии; здесь её не было, а через панель кнопку повтора прячут —
+       * то есть защищён был интерфейс, а не сервер.
+       */
+      const busy = new Set(
+        (await ctx.db.listActiveMigrationDestinations()).map((email) => email.toLowerCase()),
+      );
+      const clash = parsed.rows
+        .map((row) => row.destUser.trim().toLowerCase())
+        .filter((email) => busy.has(email));
+      if (clash.length > 0) {
+        const shown = [...new Set(clash)].slice(0, 5).join(', ');
+        throw new BadRequestError(
+          `Эти ящики уже переносятся прямо сейчас: ${shown}` +
+            (clash.length > 5 ? ` и ещё ${String(clash.length - 5)}` : '') +
+            '. Дождитесь окончания или остановите текущее задание — иначе письма ' +
+            'скопируются повторно и у людей окажутся дубли.',
+        );
+      }
+
       const jobId = await ctx.db.createMigrationJob({
         adminId: admin.adminId,
         adminLogin: admin.login,

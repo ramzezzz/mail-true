@@ -419,6 +419,18 @@ export class ServerSettings {
       throw new BadRequestError('Хранилище настроек недоступно: нет подключения к базе.');
     }
     await this.#db.query('DELETE FROM server_settings WHERE key = $1', [key]);
+    /*
+     * И ИЗ ОКРУЖЕНИЯ ТОЖЕ.
+     *
+     * При старте все незалоченные значения из базы подмешиваются в
+     * `process.env` (applyStoredEnv). После удаления строки значение
+     * читалось оттуда — то есть сброс не возвращал ничего: настройка
+     * группы «действует сразу» продолжала работать со старым значением до
+     * перезапуска, а панель подписывала его «из окружения (infra/.env)»,
+     * хотя такой строки в файле нет. Администратор шёл её искать и не
+     * находил.
+     */
+    forgetStoredEnv(key, this.#env);
     this.invalidate();
     return { before, after: await this.resolve(key) };
   }
@@ -574,6 +586,60 @@ export interface ApplyStoredEnvOptions {
  *
  * Возвращает число применённых значений.
  */
+/**
+ * Ключи, которые в `process.env` положили МЫ (из базы, при старте).
+ *
+ * Нужны сбросу настройки. «Вернуть к умолчанию» удаляет строку из базы, и
+ * дальше значение читается из окружения — а там лежит ровно то, что этот
+ * же процесс туда и записал при старте. В итоге сброс не возвращал
+ * ничего: настройка группы «действует сразу» продолжала работать со
+ * старым значением до перезапуска, а панель подписывала его «из
+ * окружения (infra/.env)», хотя такой строки в файле нет и не было.
+ *
+ * Помним именно наши ключи: значение, прописанное человеком в infra/.env
+ * своей рукой, трогать нельзя — оно и есть то умолчание, к которому сброс
+ * возвращает.
+ */
+const appliedFromDb = new Set<string>();
+
+/**
+ * Забыть значение, подмешанное в окружение из базы.
+ *
+ * Вызывается сбросом настройки: после удаления строки из базы значение из
+ * `process.env` обязано уйти вместе с ней, иначе «вернуть к умолчанию» не
+ * возвращает ничего.
+ */
+/**
+ * Кладёт значения из базы в окружение и запоминает, какие именно.
+ *
+ * Отдельной функцией — чтобы её можно было проверить без базы: путь
+ * «значение легло в окружение → сброс его оттуда убрал» и есть суть
+ * дефекта, из-за которого «вернуть к умолчанию» не возвращало ничего.
+ */
+export function applyRowsToEnv(
+  rows: ReadonlyArray<{ key: string; value: string }>,
+  env: NodeJS.ProcessEnv,
+): number {
+  let applied = 0;
+  for (const row of rows) {
+    const spec = findSetting(row.key);
+    // Неизвестный ключ и всё, что менять нельзя, не действует ни на что:
+    // строка в базе не должна уметь подменить строку подключения.
+    if (!spec || spec.group === 'locked') continue;
+    env[row.key] = row.value;
+    appliedFromDb.add(row.key);
+    applied += 1;
+  }
+  return applied;
+}
+
+export function forgetStoredEnv(key: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  if (!appliedFromDb.has(key)) return false;
+  delete env[key];
+  appliedFromDb.delete(key);
+  return true;
+}
+
 export async function applyStoredEnv(opts: ApplyStoredEnvOptions): Promise<number> {
   const env = opts.env ?? process.env;
   const pool = new Pool({
@@ -587,15 +653,7 @@ export async function applyStoredEnv(opts: ApplyStoredEnvOptions): Promise<numbe
     const result = await pool.query<StoredRow>(
       'SELECT key, value, updated_by, updated_at FROM server_settings',
     );
-    let applied = 0;
-    for (const row of result.rows) {
-      const spec = findSetting(row.key);
-      // Неизвестный ключ и всё, что менять нельзя, не действует ни на что:
-      // строка в базе не должна уметь подменить строку подключения.
-      if (!spec || spec.group === 'locked') continue;
-      env[row.key] = row.value;
-      applied += 1;
-    }
+    const applied = applyRowsToEnv(result.rows, env);
     if (applied > 0) {
       opts.onInfo?.(`Настройки сервера из базы: применено значений — ${applied}`);
     }
