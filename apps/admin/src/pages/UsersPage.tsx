@@ -723,6 +723,7 @@ function PasswordModal({
   onDone: (message: string) => void;
 }) {
   const [password, setPassword] = useState('');
+  const [passwordShown, setPasswordShown] = useState(false);
   const [generated, setGenerated] = useState<string | null>(null);
 
   const change = useMutation({
@@ -775,12 +776,33 @@ function PasswordModal({
         </>
       ) : (
         <Field label="Новый пароль" hint="Пусто — сгенерируем сами (не короче 8 символов)">
-          <input
-            className="mt-input mt-mono"
-            autoFocus
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          {/*
+            Пароль набирается скрытым, с кнопкой «Показать».
+
+            Здесь он набирался открытым текстом — в отличие от соседнего
+            окна создания ящика, где это уже исправлено и объяснено. А
+            пароль в панели набирают ровно в той обстановке, где рядом
+            люди: администратор подошёл к столу сотрудника, чтобы завести
+            ему доступ, или показывает экран на совещании. Строку,
+            которая пускает в чужую переписку, не выводят на общий обзор.
+          */}
+          <div className="mt-input-with-action">
+            <input
+              className="mt-input mt-mono"
+              type={passwordShown ? 'text' : 'password'}
+              autoComplete="new-password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <Button
+              mode="secondary"
+              onClick={() => setPasswordShown((shown) => !shown)}
+              title={passwordShown ? 'Скрыть пароль' : 'Показать пароль'}
+            >
+              {passwordShown ? 'Скрыть' : 'Показать'}
+            </Button>
+          </div>
         </Field>
       )}
     </Modal>
