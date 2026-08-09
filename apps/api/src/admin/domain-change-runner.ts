@@ -66,6 +66,7 @@ import {
 } from './domain-change.js';
 import {
   checkSpace,
+  crossDeviceBlocker,
   isRenameOnly,
   measureDomainStorage,
   moveDomainDirectories,
@@ -142,7 +143,18 @@ export async function buildDomainChangePlan(
   ]);
 
   const renameOnly = await isRenameOnly(ctx.config.ADMIN_MAIL_ROOT, oldDomain);
-  const space = await checkSpace(ctx.config.ADMIN_MAIL_ROOT, storage.bytes, renameOnly);
+  const space = await checkSpace(ctx.config.ADMIN_MAIL_ROOT, renameOnly);
+  /*
+   * Разные устройства — ПРЕПЯТСТВИЕ, а не предупреждение.
+   *
+   * Раньше здесь было предупреждение «письма придётся копировать, простой
+   * будет дольше расчётного»: план проходил, человек соглашался, а
+   * копирования в продукте нет ни строки — смена домена падала EXDEV уже
+   * ПОСЛЕ точки невозврата. Пусть лучше кнопка не нажимается, чем нажатие
+   * оставляет сервер в состоянии, из которого панель не умеет выйти.
+   */
+  const crossDevice = crossDeviceBlocker(renameOnly, ctx.config.ADMIN_MAIL_ROOT, oldDomain);
+  if (crossDevice) blockers.push(crossDevice);
   if (!space.ok) {
     blockers.push({
       id: 'no-space',
@@ -238,13 +250,6 @@ export async function buildDomainChangePlan(
         'и прежние их варианты продолжат приниматься.',
     );
   }
-  if (!renameOnly) {
-    warnings.push(
-      'Каталог домена лежит на отдельном устройстве — письма придётся копировать, а не ' +
-        'переименовывать. Простой будет заметно дольше расчётного.',
-    );
-  }
-
   const plan: DomainChangePlan = {
     createdAt: new Date().toISOString(),
     oldDomain,
@@ -500,7 +505,11 @@ export class DomainChangeRunner {
         job.oldDomain,
       );
       const renameOnly = await isRenameOnly(ctx.config.ADMIN_MAIL_ROOT, job.oldDomain);
-      const space = await checkSpace(ctx.config.ADMIN_MAIL_ROOT, storage.bytes, renameOnly);
+      const space = await checkSpace(ctx.config.ADMIN_MAIL_ROOT, renameOnly);
+      // Тома могли переставить между планом и запуском — спрашиваем заново,
+      // и обязательно ДО точки невозврата (шаг 4).
+      const crossDevice = crossDeviceBlocker(renameOnly, ctx.config.ADMIN_MAIL_ROOT, job.oldDomain);
+      if (crossDevice) blockers.push(crossDevice);
       if (!space.ok) {
         blockers.push({
           id: 'no-space',
@@ -549,6 +558,9 @@ export class DomainChangeRunner {
         ctx.config.ADMIN_MAIL_INDEX_ROOT,
         job.oldDomain,
         job.newDomain,
+        // Последняя застава: сюда мы приходим уже за точкой невозврата, и
+        // перенос между устройствами обязан отказаться, а не начаться.
+        { renameOnly },
       );
       await done(
         filesStep,

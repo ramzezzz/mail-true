@@ -42,6 +42,8 @@ import {
   migrateBatch,
   PgStateStore,
   type BatchAccount,
+  type BatchOptions,
+  type BatchReport,
   type MailboxReport,
   type ProgressEvent,
   type StateStore,
@@ -76,6 +78,13 @@ export interface MigrationRunnerOptions {
    * ящики, — это проверка не того.
    */
   createState?: () => StateStore;
+  /**
+   * Чем переносить ящики. По умолчанию — migrateBatch из packages/migrate.
+   * Переопределяется только в проверках: поднимать чужой IMAP-сервер ради
+   * проверки того, КАК работник считает переехавшие ящики, — это проверка
+   * не того. Тот же приём, что и с createState.
+   */
+  runBatch?: (options: BatchOptions) => Promise<BatchReport>;
   /** Как часто искать задания, секунды. */
   intervalSeconds?: number;
   /** После какого молчания работника задание считается брошенным, секунды. */
@@ -398,18 +407,28 @@ export class MigrationRunner {
         return;
       }
 
-      // Итог задания. Остановку не выдаём ни за успех, ни за поломку:
-      // отдельное состояние показывает ровно то, что произошло. А если
-      // не переехал НИ ОДИН ящик — это отказ задания, а не «выполнено
-      // с замечаниями»: обычно так выглядит неверный адрес или пароль,
-      // и увидеть это надо в списке заданий, не открывая отчёт.
+      /*
+       * Итог задания. Остановку не выдаём ни за успех, ни за поломку:
+       * отдельное состояние показывает ровно то, что произошло.
+       *
+       * «Выполнено» означает, что хотя бы один ящик переехал ЦЕЛИКОМ.
+       * Раньше здесь смотрели на doneMailboxes, в который засчитывался и
+       * ящик, переехавший наполовину, — и задание, где ни один ящик не
+       * доехал полностью, показывалось как «выполнено, 100 из 100».
+       * Это самое дорогое враньё в разделе: перенос закрывают, старый
+       * сервер гасят, а недостачу писем находят сотрудники недели через
+       * две. Неполный переезд — это НЕ выполнено, и в списке заданий это
+       * должно быть видно, не открывая отчёт.
+       */
       const finalState = control.signal.aborted
         ? 'stopped'
-        : totals.doneMailboxes === 0 && totals.failedMailboxes > 0
+        : totals.doneMailboxes === 0 && (totals.failedMailboxes > 0 || totals.partialMailboxes > 0)
           ? 'failed'
           : 'done';
       await db.updateMigrationJob(id, {
         state: finalState,
+        // Число «перенесено ящиков» — только целиком переехавшие: именно
+        // его человек сравнивает с общим числом ящиков задания.
         doneCount: totals.doneMailboxes,
         copied: totals.copied,
         skipped: totals.skipped,
@@ -431,12 +450,27 @@ export class MigrationRunner {
                   'удалены или отключены (подробности — в строках ящиков). ' +
                   'Восстановите их и повторите задание: уже перенесённые письма повторно не поедут.',
               }
-            : {}),
+            : finalState === 'failed' && totals.partialMailboxes > 0
+              ? {
+                  error:
+                    `Ни один ящик не переехал целиком: ${String(totals.partialMailboxes)} ` +
+                    'перенесены частично (подробности — в строках ящиков). Повторите ' +
+                    'неудавшиеся: уже перенесённые письма повторно не поедут.',
+                }
+              : totals.partialMailboxes > 0
+                ? {
+                    error:
+                      `${String(totals.partialMailboxes)} ящик(ов) переехали не полностью — ` +
+                      'часть писем или папок осталась на прежнем сервере. Повторите ' +
+                      'неудавшиеся: уже перенесённые письма повторно не поедут.',
+                  }
+                : {}),
       });
       logger.info(
         {
           jobId: id,
           mailboxes: totals.doneMailboxes,
+          partial: totals.partialMailboxes,
           copied: totals.copied,
           skipped: totals.skipped,
           failed: totals.failed,
@@ -445,14 +479,50 @@ export class MigrationRunner {
         'Задание переноса почты завершено',
       );
     } catch (err) {
-      logger.error(errorInfo(err, { jobId: id }), 'Задание переноса почты не выполнено');
+      /*
+       * НЕОЖИДАННЫЙ ОТКАЗ — НЕ ПОВОД СТИРАТЬ ПАРОЛИ.
+       *
+       * Здесь стояло updateMigrationJob({state:'failed', finished:true}), а
+       * finished:true в SQL означает не только «закончено», но и
+       * secret_enc = NULL (см. db.ts): «отказ» и «перенос закончен, пароли
+       * больше не нужны» были одним действием.
+       *
+       * Под этим catch лежит вся подготовка, и она сплошь состоит из
+       * обращений к базе без единого .catch: isMigrationStopRequested,
+       * updateMigrationJob, state.init(), listMigrationItems,
+       * updateMigrationItem. Перезапуск контейнера Postgres (обновление,
+       * перезагрузка машины, всего лишь пересоздание пула) роняет любое из
+       * них — и свёрток паролей исходных ящиков уничтожался безвозвратно.
+       * В режиме «пароль каждого ящика» это заново собранная выгрузка
+       * паролей сотен чужих ящиков; спросить их в три часа ночи не у кого.
+       * Путь остановки задания обвешан .catch именно ради этого, а
+       * подготовка — нет.
+       *
+       * Поэтому отказ здесь означает «попытка не удалась», а не «задание
+       * кончилось»: задание остаётся незавершённым, пароли остаются на
+       * месте, работник отпускает его — и следующий проход (десять секунд)
+       * берёт его снова. База вернулась — перенос продолжился сам, с
+       * записанного курсора.
+       *
+       * Что если отказ не временный? Тогда задание крутится, пока не
+       * упрётся в срок молчания: expireStaleMigrationJobs честно пометит
+       * его брошенным и сотрёт пароли — но через часы, а не через миг, и
+       * не из-за секундного перерыва в работе базы.
+       */
+      logger.error(
+        errorInfo(err, { jobId: id }),
+        'Попытка выполнить задание переноса сорвалась — задание не завершено, пароли сохранены',
+      );
       await db
         .updateMigrationJob(id, {
-          state: 'failed',
-          error: err instanceof Error ? err.message : String(err),
-          finished: true,
+          error:
+            'Попытка сорвалась: ' +
+            (err instanceof Error ? err.message : String(err)) +
+            '. Задание не закончено — работник возьмёт его снова, уже перенесённые письма ' +
+            'повторно не поедут.',
         })
         .catch(() => undefined);
+      await db.releaseMigrationJob(id, this.#runner).catch(() => undefined);
     } finally {
       clearInterval(beat);
       this.#active.delete(id);
@@ -480,7 +550,10 @@ export class MigrationRunner {
       state: string;
     }>;
   }): Promise<{
+    /** Ящики, переехавшие ЦЕЛИКОМ. */
     doneMailboxes: number;
+    /** Ящики, переехавшие не полностью: часть писем или папок осталась. */
+    partialMailboxes: number;
     failedMailboxes: number;
     copied: number;
     skipped: number;
@@ -522,8 +595,21 @@ export class MigrationRunner {
       }),
       { copied: 0, skipped: 0, failed: 0 },
     );
-    // Ящики, до которых проход не дошёл, потому что они уже перенесены
-    let doneMailboxes = untouched.filter((i) => i.state === 'ok' || i.state === 'partial').length;
+    /*
+     * ПЕРЕЕХАЛ ЦЕЛИКОМ — ЭТО ok, И ТОЛЬКО ok.
+     *
+     * Здесь partial считался наравне с ok, и число «перенесено ящиков»
+     * означало «начато и как-то закончено». На экране это выглядело так:
+     * «выполнено, 100 из 100» у задания, в котором ни один ящик не переехал
+     * полностью — у каждого осталась хотя бы одна папка или письмо, которое
+     * чужой сервер не отдал. Человек закрывал раздел, считая переезд
+     * состоявшимся, и узнавал правду от сотрудников, не нашедших писем.
+     *
+     * partial теперь считается отдельно: он и в отчёте показан отдельно, и
+     * итог задания по нему выводится честно (см. runJob).
+     */
+    let doneMailboxes = untouched.filter((i) => i.state === 'ok').length;
+    let partialMailboxes = untouched.filter((i) => i.state === 'partial').length;
     let failedMailboxes = untouched.filter((i) => i.state === 'failed').length;
     const live = new Map<
       number,
@@ -586,10 +672,10 @@ export class MigrationRunner {
 
     if (accounts.length === 0) {
       await flush(true);
-      return { doneMailboxes, failedMailboxes, ...totals() };
+      return { doneMailboxes, partialMailboxes, failedMailboxes, ...totals() };
     }
 
-    await migrateBatch({
+    await (this.#opts.runBatch ?? migrateBatch)({
       accounts,
       concurrency: this.#opts.concurrency,
       // Логгер в imapflow НЕ передаётся намеренно. Он пишет протокольный
@@ -637,7 +723,8 @@ export class MigrationRunner {
           total: report.totalMessages,
           folder: null,
         });
-        if (report.status === 'ok' || report.status === 'partial') doneMailboxes += 1;
+        if (report.status === 'ok') doneMailboxes += 1;
+        if (report.status === 'partial') partialMailboxes += 1;
         if (report.status === 'failed') failedMailboxes += 1;
         const errors = collectErrors(report.folders);
         // Ошибка уровня ящика (не достучались, нет пароля) в папки не
@@ -665,6 +752,6 @@ export class MigrationRunner {
     });
 
     await flush(true);
-    return { doneMailboxes, failedMailboxes, ...totals() };
+    return { doneMailboxes, partialMailboxes, failedMailboxes, ...totals() };
   }
 }

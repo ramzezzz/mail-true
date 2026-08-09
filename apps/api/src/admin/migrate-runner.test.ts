@@ -15,9 +15,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import pino from 'pino';
-import type { StateStore } from '@mail-true/migrate';
+import type { MailboxReport, StateStore } from '@mail-true/migrate';
 import { SecretBox } from '../crypto.js';
-import { MigrationRunner } from './migrate-runner.js';
+import { MigrationRunner, type MigrationRunnerOptions } from './migrate-runner.js';
 import { packSecrets, type DestSettings } from './migrate-jobs.js';
 import type { AdminDb, MigrationItemRow, MigrationJobRow } from './db.js';
 
@@ -129,7 +129,11 @@ class FakeDb {
   async updateMigrationJob(_id: number, patch: Record<string, unknown>): Promise<void> {
     this.jobPatches.push(patch);
   }
+  /** Чем ответить на чтение строк ящиков: так изображается упавшая база. */
+  failListItems: Error | null = null;
+
   async listMigrationItems(): Promise<MigrationItemRow[]> {
+    if (this.failListItems) throw this.failListItems;
     return this.items;
   }
   async updateMigrationItem(
@@ -141,7 +145,11 @@ class FakeDb {
   }
 }
 
-function runnerWith(db: FakeDb, box: SecretBox | null): MigrationRunner {
+function runnerWith(
+  db: FakeDb,
+  box: SecretBox | null,
+  extra: Partial<MigrationRunnerOptions> = {},
+): MigrationRunner {
   return new MigrationRunner({
     db: db as unknown as AdminDb,
     logger,
@@ -151,7 +159,49 @@ function runnerWith(db: FakeDb, box: SecretBox | null): MigrationRunner {
     // Настоящее хранилище состояния полезло бы в Postgres, которого в
     // проверке нет. Само по себе оно проверено в packages/migrate.
     createState: () => nullState,
+    ...extra,
   });
+}
+
+/**
+ * Подменённый пакетный перенос: сообщает заданные итоги по ящикам, никуда
+ * не ходя. Проверяется здесь не перенос писем (он проверен в
+ * packages/migrate), а то, КАК работник считает переехавшие ящики.
+ */
+function batchReporting(
+  statuses: ReadonlyArray<MailboxReport['status']>,
+): NonNullable<MigrationRunnerOptions['runBatch']> {
+  return async (options) => {
+    const accounts: MailboxReport[] = [];
+    statuses.forEach((status, index) => {
+      const report: MailboxReport = {
+        sourceUser: `user${String(index)}@staraya.ru`,
+        destUser: `user${String(index)}@novaya.ru`,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 1,
+        status,
+        folders: [],
+        totalMessages: 10,
+        // Наполовину переехавший ящик: часть писем осталась на прежнем
+        // сервере — ровно то, что скрывалось за «выполнено».
+        copied: status === 'ok' ? 10 : 6,
+        skipped: 0,
+        failed: status === 'ok' ? 0 : 4,
+      };
+      accounts.push(report);
+      options.onAccountDone?.(index, report);
+    });
+    return {
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      accounts,
+      ok: statuses.filter((s) => s === 'ok').length,
+      partial: statuses.filter((s) => s === 'partial').length,
+      failed: statuses.filter((s) => s === 'failed').length,
+      stopped: statuses.filter((s) => s === 'stopped').length,
+    };
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -391,6 +441,88 @@ test('удалённый ящик-приёмник объясняется отс
   const errors = String(db.itemPatches.find((p) => p.position === 0)?.patch['errors']);
   assert.match(errors, /нет на сервере/u);
   assert.doesNotMatch(errors, /парол/iu);
+});
+
+/* ------------------------------------------------------------------ */
+/* Неожиданный отказ базы посреди подготовки                            */
+/* ------------------------------------------------------------------ */
+
+test('перезапуск Postgres на подготовке не стирает пароли исходных ящиков', async () => {
+  /*
+   * Вся подготовка задания — сплошные обращения к базе без .catch, и
+   * лежала она под общим catch, который писал {state:'failed',
+   * finished:true}. А finished:true в SQL означает secret_enc = NULL:
+   * «отказ» и «перенос закончен, пароли больше не нужны» были одним
+   * действием. Секундный перерыв в работе базы (обновление, перезапуск
+   * контейнера, пересозданный пул) уничтожал свёрток паролей сотен чужих
+   * ящиков безвозвратно — в режиме «пароль каждого ящика» это заново
+   * собранная выгрузка, а спросить их в три часа ночи не у кого.
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.failListItems = new Error('Connection terminated unexpectedly');
+
+  await runnerWith(db, box).runJob(
+    jobRow({ secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol' } }) }),
+  );
+
+  const finishing = db.jobPatches.filter((p) => p['finished'] === true);
+  assert.deepEqual(finishing, [], 'ни одна запись не смеет завершать задание — это стирает пароли');
+  assert.deepEqual(db.released, [7], 'задание надо отпустить, чтобы следующий проход его взял');
+  // Причина видна человеку, а не только в журнале сервера.
+  assert.match(String(db.jobPatches.at(-1)?.['error'] ?? ''), /сорвалась/iu);
+});
+
+/* ------------------------------------------------------------------ */
+/* «Выполнено» означает, что ящики переехали ЦЕЛИКОМ                     */
+/* ------------------------------------------------------------------ */
+
+test('задание, где ни один ящик не переехал целиком, не показывается выполненным', async () => {
+  /*
+   * partial засчитывался в doneMailboxes наравне с ok, а неудавшимся
+   * задание считалось только при doneMailboxes === 0. Итог: «выполнено,
+   * 100 из 100» у переезда, в котором каждый ящик недосчитался писем.
+   * Перенос закрывают, старый сервер гасят, а недостачу находят
+   * сотрудники недели через две.
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0), itemRow(1)];
+  const runner = runnerWith(db, box, {
+    // Оба ящика переехали наполовину.
+    runBatch: batchReporting(['partial', 'partial']),
+  });
+
+  await runner.runJob(
+    jobRow({
+      total: 2,
+      secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol', '1': 'parol' } }),
+    }),
+  );
+
+  const last = db.jobPatches.at(-1) ?? {};
+  assert.equal(last['doneCount'], 0, 'целиком не переехал ни один ящик');
+  assert.equal(last['state'], 'failed', '«выполнено» здесь означало бы неправду');
+  assert.match(String(last['error']), /целиком|частично/iu, 'причина обязана быть названа');
+});
+
+test('ящик, переехавший целиком, по-прежнему считается перенесённым', async () => {
+  // Обратный ход: проверка выше не должна объявлять неудачей всё подряд.
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0), itemRow(1)];
+  const runner = runnerWith(db, box, { runBatch: batchReporting(['ok', 'partial']) });
+
+  await runner.runJob(
+    jobRow({
+      total: 2,
+      secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol', '1': 'parol' } }),
+    }),
+  );
+
+  const last = db.jobPatches.at(-1) ?? {};
+  assert.equal(last['state'], 'done');
+  assert.equal(last['doneCount'], 1, 'наполовину переехавший ящик перенесённым не считается');
 });
 
 test('исправный ящик-приёмник по-прежнему переносится', async () => {

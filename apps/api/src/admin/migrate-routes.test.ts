@@ -555,3 +555,153 @@ test('второй перенос в тот же ящик не принимае�
   // и письма скопировались бы по второму разу.
   assert.equal(db.createdJobs.length, 0);
 });
+
+/* ------------------------------------------------------------------ */
+/* Повтор неудавшихся — такое же новое задание, и замки те же           */
+/* ------------------------------------------------------------------ */
+
+/** Строка задания в состоянии, которое нужно проверке. */
+function jobRow(state: string): Record<string, unknown> {
+  return {
+    id: '42',
+    admin_login: 'rukovodstvo',
+    state,
+    stop_requested: false,
+    source_host: 'kerio.staraya.ru',
+    source_port: 993,
+    source_secure: true,
+    source_insecure_tls: true,
+    source_master_user: 'admin',
+    source_master_separator: '*',
+    secret_enc: null,
+    total: 3,
+    done_count: 1,
+    copied: 100,
+    skipped: 0,
+    failed: 0,
+    error: null,
+    runner: null,
+    heartbeat_at: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+    started_at: new Date(),
+    finished_at: null,
+  };
+}
+
+/** Строка ящика задания. */
+function itemRow(position: number, state: string): Record<string, unknown> {
+  return {
+    id: String(100 + position),
+    job_id: '42',
+    position,
+    source_user: `user${String(position)}@staraya.ru`,
+    dest_user: `user${String(position)}@novaya.ru`,
+    dest_user_id: 500 + position,
+    dest_active: true,
+    state,
+    total: 0,
+    copied: 0,
+    skipped: 0,
+    failed: 0,
+    current_folder: null,
+    errors: null,
+    started_at: null,
+    finished_at: null,
+  };
+}
+
+test('повтор ИДУЩЕГО задания не принимается — иначе у людей дубли всей почты', async () => {
+  /*
+   * Самое дорогое место раздела. У идущего задания «неудавшимися»
+   * числятся и ящики в состоянии queued — те, до которых очередь просто
+   * не дошла. Повтор забирал их себе, работник вёл оба задания
+   * параллельно, а дедупликация переноса снимочная и второго задания не
+   * видит: каждое письмо приезжало человеку дважды.
+   */
+  const { app, db, cookie } = await harness();
+  db.job = jobRow('running');
+  db.items = [itemRow(0, 'ok'), itemRow(1, 'queued'), itemRow(2, 'failed')];
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs/42/retry',
+    headers: { cookie },
+    payload: { masterPassword: 'ParolSluzhebnogo9' },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  const message = (response.json() as { message: string }).message;
+  assert.match(message, /не закончен|остановить/iu, 'надо сказать, что делать');
+  assert.equal(db.createdJobs.length, 0, 'второе задание на те же ящики заводить нельзя');
+});
+
+test('повтор не берёт ящики, которые прямо сейчас переносит соседнее задание', async () => {
+  const { app, db, cookie } = await harness();
+  db.job = jobRow('failed');
+  db.items = [itemRow(0, 'failed'), itemRow(1, 'failed')];
+  // Ящик уже переносится другим заданием (например, повтор нажали дважды).
+  db.busyDestinations = ['user1@novaya.ru'];
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs/42/retry',
+    headers: { cookie },
+    payload: { masterPassword: 'ParolSluzhebnogo9' },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match((response.json() as { message: string }).message, /уже переносятся/);
+  assert.equal(db.createdJobs.length, 0);
+});
+
+test('повтор законченного задания по-прежнему заводит новое', async () => {
+  // Обратный ход: замки выше обязаны ловить опасное, а не всё подряд.
+  const { app, db, cookie } = await harness();
+  db.job = jobRow('done');
+  db.items = [itemRow(0, 'ok'), itemRow(1, 'failed')];
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs/42/retry',
+    headers: { cookie },
+    payload: { masterPassword: 'ParolSluzhebnogo9' },
+  });
+
+  assert.equal(response.statusCode, 202, response.body);
+  assert.equal(db.createdJobs.length, 1);
+  const mailboxes = db.createdJobs[0]?.['mailboxes'] as Array<Record<string, unknown>>;
+  assert.equal(mailboxes.length, 1, 'повторять надо только не доехавший ящик');
+});
+
+/* ------------------------------------------------------------------ */
+/* Пароль служебного пользователя без самого пользователя               */
+/* ------------------------------------------------------------------ */
+
+test('пароль служебного доступа без имени служебного пользователя отвергается', async () => {
+  /*
+   * Схема обещала комментарием, что вне служебного режима этот пароль
+   * запрещён, но не проверяла ничего, а сборка секретов молча его
+   * выбрасывала. Человек вводил единственный пароль, которым, как он
+   * думал, и делается весь перенос, и получал либо отказ «ни у одного
+   * ящика нет пароля» при заполненном поле пароля, либо ночной перенос
+   * не тем доступом.
+   */
+  const { app, db, cookie } = await harness();
+  const response = await app.inject({
+    method: 'POST',
+    url: '/migrate/jobs',
+    headers: { cookie },
+    // masterUser НЕ задан, а пароль служебного — задан. Список с паролями,
+    // чтобы задание было во всём остальном исправным.
+    payload: {
+      source: { host: 'kerio.staraya.ru', port: 993, secure: true },
+      list: { text: KERIO_CSV, destDomain: 'novaya.ru' },
+      masterPassword: 'ParolSluzhebnogo9',
+    },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match((response.json() as { message: string }).message, /служебн/iu);
+  assert.equal(db.createdJobs.length, 0, 'задание не должно уехать не тем доступом');
+});

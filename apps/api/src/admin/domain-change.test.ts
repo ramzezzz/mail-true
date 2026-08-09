@@ -15,6 +15,8 @@
  */
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -32,6 +34,11 @@ import {
   OWNER_ADDRESS_COLUMNS,
 } from './domain-change.js';
 import { dkimRecordName, generateDkimKeyPair } from './dkim-keygen.js';
+import {
+  crossDeviceBlocker,
+  CrossDeviceMove,
+  moveDomainDirectories,
+} from './domain-change-files.js';
 
 /* ------------------------------------------------------------------ */
 /* Имена                                                               */
@@ -326,4 +333,74 @@ void test('уборка после удаления ящика построен�
     [],
     `в уборке выписаны руками разделы из реестра — они отстанут от продукта: ${handWritten.join(', ')}`,
   );
+});
+
+/* ------------------------------------------------------------------ */
+/* Каталоги на разных устройствах                                       */
+/* ------------------------------------------------------------------ */
+
+void test('перенос между устройствами отказывается, НЕ ТРОНУВ каталоги', async () => {
+  /*
+   * Шапка domain-change-files.ts обещала копирование на случай разных
+   * устройств, проверка места требовала под него весь объём писем, а план
+   * предупреждал «письма придётся копировать». Копирования в продукте не
+   * было ни строки — только rename. На сервере, где каталог домена
+   * смонтирован отдельным томом, всё это означало одно: план проходил,
+   * человек соглашался, и смена домена падала EXDEV уже ПОСЛЕ отметки
+   * точки невозврата — домен нового имени заведён, почта осталась под
+   * старым, а панель говорит «назад нельзя».
+   *
+   * Теперь такой перенос отказывается заранее и словами. Разные
+   * устройства изображаются признаком renameOnly: false — тем самым,
+   * который вызывающий уже посчитал на проверке условий.
+   */
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-dc-move-'));
+  const indexRoot = await mkdtemp(path.join(tmpdir(), 'mt-dc-move-idx-'));
+  const from = path.join(root, 'staryj.ru', 'ivan');
+  await mkdir(from, { recursive: true });
+  await writeFile(path.join(from, 'pismo'), 'письмо');
+
+  await assert.rejects(
+    () =>
+      moveDomainDirectories(root, indexRoot, 'staryj.ru', 'novyj.ru', {
+        renameOnly: false,
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof CrossDeviceMove, 'отказ обязан быть отдельным, узнаваемым');
+      // Человеку сказано и что случилось, и что делать руками.
+      assert.match(err.message, /устройств/iu);
+      assert.match(err.message, /rsync|руками/iu);
+      return true;
+    },
+  );
+
+  // И ничего не тронуто: письма остались там, где были.
+  assert.equal(existsSync(path.join(from, 'pismo')), true, 'каталог домена трогать было нельзя');
+  assert.equal(existsSync(path.join(root, 'novyj.ru')), false, 'каталог нового домена не заводим');
+});
+
+void test('в пределах одного тома перенос по-прежнему мгновенный', async () => {
+  // Обратный ход: отказ выше не должен ломать обычный случай.
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-dc-ok-'));
+  const indexRoot = await mkdtemp(path.join(tmpdir(), 'mt-dc-ok-idx-'));
+  await mkdir(path.join(root, 'staryj.ru', 'ivan'), { recursive: true });
+  await writeFile(path.join(root, 'staryj.ru', 'ivan', 'pismo'), 'письмо');
+
+  const moved = await moveDomainDirectories(root, indexRoot, 'staryj.ru', 'novyj.ru', {
+    renameOnly: true,
+  });
+
+  assert.equal(moved.length, 1, 'каталог писем обязан переехать');
+  assert.equal(existsSync(path.join(root, 'novyj.ru', 'ivan', 'pismo')), true);
+});
+
+void test('препятствие про разные устройства объясняет и причину, и выход', () => {
+  const blocker = crossDeviceBlocker(false, '/var/mail/vhosts', 'staryj.ru');
+  assert.ok(blocker, 'на разных устройствах смена домена обязана быть заблокирована');
+  assert.equal(blocker.id, 'cross-device');
+  assert.match(blocker.message, /staryj\.ru/u, 'надо назвать каталог, о котором речь');
+  assert.match(blocker.fix, /rsync|mv/u, 'сказать, чем перенести руками');
+  // На обычном сервере препятствия нет — иначе смена домена не работала бы
+  // нигде.
+  assert.equal(crossDeviceBlocker(true, '/var/mail/vhosts', 'staryj.ru'), null);
 });

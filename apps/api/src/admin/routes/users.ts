@@ -20,7 +20,7 @@ import { dovecotHash, generatePassword } from '../passwords.js';
 import { nulByteProblem, parseUserImport } from '../csv.js';
 import { addressProblem, displayNameLengthProblem } from '@mail-true/shared';
 import { packResult, unpackResult, type ImportJobResult } from '../import-jobs.js';
-import { quarantineMaildir } from '../mailbox-cleanup.js';
+import { maildirPathOf, quarantineMaildir } from '../mailbox-cleanup.js';
 import { isUndefinedTable, type ImportJobRow, type MailUserRow } from '../db.js';
 import { pathId } from '../../params.js';
 
@@ -354,8 +354,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
    *
    *   1. Очистка средствами Dovecot — ПОКА ящик ещё есть в базе. После
    *      удаления строки Dovecot не пустит даже служебного пользователя,
-   *      и убрать индексы полнотекстового поиска (они в отдельном томе,
-   *      куда у API доступа нет) будет уже нечем.
+   *      и убрать индексы полнотекстового поиска будет уже нечем.
+   *      Делается ТОЛЬКО при нулевой отсрочке — см. ниже.
    *   2. Запись об удалении — до самого удаления, чтобы след остался
    *      даже если следующий шаг упадёт.
    *   3. Служебные строки и строка ящика.
@@ -364,6 +364,30 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
    *
    * Физическое удаление дерева делает уборщик (см. janitor.ts) — почему
    * именно так, подробно объяснено в mailbox-cleanup.ts.
+   *
+   * ------------------------------------------------------------------
+   * ОТСРОЧКА И ШАГ 1: ЧТО ЗДЕСЬ БЫЛО СЛОМАНО
+   * ------------------------------------------------------------------
+   * Настройка ADMIN_MAILBOX_PURGE_DELAY_MINUTES описана в панели словами
+   * «даёт время передумать: письма из Maildir не восстанавливаются ничем,
+   * кроме резервной копии». Обещание не выполнялось ни на минуту: шаг 1
+   * зовёт purgeMail(), а тот через IMAP удаляет ВСЕ папки и делает
+   * messageDelete({all:true}) по INBOX. К моменту карантина уносить в
+   * карантин было уже нечего — туда уезжал пустой каталог, а отсрочка
+   * откладывала удаление пустоты. Человек, удаливший не тот ящик и
+   * прибежавший через минуту, терял всю переписку сотрудника, хотя панель
+   * обещала ему сутки на размышление.
+   *
+   * Поэтому при ненулевой отсрочке ящик через IMAP НЕ чистится: письма
+   * доживают до карантина настоящими. Индексы Dovecot и данные поиска при
+   * этом убираются с диска напрямую — том индексов у сервера приложения
+   * примонтирован ровно ради удаления ящика (infra/docker-compose.yml), а
+   * индексы производны от писем: вернувшийся из карантина каталог Dovecot
+   * переиндексирует сам.
+   *
+   * При нулевой отсрочке (значение по умолчанию) порядок прежний: уборщик
+   * убирает каталог ближайшим проходом, сохранять нечего, а очистка
+   * средствами самого Dovecot надёжнее нашего знания о его каталогах.
    */
   app.delete<{ Params: { id: string }; Querystring: { reason?: string } }>(
     '/users/:id',
@@ -378,10 +402,18 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           ? request.query.reason.trim().slice(0, 2000)
           : null;
 
+      const purgeDelayMinutes = await settingsOf(ctx).int('ADMIN_MAILBOX_PURGE_DELAY_MINUTES');
+      /** Отсрочка обещает «время передумать» — значит письма обязаны дожить. */
+      const keepMailForUndo = purgeDelayMinutes > 0;
+
       // 1. Индексы и данные Dovecot — руками самого Dovecot.
       let imapPurged = false;
       let imapError: string | null = null;
-      if (ctx.mailbox.configured) {
+      if (keepMailForUndo) {
+        // Не ошибка, а осознанный пропуск: purgeMail уничтожает письма, а
+        // при отсрочке они обязаны доехать до карантина целыми (см. шапку).
+        imapError = null;
+      } else if (ctx.mailbox.configured) {
         const outcome = await ctx.mailbox.purgeMail(row.email);
         imapPurged = outcome.ok;
         imapError = outcome.error;
@@ -398,7 +430,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           domain: row.domain,
           adminLogin: admin.login,
           reason,
-          purgeDelayMinutes: await settingsOf(ctx).int('ADMIN_MAILBOX_PURGE_DELAY_MINUTES'),
+          purgeDelayMinutes,
         });
       } catch (err) {
         if (!isUndefinedTable(err)) throw err;
@@ -445,6 +477,43 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       // 5. Каталог — в карантин.
       const tag = deletionId > 0 ? String(deletionId) : String(Date.now());
       const quarantine = await quarantineMaildir(ctx.config.ADMIN_MAIL_ROOT, row.email, tag);
+      /*
+       * 6. Индексы Dovecot — с диска, раз через IMAP их не убирали.
+       *
+       * Только в режиме отсрочки: при нулевой их уже убрал сам Dovecot
+       * вместе с папками. Индексы и данные полнотекстового поиска
+       * производны от писем и на порядки меньше их; каталог ящика,
+       * возвращённый из карантина руками, Dovecot переиндексирует сам.
+       * Оставить их было бы мусором, который копится и никем больше не
+       * убирается: после удаления строки ящика о нём не знает никто.
+       *
+       * Итог кладётся в тот же imapPurged: и запись об удалении, и панель
+       * отвечают им на один вопрос — «убраны ли индексы Dovecot». Заведи
+       * мы под это второе поле, панель продолжала бы писать «очистить не
+       * удалось, уберите вручную» над каталогом, который только что убран.
+       */
+      let indexRemoved = false;
+      if (keepMailForUndo) {
+        const indexDir = maildirPathOf(ctx.config.ADMIN_MAIL_INDEX_ROOT, row.email);
+        if (indexDir !== null) {
+          try {
+            await rm(indexDir, { recursive: true, force: true });
+            indexRemoved = true;
+          } catch (err) {
+            // Не повод отменять удаление: письма уже в карантине, а
+            // индекс без них Dovecot всё равно перестроит.
+            request.log.warn(
+              errorInfo(err, { email: row.email, path: indexDir }),
+              'Каталог индексов удалённого ящика убрать не удалось',
+            );
+            imapError =
+              `Каталог индексов ${indexDir} убрать не удалось: ` +
+              (err instanceof Error ? err.message : String(err));
+          }
+        }
+        imapPurged = indexRemoved;
+      }
+
       if (deletionId > 0) {
         await ctx.db.updateMailboxDeletion(deletionId, {
           maildirPath: quarantine.maildirPath,
@@ -481,6 +550,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           imap_purged: imapPurged,
           db_rows_removed: dbRowsRemoved,
           maildir_quarantined: quarantine.quarantinePath !== null,
+          /** Отсрочка: письма лежат в карантине целыми, их ещё можно вернуть. */
+          mail_kept_minutes: keepMailForUndo ? purgeDelayMinutes : 0,
           reason,
         },
       });
@@ -492,6 +563,18 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         /** Каталога не было вовсе — ящик ни разу не открывали. */
         mailDirMissing: !quarantine.existed,
         imapPurged,
+        /**
+         * Письма ЦЕЛЫМИ ждут в карантине столько минут — ровно то, что
+         * обещает настройка отсрочки. 0 означает «уборщик уберёт их
+         * ближайшим проходом».
+         */
+        mailKeptMinutes: keepMailForUndo ? purgeDelayMinutes : 0,
+        /**
+         * Каталог индексов Dovecot убран нами, а не через IMAP. Только в
+         * режиме отсрочки: без него было бы непонятно, почему imapPurged
+         * стоит при том, что ящик через IMAP не чистили.
+         */
+        indexRemoved,
         dbRowsRemoved,
         deletionId,
       };
@@ -514,14 +597,29 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       const after = await ctx.db.updateMailUser(id, patch);
       if (!after) continue;
       changed += 1;
-      await audit(ctx, request, {
-        action: body.quotaBytes !== undefined ? 'user.bulk.quota' : 'user.bulk.active',
-        targetType: 'user',
-        targetId: id,
-        targetLabel: after.email,
-        before: snapshot(before),
-        after: snapshot(after),
-      });
+      /*
+       * Одна правка — одна запись НА КАЖДОЕ действие.
+       *
+       * Здесь стояло «квота, а иначе блокировка»: при правке, где заданы
+       * оба поля, в журнал уходила только user.bulk.quota. Массовая
+       * блокировка сотни ящиков в журнале не отражалась вовсе — а это то
+       * самое действие, ради которого журнал и открывают: «кто отключил
+       * отдел в пятницу вечером». Найти его было нечем: отбор по действию
+       * «Массовая блокировка/разблокировка» не показывал ничего.
+       */
+      const actions: Array<'user.bulk.quota' | 'user.bulk.active'> = [];
+      if (body.quotaBytes !== undefined) actions.push('user.bulk.quota');
+      if (body.active !== undefined) actions.push('user.bulk.active');
+      for (const action of actions) {
+        await audit(ctx, request, {
+          action,
+          targetType: 'user',
+          targetId: id,
+          targetLabel: after.email,
+          before: snapshot(before),
+          after: snapshot(after),
+        });
+      }
     }
     return { ok: true, changed };
   });

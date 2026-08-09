@@ -170,6 +170,156 @@ async function trustedRootSubjects(): Promise<ReadonlySet<string> | undefined> {
   return undefined;
 }
 
+/** Куда ложится сертификат. Пути отдельным типом — ими же пользуется откат. */
+export interface CertificatePaths {
+  certPath: string;
+  keyPath: string;
+  sourcePath: string;
+}
+
+/** Итог замены: что удалось, а что пришлось возвращать назад. */
+export interface CertificateInstallResult {
+  /** Новая пара стоит на месте и source говорит «свой». */
+  ok: boolean;
+  /** Почему не получилось (человеческими словами, с состоянием на диске). */
+  problem: string;
+}
+
+/** Снимок того, что лежало в каталоге до замены. null — файла не было. */
+interface CertificateSnapshot {
+  cert: Buffer | null;
+  key: Buffer | null;
+  source: Buffer | null;
+}
+
+async function readIfExists(path: string): Promise<Buffer | null> {
+  try {
+    return await readFile(path);
+  } catch {
+    return null;
+  }
+}
+
+/** Атомарная запись: временный файл рядом плюс переименование. */
+async function writeAtomic(path: string, data: Buffer | string, mode: number): Promise<void> {
+  const tmp = `${path}.new`;
+  await writeFile(tmp, data, { mode });
+  await rename(tmp, path);
+}
+
+/**
+ * ЗАМЕНА СЕРТИФИКАТА ЦЕЛИКОМ ИЛИ НИКАК.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО СЛОМАНО
+ * ------------------------------------------------------------------
+ * Замена состояла из четырёх записей подряд без единого отката:
+ * два временных файла, rename ключа, rename сертификата, запись source.
+ * Отказ ЛЮБОЙ из последних трёх оставлял каталог в состоянии, из которого
+ * выйти было уже нечем:
+ *
+ *   * ключ переименован, сертификат — нет. На диске несходящаяся пара:
+ *     старый ключ безвозвратно перезаписан новым, а сертификат остался
+ *     прежним. Службы перечитывают каталог в течение десяти секунд
+ *     (infra/nginx/watch-certs.sh) и TLS падает РАЗОМ у nginx, Postfix и
+ *     Dovecot — то есть перестают работать и панель, и почта. При этом
+ *     ответ гласил «Не удалось записать сертификат в каталог сервера», то
+ *     есть «ничего не произошло», и человек шёл проверять права каталога,
+ *     а не поднимать почту;
+ *
+ *   * пара заменена, а source не записан. В файле остаётся letsencrypt,
+ *     и автопродление (cert-renewal.ts судит именно по этому файлу)
+ *     затирает только что поставленный свой сертификат — молча, ночью,
+ *     руками certbot.
+ *
+ * ------------------------------------------------------------------
+ * КАК СДЕЛАНО
+ * ------------------------------------------------------------------
+ * 1. Снимок прежних файлов в память ДО первой записи. Сертификат с ключом
+ *    — единицы килобайт, держать их в памяти на время замены дёшево.
+ * 2. source пишется ПЕРВЫМ. Порядок выбран по тому, что останется после
+ *    жёсткой смерти процесса (её никаким try/catch не поймать): «source
+ *    говорит свой, а сертификат ещё старый» означает пропущенное
+ *    продление — это видно в разделе «Сертификат» и лечится за минуту;
+ *    обратный порядок означал бы затёртый автопродлением свой сертификат.
+ * 3. Ключ и сертификат — двумя переименованиями подряд. Данные к этому
+ *    моменту уже на диске, поэтому между ними только два системных
+ *    вызова: окно, в которое может попасть чтение служб, — микросекунды.
+ * 4. Любой отказ — откат к снимку. И ответ говорит ровно то, что вышло:
+ *    вернулись ли файлы на место. Если откат не удался, человек обязан
+ *    узнать, что почта СЕЙЧАС не работает, а не искать права каталога.
+ */
+export async function installCertificateFiles(
+  paths: CertificatePaths,
+  input: { fullchainPem: string; privateKeyPem: string },
+): Promise<CertificateInstallResult> {
+  const { certPath, keyPath, sourcePath } = paths;
+  const previous: CertificateSnapshot = {
+    cert: await readIfExists(certPath),
+    key: await readIfExists(keyPath),
+    source: await readIfExists(sourcePath),
+  };
+
+  /** Докуда дошли — по этому строится и откат, и объяснение. */
+  let stage: 'nothing' | 'source' | 'key' | 'done' = 'nothing';
+  try {
+    await writeAtomic(sourcePath, 'custom\n', 0o644);
+    stage = 'source';
+    // Права задаются при СОЗДАНИИ файла; отдельного chmod поверх своего
+    // же файла здесь нет намеренно. Он выглядит безобидно, но на каталоге,
+    // примонтированном не с обычной файловой системы, отвечает EPERM — и
+    // замена падала на нём, уже записав файл. Поймано живым прогоном.
+    await writeFile(`${certPath}.new`, input.fullchainPem, { mode: 0o644 });
+    await writeFile(`${keyPath}.new`, `${input.privateKeyPem}\n`, { mode: 0o600 });
+    await rename(`${keyPath}.new`, keyPath);
+    stage = 'key';
+    await rename(`${certPath}.new`, certPath);
+    stage = 'done';
+    return { ok: true, problem: '' };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    // Недописанные файлы не должны пережить отказ: службы следят за
+    // каталогом, и половина сертификата в нём — худший из исходов.
+    await rm(`${certPath}.new`, { force: true }).catch(() => undefined);
+    await rm(`${keyPath}.new`, { force: true }).catch(() => undefined);
+
+    const notRestored: string[] = [];
+    const restore = async (path: string, data: Buffer | null, mode: number): Promise<void> => {
+      // Файла не было и до нас — возвращать нечего; но если мы успели
+      // его создать, оставлять его нельзя.
+      try {
+        if (data === null) await rm(path, { force: true });
+        else await writeAtomic(path, data, mode);
+      } catch {
+        notRestored.push(path);
+      }
+    };
+    if (stage !== 'nothing') await restore(sourcePath, previous.source, 0o644);
+    if (stage === 'key' || stage === 'done') await restore(keyPath, previous.key, 0o600);
+    if (stage === 'done') await restore(certPath, previous.cert, 0o644);
+
+    if (notRestored.length > 0) {
+      return {
+        ok: false,
+        problem:
+          `Замена оборвалась (${reason}), и вернуть прежние файлы не удалось: ` +
+          `${notRestored.join(', ')}. TLS сейчас может не работать НИ У ОДНОЙ службы — ` +
+          'ни у почты, ни у панели. Восстановите пару из резервной копии на сервере ' +
+          '(каталог infra/data/certs) или выпустите сертификат заново: ' +
+          `${RENEW_FORCE_COMMAND}`,
+      };
+    }
+    return {
+      ok: false,
+      problem:
+        `Не удалось записать сертификат в каталог сервера: ${reason}. Прежний сертификат ` +
+        'и ключ возвращены на место — почта работает как раньше. Каталог infra/data/certs ' +
+        'должен быть доступен серверу приложения на запись — это делает установщик ' +
+        '(install/install.sh). Проверить: ls -ld infra/data/certs',
+    };
+  }
+}
+
 export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
   const ctx = app.adminCtx;
   const dir = ctx.config.TLS_CERT_DIR;
@@ -357,35 +507,16 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
       );
     }
 
-    // Запись через временный файл и переименование: службы следят за
-    // файлом и могут прочитать его в любой момент. Половина сертификата,
-    // попавшая под чтение, означала бы остановку TLS на всех трёх сразу.
+    // Запись через временный файл и переименование, с откатом к прежней
+    // паре на любом отказе: службы следят за файлом и могут прочитать его
+    // в любой момент. Несходящаяся пара, попавшая под чтение, означала бы
+    // остановку TLS на всех трёх сразу (см. installCertificateFiles).
     const keyPem = result.fullchainPem === '' ? '' : body.privateKey.trim();
-    const tmpCert = `${certPath}.new`;
-    const tmpKey = `${keyPath}.new`;
-    try {
-      // Права задаются при СОЗДАНИИ файла; отдельного chmod поверх своего
-      // же файла здесь нет намеренно. Он выглядит безобидно, но на каталоге,
-      // примонтированном не с обычной файловой системы, отвечает EPERM — и
-      // замена падала на нём, уже записав файл. Поймано живым прогоном.
-      await writeFile(tmpCert, result.fullchainPem, { mode: 0o644 });
-      await writeFile(tmpKey, `${keyPem}\n`, { mode: 0o600 });
-      await rename(tmpKey, keyPath);
-      await rename(tmpCert, certPath);
-      await writeFile(sourcePath, 'custom\n', { mode: 0o644 });
-    } catch (err) {
-      // Недописанные файлы не должны пережить отказ: службы следят за
-      // каталогом, и половина сертификата в нём — худший из исходов.
-      await rm(tmpCert, { force: true }).catch(() => undefined);
-      await rm(tmpKey, { force: true }).catch(() => undefined);
-      throw new BadRequestError(
-        'Не удалось записать сертификат в каталог сервера: ' +
-          `${err instanceof Error ? err.message : String(err)}. ` +
-          'Каталог infra/data/certs должен быть доступен серверу приложения на запись — ' +
-          'это делает установщик (install/install.sh). Проверить: ' +
-          'ls -ld infra/data/certs',
-      );
-    }
+    const outcome = await installCertificateFiles(
+      { certPath, keyPath, sourcePath },
+      { fullchainPem: result.fullchainPem, privateKeyPem: keyPem },
+    );
+    if (!outcome.ok) throw new BadRequestError(outcome.problem);
 
     // В аудит — отпечаток и имена. Ни байта ключа: журнал читают люди,
     // которым доступ к ключу не полагается, и он же уезжает в выгрузку.

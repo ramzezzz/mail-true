@@ -23,6 +23,7 @@
  * на живой базе.
  */
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -36,6 +37,7 @@ import { loadAdminConfig } from './config.js';
 import type { AdminDb } from './db.js';
 import { createImportBox, ImportSecretBox, packResult, unpackResult } from './import-jobs.js';
 import { QueueAgent } from './queue-agent.js';
+import { ServerSettings } from './server-settings.js';
 import { MemoryAdminSessionStore } from './session.js';
 import { adminAuthRoutes } from './routes/auth.js';
 import { adminAliasRoutes } from './routes/aliases.js';
@@ -114,6 +116,17 @@ class FakeDb {
   async deleteMailUser(id: number): Promise<void> {
     this.#note('deleteMailUser', id);
     this.users.delete(id);
+  }
+  async updateMailUser(
+    id: number,
+    patch: { quotaBytes?: number; active?: boolean },
+  ): Promise<Record<string, unknown> | null> {
+    this.#note('updateMailUser', id, patch);
+    const row = this.users.get(id);
+    if (!row) return null;
+    if (patch.quotaBytes !== undefined) row.quota_bytes = patch.quotaBytes;
+    if (patch.active !== undefined) row.active = patch.active;
+    return row;
   }
   async listExportFiles(email: string): Promise<string[]> {
     this.#note('listExportFiles', email);
@@ -295,6 +308,10 @@ async function harness(options?: {
   mailRoot?: string;
   masterConfigured?: boolean;
   purge?: (email: string) => Promise<{ ok: boolean; foldersDeleted: number; error: string | null }>;
+  /** Отсрочка физического удаления каталога, минуты (ADMIN_MAILBOX_PURGE_DELAY_MINUTES). */
+  purgeDelayMinutes?: number;
+  /** Корень индексов Dovecot: отдельный том, который убирается при удалении. */
+  indexRoot?: string;
 }): Promise<Harness> {
   const app = Fastify({ loggerInstance: logger }) as unknown as FastifyInstance;
   await app.register(cookiePlugin, { secret: SECRET });
@@ -308,6 +325,7 @@ async function harness(options?: {
   const config = loadAdminConfig({
     ADMIN_DATABASE_URL: 'postgres://ignored/ignored',
     ADMIN_MAIL_ROOT: mailRoot,
+    ...(options?.indexRoot === undefined ? {} : { ADMIN_MAIL_INDEX_ROOT: options.indexRoot }),
     SESSION_SECRET: SECRET,
   } as NodeJS.ProcessEnv);
 
@@ -337,6 +355,18 @@ async function harness(options?: {
     branding: new BrandingStore(path.join(tmpdir(), 'mailtrue-admin-routes-branding')),
     cookieSecure: false,
     importBox: createImportBox(SECRET),
+    // Настройки сервера — из своего окружения, а не из process.env: иначе
+    // отсрочка удаления в одной проверке влияла бы на все остальные.
+    ...(options?.purgeDelayMinutes === undefined
+      ? {}
+      : {
+          serverSettings: new ServerSettings({
+            db: null,
+            env: {
+              ADMIN_MAILBOX_PURGE_DELAY_MINUTES: String(options.purgeDelayMinutes),
+            } as NodeJS.ProcessEnv,
+          }),
+        }),
   };
 
   app.decorate('adminCtx', ctx);
@@ -529,6 +559,122 @@ void test('удаление ящика уводит Maildir из-под ново
   await assert.rejects(stat(dir), 'каталог ящика обязан исчезнуть со старого места');
   assert.equal(h.db.called('purgeMailboxData').length, 1);
   assert.equal(h.db.called('recordMailboxDeletion').length, 1);
+  await h.app.close();
+});
+
+void test('массовая блокировка попадает в журнал даже вместе со сменой квоты', async () => {
+  /*
+   * Запись была одна на правку, а действие у неё выбиралось так: «есть
+   * квота — значит квота, иначе блокировка». Правка, где заданы оба поля
+   * (в панели это один экран и одна кнопка), уходила в журнал как
+   * «Массовая смена квоты», а блокировка сотни ящиков не отражалась
+   * нигде. Отбор журнала по «Массовая блокировка/разблокировка» не
+   * показывал ничего — а это ровно тот вопрос, ради которого журнал и
+   * открывают: кто отключил отдел в пятницу вечером.
+   */
+  const h = await harness();
+  for (const id of [21, 22]) {
+    h.db.users.set(id, {
+      id,
+      domain_id: 5,
+      email: `sotrudnik${String(id)}@x.local`,
+      display_name: null,
+      quota_bytes: 1024,
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+      domain: 'x.local',
+      alias_count: 0,
+    });
+  }
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/users/bulk',
+    headers: { cookie: h.cookie },
+    payload: { ids: [21, 22], quotaBytes: 2048, active: false },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+
+  const actions = h.db.audits.map((a) => a.action);
+  assert.equal(
+    actions.filter((a) => a === 'user.bulk.active').length,
+    2,
+    'блокировка каждого ящика обязана быть в журнале',
+  );
+  assert.equal(actions.filter((a) => a === 'user.bulk.quota').length, 2, 'квота — тоже');
+  await h.app.close();
+});
+
+void test('при отсрочке письма доживают до карантина, а не уничтожаются заранее', async () => {
+  /*
+   * Настройка ADMIN_MAILBOX_PURGE_DELAY_MINUTES описана в панели словами
+   * «даёт время передумать: письма из Maildir не восстанавливаются ничем,
+   * кроме резервной копии». Обещание не выполнялось ни минуты: шаг 1
+   * удаления звал purgeMail(), а тот через IMAP удаляет ВСЕ папки и делает
+   * messageDelete({all:true}) по INBOX. В карантин уезжал пустой каталог,
+   * а отсрочка откладывала удаление пустоты. Человек, удаливший не тот
+   * ящик и прибежавший через минуту, терял переписку сотрудника целиком.
+   */
+  let purgeCalled = false;
+  const indexRoot = await mkdtemp(path.join(tmpdir(), 'mt-index-'));
+  const h = await harness({
+    purgeDelayMinutes: 60,
+    indexRoot,
+    purge: async () => {
+      purgeCalled = true;
+      return { ok: true, foldersDeleted: 3, error: null };
+    },
+  });
+  await seedMaildir(h.mailRoot, 'peredumal@x.local');
+  // Индексы Dovecot лежат в отдельном томе тем же путём «домен/логин».
+  await mkdir(path.join(indexRoot, 'x.local', 'peredumal'), { recursive: true });
+  await writeFile(path.join(indexRoot, 'x.local', 'peredumal', 'dovecot.index'), 'индекс');
+  h.db.users.set(11, {
+    id: 11,
+    domain_id: 5,
+    email: 'peredumal@x.local',
+    display_name: null,
+    quota_bytes: 0,
+    active: true,
+    created_at: new Date(),
+    updated_at: new Date(),
+    domain: 'x.local',
+    alias_count: 0,
+  });
+
+  const response = await h.app.inject({
+    method: 'DELETE',
+    url: '/users/11',
+    headers: { cookie: h.cookie },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+
+  assert.equal(purgeCalled, false, 'письма нельзя уничтожать до карантина — отсрочка обещает их');
+  // Письмо лежит в карантине настоящее, а не в пустом каталоге. Подделка
+  // purgeMail до диска не дотягивается, поэтому проверка выше — главная;
+  // эта показывает, что уводить в карантин было ЧТО.
+  const quarantined = path.join(
+    h.mailRoot,
+    'x.local',
+    '.deleted',
+    'peredumal.42',
+    'cur',
+    '1234.mail',
+  );
+  assert.equal(existsSync(quarantined), true, 'письмо обязано доехать до карантина');
+  // Индексы при этом убраны: через IMAP их никто не чистил, а мусор от
+  // удалённого ящика больше убрать некому.
+  assert.equal(
+    existsSync(path.join(indexRoot, 'x.local', 'peredumal')),
+    false,
+    'каталог индексов удалённого ящика остался бы навсегда',
+  );
+  const body = response.json<{ mailKeptMinutes: number; imapPurged: boolean }>();
+  assert.equal(body.mailKeptMinutes, 60, 'человеку надо сказать, сколько у него есть времени');
+  // Панель отвечает этим полем на вопрос «убраны ли индексы Dovecot» —
+  // и ответ должен быть правдой, а не «очистить не удалось».
+  assert.equal(body.imapPurged, true);
   await h.app.close();
 });
 
