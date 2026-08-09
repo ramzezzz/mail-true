@@ -254,9 +254,18 @@ describe('показ уведомления', () => {
     await fire(harness, 'push', { data: { text: () => '{"v":1,"k":"abc"}' } });
 
     // Вот оно, главное свойство: за содержимым работник пошёл к нам
-    const call = harness.requests.find((r) => r.url === '/api/push/notifications');
+    const call = harness.requests.find((r) => r.url.startsWith('/api/push/notifications'));
     expect(call, 'работник обязан спросить содержимое у нашего сервера').toBeTruthy();
     expect(call?.init?.['credentials']).toBe('include');
+    /*
+     * И назвал ящик, которому пришло уведомление.
+     *
+     * Подписка привязана к адресу в момент включения, а сессия в браузере
+     * могла смениться — человек переключился на второй ящик. Без этого
+     * признака сервер собирал содержимое по текущей сессии, и в окне
+     * показывались письма ДРУГОГО ящика.
+     */
+    expect(call?.url).toContain('k=abc');
     expect(harness.shown).toHaveLength(1);
     expect(harness.shown[0]?.title).toBe('Пётр');
     expect(harness.shown[0]?.options['body']).toBe('Договор поставки');

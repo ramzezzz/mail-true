@@ -347,10 +347,20 @@ export async function setCustomWallpaper(blob: Blob): Promise<void> {
   await selectWallpaper({ kind: 'custom' });
 }
 
-/** Убрать свою картинку (и из IndexedDB тоже); вернуться к первому фону. */
+/**
+ * Убрать свою картинку из хранилища браузера.
+ *
+ * Готовый фон переключается ТОЛЬКО если сейчас показывается своя
+ * картинка. Раньше первый готовый фон ставился безусловно, и человек,
+ * выбравший, скажем, «Город в тумане», после удаления давно забытой
+ * своей картинки молча получал «Луг в горах» — фон менялся сам, без
+ * единого слова.
+ */
 export async function clearCustomWallpaper(): Promise<void> {
   await dbDelete();
-  await setWallpaperPreset(WALLPAPER_PRESETS[0]!.id);
+  if (readWallpaperSelection().kind === 'custom') {
+    await setWallpaperPreset(WALLPAPER_PRESETS[0]!.id);
+  }
 }
 
 /** Есть ли сохранённая своя картинка; url — для миниатюры в настройках. */

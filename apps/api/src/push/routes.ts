@@ -16,7 +16,7 @@ import { z } from 'zod';
 import { BadRequestError, UnauthorizedError } from '../errors.js';
 import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import type { MailSession } from '../types.js';
-import type { PushService } from './service.js';
+import { accountKey, type PushService } from './service.js';
 import { NOTIFICATION_LEVELS } from './types.js';
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +75,18 @@ const testSchema = z.object({ clientId: clientIdSchema });
 const notificationsQuerySchema = z.object({
   /** Ограничить конкретными письмами. Без него — все неувиденные. */
   ids: z.string().max(4000).optional(),
+  /**
+   * Отпечаток ящика, которому пришло уведомление.
+   *
+   * Работник уведомлений в браузере получает его прямо в push и передаёт
+   * сюда. Проверка нужна потому, что подписка привязана к адресу в момент
+   * включения, а сессия в браузере с тех пор могла смениться: человек
+   * переключился на второй ящик. Тогда письмо приходило в первый, а
+   * содержимое собиралось по текущей сессии — и в окне показывались
+   * письма ДРУГОГО ящика (а если новых там нет, безымянное «Новое
+   * письмо»). Отпечаток — это хеш адреса, самого адреса он не открывает.
+   */
+  k: z.string().max(64).optional(),
 });
 
 /* ------------------------------------------------------------------ */
@@ -176,6 +188,16 @@ export async function pushRoutes(app: FastifyInstance, service: PushService): Pr
     async (request) => {
       const session = sessionOf(request);
       const query = notificationsQuerySchema.parse(request.query ?? {});
+      /*
+       * Уведомление пришло другому ящику, а в браузере открыт этот.
+       * Показывать чужие письма нельзя, а показывать письма открытого
+       * ящика — значит соврать: человек решит, что написали туда, куда
+       * не писали. Отвечаем пустотой, и работник покажет безымянное
+       * «Новое письмо» — честный минимум.
+       */
+      if (query.k && query.k !== accountKey(session.email)) {
+        return { view: null, pending: 0 };
+      }
       const ids = query.ids
         ?.split(',')
         .map((id) => id.trim())

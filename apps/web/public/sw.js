@@ -162,9 +162,18 @@ self.addEventListener('activate', (event) => {
 /* Уведомление                                                          */
 /* ------------------------------------------------------------------ */
 
-/** Забирает содержимое уведомления с НАШЕГО сервера. */
-async function fetchView() {
-  const response = await fetch(API.notifications, {
+/**
+ * Забирает содержимое уведомления с НАШЕГО сервера.
+ *
+ * Отпечаток ящика (`k`) из push уходит вместе с запросом: подписка
+ * привязана к адресу в момент включения, а сессия в браузере могла с тех
+ * пор смениться — человек переключился на второй ящик. Без этой сверки
+ * письмо приходило в первый ящик, а содержимое собиралось по текущей
+ * сессии, и в окне показывались письма ДРУГОГО ящика.
+ */
+async function fetchView(key) {
+  const url = key ? `${API.notifications}?k=${encodeURIComponent(key)}` : API.notifications;
+  const response = await fetch(url, {
     // Без cookie сервер не узнает, чей это ящик. Запрос свой,
     // к своему же адресу — никуда наружу он не идёт.
     credentials: 'include',
@@ -213,7 +222,7 @@ self.addEventListener('push', (event) => {
       let view = incoming.view;
       if (!view) {
         try {
-          view = await fetchView();
+          view = await fetchView(incoming.key);
         } catch {
           // Сервер недоступен с этого устройства (нет сети, почта за
           // границей сети предприятия). Показываем безымянное окно —
