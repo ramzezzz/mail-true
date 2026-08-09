@@ -7,10 +7,40 @@
  * превращает любую ошибку в текст, который не стыдно показать.
  */
 
-import { isApiError } from '../api/http';
+import { isApiError, type ApiError } from '../api/http';
 
 /** Сообщение по умолчанию, если о причине ничего не известно. */
 const FALLBACK = 'Что-то пошло не так. Попробуйте ещё раз';
+
+/** Заглушка на случай, когда сервер о причине ничего внятного не сказал. */
+const SERVER_FALLBACK = 'Сервер не отвечает. Попробуйте позже';
+
+/**
+ * Написан ли этот текст для человека — или это служебная строка.
+ *
+ * Нужно ради 5xx. Раньше ЛЮБОЙ ответ 500 и выше подменялся общей заглушкой
+ * «Сервер не отвечает», хотя по 503 сервер присылает самое важное, что
+ * человеку сейчас нужно знать: «Почтовый сервер сейчас недоступен, письмо
+ * не отправлено. Текст сохранён в черновиках — попробуйте отправить ещё
+ * раз» (apps/api/src/routes/compose.ts). Из заглушки не следует ни что
+ * письмо цело, ни что его не надо набирать заново, — и человек отправлял
+ * его повторно, а у получателя оказывался дубль.
+ *
+ * Показывать при этом можно не всё подряд. В `message` ошибки, когда своего
+ * текста у сервера нет, оказывается либо машинный код (`INTERNAL_ERROR`),
+ * либо `statusText` от fetch («Internal Server Error», «Bad Gateway») —
+ * то есть строки, которые человеку не говорят ничего. Наши же тексты
+ * написаны по-русски все до одного, поэтому русские буквы здесь и есть
+ * признак «это писали для человека».
+ */
+function looksHuman(error: ApiError): boolean {
+  const text = error.message.trim();
+  if (text === '') return false;
+  // Сервер прислал только код — http.ts подставляет его в message
+  if (error.code !== null && text === error.code) return false;
+  if (/^[A-Z][A-Z0-9_]*$/.test(text)) return false;
+  return /[а-яё]/i.test(text);
+}
 
 /** Текст ошибки для пользователя — без имени класса и служебных кодов. */
 export function errorText(error: unknown, fallback = FALLBACK): string {
@@ -19,7 +49,8 @@ export function errorText(error: unknown, fallback = FALLBACK): string {
     if (error.status === 403) return 'Недостаточно прав для этого действия';
     if (error.status === 404) return 'Не найдено на сервере';
     if (error.status === 429) return 'Слишком много запросов, подождите немного';
-    if (error.status >= 500) return 'Сервер не отвечает. Попробуйте позже';
+    // Свой текст сервера важнее общей заглушки — см. looksHuman
+    if (error.status >= 500) return looksHuman(error) ? error.message.trim() : SERVER_FALLBACK;
     return error.message || fallback;
   }
   // fetch бросает TypeError, когда сети нет вовсе

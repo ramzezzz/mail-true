@@ -75,7 +75,16 @@ describe('различение бед', () => {
 
 describe('actionErrorText', () => {
   it('называет действие и причину', () => {
+    // Причина — своими словами сервера: 5xx с человеческим текстом больше
+    // не подменяется общей заглушкой (см. tests/serverErrorText.test.ts).
     const error = new ApiError(500, '/api/messages/move', 'Сервер недоступен');
+    expect(actionErrorText('Не удалось переместить письма', error)).toBe(
+      'Не удалось переместить письма: Сервер недоступен',
+    );
+  });
+
+  it('а когда своих слов у сервера нет — общей заглушкой', () => {
+    const error = new ApiError(500, '/api/messages/move', 'Internal Server Error');
     expect(actionErrorText('Не удалось переместить письма', error)).toBe(
       'Не удалось переместить письма: Сервер не отвечает. Попробуйте позже',
     );

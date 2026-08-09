@@ -26,8 +26,8 @@ import {
   UpstreamUnavailableError,
 } from '../errors.js';
 import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
-import { findFolderById } from '../mail/folders.js';
-import { parseDraftSource } from '../mail/draft-read.js';
+import { findFolderById, MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
+import { parseDraftSource, type DraftAttachmentPart } from '../mail/draft-read.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
 import {
   checkSendAt,
@@ -52,7 +52,7 @@ import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import { ENCODING_OVERHEAD } from '../config.js';
 import type { MailSession } from '../types.js';
-import type { UploadStore } from '../uploads.js';
+import { UploadQuotaError, type UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
 
 /**
@@ -103,8 +103,16 @@ const draftPayloadSchema = z.object({
    * Письма, вложенные целиком, — «Переслать как вложение». Пересылают
    * обычно одно-два, поэтому предел небольшой: каждое такое вложение
    * тянет за собой весь исходник письма вместе с его вложениями.
+   *
+   * Длина — общая для всего продукта (MAX_ENTITY_ID_LENGTH). Здесь стояло
+   * своё «200», и это был не запас, а потолок: идентификатор письма —
+   * `f-<base64url(путь папки)>:<uid>`, а base64url прибавляет к пути треть.
+   * Папка из семи десятков русских букв (кириллица — два байта на букву)
+   * уже перебирала двести символов, и письмо из такой папки нельзя было
+   * переслать вложением вовсе: сервер отвечал «Некорректные данные
+   * запроса», из которого не следует ни что не так, ни что делать.
    */
-  attachMessageIds: z.array(z.string().min(1).max(200)).max(10).optional(),
+  attachMessageIds: z.array(z.string().min(1).max(MAX_ENTITY_ID_LENGTH)).max(10).optional(),
   inReplyTo: z.string().max(1000).optional(),
   references: z.array(z.string().max(1000)).max(100).optional(),
   requestReadReceipt: z.boolean().optional(),
@@ -289,6 +297,107 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   // Сохранения черновика одного окна написания идут строго по очереди —
   // иначе автосохранение вместе с явным «сохранить» плодит копии письма
   const drafts = new DraftSequencer();
+
+  /**
+   * Вложения черновиков, уже выложенные во временное хранилище.
+   *
+   * Ключ — ящик и UID черновика, значение — что именно для него выложено.
+   *
+   * Зачем это нужно. Открытие черновика (GET /drafts/:uid) кладёт его
+   * вложения в хранилище ЗАНОВО: окну написания нужны идентификаторы
+   * загрузок, а в ящике лежат части MIME. Но открытий у одного черновика
+   * сколько угодно — открыл, посмотрел, закрыл, вернулся, — и каждое
+   * оставляло в хранилище ещё одну копию всех файлов. Копии считаются в
+   * занятое ящиком место (uploads.usedBy), поэтому черновик с парой
+   * тяжёлых вложений за несколько открытий съедал предел на ящик, и
+   * человек упирался в «предел на ящик — 250,0 МБ», пытаясь прикрепить
+   * обычный файл к СОВСЕМ ДРУГОМУ письму. Связи между причиной и отказом
+   * не видно никакой.
+   *
+   * Поэтому повторное открытие того же черновика отдаёт те же загрузки,
+   * если они ещё на месте и черновик с тех пор не менялся (сверяется
+   * отпечаток: имена, типы и размеры частей). Изменился или загрузки
+   * унесло уборщиком — выкладываем заново, теперь уже с проверкой места.
+   */
+  const materializedDrafts = new Map<string, { fingerprint: string; ids: string[] }>();
+  /** Сколько черновиков помним. Забытый — просто выложится заново. */
+  const MATERIALIZED_MAX = 500;
+
+  /** Чем один набор вложений черновика отличается от другого. */
+  function attachmentsFingerprint(parts: readonly DraftAttachmentPart[]): string {
+    return parts.map((p) => `${p.filename}|${p.mimeType}|${String(p.content.length)}`).join('\n');
+  }
+
+  /**
+   * Те же загрузки, что и в прошлое открытие, — если они ещё на месте.
+   * Пропала хоть одна (уборщик, отправка соседнего письма) — набор считаем
+   * негодным целиком: половина вложений хуже, чем выложить их заново.
+   */
+  async function reuseUploads(
+    owner: string,
+    ids: readonly string[],
+  ): Promise<DraftContent['attachments'] | null> {
+    const found: DraftContent['attachments'] = [];
+    for (const id of ids) {
+      const upload = await uploads.get(id, owner);
+      if (!upload) return null;
+      found.push({ id: upload.meta.id, filename: upload.meta.filename, size: upload.meta.size });
+    }
+    return found;
+  }
+
+  /**
+   * Вложения черновика во временном хранилище — по одному набору на
+   * черновик, а не по набору на каждое открытие (см. materializedDrafts).
+   *
+   * Место проверяется ТЕМ ЖЕ пределом, что и обычная загрузка файла
+   * (routes/uploads.ts): этот путь клал файлы мимо всякой проверки, но в
+   * занятое место они засчитывались — то есть переполнить хранилище через
+   * него было можно, а узнать об этом человек мог только по отказу в
+   * другом окне.
+   */
+  async function draftAttachments(
+    session: MailSession,
+    uid: number,
+    parts: readonly DraftAttachmentPart[],
+  ): Promise<DraftContent['attachments']> {
+    if (parts.length === 0) return [];
+    const key = `${session.email}:${String(uid)}`;
+    const fingerprint = attachmentsFingerprint(parts);
+    const remembered = materializedDrafts.get(key);
+    if (remembered && remembered.fingerprint === fingerprint) {
+      const reused = await reuseUploads(session.email, remembered.ids);
+      if (reused) return reused;
+    }
+
+    const incoming = parts.reduce((sum, part) => sum + part.content.length, 0);
+    const used = await uploads.usedBy(session.email);
+    if (used + incoming > config.UPLOAD_MAILBOX_MAX_BYTES) {
+      throw new UploadQuotaError(
+        'Вложения черновика не помещаются во временное хранилище: предел на ящик — ' +
+          `${megabytes(config.UPLOAD_MAILBOX_MAX_BYTES)} МБ. ` +
+          'Отправьте или удалите начатые письма и откройте черновик снова.',
+      );
+    }
+
+    const saved: DraftContent['attachments'] = [];
+    for (const part of parts) {
+      const meta = await uploads.save(
+        session.email,
+        part.filename,
+        part.mimeType,
+        Readable.from(part.content),
+      );
+      saved.push({ id: meta.id, filename: meta.filename, size: meta.size });
+    }
+    materializedDrafts.set(key, { fingerprint, ids: saved.map((a) => a.id) });
+    if (materializedDrafts.size > MATERIALIZED_MAX) {
+      // Map помнит порядок вставки — уходит самый старый черновик
+      const oldest = materializedDrafts.keys().next().value;
+      if (oldest !== undefined) materializedDrafts.delete(oldest);
+    }
+    return saved;
+  }
 
   /**
    * Очередь отложенной отправки лежит рядом с загруженными вложениями —
@@ -1217,16 +1326,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      */
     const parsed = await parseDraftSource(source);
     const sendFailure = readFailureFromRaw(source);
-    const attachments: DraftContent['attachments'] = [];
-    for (const part of parsed.attachments) {
-      const meta = await uploads.save(
-        session.email,
-        part.filename,
-        part.mimeType,
-        Readable.from(part.content),
-      );
-      attachments.push({ id: meta.id, filename: meta.filename, size: meta.size });
-    }
+    const attachments = await draftAttachments(session, uid, parsed.attachments);
 
     const content: DraftContent = {
       draftUid: uid,
@@ -1261,7 +1361,13 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/messages/:id/read-receipt', { preHandler: app.requireSession }, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
-    const { id } = z.object({ id: z.string().min(1).max(200) }).parse(request.params);
+    // Предел длины — общий для всего продукта: письмо из папки с длинным
+    // русским названием тоже просит уведомления о прочтении, а со своим
+    // «200» этот маршрут отвечал ему «Некорректные данные запроса», и
+    // вопрос «уведомить отправителя?» возвращался при каждом открытии.
+    const { id } = z
+      .object({ id: z.string().min(1).max(MAX_ENTITY_ID_LENGTH) })
+      .parse(request.params);
     const { send } = z.object({ send: z.boolean() }).parse(request.body ?? {});
     const { folderId, uid } = splitMessageId(id);
 
