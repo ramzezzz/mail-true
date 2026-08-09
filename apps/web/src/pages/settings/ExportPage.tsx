@@ -28,7 +28,12 @@ import {
   plural,
   type ExportJob,
 } from '../../settings/ownerApi';
-import { useCancelExport, useExports, useStartExport } from '../../settings/ownerQueries';
+import {
+  useCancelExport,
+  useDeleteExport,
+  useExports,
+  useStartExport,
+} from '../../settings/ownerQueries';
 import {
   SettingsEmpty,
   SettingsError,
@@ -52,11 +57,12 @@ export function ExportPage() {
   const { available, reason, jobs, ttlHours, loading } = useExports();
   const start = useStartExport();
   const cancel = useCancelExport();
+  const remove = useDeleteExport();
   const [includeSpam, setIncludeSpam] = useState(false);
   const [includeTrash, setIncludeTrash] = useState(false);
 
   const live = jobs.find(isExportLive);
-  const error = start.error ?? cancel.error;
+  const error = start.error ?? cancel.error ?? remove.error;
 
   return (
     <>
@@ -130,6 +136,8 @@ export function ExportPage() {
                   job={job}
                   onCancel={() => cancel.mutate(job.id)}
                   cancelling={cancel.isPending}
+                  onDelete={() => remove.mutate(job.id)}
+                  deleting={remove.isPending}
                 />
               ))}
             </div>
@@ -152,10 +160,14 @@ function JobCard({
   job,
   onCancel,
   cancelling,
+  onDelete,
+  deleting,
 }: {
   job: ExportJob;
   onCancel: () => void;
   cancelling: boolean;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   const live = isExportLive(job);
   /*
@@ -219,8 +231,29 @@ function JobCard({
             <a className={styles.download} href={ownerApi.exportFileUrl(job.id)} download>
               Скачать архив
             </a>
+            {/*
+              «Удалить» рядом со «Скачать», а не спрятано в углу.
+              В архиве вся переписка ящика в открытом виде, и до этой
+              кнопки убрать его с сервера было нечем: файл ждал своих
+              двух суток и попадал в каждую резервную копию, снятую за
+              это время. Человек, скачавший архив себе, хочет закрыть за
+              собой дверь сразу, а не через двое суток.
+            */}
+            <Button
+              mode="secondary"
+              onClick={() => {
+                if (window.confirm('Удалить архив с сервера? Скачать его после этого не выйдет.')) {
+                  onDelete();
+                }
+              }}
+              disabled={deleting}
+            >
+              Удалить архив
+            </Button>
             {job.expiresAt && (
-              <span className={styles.expires}>удалится через {formatLeft(job.expiresAt)}</span>
+              <span className={styles.expires}>
+                иначе удалится через {formatLeft(job.expiresAt)}
+              </span>
             )}
           </SettingsRow>
         </>

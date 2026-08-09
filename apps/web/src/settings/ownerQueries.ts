@@ -125,6 +125,15 @@ export function useCancelExport() {
   });
 }
 
+/** Убрать готовый архив с сервера, не дожидаясь срока хранения. */
+export function useDeleteExport() {
+  const invalidate = useInvalidateExports();
+  return useMutation({
+    mutationFn: (id: number) => ownerApi.deleteExport(id),
+    onSuccess: invalidate,
+  });
+}
+
 /* --- Восстановление писем ---------------------------------------------- */
 
 export function useRecovery(): RecoveryPageState & { loading: boolean } {

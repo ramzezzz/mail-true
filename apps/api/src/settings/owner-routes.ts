@@ -16,6 +16,7 @@
  * кнопку, которая ответит отказом.
  */
 import { createReadStream } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
@@ -228,6 +229,45 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
       throw new BadRequestError('Это задание уже закончилось — отменять нечего');
     }
     await store.finishExport(id, { state: 'cancelled' });
+    return { ok: true };
+  });
+
+  /**
+   * Удаление готового архива по требованию человека.
+   *
+   * Раньше убрать его было нечем: отмена работает только с идущей
+   * выгрузкой, а готовый файл лежал до истечения срока хранения — по
+   * умолчанию двое суток. В нём вся переписка ящика в открытом виде, и
+   * попадает он заодно в каждую резервную копию, снятую за это время.
+   * Человек, скачавший архив себе, не мог убрать копию с сервера вообще
+   * никак — только просить администратора лезть в том с файлами.
+   *
+   * Тот же приём уже принят в «Восстановлении писем»: там есть «Удалить
+   * всё сейчас» ровно с этим смыслом.
+   *
+   * Состояние ставим `expired`, а не удаляем строку: человек должен
+   * увидеть, что архива больше нет, а не гадать, куда делось задание.
+   * Уборщик по сроку такие строки просто не выберет — у них нет файла.
+   */
+  app.delete('/export/:id', { preHandler: app.requireSession }, async (request) => {
+    const session = sessionOf(request);
+    const store = requireExport();
+    const { id } = idParam.parse(request.params);
+    const job = await store.findExport(id);
+    if (!job || job.accountEmail.toLowerCase() !== session.email.toLowerCase()) {
+      throw new NotFoundError('Задание не найдено');
+    }
+    if (job.state === 'queued' || job.state === 'running') {
+      throw new BadRequestError('Эта выгрузка ещё собирается — сначала отмените её');
+    }
+    if (job.filePath) await rm(job.filePath, { force: true }).catch(() => undefined);
+    await store.finishExport(id, { state: 'expired', filePath: null });
+    app.deps.accessLog?.record({
+      accountEmail: session.email,
+      kind: 'export',
+      detail: 'Архив выгрузки удалён по просьбе владельца',
+      ...originOf(request),
+    });
     return { ok: true };
   });
 
