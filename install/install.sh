@@ -395,18 +395,45 @@ env_ensure DOVECOT_MASTER_USER  mtadmin    || true
 # заранее (MAILTRUE_SMTP_PORT и т.д.) — этим и пользуется веб-установщик,
 # у которого есть шаг «Порты».
 # ------------------------------------------------------------------
-env_set POSTGRES_PORT   "${MAILTRUE_POSTGRES_PORT:-5432}"
-env_set REDIS_PORT      "${MAILTRUE_REDIS_PORT:-6379}"
-env_set SMTP_PORT       "${MAILTRUE_SMTP_PORT:-25}"
-env_set SUBMISSION_PORT "${MAILTRUE_SUBMISSION_PORT:-587}"
-env_set SUBMISSIONS_PORT "${MAILTRUE_SUBMISSIONS_PORT:-465}"
-env_set IMAP_PORT       "${MAILTRUE_IMAP_PORT:-143}"
-env_set IMAPS_PORT      "${MAILTRUE_IMAPS_PORT:-993}"
-env_set POP3_PORT       "${MAILTRUE_POP3_PORT:-110}"
-env_set POP3S_PORT      "${MAILTRUE_POP3S_PORT:-995}"
-env_set AUTOCONFIG_PORT "${MAILTRUE_AUTOCONFIG_PORT:-8025}"
-env_set NGINX_HTTP_PORT "${MAILTRUE_NGINX_HTTP_PORT:-80}"
-env_set NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-443}"
+#
+# env_port <ключ> <заданное явно> <умолчание> — «явное пишем, чужое не трогаем».
+#
+# Обещание выше («любой из них можно задать заранее») выполнялось только
+# для ТОГО ЖЕ запуска: дальше стоял env_set, который переписывает строку
+# всегда. Второй запуск установщика — обновление, починка, повторная
+# установка поверх — возвращал все двенадцать портов к стандартным,
+# молча. Стенд, живший на 2525-м, после обновления пытался занять 25-й,
+# не поднимался вовсе, и виноватым выглядел docker: «port is already
+# allocated».
+#
+# Теперь: значение из окружения (MAILTRUE_*_PORT, им пользуется
+# веб-установщик) пишется всегда — это осознанный ввод. Пустое место в
+# infra/.env заполняется умолчанием. А уже стоящее там значение остаётся:
+# его туда поставил человек, и знать лучше него, какой порт ему нужен,
+# установщику неоткуда.
+env_port() {
+    local key="$1" explicit="$2" fallback="$3"
+    if [ -n "$explicit" ]; then
+        env_set "$key" "$explicit"
+    else
+        # env_ensure возвращает 1, когда значение уже было, — под set -e
+        # это оборвало бы установку.
+        env_ensure "$key" "$fallback" || true
+    fi
+}
+
+env_port POSTGRES_PORT    "${MAILTRUE_POSTGRES_PORT:-}"    5432
+env_port REDIS_PORT       "${MAILTRUE_REDIS_PORT:-}"       6379
+env_port SMTP_PORT        "${MAILTRUE_SMTP_PORT:-}"        25
+env_port SUBMISSION_PORT  "${MAILTRUE_SUBMISSION_PORT:-}"  587
+env_port SUBMISSIONS_PORT "${MAILTRUE_SUBMISSIONS_PORT:-}" 465
+env_port IMAP_PORT        "${MAILTRUE_IMAP_PORT:-}"        143
+env_port IMAPS_PORT       "${MAILTRUE_IMAPS_PORT:-}"       993
+env_port POP3_PORT        "${MAILTRUE_POP3_PORT:-}"        110
+env_port POP3S_PORT       "${MAILTRUE_POP3S_PORT:-}"       995
+env_port AUTOCONFIG_PORT  "${MAILTRUE_AUTOCONFIG_PORT:-}"  8025
+env_port NGINX_HTTP_PORT  "${MAILTRUE_NGINX_HTTP_PORT:-}"  80
+env_port NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-}" 443
 
 # ------------------------------------------------------------------
 # Резервный вход в панель: адрес, на котором его слушать.
@@ -423,13 +450,25 @@ env_set NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-443}"
 # пробросом через SSH. Открывать управление сервером в интернет по
 # умолчанию нельзя ни при каких удобствах.
 # ------------------------------------------------------------------
+#
+# Повторный запуск это значение НЕ ПЕРЕСЧИТЫВАЕТ.
+#
+# Раньше пересчитывал, и всегда в сторону ослабления: человек, сузивший
+# резервный вход до 127.0.0.1 (потому что в его сети сидит не только он),
+# после первого же обновления получал панель, открытую всей локальной
+# сети. Молча — в выводе установщика это одна строка среди сотни.
+#
+# Обратный случай тоже вредный: адрес машины в сети сменился, человек
+# вписал новый руками, установщик вернул старый.
 ADMIN_LOCAL_BIND="${MAILTRUE_ADMIN_LOCAL_BIND:-}"
-if [ -z "$ADMIN_LOCAL_BIND" ]; then
+if [ -n "$ADMIN_LOCAL_BIND" ]; then
+    # Задано явно при запуске — это осознанный ввод, пишем.
+    env_set ADMIN_LOCAL_BIND "$ADMIN_LOCAL_BIND"
+elif [ -z "$(env_get ADMIN_LOCAL_BIND)" ]; then
     ADMIN_LOCAL_BIND="$(private_ip)"
-    ADMIN_LOCAL_BIND="${ADMIN_LOCAL_BIND:-127.0.0.1}"
+    env_set ADMIN_LOCAL_BIND "${ADMIN_LOCAL_BIND:-127.0.0.1}"
 fi
-env_set ADMIN_LOCAL_BIND "$ADMIN_LOCAL_BIND"
-env_set ADMIN_LOCAL_PORT "${MAILTRUE_ADMIN_LOCAL_PORT:-8081}"
+env_port ADMIN_LOCAL_PORT "${MAILTRUE_ADMIN_LOCAL_PORT:-}" 8081
 env_set API_LOG_LEVEL info
 # Веб-интерфейс: cookie сессии отдаётся только по HTTPS. Отладочный порт
 # сервера приложения наружу не публикуется (install/compose.prod.yml).
@@ -477,6 +516,16 @@ fi
 # Если спросить не удалось — оставляем пустым и говорим об этом. Записать
 # сюда локальный адрес было бы хуже пустоты: проверка PTR уверенно ругалась
 # бы на верную настройку.
+#
+# Смотрим и в окружение, и в САМ infra/.env.
+#
+# load_env вызывается ниже по тексту, поэтому при повторном запуске
+# переменной здесь нет — и прежний адрес определялся заново. Без сети
+# (или при отказе всех трёх служб) записывалось ПУСТО, то есть настройка,
+# однажды выясненная или вписанная руками, молча стиралась. Дальше это
+# всплывало проверкой обратной записи: PTR начинали сверять с A-записью
+# почтового хоста, и на верной настройке появлялась жалоба.
+if [ -z "${MAIL_PUBLIC_IPV4:-}" ]; then MAIL_PUBLIC_IPV4="$(env_get MAIL_PUBLIC_IPV4)"; fi
 if [ -z "${MAIL_PUBLIC_IPV4:-}" ]; then
     PUBLIC_IP=""
     for probe in "https://api.ipify.org" "https://ifconfig.me/ip" "https://icanhazip.com"; do
@@ -729,9 +778,24 @@ else
     fail "не удалось добавить домен $DOMAIN в базу"
 fi
 
-# Ящик администратора
-if bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" "$MAILBOX_PASSWORD" >/dev/null 2>&1; then
-    ok "ящик $ADMIN_EMAIL создан (или обновлён пароль)"
+# Ящик администратора.
+#
+# ПОВТОРНЫЙ ЗАПУСК НЕ МЕНЯЕТ ПАРОЛЬ СУЩЕСТВУЮЩЕГО ЯЩИКА. Раньше менял —
+# create-mailbox.sh делает upsert, и строка «создан (или обновлён пароль)»
+# описывала это честно. Последствие: человек сменил пароль почты через
+# панель, через месяц запустил install.sh для обновления — и пароль
+# молча откатился к тому, что лежит в файле ответов. Почтовые программы
+# перестают ходить, человек ищет причину где угодно, кроме установщика,
+# который «просто обновлял».
+#
+# Пароль из ответов остаётся нужен ровно один раз — при создании.
+MAILBOX_EXISTS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
+    -c "SELECT 1 FROM virtual_users WHERE email = '$ADMIN_EMAIL'" 2>/dev/null | tr -d '\r' | head -1 || true)"
+if [ "$MAILBOX_EXISTS" = "1" ]; then
+    ok "ящик $ADMIN_EMAIL уже есть — пароль не трогаем"
+    hint "сменить пароль ящика: в панели, раздел «Ящики»"
+elif bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" "$MAILBOX_PASSWORD" >/dev/null 2>&1; then
+    ok "ящик $ADMIN_EMAIL создан"
 else
     fail "не удалось создать ящик $ADMIN_EMAIL"
 fi
