@@ -10,7 +10,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelsEndpoint, parseModelList } from './models.js';
+import { describeNetworkFailure, modelsEndpoint, parseModelList } from './models.js';
 
 void test('адрес списка приклеивается к адресу сервиса', () => {
   assert.equal(modelsEndpoint('https://api.openai.com/v1'), 'https://api.openai.com/v1/models');
@@ -78,4 +78,39 @@ void test('порядок — по алфавиту без учёта регис
   // Порядок поставщика ничего не значит: у одних он по дате, у других
   // случайный. Список из полусотни моделей читается только отсортированным.
   assert.deepEqual(parseModelList(['Zephyr', 'alpha', 'Beta']), ['alpha', 'Beta', 'Zephyr']);
+});
+
+/* ------------------------------------------------------------------ */
+/* Сетевой отказ словами                                               */
+/* ------------------------------------------------------------------ */
+
+void test('неверное имя хоста объясняется, а не пересказывается как «fetch failed»', () => {
+  // Найдено живой проверкой: панель показывала ровно «fetch failed».
+  const err = new TypeError('fetch failed', {
+    cause: Object.assign(new Error('x'), { code: 'ENOTFOUND' }),
+  });
+  assert.match(describeNetworkFailure(err), /адрес/u);
+});
+
+void test('никто не слушает — сказано именно это', () => {
+  const err = new TypeError('fetch failed', {
+    cause: Object.assign(new Error('x'), { code: 'ECONNREFUSED' }),
+  });
+  assert.match(describeNetworkFailure(err), /не запущен|не слушает/u);
+});
+
+void test('самоподписанный сертификат назван своим именем', () => {
+  const err = new TypeError('fetch failed', {
+    cause: Object.assign(new Error('x'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' }),
+  });
+  assert.match(describeNetworkFailure(err), /сертификат/u);
+});
+
+void test('незнакомая беда пересказывает причину, а не пустоту', () => {
+  const err = new TypeError('fetch failed', { cause: new Error('что-то своё') });
+  assert.equal(describeNetworkFailure(err), 'что-то своё');
+});
+
+void test('совсем без причины — понятная заглушка', () => {
+  assert.equal(describeNetworkFailure(new TypeError('')), 'сеть недоступна');
 });

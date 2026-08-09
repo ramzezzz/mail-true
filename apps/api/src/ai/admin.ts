@@ -18,7 +18,7 @@ import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
 import { keyHint } from './secret.js';
-import { modelsEndpoint, parseModelList } from './models.js';
+import { describeNetworkFailure, modelsEndpoint, parseModelList } from './models.js';
 import { AiUnavailableError } from './errors.js';
 import type { AiDomainSettings, AiDomainSettingsPatch } from './db.js';
 import type { AiService } from './service.js';
@@ -357,7 +357,7 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
           message:
             err instanceof Error && err.name === 'TimeoutError'
               ? `Сервис не ответил за ${String(row.timeoutMs)} мс`
-              : `Не удалось обратиться к сервису: ${err instanceof Error ? err.message : String(err)}`,
+              : `Не удалось обратиться к сервису: ${describeNetworkFailure(err)}`,
           models: [],
         };
       }

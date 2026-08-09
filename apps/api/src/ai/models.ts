@@ -72,3 +72,44 @@ export function parseModelList(payload: unknown): string[] {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+
+/**
+ * Сетевой отказ — словами.
+ *
+ * `fetch` в Node на любую сетевую беду отдаёт одно и то же «fetch
+ * failed», а настоящая причина лежит в `cause`. Разница здесь
+ * принципиальная: «имя не разрешается» — опечатка в адресе, «соединение
+ * отвергнуто» — сервис не поднят, «сертификат» — самоподписанный TLS. Всё
+ * это чинится по-разному, и человеку у формы нужно знать, что именно.
+ *
+ * Найдено живой проверкой: при неверном имени хоста панель показывала
+ * ровно «Не удалось обратиться к сервису: fetch failed».
+ */
+export function describeNetworkFailure(err: unknown): string {
+  if (err instanceof Error && err.name === 'TimeoutError') return 'сервис не ответил вовремя';
+  const cause: unknown = err instanceof Error ? err.cause : undefined;
+  const code =
+    typeof cause === 'object' && cause !== null && 'code' in cause
+      ? String((cause as { code: unknown }).code)
+      : '';
+  switch (code) {
+    case 'ENOTFOUND':
+    case 'EAI_AGAIN':
+      return 'имя из адреса не разрешается — проверьте адрес сервиса';
+    case 'ECONNREFUSED':
+      return 'адрес есть, но по нему никто не слушает — сервис не запущен или порт другой';
+    case 'ECONNRESET':
+      return 'соединение оборвано на середине';
+    case 'ETIMEDOUT':
+      return 'соединение не установилось — вероятно, мешает сеть или межсетевой экран';
+    case 'CERT_HAS_EXPIRED':
+      return 'у сервиса просроченный сертификат';
+    case 'DEPTH_ZERO_SELF_SIGNED_CERT':
+    case 'SELF_SIGNED_CERT_IN_CHAIN':
+      return 'у сервиса самоподписанный сертификат, которому здесь не доверяют';
+    default:
+      break;
+  }
+  const message = cause instanceof Error ? cause.message : err instanceof Error ? err.message : '';
+  return message === '' ? 'сеть недоступна' : message;
+}
