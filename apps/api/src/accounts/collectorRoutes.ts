@@ -168,7 +168,21 @@ export async function collectorRoutes(
     const session = sessionOf(request);
     const accounts = await guard(() => service.requireDb().listExternal(session.email));
     const folders = await foldersOf(session);
-    return accounts.map((a) => toWebCollector(a, folders));
+    /*
+     * Раздел «Почта с других ящиков» — только про СБОР.
+     *
+     * ------------------------------------------------------------------
+     * ЧТО БЫЛО
+     * ------------------------------------------------------------------
+     * `listExternal` отдаёт все подключения ящика подряд, без разбора
+     * режима, — в отличие от выборки для работника (`listDueCollectors`,
+     * там фильтр есть). Поэтому здесь показывались и подключения ПРЯМОГО
+     * доступа, где сбор не нужен и намеренно запрещён, а кнопка
+     * «Проверить» рядом с ними начинала копировать чужой ящик во
+     * «Входящие» — ровно то дублирование почты, ради отказа от которого
+     * прямой режим и выбирают.
+     */
+    return accounts.filter((a) => a.mode !== 'direct').map((a) => toWebCollector(a, folders));
   });
 
   app.post('/', { preHandler: app.requireSession }, async (request) => {
@@ -281,6 +295,14 @@ export async function collectorRoutes(
     const db = service.requireDb();
     const found = await guard(() => db.findExternal(session.email, numericId(id)));
     if (!found) throw new NotFoundError('Подключение не найдено');
+    /*
+     * Тот же замок, что и на соседнем маршруте (accounts/routes.ts): у
+     * прямого доступа сбора нет по устройству, и запускать его — значит
+     * дублировать чужую почту в свой ящик.
+     */
+    if (found.account.mode === 'direct') {
+      throw new BadRequestError('Это подключение работает в режиме прямого доступа, сбор не нужен');
+    }
 
     await service.collect(session.email, found.account, found.passwordEnc, session.password);
     const after = await db.findExternal(session.email, numericId(id));

@@ -116,6 +116,39 @@ async function withTimeout<T>(
   }
 }
 
+/**
+ * Отменить работу по времени и ДОЖДАТЬСЯ её отчёта.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Сбор шёл через `withTimeout`, то есть через гонку обещаний: по
+ * истечении срока отправлялся сигнал отмены и тут же бросалось
+ * исключение, а отчёт переноса отбрасывался целиком. Обработчик отказа
+ * возвращал жёстко `copied: 0` и состояние «ошибка».
+ *
+ * Выглядело это так: первая синхронизация большого ящика идёт нормально
+ * и переносит тысячи писем, упирается в предел времени — и человек
+ * видит «Ошибка» и совет «проверьте адрес сервера и доступность ящика».
+ * Ящик исправен, письма перенесены, а счётчик «всего собрано» врёт в
+ * ноль. Следующий заход продолжит с курсора и опять «ошибётся».
+ *
+ * Сам перенос при отмене отчёт НЕ теряет: он ловит остановку и
+ * возвращает сделанное со статусом `stopped` (см. migrator.ts). Значит
+ * достаточно дождаться его после сигнала — и сказать человеку правду:
+ * «перенесено столько-то, продолжим в следующий раз».
+ */
+async function cancelAfter<T>(work: Promise<T>, ms: number, cancel: AbortController): Promise<T> {
+  if (ms <= 0) return work;
+  const timer = setTimeout(() => cancel.abort(), ms);
+  timer.unref?.();
+  try {
+    return await work;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface CollectResult {
   status: CollectorStatus;
   copied: number;
@@ -243,7 +276,7 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
     // Один и тот же сигнал уходит в перенос и срабатывает по пределу
     // времени: иначе брошенная работа продолжает класть письма в ящик.
     cancel = new AbortController();
-    const report = await withTimeout(
+    const report = await cancelAfter(
       migrateMailbox({
         source,
         dest,
@@ -258,7 +291,19 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
     );
 
     return {
-      status: report.status === 'ok' ? 'ok' : report.status === 'partial' ? 'partial' : 'error',
+      /*
+       * Остановка по времени — это НЕ ошибка подключения.
+       *
+       * Письма перенесены, ящик исправен, а следующий заход продолжит с
+       * курсора. Сказать здесь «ошибка» значит послать человека чинить
+       * то, что работает, и заодно соврать счётчиком «собрано: 0».
+       */
+      status:
+        report.status === 'ok'
+          ? 'ok'
+          : report.status === 'partial' || report.status === 'stopped'
+            ? 'partial'
+            : 'error',
       copied: report.copied,
       skipped: report.skipped,
       failed: report.failed,
