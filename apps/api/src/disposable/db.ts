@@ -283,14 +283,19 @@ export class DisposableDb implements DisposableStore {
         );
         const source = mine[0]?.source;
         if (source === undefined) return null;
-        const { rows: busy } = await client.query<{ n: string }>(
-          `SELECT count(*)::text AS n
-             FROM virtual_users
-            WHERE lower(email) = lower($1)
-              FOR UPDATE`,
+        /*
+         * Без агрегата: `FOR UPDATE` вместе с `count(*)` Postgres
+         * запрещает («FOR UPDATE is not allowed with aggregate
+         * functions»), и такой запрос отвечал бы не отказом, а внутренней
+         * ошибкой — то есть человек видел бы «что-то сломалось» вместо
+         * объяснения, почему адрес занят. Найдено живой проверкой на
+         * сервере: тесты этого не ловят, там заглушка вместо Postgres.
+         */
+        const { rows: busy } = await client.query<{ id: number }>(
+          `SELECT id FROM virtual_users WHERE lower(email) = lower($1) LIMIT 1 FOR UPDATE`,
           [source],
         );
-        if (Number(busy[0]?.n ?? 0) > 0) {
+        if (busy.length > 0) {
           throw new DisposableAddressTakenError(
             `Адрес ${source} теперь занят настоящим почтовым ящиком. ` +
               'Включить его снова нельзя: письма уходили бы не тому, кому их пишут.',
