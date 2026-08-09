@@ -315,6 +315,23 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
           const lock = await client.getMailboxLock(folder.path);
           try {
             const dl = await client.download(String(uid), partId, { uid: true });
+            /*
+             * Письма может уже не быть — и это обычное дело, а не поломка.
+             *
+             * imapflow в таком случае возвращает ПУСТОЙ объект, без поля
+             * content. Обход по нему (`for await … of undefined`) бросал
+             * TypeError, общий обработчик превращал его в 500 «Внутренняя
+             * ошибка сервера», а в журнал сервера падала запись со стеком.
+             *
+             * Житейский сценарий: письмо открыто в одной вкладке, в другой
+             * его убрали в «Корзину»; человек нажимает на вложение и
+             * получает «внутреннюю ошибку» вместо «письмо не найдено», а
+             * администратор — ложную запись об ошибке.
+             *
+             * Проверка ниже (`content.length === 0`) этот случай не
+             * ловила: до неё не доходило управление.
+             */
+            if (!dl.content) throw new NotFoundError('Письмо или его часть не найдены');
             // Скачиваем часть целиком под блокировкой, чтобы не держать ящик
             const chunks: Buffer[] = [];
             for await (const chunk of dl.content) {

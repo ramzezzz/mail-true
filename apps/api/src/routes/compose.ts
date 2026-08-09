@@ -45,6 +45,7 @@ import { buildReadReceipt, readReceiptRequest } from '../mail/read-receipt.js';
 import { classifySmtpError, readSendOutcome, type RejectedRecipient } from '../mail/send-result.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
+import { ENCODING_OVERHEAD } from '../config.js';
 import type { MailSession } from '../types.js';
 import type { UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
@@ -162,20 +163,62 @@ async function composeRaw(
   payload: DraftBody,
   from: string,
   uploads: UploadStore,
+  /** Предел письма целиком: проверяется ДО сборки, по размерам вложений. */
+  messageMaxBytes: number,
   forwarded: readonly ForwardedMessage[] = [],
   settings?: { keepBcc?: boolean },
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
+  /*
+   * СУММУ СЧИТАЕМ ДО СБОРКИ, А НЕ ПОСЛЕ.
+   *
+   * Единственная проверка размера стояла ниже по течению — над готовым
+   * буфером письма. К тому времени память уже съедена: nodemailer копит
+   * все части в массив и делает Buffer.concat, то есть держит письмо
+   * дважды.
+   *
+   * Обойти это было просто и не требовало ничего, кроме обычной работы
+   * интерфейса. Пределы, которые есть, — на ОДНО вложение (17,8 МБ) и на
+   * число файлов В ОДНОМ запросе (20). Суммы не проверял никто: пятьдесят
+   * загруженных файлов по 17,8 МБ давали пик около двух с половиной
+   * гигабайт на один запрос. Дальше «Reached heap limit», процесс
+   * перезапускается, и у ВСЕХ остальных обрываются сессии, соединения и
+   * отправка — ровно тот отказ, который уже разбирали в infra/docker-
+   * compose.yml и закрывали ограничением тела запроса. Вложения приходят
+   * не в теле, а по идентификаторам, поэтому то ограничение их не ловит,
+   * а Buffer живёт вне кучи V8 — не ловит и --max-old-space-size.
+   *
+   * Черновик при этом не проверялся вовсе: гигабайтный буфер уходил прямо
+   * в IMAP APPEND.
+   *
+   * Размер известен заранее — uploads.get отдаёт его в meta. Считаем с
+   * той же надбавкой на кодирование, что и предел одного вложения:
+   * base64 растит вложение примерно на 40%.
+   */
+  let attachedBytes = 0;
   for (const id of payload.attachmentIds) {
     const found = await uploads.get(id);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
+    attachedBytes += found.meta.size;
     attachments.push({
       filename: found.meta.filename,
       path: found.path,
       contentType: found.meta.mimeType,
     });
   }
-  for (const item of forwarded) attachments.push(forwardedAttachment(item));
+  for (const item of forwarded) {
+    attachedBytes += item.raw.length;
+    attachments.push(forwardedAttachment(item));
+  }
+  const projected = Math.round(attachedBytes * ENCODING_OVERHEAD);
+  if (projected > messageMaxBytes) {
+    throw new MessageTooLargeError(
+      `Вложения не помещаются: вместе они дадут около ${megabytes(projected)} МБ, ` +
+        `а предел письма — ${megabytes(messageMaxBytes)} МБ. ` +
+        'Уберите часть файлов или отправьте их отдельными письмами.',
+      { limitBytes: messageMaxBytes, projectedBytes: projected },
+    );
+  }
 
   // Пользовательский HTML тоже прогоняем через санитайзер:
   // composer не должен рассылать скрипты даже по ошибке фронтенда
@@ -355,7 +398,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       return { draftUid: payload.draftUid, draftId: `drafts:${payload.draftUid}` };
     }
     try {
-      const raw = await composeRaw(payload, session.email, uploads, forwarded, { keepBcc: true });
+      const raw = await composeRaw(
+        payload,
+        session.email,
+        uploads,
+        config.MESSAGE_MAX_BYTES,
+        forwarded,
+        {
+          keepBcc: true,
+        },
+      );
       const uid = await saveDraftVersion(session, raw, undefined, payload.draftKey);
       return { draftUid: uid, draftId: uid ? `drafts:${uid}` : null };
     } catch (err) {
@@ -768,14 +820,39 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     checkSendableAddresses(payload);
 
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
-    const raw = await composeRaw(payload, session.email, uploads, forwarded);
+    const raw = await composeRaw(
+      payload,
+      session.email,
+      uploads,
+      config.MESSAGE_MAX_BYTES,
+      forwarded,
+    );
 
     // Предел письма известен заранее — незачем узнавать его от SMTP отказом
     if (raw.length > config.MESSAGE_MAX_BYTES) {
       const kept = await keepDraftAfterFailure(session, payload, forwarded, request.log);
+      /*
+       * Про черновик говорим ТОЛЬКО когда он есть.
+       *
+       * Здесь стояло безусловное «Письмо сохранено в черновиках», хотя
+       * keepDraftAfterFailure глотает свою неудачу и возвращает draftId:
+       * null — например, когда ящик упёрся в квоту и Dovecot отбил APPEND.
+       * Человек читал обещание, закрывал окно написания — и текста не
+       * оставалось нигде: ни у получателя, ни в «Черновиках».
+       *
+       * В этой ветке вероятность отказа как раз наибольшая: сохраняется
+       * то самое письмо, которое только что признано слишком большим.
+       *
+       * Соседняя ветка (временный отказ SMTP) написана правильно и
+       * проверяет kept.draftId — теперь так делают все три.
+       */
       throw new MessageTooLargeError(
         `Письмо ${megabytes(raw.length)} МБ, а почтовый сервер принимает не больше ` +
-          `${megabytes(config.MESSAGE_MAX_BYTES)} МБ. Письмо сохранено в черновиках.`,
+          `${megabytes(config.MESSAGE_MAX_BYTES)} МБ.` +
+          (kept.draftId
+            ? ' Письмо сохранено в черновиках.'
+            : ' Сохранить его в черновиках тоже не удалось — не закрывайте окно, ' +
+              'уберите лишние вложения и попробуйте снова.'),
         kept,
       );
     }
@@ -897,7 +974,12 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           smtpCode: failure.code,
           rejected: failure.rejected,
         };
-        const message = `${failure.message}. Письмо сохранено в черновиках.`;
+        // Тот же случай: обещать черновик можно, только если он записался.
+        const message =
+          failure.message +
+          (kept.draftId
+            ? '. Письмо сохранено в черновиках.'
+            : '. Сохранить письмо в черновиках тоже не удалось — не закрывайте окно.');
         throw failure.tooLarge
           ? new MessageTooLargeError(message, details)
           : new SendRejectedError(message, details);
@@ -1075,7 +1157,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
     // keepBcc — чтобы «Скрытая копия» дожила до дописывания черновика,
     // см. composeRaw. У отправляемого письма этого заголовка быть не должно.
-    const raw = await composeRaw(payload, session.email, uploads, forwarded, { keepBcc: true });
+    const raw = await composeRaw(
+      payload,
+      session.email,
+      uploads,
+      config.MESSAGE_MAX_BYTES,
+      forwarded,
+      {
+        keepBcc: true,
+      },
+    );
     const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
 
     return {
