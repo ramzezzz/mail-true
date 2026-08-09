@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isServiceNoise } from './mail-log.js';
-import { querySchema, tailSchema } from './routes/logs.js';
+import { queryFlag, querySchema, tailSchema } from './routes/logs.js';
 
 const NOISE = [
   // Dovecot: проверка портов — соединение без единой попытки входа.
@@ -87,4 +87,23 @@ test('«true» и «1» по-прежнему означают ДА', () => {
 
 test('без признака служебные строки спрятаны', () => {
   assert.equal(querySchema.parse({}).serviceNoise, false);
+});
+
+/*
+ * Тот же признак в истории антиспама.
+ *
+ * `spamOnly` разбирался через `z.coerce.boolean()` — то есть строка
+ * «false» из запроса означала ИСТИНУ. В истории показывался только спам
+ * при любом положении флажка, а ищут в ней обычно обратное: чистое
+ * письмо, которое куда-то делось. Дефект тот же самый и уже третий по
+ * счёту (список писем, журналы служб, теперь история) — поэтому разбор
+ * общий, а не переписанный в третий раз.
+ */
+test('история антиспама: «false» из строки запроса — это ложь', () => {
+  assert.equal(queryFlag.parse('false'), false);
+  assert.equal(queryFlag.parse('0'), false);
+  assert.equal(queryFlag.parse(undefined), false);
+  assert.equal(queryFlag.parse('true'), true);
+  assert.equal(queryFlag.parse('1'), true);
+  assert.equal(queryFlag.parse(true), true);
 });

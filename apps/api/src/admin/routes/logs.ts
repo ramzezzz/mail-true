@@ -39,7 +39,7 @@ import { isServiceNoise, LOG_LEVELS, LOG_SOURCES, type LogSource } from '../mail
  * Тот же дефект уже разбирали в списке писем (routes/messages.ts,
  * `threaded`) — разбираем так же: истина только «1» и «true».
  */
-const queryFlag = z
+export const queryFlag = z
   .union([z.boolean(), z.string()])
   .default(false)
   .transform((value) => value === true || value === '1' || value === 'true');

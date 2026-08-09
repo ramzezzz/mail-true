@@ -53,6 +53,7 @@ import {
   topSymbols,
 } from '../rspamd.js';
 import { checkEntry, findSpamList, matchMapId, SPAM_LISTS } from '../spam-lists.js';
+import { queryFlag } from './logs.js';
 import { spamOf, SpamStore } from '../spam-store.js';
 import {
   describeThresholds,
@@ -282,8 +283,17 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       const q = z
         .object({
           limit: z.coerce.number().int().min(1).max(200).default(50),
-          /** Показывать только то, что фильтр счёл спамом. */
-          spamOnly: z.coerce.boolean().default(false),
+          /*
+           * Показывать только то, что фильтр счёл спамом.
+           *
+           * Через общий queryFlag, а не z.coerce.boolean: тот превращает
+           * строку «false» из запроса в ИСТИНУ (непустая строка), и
+           * флажок стоял включённым при любом положении — в истории
+           * показывался только спам, а искали в ней обычно потерявшееся
+           * ЧИСТОЕ письмо. Тот же дефект уже дважды ловили в списке
+           * писем и в журналах служб.
+           */
+          spamOnly: queryFlag,
         })
         .parse(request.query);
       try {
