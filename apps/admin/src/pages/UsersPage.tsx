@@ -634,11 +634,30 @@ function EditUserModal({
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
   const displayNameProblem = displayNameLengthProblem(displayName);
 
+  /*
+   * Нетронутая квота уходит на сервер БАЙТ В БАЙТ.
+   *
+   * Поля показывают число и единицу, а некруглое значение в них не
+   * помещается: splitQuota округляет до двух знаков (иначе в поле стояло
+   * бы «1.3969838619232178 ГБ»). Обратный перевод даёт другое число —
+   * 1 500 000 000 байт превращаются в 1 503 238 554.
+   *
+   * Из-за этого правка ЛЮБОГО другого поля молча меняла квоту: человек
+   * поправил отображаемое имя, нажал «Сохранить» — и ящику досталось на
+   * три мегабайта больше, чем было. Он к квоте не прикасался.
+   *
+   * Некруглые квоты — не редкость: их ставят из CSV при импорте, через
+   * API и при переносе с чужого сервера. Поэтому отправляем то, что
+   * набрано, только если человек действительно набирал.
+   */
+  const quotaUntouched = quotaAmount === String(initial.amount) && quotaUnit === initial.unit;
+  const quotaToSend = quotaUntouched ? user.quotaBytes : quotaBytes;
+
   const save = useMutation({
     mutationFn: () =>
       api.updateUser(user.id, {
         displayName: displayName.trim() === '' ? null : displayName.trim(),
-        ...(quotaBytes !== null ? { quotaBytes } : {}),
+        ...(quotaToSend !== null ? { quotaBytes: quotaToSend } : {}),
       }),
     onSuccess: () => onSaved(`Ящик ${user.email} изменён`),
   });
@@ -674,7 +693,9 @@ function EditUserModal({
         hint={
           quotaBytes === null
             ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
-            : `Сейчас ${formatBytes(user.quotaBytes)}, станет ${formatBytes(quotaBytes)}`
+            : quotaUntouched
+              ? `Сейчас ${formatBytes(user.quotaBytes)} — останется как есть`
+              : `Сейчас ${formatBytes(user.quotaBytes)}, станет ${formatBytes(quotaBytes)}`
         }
       >
         <QuotaInput
