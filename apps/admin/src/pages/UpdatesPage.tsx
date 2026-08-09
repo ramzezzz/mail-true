@@ -37,7 +37,7 @@
  * ровно тот момент, когда служба поднимается заново.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api/client';
 import { PageTitle } from '../app/AdminLayout';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
@@ -73,6 +73,21 @@ export function UpdatesPage() {
     retry: false,
   });
   const running = progress.data?.state === 'running';
+
+  /*
+   * Обновление закончилось — версия на экране устарела: там всё ещё
+   * прежний коммит и прежние слепки образов. Перечитываем её один раз по
+   * переходу «идёт → закончилось», а не по каждому опросу: иначе страница
+   * дёргала бы сервер каждые три секунды после любого обновления.
+   */
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    const now = progress.data?.state ?? 'idle';
+    if (wasRunning.current && now !== 'running') {
+      void queryClient.invalidateQueries({ queryKey: ['server-version'] });
+    }
+    wasRunning.current = now === 'running';
+  }, [progress.data?.state, queryClient]);
 
   const check = useMutation({
     mutationFn: () => api.checkUpdates(),

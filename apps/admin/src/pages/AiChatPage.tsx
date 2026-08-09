@@ -62,6 +62,24 @@ export function AiChatPage() {
   // прекращает запрос к сервису ИИ, и за брошенный ответ не платят.
   useEffect(() => () => stopRef.current?.(), []);
 
+  /**
+   * Остановить ответ.
+   *
+   * Недостаточно оборвать поток: реплика помощника уже стоит на экране с
+   * пометкой «печатает», и без уборки она остаётся такой навсегда. Текст,
+   * успевший прийти, оставляем — он настоящий.
+   */
+  const stop = (): void => {
+    stopRef.current?.();
+    stopRef.current = null;
+    setBusy(false);
+    setTurns((previous) =>
+      previous
+        .map((turn) => (turn.pending ? { role: turn.role, content: turn.content } : turn))
+        .filter((turn) => turn.content !== ''),
+    );
+  };
+
   const ask = (question: string): void => {
     const text = question.trim();
     if (text === '' || busy) return;
@@ -169,14 +187,7 @@ export function AiChatPage() {
             }}
           />
           {busy ? (
-            <Button
-              mode="secondary"
-              onClick={() => {
-                stopRef.current?.();
-                stopRef.current = null;
-                setBusy(false);
-              }}
-            >
+            <Button mode="secondary" onClick={stop}>
               Остановить
             </Button>
           ) : (

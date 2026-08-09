@@ -20,6 +20,28 @@
  * тестом на каждой из форм, а сетевая часть остаётся тонкой.
  */
 
+/**
+ * Сколько байт ответа читаем.
+ *
+ * Адрес сервиса задаёт администратор, и ошибиться в нём легко: указать
+ * не тот путь, не тот порт, попасть в файловое хранилище. `response.json()`
+ * без предела прочитает столько, сколько отдадут, — то есть съест память
+ * сервера приложения на ответе, который списком моделей и не был.
+ *
+ * Мегабайта хватает с многократным запасом: даже сотня моделей с полными
+ * описаниями укладывается в сотню килобайт.
+ */
+const MAX_BODY_BYTES = 1_000_000;
+
+/**
+ * Сколько названий отдаём наружу.
+ *
+ * Обёртки над десятками поставщиков называют тысячи моделей. Выпадающий
+ * список из трёх тысяч строк бесполезен человеку и тяжёл браузеру, а
+ * толку от хвоста нет: нужную ищут по первым буквам.
+ */
+const MAX_MODELS = 500;
+
 /** Адрес списка моделей рядом с адресом сервиса. */
 export function modelsEndpoint(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, '')}/models`;
@@ -66,7 +88,9 @@ export function parseModelList(payload: unknown): string[] {
    * не значит (у одних он по дате, у других случайный), а список из
    * полусотни моделей глазами читается только отсортированным.
    */
-  return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+  return [...new Set(names)]
+    .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+    .slice(0, MAX_MODELS);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,4 +136,45 @@ export function describeNetworkFailure(err: unknown): string {
   }
   const message = cause instanceof Error ? cause.message : err instanceof Error ? err.message : '';
   return message === '' ? 'сеть недоступна' : message;
+}
+
+/**
+ * Тело ответа с потолком.
+ *
+ * Читаем потоком и обрываем, как только вышли за предел: иначе
+ * ошибочный адрес (архив, дамп, файловое хранилище) превращается в
+ * попытку положить в память сервера всё, что там лежит. Обрыв — это
+ * отказ, а не «прочитаем сколько успели»: обрезанный JSON всё равно не
+ * разберётся, а притворяться, что список пуст, нельзя.
+ */
+export async function readJsonCapped(response: Response): Promise<unknown> {
+  const body = response.body;
+  if (!body) return JSON.parse(await response.text());
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    size += chunk.value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader.cancel();
+      throw new Error(
+        `Ответ больше ${String(Math.round(MAX_BODY_BYTES / 1000))} КБ — это не похоже на список моделей. Проверьте адрес сервиса.`,
+      );
+    }
+    chunks.push(chunk.value);
+  }
+  return JSON.parse(new TextDecoder().decode(concat(chunks, size)));
+}
+
+function concat(chunks: readonly Uint8Array[], size: number): Uint8Array {
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return out;
 }

@@ -18,7 +18,12 @@ import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
 import { keyHint } from './secret.js';
-import { describeNetworkFailure, modelsEndpoint, parseModelList } from './models.js';
+import {
+  describeNetworkFailure,
+  modelsEndpoint,
+  parseModelList,
+  readJsonCapped,
+} from './models.js';
 import { serverKnowledge } from '../admin/ai-knowledge.js';
 import { AiUnavailableError } from './errors.js';
 import type { AiDomainSettings, AiDomainSettingsPatch } from './db.js';
@@ -364,7 +369,7 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
             models: [],
           };
         }
-        const models = parseModelList(await response.json());
+        const models = parseModelList(await readJsonCapped(response));
         return { ok: true as const, endpoint, status: response.status, message: null, models };
       } catch (err) {
         return {

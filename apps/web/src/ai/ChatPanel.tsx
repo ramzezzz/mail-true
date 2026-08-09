@@ -56,6 +56,25 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   // прекращает запрос к сервису ИИ, и за брошенный ответ не платят.
   useEffect(() => () => stopRef.current?.(), []);
 
+  /**
+   * Остановить ответ.
+   *
+   * Недостаточно оборвать поток: реплика помощника уже стоит на экране
+   * с пометкой «печатает», и без уборки она остаётся такой навсегда —
+   * три точки мигают, а ответа не будет уже никогда. Успевший прийти
+   * текст оставляем: он настоящий, за него заплачено.
+   */
+  const stop = (): void => {
+    stopRef.current?.();
+    stopRef.current = null;
+    setBusy(false);
+    setTurns((previous) =>
+      previous
+        .map((turn) => (turn.pending ? { role: turn.role, content: turn.content } : turn))
+        .filter((turn) => turn.content !== ''),
+    );
+  };
+
   const send = (): void => {
     const question = draft.trim();
     if (question === '' || busy) return;
@@ -172,14 +191,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
               }}
             />
             {busy ? (
-              <Button
-                mode="secondary"
-                onClick={() => {
-                  stopRef.current?.();
-                  stopRef.current = null;
-                  setBusy(false);
-                }}
-              >
+              <Button mode="secondary" onClick={stop}>
                 Остановить
               </Button>
             ) : (

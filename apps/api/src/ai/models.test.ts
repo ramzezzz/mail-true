@@ -10,7 +10,12 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeNetworkFailure, modelsEndpoint, parseModelList } from './models.js';
+import {
+  describeNetworkFailure,
+  modelsEndpoint,
+  parseModelList,
+  readJsonCapped,
+} from './models.js';
 
 void test('адрес списка приклеивается к адресу сервиса', () => {
   assert.equal(modelsEndpoint('https://api.openai.com/v1'), 'https://api.openai.com/v1/models');
@@ -113,4 +118,41 @@ void test('незнакомая беда пересказывает причин
 
 void test('совсем без причины — понятная заглушка', () => {
   assert.equal(describeNetworkFailure(new TypeError('')), 'сеть недоступна');
+});
+
+/* ------------------------------------------------------------------ */
+/* Потолок на объём                                                     */
+/* ------------------------------------------------------------------ */
+
+/** Ответ заданного размера — как его отдал бы сервис. */
+function bodyOf(text: string): Response {
+  return new Response(new TextEncoder().encode(text), { status: 200 });
+}
+
+void test('обычный ответ читается целиком', async () => {
+  const payload = JSON.stringify({ data: [{ id: 'gpt-4o' }] });
+  assert.deepEqual(parseModelList(await readJsonCapped(bodyOf(payload))), ['gpt-4o']);
+});
+
+void test('огромный ответ отвергается, а не съедает память сервера', async () => {
+  /*
+   * Адрес сервиса задаёт администратор, и ошибиться в нём легко: не тот
+   * путь, не тот порт, попадание в файловое хранилище. Без предела
+   * response.json() прочитает столько, сколько отдадут.
+   */
+  const row = `{"id":"${'x'.repeat(2000)}"},`;
+  const huge = `{"data":[${row.repeat(1000)}{"id":"a"}]}`;
+  await assert.rejects(() => readJsonCapped(bodyOf(huge)), /Проверьте адрес сервиса/u);
+});
+
+void test('в отказе сказано, сколько это было и что делать', async () => {
+  const huge = `{"data":[${'{"id":"y"},'.repeat(200_000)}{"id":"a"}]}`;
+  await assert.rejects(() => readJsonCapped(bodyOf(huge)), /КБ/u);
+});
+
+void test('тысячи моделей обрезаются: выпадающий список должен оставаться пригодным', () => {
+  // Обёртки над десятками поставщиков называют тысячи моделей. Нужную
+  // ищут по первым буквам, а не листанием трёх тысяч строк.
+  const many = Array.from({ length: 3000 }, (_, index) => ({ id: `model-${String(index)}` }));
+  assert.equal(parseModelList({ data: many }).length, 500);
 });
