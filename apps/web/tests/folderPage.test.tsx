@@ -190,7 +190,9 @@ describe('отказ мутации', () => {
     act(() => button('Удалить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
     await waitFor(() => text().includes('Не удалось переместить письма'), 'сообщение об отказе');
-    expect(text()).toContain('Сервер не отвечает');
+    // Причина — словами сервера: 5xx с человеческим текстом больше не
+    // подменяется общей заглушкой (см. tests/serverErrorText.test.ts).
+    expect(text()).toContain('Сервер недоступен');
   });
 });
 
@@ -382,5 +384,94 @@ describe('переслать как вложение', () => {
     const win = useUiStore.getState().composeWindows[0];
     expect(win?.draft.attachedMessages.map((m) => m.id)).toEqual(['inbox:2', 'inbox:3']);
     expect(win?.draft.subject).toBe('Fwd: 2 писем');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Выделение и правая кнопка                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Виртуализация меряет окно списка через offsetHeight, а в jsdom он всегда
+ * ноль — без этой подпорки не отрисовалось бы ни одной строки.
+ */
+function stubLayout(): void {
+  for (const [prop, value] of [
+    ['offsetHeight', 600],
+    ['offsetWidth', 900],
+  ] as const) {
+    Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, value });
+  }
+}
+
+const rowsInList = () => [...host.querySelectorAll<HTMLElement>('a[draggable="true"]')];
+const rowFor = (id: string) =>
+  rowsInList().find((a) => a.getAttribute('href') === `/inbox/${encodeURIComponent(id)}`);
+
+describe('правый щелчок мимо выделения', () => {
+  it('не сбрасывает набранные галочки', async () => {
+    /*
+     * Комментарий над обработчиком обещал: «Щелчок по НЕвыделенной строке
+     * выделение не трогает». Строкой ниже стоял `clearSelection()` —
+     * человек набирал два десятка галочек, чуть промахивался правой
+     * кнопкой мимо выделения и терял весь набор.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
+    stubLayout();
+    render();
+    await waitFor(() => rowsInList().length > 0, 'строки списка');
+
+    act(() => useUiStore.getState().selectMany(['inbox:1', 'inbox:2']));
+    const other = rowFor('inbox:3');
+    expect(other, 'строка, по которой щёлкают, должна быть на экране').toBeTruthy();
+    act(
+      () =>
+        void other!.dispatchEvent(
+          new MouseEvent('contextmenu', { bubbles: true, clientX: 20, clientY: 20 }),
+        ),
+    );
+
+    expect(useUiStore.getState().selectedIds.size, 'галочки обязаны остаться').toBe(2);
+    expect(host.querySelector('[role="menu"]'), 'меню должно открыться').toBeTruthy();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Погашенные строки уезжающих писем                                   */
+/* ------------------------------------------------------------------ */
+
+describe('строки уезжающих писем', () => {
+  it('второе удаление не зажигает первую строку обратно', async () => {
+    /*
+     * Список уезжающих ЗАМЕНЯЛСЯ, а не дополнялся: удалил письмо A, тут же
+     * удалил B — строка A переставала быть погашенной и снова выглядела
+     * живой. Человек удалял её второй раз.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
+    // Ответа сервера ждём вечно: строки гаснут сразу, не дожидаясь его
+    vi.spyOn(api, 'moveMessages').mockImplementation(() => new Promise(() => undefined));
+    stubLayout();
+    render();
+    await waitFor(() => rowsInList().length > 0, 'строки списка');
+
+    const leaving = () =>
+      rowsInList()
+        .filter((a) => a.getAttribute('aria-hidden') === 'true')
+        .map((a) => a.getAttribute('href'));
+
+    const deleteSelected = async () => {
+      await waitFor(() => Boolean(button('Удалить')), 'панель выделения');
+      act(() => void button('Удалить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    };
+
+    act(() => useUiStore.getState().selectMany(['inbox:1']));
+    await deleteSelected();
+    await waitFor(() => leaving().length === 1, 'первая строка погасла');
+
+    act(() => useUiStore.getState().selectMany(['inbox:2']));
+    await deleteSelected();
+    await waitFor(() => leaving().length === 2, 'обе строки погашены');
+
+    expect(leaving()).toEqual(['/inbox/inbox%3A1', '/inbox/inbox%3A2']);
   });
 });

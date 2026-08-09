@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { Message } from '@mail-true/shared';
+import type { Message, MessageListQuery } from '@mail-true/shared';
 import {
   AiMessageBanners,
   AiSummaryButton,
@@ -160,14 +160,29 @@ export function MessagePage() {
    * возврат «К списку» приводил не туда, где он остановился.
    */
   const listView = useUiStore((s) => s.listView);
-  const { data: page } = useMessages({
+  const listQuery: MessageListQuery = {
     folderId,
     offset: 0,
     limit: MESSAGES_PAGE_SIZE,
     threaded: listView.threaded,
     filter: listView.filter,
     ...(listView.labelFilter ? { label: listView.labelFilter } : {}),
-  });
+  };
+  const { data: page } = useMessages(listQuery);
+  /**
+   * Тот же отбор, но БЕЗ группировки — ради самой переписки.
+   *
+   * С группировкой сервер отдаёт по одной строке на разговор: в списке
+   * лежит только последнее письмо каждого, а остальных нет вовсе. Поэтому
+   * блок «Ещё писем в переписке» оказывался пуст, и разговор из шести
+   * писем показывал ровно одну реплику — ту, что открыли. Без группировки
+   * (как было раньше жёстко прописано) письма были на месте, то есть
+   * возможность ломалась ровно от включения переписок в настройках.
+   *
+   * Когда группировка выключена, это тот же самый ключ запроса, что и
+   * выше, — второго обращения к серверу не будет.
+   */
+  const { data: flatPage } = useMessages({ ...listQuery, threaded: false });
   const { data: folders } = useFolders();
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
@@ -237,13 +252,24 @@ export function MessagePage() {
     if (id) setVisitedMessage(folderId, id);
   }, [folderId, id, setVisitedMessage]);
 
-  // Открытое письмо помечаем прочитанным
+  /**
+   * Открытое письмо помечаем прочитанным — по одному разу на письмо.
+   *
+   * Раньше `seen: true` уходил заново при каждом возврате к тому же
+   * письму: пометки правились в списке, а САМО письмо лежит под своим
+   * ключом кэша и оставалось непрочитанным до перезагрузки страницы —
+   * вместе с ним возвращался и запрос. Ключ письма теперь сбрасывается
+   * вместе со списком (useInvalidateMail в api/queries.ts), а здесь стоит
+   * замок от повтора внутри одного просмотра.
+   */
+  const markedReadId = useRef<string | null>(null);
   useEffect(() => {
-    if (message && !message.flags.seen) {
-      setFlags.mutate({ ids: [message.id], set: { seen: true } });
-    }
+    if (!message || message.flags.seen) return;
+    if (markedReadId.current === message.id) return;
+    markedReadId.current = message.id;
+    setFlags.mutate({ ids: [message.id], set: { seen: true } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message?.id]);
+  }, [message?.id, message?.flags.seen]);
 
   useEffect(() => setShowImages(false), [id]);
 
@@ -262,13 +288,23 @@ export function MessagePage() {
     annotatePrintLinks(bodyRef.current);
   }, [message?.id, message?.bodyHtml]);
 
-  // Соседние письма в папке — стрелки перехода
+  /**
+   * Соседние письма в папке — стрелки перехода.
+   *
+   * Ищем СТРОКУ списка, в которую попало открытое письмо, а не письмо
+   * с таким же идентификатором. При группировке строку представляет
+   * последнее письмо разговора, поэтому у письма, открытого из блока
+   * «Ещё писем в переписке» (или по прямой ссылке, или из поиска),
+   * совпадения не находилось вовсе — обе стрелки гасли намертво.
+   */
   const { prevId, nextId } = useMemo(() => {
-    const items = page?.items ?? [];
-    const index = items.findIndex((m) => m.id === id);
+    const rows = page?.items ?? [];
+    const index = rows.findIndex(
+      (m) => m.id === id || (m.thread?.messageIds ?? []).some((mid) => mid === id),
+    );
     return {
-      prevId: index > 0 ? (items[index - 1]?.id ?? null) : null,
-      nextId: index >= 0 && index < items.length - 1 ? (items[index + 1]?.id ?? null) : null,
+      prevId: index > 0 ? (rows[index - 1]?.id ?? null) : null,
+      nextId: index >= 0 && index < rows.length - 1 ? (rows[index + 1]?.id ?? null) : null,
     };
   }, [page, id]);
 
@@ -276,28 +312,39 @@ export function MessagePage() {
   const blockedImages = useMemo(() => blockedImageCount(message), [message]);
 
   /**
-   * Письма той же цепочки из уже загруженного списка папки. Если их больше
-   * одного, «Кратко» резюмирует всю переписку, а не одно письмо.
+   * Письма той же цепочки. Если их больше одного, «Кратко» резюмирует всю
+   * переписку, а не одну реплику.
+   *
+   * Сводка переписки от сервера (`thread.messageIds`) знает про ВСЮ папку,
+   * поэтому она здесь первый источник; плоский список добавляет то, чего
+   * в сводке нет (её не бывает без группировки).
    */
   const threadIds = useMemo(() => {
     if (!message) return [];
-    const own = (page?.items ?? []).filter((m) => m.threadId === message.threadId);
-    const ids = own.map((m) => m.id);
-    return ids.includes(message.id) ? ids : [message.id, ...ids];
-  }, [page, message]);
+    const ids = [message.id];
+    const add = (value: string) => {
+      if (!ids.includes(value)) ids.push(value);
+    };
+    const row = (page?.items ?? []).find((m) => m.threadId === message.threadId);
+    for (const mid of row?.thread?.messageIds ?? []) add(mid);
+    for (const m of flatPage?.items ?? []) {
+      if (m.threadId === message.threadId) add(m.id);
+    }
+    return ids;
+  }, [page, flatPage, message]);
 
   /**
    * Остальные письма цепочки — старые сверху, как в привычных почтовых интерфейсах. Список берётся
-   * из уже загруженной страницы папки: отдельного маршрута цепочки в API нет
+   * из плоской страницы папки: отдельного маршрута цепочки в API нет
    * (`GET /api/threads/:id` — см. отчёт), поэтому за пределами первой сотни
    * писем цепочка окажется неполной.
    */
   const threadRest = useMemo(() => {
     if (!message) return [];
-    return (page?.items ?? [])
+    return (flatPage?.items ?? [])
       .filter((m) => m.threadId === message.threadId && m.id !== message.id)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [page, message]);
+  }, [flatPage, message]);
 
   const ai = useMessageAi({ messageId: message?.id, threadIds });
 

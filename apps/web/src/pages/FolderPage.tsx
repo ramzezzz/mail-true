@@ -144,6 +144,29 @@ export function FolderPage() {
   /** Письма, уже уезжающие из папки: перенос отправлен, ответа ещё нет. */
   const [leavingIds, setLeavingIds] = useState<readonly string[]>([]);
 
+  /**
+   * Пометить строки уезжающими — ДОПОЛНЕНИЕМ к уже уезжающим.
+   *
+   * Здесь стояло присваивание списком, и второе действие стирало память о
+   * первом: смахнул письмо A, тут же смахнул B — строка A переставала быть
+   * погашенной и снова выглядела живой. Человек смахивал её второй раз,
+   * то есть удалял уже удалённое.
+   */
+  const markLeaving = useCallback((ids: readonly string[]) => {
+    setLeavingIds((prev) => [...prev, ...ids.filter((id) => !prev.includes(id))]);
+  }, []);
+
+  /**
+   * Вернуть строки в живые: сервер отказал.
+   *
+   * Снимаем пометку ТОЛЬКО с той порции, которая не доехала. Раньше отказ
+   * одного запроса зажигал заново все уезжающие строки — в том числе те,
+   * что честно уехали соседним запросом (письма уходят порциями по пятьсот).
+   */
+  const unmarkLeaving = useCallback((ids: readonly string[]) => {
+    setLeavingIds((prev) => prev.filter((id) => !ids.includes(id)));
+  }, []);
+
   const messages = page.items;
 
   // Смена папки: сбрасываем выделение, курсор и фильтры
@@ -164,11 +187,12 @@ export function FolderPage() {
     setLeavingIds([]);
   }, [folderId, clearSelection]);
 
-  // Уехавшие письма пропали из списка — метку можно снять
+  // Уехавшие письма пропали из списка — метку можно снять. Именно с тех,
+  // кого в списке уже нет: остальные ещё уезжают, и гасить их рано.
   useEffect(() => {
     if (leavingIds.length === 0) return;
-    if (leavingIds.some((id) => messages.some((m) => m.id === id))) return;
-    setLeavingIds([]);
+    const stillHere = leavingIds.filter((id) => messages.some((m) => m.id === id));
+    if (stillHere.length !== leavingIds.length) setLeavingIds(stillHere);
   }, [messages, leavingIds]);
 
   /**
@@ -294,14 +318,26 @@ export function FolderPage() {
       }
       // Строки гаснут сразу: ждать ответа сервера, чтобы показать отклик,
       // нельзя — при неудаче метка снимается и письма возвращаются на место.
-      setLeavingIds(ids);
+      markLeaving(ids);
       for (const chunk of chunkIds(ids)) {
-        moveMessages.mutate({ ids: chunk, targetFolderId }, { onError: () => setLeavingIds([]) });
+        moveMessages.mutate(
+          { ids: chunk, targetFolderId },
+          { onError: () => unmarkLeaving(chunk) },
+        );
       }
       clearSelection();
       setFocusedId(null);
     },
-    [expand, moveMessages, clearSelection, folderId, currentFolder?.role, showNotice],
+    [
+      expand,
+      moveMessages,
+      clearSelection,
+      folderId,
+      currentFolder?.role,
+      showNotice,
+      markLeaving,
+      unmarkLeaving,
+    ],
   );
 
   /** Подгрузка следующей страницы — по прокрутке до конца списка. */
@@ -580,17 +616,17 @@ export function FolderPage() {
       // Строки гаснут сразу, как при переносе в другую папку: письмо и
       // правда уезжает — ждать ответа сервера, чтобы показать отклик,
       // значило бы на секунду делать вид, что нажатие не сработало.
-      setLeavingIds(ids);
+      markLeaving(ids);
       for (const chunk of chunkIds(ids)) {
         snoozeMessages.mutate(
           { ids: chunk, preset: choice.preset, ...(choice.until ? { until: choice.until } : {}) },
-          { onError: () => setLeavingIds([]) },
+          { onError: () => unmarkLeaving(chunk) },
         );
       }
       clearSelection();
       setFocusedId(null);
     },
-    [expand, snoozeMessages, clearSelection],
+    [expand, snoozeMessages, clearSelection, markLeaving, unmarkLeaving],
   );
 
   const returnNow = useCallback(
@@ -600,14 +636,14 @@ export function FolderPage() {
       // действия, и исключений в нём быть не должно.
       const ids = expand(rowIds);
       if (ids.length === 0) return;
-      setLeavingIds(ids);
+      markLeaving(ids);
       for (const chunk of chunkIds(ids)) {
-        unsnooze.mutate(chunk, { onError: () => setLeavingIds([]) });
+        unsnooze.mutate(chunk, { onError: () => unmarkLeaving(chunk) });
       }
       clearSelection();
       setFocusedId(null);
     },
-    [expand, unsnooze, clearSelection],
+    [expand, unsnooze, clearSelection, markLeaving, unmarkLeaving],
   );
 
   /**
@@ -648,14 +684,14 @@ export function FolderPage() {
       if (ids.length === 0) return;
       // Строки гаснут сразу: письма уезжают в «Заглушённые», и делать вид,
       // что нажатие не сработало, пока идёт запрос, нельзя.
-      setLeavingIds(ids);
+      markLeaving(ids);
       for (const chunk of chunkIds(ids)) {
-        muteThreads.mutate(chunk, { onError: () => setLeavingIds([]) });
+        muteThreads.mutate(chunk, { onError: () => unmarkLeaving(chunk) });
       }
       clearSelection();
       setFocusedId(null);
     },
-    [expand, muteThreads, clearSelection],
+    [expand, muteThreads, clearSelection, markLeaving, unmarkLeaving],
   );
 
   /**
@@ -948,9 +984,13 @@ export function FolderPage() {
              * делали разное.
              *
              * Щелчок по НЕвыделенной строке выделение не трогает: он
-             * относится к этой строке, и это тоже привычно.
+             * относится к этой строке, и это тоже привычно. Здесь стояло
+             * `clearSelection()` — прямо против написанного выше: человек
+             * набирал два десятка галочек, чуть промахивался правой
+             * кнопкой мимо выделения — и весь набор пропадал. Меню и так
+             * работает по contextTargets(), которое само решает, над чем
+             * действовать, так что снимать выделение незачем.
              */
-            if (!selectedIds.has(message.id)) clearSelection();
             setFocusedId(message.id);
             setContextMenu({ message, x, y, view: 'main' });
           }}

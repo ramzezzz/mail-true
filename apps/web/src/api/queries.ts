@@ -1,5 +1,6 @@
 /** Хуки @tanstack/react-query поверх клиента API. */
 
+import { useCallback, useMemo } from 'react';
 import {
   useInfiniteQuery,
   useMutation,
@@ -24,7 +25,7 @@ import type {
 } from './types';
 import { useUiStore } from '../app/store';
 import { actionErrorText } from '../lib/errorText';
-import { loadedCount, nextPageOffset, totalCount } from '../lib/paging';
+import { dedupeById, nextPageOffset, totalCount } from '../lib/paging';
 
 export const queryKeys = {
   account: ['account'] as const,
@@ -192,23 +193,51 @@ export function useFolderMessages(
   });
 
   const pages = result.data?.pages ?? [];
-  const items = pages.flatMap((page) => page.items);
+  /**
+   * Склеенные страницы — ОДИН И ТОТ ЖЕ массив, пока не приехали новые
+   * данные, и повторов в нём нет.
+   *
+   * Про повторы — см. `dedupeById`. Про постоянство ссылки: раньше здесь
+   * стоял голый `pages.flatMap`, то есть новый массив на каждый рендер.
+   * Список писем на него смотрит как на «письма изменились» и заново
+   * считает строки, счётчики переписок, состояния выделения — и заодно
+   * доводит прокрутку до строки под клавиатурным курсором. Человек уезжал
+   * колесом вниз читать темы, а список отпрыгивал обратно от любой
+   * мелочи: щелчка по галочке соседа, возврата в окно, события по сокету.
+   */
+  const items = useMemo(
+    () => dedupeById((result.data?.pages ?? []).flatMap((page) => page.items)),
+    [result.data],
+  );
+
+  /*
+   * Действия списка — постоянные функции. `loadMore` уезжает в эффект
+   * «долистали до конца» внутри списка: новая функция на каждый рендер
+   * заставляла бы этот эффект срабатывать снова и снова.
+   */
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = result;
+  const loadMore = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const retry = useCallback(() => void refetch(), [refetch]);
+  const refresh = useCallback(() => refetch(), [refetch]);
 
   return {
     items,
     total: pages.length > 0 ? totalCount(pages) : 0,
-    loaded: loadedCount(pages),
+    // Именно строки списка, а не сумма длин страниц: подпись «Выделить
+    // загруженные (N из M)» обещает выделить ровно то, что видно, а после
+    // снятия повторов это разные числа.
+    loaded: items.length,
     isPending: result.isPending,
     isError: result.isError,
     error: result.error,
     hasMore: Boolean(result.hasNextPage),
     isLoadingMore: result.isFetchingNextPage,
     isRefreshing: result.isFetching && !result.isPending && !result.isFetchingNextPage,
-    loadMore: () => {
-      if (result.hasNextPage && !result.isFetchingNextPage) void result.fetchNextPage();
-    },
-    retry: () => void result.refetch(),
-    refresh: () => result.refetch(),
+    loadMore,
+    retry,
+    refresh,
   };
 }
 
@@ -239,11 +268,24 @@ export function useMessage(
   });
 }
 
-/** После любых изменений писем перечитываем списки и счётчики папок. */
+/**
+ * После любых изменений писем перечитываем списки, ОТКРЫТОЕ ПИСЬМО и
+ * счётчики папок.
+ *
+ * Ключа три, и третий здесь не для красоты. Список лежит под
+ * `['messages']`, а показанное письмо — под своим `['message', id, images]`.
+ * Пока сбрасывался только список, флажок, поставленный на странице письма,
+ * не доходил до самого письма: пункт меню продолжал называться «Пометить
+ * флажком», второе нажатие снова слало `flagged: true` — снять флажок из
+ * просмотра было нельзя вообще. То же и с «прочитано»: `seen: true` уходил
+ * заново при каждом возврате к письму. Соседи (useLabels, useAwaitReply)
+ * сбрасывают оба ключа с самого начала — здесь про второй забыли.
+ */
 function useInvalidateMail() {
   const client = useQueryClient();
   return () => {
     void client.invalidateQueries({ queryKey: ['messages'] });
+    void client.invalidateQueries({ queryKey: ['message'] });
     void client.invalidateQueries({ queryKey: queryKeys.folders });
   };
 }

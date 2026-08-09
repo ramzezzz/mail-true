@@ -111,8 +111,11 @@ export function useCleanupState(enabled: boolean): {
 /**
  * После уборки меняется всё: список писем, счётчики папок и сам разбор.
  * Сервер свой снимок уже выбросил — здесь надо выбросить свой.
+ *
+ * Наружу вынесено ради удаления тяжёлых писем: оно ходит обычным переносом
+ * в корзину (useMoveMessages), а тот про разбор ящика ничего не знает.
  */
-function useInvalidateAfterSweep(): () => void {
+export function useInvalidateAfterSweep(): () => void {
   const client = useQueryClient();
   return () => {
     void client.invalidateQueries({ queryKey: ['messages'] });

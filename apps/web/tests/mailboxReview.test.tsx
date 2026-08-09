@@ -23,6 +23,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { Folder } from '@mail-true/shared';
+import { api } from '../src/api';
 import { ListToolbar } from '../src/mail/ListToolbar';
 import { useMailboxReviewAvailable } from '../src/mail/useMailings';
 import { MailboxReview } from '../src/mail/MailboxReview';
@@ -560,5 +561,36 @@ describe('разбор не выдаёт часть ящика за весь', (
     render(<MailboxReview onClose={() => undefined} folders={FOLDERS} />);
     await waitFor(() => text().includes('это не весь ящик'), 'предупреждение');
     expect(text()).toContain('Осмотрено 5000 писем из 21000');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Разбор после уборки                                                 */
+/* ------------------------------------------------------------------ */
+
+describe('убранные тяжёлые письма', () => {
+  it('пропадают из разбора, а не остаются в нём на четыре минуты', async () => {
+    /*
+     * Тяжёлые письма уезжают обычным переносом в корзину, а тот про разбор
+     * ящика ничего не знает. Снимок разбора живёт четыре минуты — и всё это
+     * время убранные письма оставались в списке «Самые тяжёлые» и в
+     * подсчёте занятого места. Человек видел их на прежнем месте и жал
+     * «Убрать в корзину» второй раз. Соседняя уборка (useSweepRun)
+     * сбрасывает разбор с самого начала.
+     */
+    const getCleanup = vi.spyOn(mailingsApi, 'getCleanup').mockResolvedValue(cleanupState());
+    vi.spyOn(api, 'moveMessages').mockResolvedValue({ moved: 1 });
+
+    render(<MailboxReview onClose={() => undefined} folders={FOLDERS} initialTab="space" />);
+    await waitFor(() => text().includes('Отчёт за год'), 'тяжёлое письмо');
+
+    const checkbox = [
+      ...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'),
+    ].find((input) => (input.closest('label')?.textContent ?? '') === '');
+    act(() => checkbox!.click());
+    await waitFor(() => Boolean(button('Убрать в корзину')), 'кнопка с числом');
+    click(button('Убрать в корзину')!);
+
+    await waitFor(() => getCleanup.mock.calls.length > 1, 'перечитанный разбор');
   });
 });

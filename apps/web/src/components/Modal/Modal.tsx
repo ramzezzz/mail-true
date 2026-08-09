@@ -69,6 +69,7 @@ export function Modal({ title, onClose, children, footer, className }: ModalProp
         requestClose();
         return;
       }
+      /* Про фазу перехвата — см. addEventListener в конце эффекта. */
       /*
        * Ловушка фокуса.
        *
@@ -99,11 +100,26 @@ export function Modal({ title, onClose, children, footer, className }: ModalProp
         (e.shiftKey ? last : first).focus();
       }
     };
-    document.addEventListener('keydown', onKeyDown);
+    /*
+     * Слушаем в фазе ПЕРЕХВАТА, а не всплытия, и это единственное, чем
+     * Escape окна отличается от Escape страницы.
+     *
+     * Страница письма и страница папки держат свои обработчики Escape на
+     * том же `document` — и `stopPropagation` соседа по узлу не гасит:
+     * во всплытии оба слушателя равноправны и срабатывают оба. Escape в
+     * предпросмотре вложения закрывал окно И одновременно уводил со
+     * страницы письма в список; то же с «Исходным текстом письма», а в
+     * папке «Разбор ящика» заодно снимал набранное выделение.
+     *
+     * Перехват на `document` идёт ДО того, как событие дойдёт до цели и
+     * пойдёт обратно, поэтому здешний `stopPropagation` до всплытия его и
+     * не допускает. Ровно так же сделано в ContextMenu.
+     */
+    document.addEventListener('keydown', onKeyDown, true);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
       document.body.style.overflow = previousOverflow;
     };
   }, [requestClose]);

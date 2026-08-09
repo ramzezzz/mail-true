@@ -46,6 +46,7 @@ import {
 } from './mailingsApi';
 import {
   useCleanupState,
+  useInvalidateAfterSweep,
   useMailingsState,
   useSweepPreview,
   useSweepRun,
@@ -389,6 +390,7 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
   const previewMutation = useSweepPreview();
   const runMutation = useSweepRun();
   const moveMessages = useMoveMessages();
+  const invalidateAfterSweep = useInvalidateAfterSweep();
   const showNotice = useUiStore((s) => s.showNotice);
 
   /** Отметка разбора, которую человек сейчас видит. */
@@ -441,6 +443,15 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
       {
         onSuccess: (result) => {
           setCheckedHeavy(new Set());
+          /*
+           * Разбор ящика держит свой снимок четыре минуты, и обычный
+           * перенос в корзину о нём не знает: убранные письма оставались
+           * в списке «Самые тяжёлые» и в подсчёте занятого места. Человек
+           * видел их на прежнем месте и жал «Убрать в корзину» второй раз.
+           * Соседняя уборка (useSweepRun) сбрасывает разбор с самого
+           * начала — здесь про это забыли.
+           */
+          invalidateAfterSweep();
           showNotice(`Убрали в корзину: ${messagesWord(result.moved)}, ${formatBytes(heavyBytes)}`);
         },
       },

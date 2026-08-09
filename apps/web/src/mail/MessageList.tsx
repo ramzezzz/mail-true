@@ -772,12 +772,26 @@ export function MessageList({
     if (lastVisible >= rows.length - 5) onEndReached();
   }, [lastVisible, rows.length, onEndReached]);
 
-  // Клавиатурный курсор всегда в зоне видимости
+  /**
+   * Клавиатурный курсор всегда в зоне видимости.
+   *
+   * Доводить прокрутку надо ровно тогда, когда курсор ПЕРЕЕХАЛ. Раньше
+   * эффект зависел ещё и от `rows`, а строки пересобираются от любого
+   * обновления списка — пришло письмо по сокету, вернулись в окно, сосед
+   * пометился прочитанным. Человек уходил колесом вниз читать темы, и
+   * список без объяснений утаскивало обратно к строке под курсором,
+   * которую он давно оставил. Поэтому строки читаются через ссылку и
+   * в зависимости эффекта не входят.
+   */
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   useEffect(() => {
     if (!focusedId) return;
-    const index = rows.findIndex((r) => r.type === 'message' && r.message.id === focusedId);
+    const index = rowsRef.current.findIndex(
+      (r) => r.type === 'message' && r.message.id === focusedId,
+    );
     if (index >= 0) virtualizer.scrollToIndex(index);
-  }, [focusedId, rows, virtualizer]);
+  }, [focusedId, virtualizer]);
 
   /**
    * Курсор списка ведёт за собой настоящий фокус. Раньше стрелки только

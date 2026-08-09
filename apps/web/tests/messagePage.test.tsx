@@ -19,11 +19,13 @@ import { act } from 'react-dom/test-utils';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import type { MessageListQuery, MessageSummary } from '@mail-true/shared';
 import { ApiError } from '../src/api/http';
 import type { MessageFull } from '../src/api/types';
 import { BLOCKED_PIXEL } from '../src/lib/externalImages';
 import { MessagePage } from '../src/pages/MessagePage';
 import { api } from '../src/api';
+import { useUiStore } from '../src/app/store';
 
 let host: HTMLDivElement;
 let root: Root;
@@ -75,16 +77,19 @@ function serverMessage(patch: Partial<MessageFull> = {}): MessageFull {
   };
 }
 
-function render() {
+function render(entry = '/inbox/inbox%3A209') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: 0 } },
   });
   act(() => {
     root.render(
       <QueryClientProvider client={client}>
-        <MemoryRouter initialEntries={['/inbox/inbox%3A209']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route path=":folderId/:messageId" element={<MessagePage />} />
+            {/* Куда уводит Escape со страницы письма: по этой надписи и
+                видно, ушли мы в список или остались в письме. */}
+            <Route path=":folderId" element={<div>Список писем</div>} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -103,10 +108,17 @@ async function waitFor(check: () => boolean, what: string): Promise<void> {
   throw new Error(`не дождались: ${what}\n${host.textContent}`);
 }
 
+const text = () => host.textContent ?? '';
+const button = (label: string) =>
+  [...host.querySelectorAll('button')].find((b) => b.textContent?.includes(label));
+const click = (el: Element) =>
+  act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
 beforeEach(() => {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
+  useUiStore.setState({ listView: { threaded: false, filter: 'all', labelFilter: null } });
 });
 
 afterEach(() => {
@@ -242,5 +254,221 @@ describe('письмо на два десятка получателей', () =>
 
     await waitFor(() => host.textContent!.includes('user20@example.org'), 'полный список');
     expect(host.textContent).toContain('user00@example.org');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Пометки открытого письма                                            */
+/* ------------------------------------------------------------------ */
+
+/** Пустой список папки: соседей у письма в этих проверках нет. */
+function emptyList() {
+  return vi.fn(async (query: MessageListQuery) => ({
+    items: [] as MessageSummary[],
+    total: 0,
+    offset: query.offset,
+    limit: query.limit,
+  }));
+}
+
+describe('флажок на открытом письме', () => {
+  it('поставленный флажок виден в самом письме, и его можно снять', async () => {
+    /*
+     * Пометки правились в списке (`['messages']`), а показанное письмо
+     * лежит под своим ключом (`['message', id, images]`) — и его никто не
+     * сбрасывал. Пункт меню продолжал называться «Пометить флажком»,
+     * второе нажатие снова слало `flagged: true`, и СНЯТЬ флажок из
+     * просмотра письма было нельзя вообще.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(emptyList());
+    let flagged = false;
+    const getMessage = vi
+      .spyOn(api, 'getMessage')
+      .mockImplementation(async () =>
+        serverMessage({ flags: { ...serverMessage().flags, flagged } }),
+      );
+    const setFlags = vi.spyOn(api, 'setFlags').mockImplementation(async (request) => {
+      if (request.set.flagged !== undefined) flagged = request.set.flagged;
+      return { updated: request.ids.length };
+    });
+
+    render();
+    await waitFor(() => text().includes('Тест картинок'), 'письмо');
+
+    const openMore = () => click(host.querySelector('button[aria-label="Ещё действия"]')!);
+    openMore();
+    await waitFor(() => Boolean(button('Пометить флажком')), 'пункт меню');
+    click(button('Пометить флажком')!);
+
+    await waitFor(() => setFlags.mock.calls.length === 1, 'запрос пометки');
+    expect(setFlags.mock.calls[0]?.[0].set).toMatchObject({ flagged: true });
+
+    // Письмо обязано перечитаться: иначе оно так и осталось бы без флажка
+    await waitFor(() => getMessage.mock.calls.length > 1, 'перечитанное письмо');
+
+    openMore();
+    await waitFor(() => Boolean(button('Снять флажок')), 'пункт «Снять флажок»');
+    expect(button('Пометить флажком')).toBeUndefined();
+
+    // И снятие доходит до сервера как снятие, а не как повторная простановка
+    click(button('Снять флажок')!);
+    await waitFor(() => setFlags.mock.calls.length === 2, 'запрос снятия');
+    expect(setFlags.mock.calls[1]?.[0].set).toMatchObject({ flagged: false });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Escape в окне поверх письма                                         */
+/* ------------------------------------------------------------------ */
+
+describe('Escape в предпросмотре вложения', () => {
+  it('закрывает окно и НЕ уводит со страницы письма', async () => {
+    /*
+     * Окно и страница письма слушали Escape на одном и том же `document`
+     * во всплытии, а `stopPropagation` соседа по узлу не гасит: одно
+     * нажатие закрывало предпросмотр И одновременно уводило в список.
+     * Человек хотел закрыть картинку, а терял и письмо.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(emptyList());
+    vi.spyOn(api, 'getMessage').mockResolvedValue(
+      serverMessage({
+        attachments: [
+          {
+            partId: '2',
+            filename: 'записка.txt',
+            mimeType: 'text/plain',
+            size: 12,
+            contentId: null,
+            inline: false,
+          },
+        ],
+      }),
+    );
+    vi.spyOn(api, 'getMessagePart').mockResolvedValue(new Blob(['привет'], { type: 'text/plain' }));
+
+    render();
+    await waitFor(() => Boolean(button('записка.txt')), 'карточку вложения');
+    click(button('записка.txt')!);
+    await waitFor(() => Boolean(host.querySelector('[role="dialog"]')), 'окно предпросмотра');
+
+    // Клавиша нажимается там, где стоит фокус, — внутри окна, а не в
+    // пустоте: именно так её и получает браузер.
+    const dialog = host.querySelector('[role="dialog"]')!;
+    act(() => {
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    // Окно уезжает с ходом (MODAL_EXIT_MS) — дожидаемся конца
+    await waitFor(() => !host.querySelector('[role="dialog"]'), 'закрытие окна');
+
+    expect(text(), 'Escape в окне не должен уводить в список').not.toContain('Список писем');
+    expect(text()).toContain('Тест картинок');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Переписка при включённой группировке                                */
+/* ------------------------------------------------------------------ */
+
+function threadSummary(uid: number, threadId: string): MessageSummary {
+  return {
+    id: `inbox:${uid}`,
+    folderId: 'inbox',
+    uid,
+    threadId,
+    from: { name: 'Иван', address: 'ivan@example.com' },
+    to: [],
+    cc: [],
+    subject: `Реплика ${uid}`,
+    snippet: `начало ${uid}`,
+    date: new Date(2026, 6, 1, 12, uid).toISOString(),
+    flags: {
+      seen: true,
+      flagged: false,
+      answered: false,
+      forwarded: false,
+      draft: false,
+      deleted: false,
+    },
+    hasAttachments: false,
+    attachmentNames: [],
+    labels: [],
+    pinned: false,
+    sizeBytes: 1024,
+  };
+}
+
+/**
+ * Сервер с включённой группировкой: строка на переписку — и та же папка
+ * плоским списком, если группировку не просили.
+ */
+function threadedServer() {
+  const conversation = [1, 2, 3].map((uid) => threadSummary(uid, 't-1'));
+  const other = threadSummary(10, 't-10');
+  return vi.fn(async (query: MessageListQuery) => {
+    const items = query.threaded
+      ? [
+          {
+            ...conversation[2]!,
+            thread: {
+              messageIds: ['inbox:1', 'inbox:2', 'inbox:3'],
+              count: 3,
+              unreadCount: 0,
+              flagged: false,
+              hasAttachments: false,
+              labels: [],
+              participants: [{ name: 'Иван', address: 'ivan@example.com' }],
+            },
+          },
+          other,
+        ]
+      : [...conversation, other];
+    return { items, total: items.length, offset: query.offset, limit: query.limit };
+  });
+}
+
+describe('переписка при включённой группировке', () => {
+  beforeEach(() => {
+    useUiStore.setState({ listView: { threaded: true, filter: 'all', labelFilter: null } });
+  });
+
+  it('показывает весь разговор, а не одну последнюю реплику', async () => {
+    /*
+     * С группировкой сервер отдаёт по одной строке на переписку, и блок
+     * «Ещё писем в переписке» оставался пуст: разговор из трёх писем
+     * показывал только то, которое открыли. Без группировки те же письма
+     * были на месте — то есть возможность ломалась ровно от включения
+     * переписок в настройках.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(threadedServer());
+    vi.spyOn(api, 'getMessage').mockResolvedValue(
+      serverMessage({ id: 'inbox:3', uid: 3, threadId: 't-1', subject: 'Реплика 3' }),
+    );
+
+    render('/inbox/inbox%3A3');
+    await waitFor(() => text().includes('Ещё писем в переписке'), 'блок переписки');
+    expect(text()).toContain('Ещё писем в переписке: 2');
+    // Свёрнутая строка разговора показывает начало письма, а не тему
+    expect(text()).toContain('начало 1');
+    expect(text()).toContain('начало 2');
+  });
+
+  it('стрелки к соседям работают и у письма из середины переписки', async () => {
+    /*
+     * Строку списка представляет ПОСЛЕДНЕЕ письмо разговора. У письма,
+     * открытого из блока переписки (или по прямой ссылке, или из поиска),
+     * совпадения по идентификатору в списке не находилось вовсе — и обе
+     * стрелки гасли намертво.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(threadedServer());
+    vi.spyOn(api, 'getMessage').mockResolvedValue(
+      serverMessage({ id: 'inbox:1', uid: 1, threadId: 't-1', subject: 'Реплика 1' }),
+    );
+
+    render('/inbox/inbox%3A1');
+    await waitFor(() => text().includes('Реплика 1'), 'письмо');
+
+    const next = host.querySelector<HTMLButtonElement>('button[aria-label="Следующее письмо"]');
+    expect(next, 'кнопка соседнего письма должна быть на месте').toBeTruthy();
+    expect(next!.disabled, 'следующая строка списка есть — стрелка обязана работать').toBe(false);
   });
 });
