@@ -107,6 +107,21 @@ export function isServiceFolder(info: Pick<RawFolderInfo, 'path' | 'delimiter'>)
 }
 
 /** Определяет роль папки по SPECIAL-USE или имени. */
+/**
+ * Роль, которую даст папке одно только ИМЯ.
+ *
+ * Нужна созданию папки: имя из списка выше превращает свою папку в
+ * служебную, а служебную нельзя ни переименовать, ни удалить. Человек
+ * заводил «Архив» руками — и получал папку, которую больше нечем убрать
+ * из продукта.
+ */
+export function roleByName(name: string): FolderRole {
+  for (const [re, role] of NAME_HINTS) {
+    if (re.test(name)) return role;
+  }
+  return 'custom';
+}
+
 export function detectRole(info: RawFolderInfo): FolderRole {
   if (info.path.toUpperCase() === 'INBOX') return 'inbox';
   if (info.specialUse) {

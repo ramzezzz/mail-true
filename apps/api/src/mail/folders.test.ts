@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   detectRole,
+  roleByName,
   encodePathId,
   decodePathId,
   mapFolders,
@@ -181,4 +182,30 @@ test('mapFolders: папка со словом Recovery внутри имени 
     raw({ path: 'Recovery plan', name: 'Recovery plan' }),
   ]);
   assert.ok(folders.some((f) => f.path === 'Recovery plan'));
+});
+
+/*
+ * Роль папки узнаётся в том числе по имени — так ящик, приехавший с
+ * чужого сервера, получает правильные папки. Обратная сторона: папка,
+ * заведённая человеком руками под таким именем, тоже становится
+ * служебной, а служебную нельзя ни переименовать, ни удалить. Убрать её
+ * из продукта было нечем, поэтому создание таких имён теперь отклоняется
+ * — а решает это `roleByName`.
+ */
+test('roleByName: имена служебных папок узнаются по-русски и по-английски', () => {
+  assert.equal(roleByName('Архив'), 'archive');
+  assert.equal(roleByName('archive'), 'archive');
+  assert.equal(roleByName('Спам'), 'spam');
+  assert.equal(roleByName('Корзина'), 'trash');
+  assert.equal(roleByName('Отложенные'), 'snoozed');
+  assert.equal(roleByName('Заглушённые'), 'muted');
+  assert.equal(roleByName('Черновики'), 'drafts');
+});
+
+test('roleByName: обычное имя остаётся обычным', () => {
+  // Иначе запрет разросся бы на всё подряд: «Архивные документы» — это
+  // папка человека, а не служебная.
+  assert.equal(roleByName('Договоры'), 'custom');
+  assert.equal(roleByName('Архивные документы'), 'custom');
+  assert.equal(roleByName('Спамеры'), 'custom');
 });

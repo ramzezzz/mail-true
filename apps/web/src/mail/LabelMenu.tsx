@@ -15,6 +15,7 @@ import { useNavigate } from 'react-router-dom';
 import { cx } from '../lib/cx';
 import { LabelPill } from './LabelPill';
 import { labelPresence, nextLabelAction, type MailLabel } from './labelsApi';
+import { chunkIds } from './threadList';
 import { useApplyLabels, useLabelsState } from './useLabels';
 import styles from './LabelMenu.module.css';
 
@@ -54,7 +55,19 @@ export function LabelMenu({ messages, targetIds, onApplied }: LabelMenuProps) {
 
   const toggle = (label: MailLabel): void => {
     const action = nextLabelAction(labelPresence(messages, label.key));
-    apply.mutate(action === 'add' ? { ids, add: [label.key] } : { ids, remove: [label.key] });
+    /*
+     * Порциями: маршрут принимает не больше пятисот писем за раз, а
+     * заголовок меню честно пишет «Метки для 600 писем» — столько
+     * набирается на длинной папке одним нажатием «выделить загруженные».
+     * Один запрос на всё отвергался целиком, и метка не ставилась НИ
+     * ОДНОМУ письму ровно там, где это нужнее всего. Рядом, у переноса и
+     * флагов, нарезка есть — три места просто пропустили.
+     */
+    for (const chunk of chunkIds(ids)) {
+      apply.mutate(
+        action === 'add' ? { ids: chunk, add: [label.key] } : { ids: chunk, remove: [label.key] },
+      );
+    }
     onApplied?.();
   };
 

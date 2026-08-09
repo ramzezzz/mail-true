@@ -17,7 +17,12 @@ import { z } from 'zod';
 import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
-import { findFolderById, folderPathBytes, MAX_FOLDER_PATH_BYTES } from '../mail/folders.js';
+import {
+  findFolderById,
+  folderPathBytes,
+  MAX_FOLDER_PATH_BYTES,
+  roleByName,
+} from '../mail/folders.js';
 import type { MailSession } from '../types.js';
 import { originOf } from './access-record.js';
 
@@ -87,6 +92,28 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
       const folders = await listFolders(client);
       const delimiter = await delimiterOf(client, folders);
       checkName(draft.name, delimiter);
+      /*
+       * Имя, которое делает папку СЛУЖЕБНОЙ, руками не даём.
+       *
+       * Роль папки узнаётся в том числе по имени («Архив», «Спам»,
+       * «Корзина», «Отложенные», «Заглушённые» и их английские
+       * написания) — так ящик, приехавший с чужого сервера, получает
+       * правильные папки. Обратная сторона: заведённая руками папка с
+       * таким именем тоже становится служебной, а служебную нельзя ни
+       * переименовать, ни удалить. Человек создавал её сам — и больше не
+       * мог убрать из продукта ничем.
+       *
+       * Отдельно про «Заглушённые»: правило доставки пишет туда жёстко
+       * заданный путь, и своя папка с таким именем расщепляла бы
+       * заглушённую переписку на две.
+       */
+      const wouldBeSystem = roleByName(draft.name);
+      if (wouldBeSystem !== 'custom') {
+        throw new BadRequestError(
+          `Имя «${draft.name}» занято под служебную папку: такие папки почта заводит сама, ` +
+            'и удалить или переименовать их потом нельзя. Выберите другое имя.',
+        );
+      }
 
       let path = draft.name;
       if (draft.parentId) {

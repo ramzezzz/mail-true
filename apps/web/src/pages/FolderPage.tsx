@@ -249,10 +249,49 @@ export function FolderPage() {
     [expand, setFlags, clearSelection],
   );
 
+  /**
+   * Над чем работает контекстное меню.
+   *
+   * Если щёлкнули по выделенной строке — над всем выделением; иначе — над
+   * этой строкой. Ровно так же ведёт себя перетаскивание, и два жеста
+   * над одним письмом не должны делать разное.
+   */
+  const contextTargets = useCallback((): string[] => {
+    const id = contextMenu?.message.id;
+    if (!id) return [];
+    return selectedIds.has(id) ? [...selectedIds] : [id];
+  }, [contextMenu?.message.id, selectedIds]);
+
+  /** Папка, открытая сейчас: нужна и обработчикам выше, и разметке ниже. */
+  const currentFolder = (folders ?? []).find((f) => f.id === folderId);
+
   const moveTo = useCallback(
     (rowIds: string[], targetFolderId: string) => {
       const ids = expand(rowIds);
       if (ids.length === 0) return;
+      /*
+       * ПЕРЕНОС В ТУ ЖЕ ПАПКУ — НЕ ДЕЙСТВИЕ, А НЕДОРАЗУМЕНИЕ.
+       *
+       * Сервер такой перенос пропускает (исходная папка и есть цель) и
+       * честно отвечает «перенесено 0». А браузер к этому моменту уже
+       * погасил строки: они становились невидимыми дырами — их нельзя ни
+       * выделить, ни открыть, ни повторить действие, и метка «уезжает» с
+       * них не снималась никогда, потому что письма из списка никуда не
+       * делись. Лечилось только уходом в другую папку или перезагрузкой.
+       *
+       * Ловилось это на самом обычном: «Удалить» в «Корзине», «В архив» в
+       * «Архиве», «Спам» в «Спаме» — и жестами смахивания, которые делают
+       * то же самое.
+       */
+      if (targetFolderId === folderId || targetFolderId === currentFolder?.role) {
+        showNotice(
+          targetFolderId === 'trash'
+            ? 'Эти письма уже в «Корзине». Очистить её целиком можно в настройках, в разделе «Восстановление писем»'
+            : 'Эти письма уже в этой папке',
+        );
+        clearSelection();
+        return;
+      }
       // Строки гаснут сразу: ждать ответа сервера, чтобы показать отклик,
       // нельзя — при неудаче метка снимается и письма возвращаются на место.
       setLeavingIds(ids);
@@ -262,7 +301,7 @@ export function FolderPage() {
       clearSelection();
       setFocusedId(null);
     },
-    [expand, moveMessages, clearSelection],
+    [expand, moveMessages, clearSelection, folderId, currentFolder?.role, showNotice],
   );
 
   /** Подгрузка следующей страницы — по прокрутке до конца списка. */
@@ -277,7 +316,6 @@ export function FolderPage() {
    * Смотрим на роль папки, а не на её идентификатор: имя папки черновиков
    * в IMAP бывает любым, роль ставит сервер.
    */
-  const currentFolder = (folders ?? []).find((f) => f.id === folderId);
   const draftsFolder = (currentFolder?.role ?? folderId) === 'drafts';
   const { openDraft } = useOpenDraft();
 
@@ -637,7 +675,8 @@ export function FolderPage() {
      */
     const ids = targetIds();
     if (ids.length === 0) return;
-    unmuteThreads.mutate(ids);
+    // Порциями: маршрут снятия принимает не больше пятисот писем.
+    for (const chunk of chunkIds(ids)) unmuteThreads.mutate(chunk);
     clearSelection();
   }, [targetIds, unmuteThreads, clearSelection]);
 
@@ -661,11 +700,16 @@ export function FolderPage() {
        * три значило бы три напоминания об одном и том же.
        */
       if (rowIds.length === 0) return;
-      awaitReply.mutate({
-        ids: rowIds,
-        preset: choice.preset,
-        ...(choice.until ? { until: choice.until } : {}),
-      });
+      // Порциями: маршрут ожидания принимает не больше сотни писем, а
+      // в «Отправленных» легко выделить двести загруженных строк — запрос
+      // отвергался целиком, и ожидание не ставилось ни на одно письмо.
+      for (const chunk of chunkIds(rowIds, 100)) {
+        awaitReply.mutate({
+          ids: chunk,
+          preset: choice.preset,
+          ...(choice.until ? { until: choice.until } : {}),
+        });
+      }
       clearSelection();
     },
     [awaitReply, clearSelection],
@@ -674,7 +718,7 @@ export function FolderPage() {
   const stopWaiting = useCallback(
     (rowIds: string[]) => {
       if (rowIds.length === 0) return;
-      cancelAwaitReply.mutate(rowIds);
+      for (const chunk of chunkIds(rowIds, 100)) cancelAwaitReply.mutate(chunk);
       clearSelection();
     },
     [cancelAwaitReply, clearSelection],
@@ -892,6 +936,21 @@ export function FolderPage() {
             ) : null
           }
           onContextMenu={(message, x, y) => {
+            /*
+             * Правый щелчок по ВЫДЕЛЕННОМУ письму работает над всем
+             * выделением — так же, как перетаскивание в этом же списке.
+             *
+             * Раньше пункты меню шли по одному письму под курсором, а
+             * `clearSelection` внутри действий уничтожал выделение из
+             * двадцати строк: человек отмечал галочками два десятка писем,
+             * выбирал «Удалить» — уезжало одно, а набирать выделение
+             * приходилось заново. Два соседних жеста над одной строкой
+             * делали разное.
+             *
+             * Щелчок по НЕвыделенной строке выделение не трогает: он
+             * относится к этой строке, и это тоже привычно.
+             */
+            if (!selectedIds.has(message.id)) clearSelection();
             setFocusedId(message.id);
             setContextMenu({ message, x, y, view: 'main' });
           }}
@@ -929,19 +988,19 @@ export function FolderPage() {
               {/* Группа 2 */}
               <ContextMenuItem
                 before={<IconTrash />}
-                onClick={() => moveTo([contextMenu.message.id], 'trash')}
+                onClick={() => moveTo(contextTargets(), 'trash')}
               >
                 Удалить
               </ContextMenuItem>
               <ContextMenuItem
                 before={<IconArchive />}
-                onClick={() => moveTo([contextMenu.message.id], 'archive')}
+                onClick={() => moveTo(contextTargets(), 'archive')}
               >
                 В архив
               </ContextMenuItem>
               <ContextMenuItem
                 before={<IconSpam />}
-                onClick={() => moveTo([contextMenu.message.id], 'spam')}
+                onClick={() => moveTo(contextTargets(), 'spam')}
               >
                 Спам
               </ContextMenuItem>
@@ -985,7 +1044,7 @@ export function FolderPage() {
               <ContextMenuItem
                 before={<IconMailUnread />}
                 hint="U"
-                onClick={() => applyFlags([contextMenu.message.id], { seen: false })}
+                onClick={() => applyFlags(contextTargets(), { seen: false })}
               >
                 Пометить непрочитанным
               </ContextMenuItem>
