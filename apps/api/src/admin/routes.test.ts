@@ -86,8 +86,19 @@ class FakeDb {
   }
 
   /* --- ящики --- */
+  /*
+   * Возвращаем СНИМОК, а не саму строку.
+   *
+   * Настоящая база отдаёт копию: `before` в маршруте — это состояние до
+   * правки, и на него смотрят проверки «что именно изменилось». Заглушка
+   * же отдавала ту же ссылку, которую потом меняла `updateMailUser`, —
+   * то есть `before` менялся задним числом, и условие «ящик был активен,
+   * а стал заблокирован» не срабатывало никогда. Из-за этого закрытие
+   * доступа при массовой блокировке нельзя было проверить вовсе.
+   */
   async findMailUserById(id: number): Promise<Record<string, unknown> | null> {
-    return this.users.get(id) ?? null;
+    const row = this.users.get(id);
+    return row ? { ...row } : null;
   }
   async findMailUserByEmail(email: string): Promise<Record<string, unknown> | null> {
     for (const user of this.users.values()) {
@@ -293,6 +304,22 @@ class FakeDb {
   }
 }
 
+/**
+ * След закрытия доступа к ящику.
+ *
+ * Блокировка, смена пароля и удаление обязаны закрывать всё разом:
+ * сессии, соединения пула и наблюдателя за ящиком. Раньше стенд об этом
+ * не знал вовсе, и проверить было нечем — а массовая блокировка как раз
+ * проходила мимо: строка в базе менялась, а человек продолжал читать
+ * почту, потому что Dovecot отсеивает заблокированных только при
+ * проверке пароля.
+ */
+interface AccessTrace {
+  revoked: string[];
+  closed: string[];
+  watchers: string[];
+}
+
 interface Harness {
   app: FastifyInstance;
   db: FakeDb;
@@ -300,6 +327,7 @@ interface Harness {
   /** Кука админской сессии — её нужно слать в каждом запросе. */
   cookie: string;
   mailRoot: string;
+  access: AccessTrace;
 }
 
 /** Поднимает Fastify с админскими маршрутами и уже открытой сессией. */
@@ -369,6 +397,28 @@ async function harness(options?: {
         }),
   };
 
+  const access: AccessTrace = { revoked: [], closed: [], watchers: [] };
+  app.decorate('deps', {
+    sessions: {
+      revokeByEmail: async (email: string) => {
+        access.revoked.push(email);
+        return 1;
+      },
+    },
+    pool: {
+      closeUser: async (email: string) => {
+        access.closed.push(email);
+      },
+    },
+  } as unknown as FastifyInstance['deps']);
+  app.decorate('mailNotifier', {
+    notify: () => false,
+    dropWatcher: (email: string) => {
+      access.watchers.push(email);
+      return true;
+    },
+  });
+
   app.decorate('adminCtx', ctx);
   app.decorateRequest('admin', null);
   app.decorateRequest('mailSession', null);
@@ -394,7 +444,14 @@ async function harness(options?: {
     3600,
   );
   const signed = app.signCookie(sessionId);
-  return { app, db, ctx, cookie: `${config.ADMIN_SESSION_COOKIE_NAME}=${signed}`, mailRoot };
+  return {
+    app,
+    db,
+    ctx,
+    cookie: `${config.ADMIN_SESSION_COOKIE_NAME}=${signed}`,
+    mailRoot,
+    access,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1071,4 +1128,108 @@ test('обычное включение алиаса по-прежнему ра�
   } finally {
     await h.app.close();
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Блокировка и удаление обязаны закрывать доступ                       */
+/* ------------------------------------------------------------------ */
+
+void test('массовая блокировка выкидывает заблокированных из почты', async () => {
+  /*
+   * Одиночная блокировка закрывает сессии, соединения и наблюдателя, а
+   * массовая — не закрывала ничего: менялась только строка в базе.
+   * Dovecot отсеивает `active` лишь при проверке пароля, а у вошедшего
+   * проверять нечего: сессия продлевается на каждом запросе, соединение
+   * пула переиспользуется без сверки, наблюдатель держит своё и шлёт
+   * события о новых письмах. То есть человек, снявший галку «активен» у
+   * целого отдела, не менял для них ничего — они читали почту дальше.
+   */
+  const h = await harness();
+  for (const id of [31, 32]) {
+    h.db.users.set(id, {
+      id,
+      domain_id: 5,
+      email: `uvolen${String(id)}@x.local`,
+      display_name: null,
+      quota_bytes: 1024,
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+      domain: 'x.local',
+      alias_count: 0,
+    });
+  }
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/users/bulk',
+    headers: { cookie: h.cookie },
+    payload: { ids: [31, 32], active: false },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+
+  assert.deepEqual(h.access.revoked.sort(), ['uvolen31@x.local', 'uvolen32@x.local']);
+  assert.deepEqual(h.access.closed.sort(), ['uvolen31@x.local', 'uvolen32@x.local']);
+  assert.deepEqual(h.access.watchers.sort(), ['uvolen31@x.local', 'uvolen32@x.local']);
+  await h.app.close();
+});
+
+void test('разблокировка доступ не трогает: закрывать нечего', async () => {
+  const h = await harness();
+  h.db.users.set(33, {
+    id: 33,
+    domain_id: 5,
+    email: 'vernuli@x.local',
+    display_name: null,
+    quota_bytes: 1024,
+    active: false,
+    created_at: new Date(),
+    updated_at: new Date(),
+    domain: 'x.local',
+    alias_count: 0,
+  });
+
+  await h.app.inject({
+    method: 'POST',
+    url: '/users/bulk',
+    headers: { cookie: h.cookie },
+    payload: { ids: [33], active: true },
+  });
+
+  assert.deepEqual(h.access.revoked, [], 'включение ящика не должно никого выкидывать');
+  await h.app.close();
+});
+
+void test('удаление ящика закрывает доступ, а не только уносит данные', async () => {
+  /*
+   * Удаление доступ не закрывало вовсе, хотя блокировка — действие
+   * заведомо более слабое — закрывает. Ящика уже нет, а cookie по-прежнему
+   * проходит проверку сессии, и наблюдатель до суток держит соединение с
+   * паролем удалённого ящика.
+   */
+  const h = await harness();
+  h.db.users.set(34, {
+    id: 34,
+    domain_id: 5,
+    email: 'udalyaemyi@x.local',
+    display_name: null,
+    quota_bytes: 1024,
+    active: true,
+    created_at: new Date(),
+    updated_at: new Date(),
+    domain: 'x.local',
+    alias_count: 0,
+  });
+
+  const response = await h.app.inject({
+    method: 'DELETE',
+    url: '/users/34',
+    headers: { cookie: h.cookie },
+  });
+  assert.equal(response.statusCode, 200, response.body);
+
+  assert.deepEqual(h.access.revoked, ['udalyaemyi@x.local'], 'сессии удалённого ящика остались');
+  assert.deepEqual(h.access.closed, ['udalyaemyi@x.local'], 'соединения пула остались');
+  assert.deepEqual(h.access.watchers, ['udalyaemyi@x.local'], 'наблюдатель остался жив');
+  await h.app.close();
 });

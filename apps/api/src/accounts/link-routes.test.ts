@@ -44,10 +44,16 @@ function code(text: string): string {
 const ROUTES = code(source('./routes.ts'));
 
 test('связывание не заводит обратную связь с нашим паролем', () => {
-  const linkBlock = ROUTES.slice(
-    ROUTES.indexOf("app.post('/link'"),
-    ROUTES.indexOf("app.delete('/link"),
-  );
+  /*
+   * Границы блока ищем по самим путям, а не по строке `app.post('/link'`.
+   *
+   * У маршрута появились настройки (предел частоты запросов), объявление
+   * переехало на несколько строк — и поиск по слитному написанию перестал
+   * находить хоть что-нибудь. Тест при этом не покраснел от настоящей
+   * поломки: он просто резал пустоту и считал в ней ноль вызовов.
+   */
+  const linkBlock = ROUTES.slice(ROUTES.indexOf("'/link'"), ROUTES.indexOf("'/link/:email'"));
+  assert.ok(linkBlock.length > 0, 'блок маршрута связывания не найден — проверка ничего не проверяет');
 
   const links = linkBlock.match(/db\.linkAccount\(/g) ?? [];
   assert.equal(

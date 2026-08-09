@@ -24,6 +24,7 @@ import { accountsKeys } from '../api/accountsQueries';
 import { setUnauthorizedHandler } from '../api/http';
 import type { SessionInfo } from '../api/types';
 import { forgetAppearance, syncAppearance } from '../appearance/sync';
+import { disablePush } from '../notifications/subscribe';
 import { publishMailEvent } from './mailEvents';
 import { useUiStore } from './store';
 
@@ -141,6 +142,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
+    /*
+     * Подписка на уведомления снимается ПЕРВОЙ, пока сессия ещё жива.
+     *
+     * Без этого выход её не трогал вовсе, а наблюдатель на сервере видел
+     * живую подписку и продолжал работать ещё сутки — с паролем вышедшего
+     * человека в памяти. На общем компьютере это значило, что посторонний
+     * до суток получает уведомления о чужих новых письмах, а при
+     * включённом «класть содержимое в push» — прямо с темой и
+     * отправителем: показывает их Service Worker, ни о чём не спрашивая
+     * сервер.
+     */
+    await disablePush().catch(() => undefined);
     await api.logout().catch(() => undefined);
     setSession(null);
     queryClient.clear();

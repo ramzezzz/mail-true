@@ -46,6 +46,16 @@ export interface SessionStore {
    */
   revokeByEmail(email: string): Promise<number>;
   /**
+   * Сколько живых сессий у ящика.
+   *
+   * Нужно выходу: наблюдатель за ящиком держит своё соединение с паролем
+   * и живёт до суток без единой вкладки — ради уведомлений. Гасить его
+   * можно только тогда, когда ушёл последний: иначе выход на телефоне
+   * лишал бы уведомлений человека, оставшегося в почте на рабочем
+   * компьютере.
+   */
+  countByEmail(email: string): Promise<number>;
+  /**
    * Отвечает ли хранилище. Нужна пробе состояния: без хранилища сессий
    * ни один вошедший пользователь не сделает ни одного запроса.
    * Проверка идёт по УЖЕ ОТКРЫТОМУ соединению — своего не заводит.
@@ -99,6 +109,27 @@ export class RedisSessionStore implements SessionStore {
 
   async touch(id: string, ttlSeconds: number): Promise<void> {
     await this.redis.expire(PREFIX + id, ttlSeconds);
+    /*
+     * Указатель продлевается ВМЕСТЕ с сессией.
+     *
+     * Сессия живёт скользящим сроком: браузер опрашивает сервер сам, и
+     * открытая вкладка держит её сколько угодно долго без повторного
+     * входа. А указатель получал срок только при входе — и через две
+     * недели истекал у живой сессии. Дальше revokeByEmail находил пустое
+     * множество и честно возвращал ноль: смена пароля, блокировка и
+     * удаление ящика переставали закрывать доступ, ничем этого не
+     * показывая.
+     *
+     * Стоит это дороже, чем кажется: чтение почты у такой сессии
+     * отвалится (новый вход в Dovecot со старым паролем не пройдёт), а
+     * вот выгрузка ящика идёт СЛУЖЕБНЫМ пользователем — то есть угнанная
+     * сессия и после смены пароля могла заказать и скачать архив со всей
+     * перепиской.
+     */
+    const data = await this.get(id);
+    if (!data) return;
+    await this.redis.sadd(indexKey(data.email), id);
+    await this.redis.expire(indexKey(data.email), ttlSeconds * 2);
   }
 
   async delete(id: string): Promise<void> {
@@ -115,9 +146,31 @@ export class RedisSessionStore implements SessionStore {
     for (const id of ids) {
       const removed = await this.redis.del(PREFIX + id);
       if (removed > 0) closed += 1;
+      /*
+       * Убираем ПОИМЁННО то, что прочитали, а не весь указатель разом.
+       *
+       * `del(key)` в конце сносил и те идентификаторы, что появились
+       * между чтением множества и удалением, — а появиться они успевают:
+       * человек входит заново ровно тогда, когда ему меняют пароль.
+       * Такая сессия выпадала из указателя навсегда и становилась
+       * неотзываемой: следующая попытка закрыть доступ её уже не видела.
+       */
+      await this.redis.srem(key, id);
     }
-    await this.redis.del(key);
     return closed;
+  }
+
+  async countByEmail(email: string): Promise<number> {
+    const ids = await this.redis.smembers(indexKey(email));
+    if (ids.length === 0) return 0;
+    let alive = 0;
+    // Указатель может помнить и уже истёкшие: проверяем каждую.
+    for (const id of ids) {
+      const exists = await this.redis.exists(PREFIX + id);
+      if (exists > 0) alive += 1;
+      else await this.redis.srem(indexKey(email), id);
+    }
+    return alive;
   }
 
   async ping(): Promise<ProbeOutcome> {
@@ -184,6 +237,16 @@ export class MemorySessionStore implements SessionStore {
       closed += 1;
     }
     return closed;
+  }
+
+  async countByEmail(email: string): Promise<number> {
+    this.sweep();
+    const wanted = email.trim().toLowerCase();
+    let alive = 0;
+    for (const entry of this.map.values()) {
+      if (entry.data.email.trim().toLowerCase() === wanted) alive += 1;
+    }
+    return alive;
   }
 
   async ping(): Promise<ProbeOutcome> {

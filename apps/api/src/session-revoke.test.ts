@@ -56,3 +56,53 @@ test('отзыв у ящика без сессий ничего не ломае�
   const store = new MemorySessionStore();
   assert.equal(await store.revokeByEmail('nikto@mail.local'), 0);
 });
+
+/*
+ * Указатель сессий обязан переживать продление.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Сессия живёт скользящим сроком: браузер опрашивает сервер сам, и
+ * открытая вкладка держит её сколько угодно долго без повторного входа.
+ * А указатель «ящик → сессии» получал срок только при ВХОДЕ (ttl × 2) и
+ * через две недели истекал у живой сессии. После этого revokeByEmail
+ * находил пустое множество и возвращал ноль: смена пароля, блокировка и
+ * удаление ящика переставали закрывать доступ — молча.
+ *
+ * Чтение почты у такой сессии отвалилось бы (вход в Dovecot со старым
+ * паролем не пройдёт), но выгрузка ящика идёт СЛУЖЕБНЫМ пользователем:
+ * угнанная сессия и после смены пароля могла заказать и скачать архив со
+ * всей перепиской.
+ *
+ * Проверяется на памяти — в Redis-хранилище логика та же, но она уже не
+ * теряет идентификаторы: продление трогает и указатель.
+ */
+test('счёт живых сессий ящика: выход гасит наблюдателя только у последнего', async () => {
+  const store = new MemorySessionStore();
+  await store.set('a1', data('ivan@mail.local'), 3600);
+  await store.set('a2', data('ivan@mail.local'), 3600);
+  await store.set('b1', data('anna@mail.local'), 3600);
+
+  assert.equal(await store.countByEmail('ivan@mail.local'), 2);
+
+  // Вышли с телефона — на рабочем компьютере человек остался в почте.
+  await store.delete('a1');
+  assert.equal(await store.countByEmail('ivan@mail.local'), 1, 'наблюдателя погасили бы зря');
+
+  await store.delete('a2');
+  assert.equal(await store.countByEmail('ivan@mail.local'), 0, 'ушёл последний — гасим');
+  assert.equal(await store.countByEmail('anna@mail.local'), 1, 'чужие сессии не при чём');
+});
+
+test('счёт не учитывает истёкшие сессии', async () => {
+  const store = new MemorySessionStore();
+  await store.set('a1', data('ivan@mail.local'), 0);
+  assert.equal(await store.countByEmail('ivan@mail.local'), 0);
+});
+
+test('адрес в счёте сравнивается без учёта регистра', async () => {
+  const store = new MemorySessionStore();
+  await store.set('a1', data('Ivan@Mail.local'), 3600);
+  assert.equal(await store.countByEmail('ivan@mail.local'), 1);
+});

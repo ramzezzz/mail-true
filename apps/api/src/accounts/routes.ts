@@ -17,6 +17,8 @@ import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js'
 import { listFolders } from '../imap/service.js';
 import { loadForwardedMessages } from '../mail/forwarded.js';
 import { setSessionCookie } from '../routes/auth.js';
+import { draftSequencerFor, dropDraftAfterSend } from '../routes/compose.js';
+import { originOf } from '../settings/access-record.js';
 import { detectMailSettings, type LocalMailSettings } from './autodetect.js';
 import { decodeLabel } from './collectorRoutes.js';
 import { composeExternalRaw, externalRecipients } from './compose.js';
@@ -80,6 +82,20 @@ const addressSchema = z.object({
 });
 
 const sendSchema = z.object({
+  /**
+   * Черновик, из которого отправляют.
+   *
+   * Этих двух полей здесь не было, и черновик после отправки «от имени»
+   * оставался лежать в папке. Свой путь отправки его убирает (см.
+   * routes/compose.ts, dropDraftAfterSend), а этот — нет, хотя черновик
+   * один и тот же и лежит в НАШЕМ ящике. Сценарий целиком: человек открыл
+   * сохранённое письмо, переключил отправителя на подключённый внешний
+   * адрес, отправил — окно закрылось, письмо ушло, черновик остался. Через
+   * неделю он находит его в «Черновиках», не помнит, отправлял или нет, и
+   * отправляет ещё раз. У получателя дубль.
+   */
+  draftUid: z.number().int().positive().optional(),
+  draftKey: z.string().min(1).max(100).optional(),
   to: z.array(addressSchema).max(100).default([]),
   cc: z.array(addressSchema).max(100).default([]),
   bcc: z.array(addressSchema).max(100).default([]),
@@ -187,41 +203,85 @@ export async function accountsUserRoutes(
    * Связь заводится в обе стороны, иначе вернуться обратно было бы
    * нельзя без повторного ввода.
    */
-  app.post('/link', { preHandler: app.requireSession }, async (request) => {
-    const session = sessionOf(request);
-    const { email, password, label } = linkSchema.parse(request.body);
-    if (email === session.email.toLowerCase()) {
-      throw new BadRequestError('Это и есть текущий ящик');
-    }
-    const db = service.requireDb();
-    const box = service.requireSecretBox();
+  /*
+   * Предел частоты — тот же, что у формы входа.
+   *
+   * Этот маршрут проверяет ЧУЖОЙ пароль настоящим логином к Dovecot и
+   * однозначно отвечает, подошёл он или нет. То есть это вторая форма
+   * входа — только раньше она была без замков: предел стоял общий (300
+   * запросов в минуту вместо десяти), строки для fail2ban не было вовсе,
+   * и в историю ящика жертвы попытки не попадали. Подбор пароля через
+   * него обходил всю защиту, выстроенную вокруг /auth/login; нужен для
+   * этого лишь любой действующий ящик на сервере — хоть свой собственный.
+   */
+  app.post(
+    '/link',
+    { preHandler: app.requireSession, config: { rateLimit: { max: 10, timeWindow: 60_000 } } },
+    async (request) => {
+      const session = sessionOf(request);
+      const { email, password, label } = linkSchema.parse(request.body);
+      if (email === session.email.toLowerCase()) {
+        throw new BadRequestError('Это и есть текущий ящик');
+      }
+      const db = service.requireDb();
+      const box = service.requireSecretBox();
 
-    // Проверяем владение реальным логином к нашему Dovecot.
-    await pool.verify(email, password);
+      // Проверяем владение реальным логином к нашему Dovecot.
+      try {
+        await pool.verify(email, password);
+      } catch (err) {
+        /*
+         * Неудача обязана оставить след — ровно такой же, как у входа.
+         *
+         * Запись в историю ящика видит его владелец: чужие попытки
+         * привязать его ящик к себе — это именно то, ради чего раздел
+         * «Вход и действия» и открывают. Строку в журнале читает
+         * fail2ban: без неё камера включена и не ловит ничего.
+         *
+         * Недоступность почтового сервера следом НЕ пишем: иначе авария
+         * Dovecot превращалась бы в веерный бан своих же (разбор — в
+         * routes/auth.ts).
+         */
+        if ((err as { code?: string } | null)?.code === 'AUTH_FAILED') {
+          app.deps.accessLog?.record({
+            accountEmail: email,
+            kind: 'login.failed',
+            success: false,
+            detail: `Неудачная попытка связать ящик из сессии ${session.email}`,
+            ...originOf(request),
+          });
+          request.log.warn(
+            { kind: 'login.failed', ip: request.ip, email },
+            'Неудачная попытка входа в веб-почту',
+          );
+        }
+        throw err;
+      }
 
-    return guard(async () => {
-      /*
-       * Связь заводится ТОЛЬКО В ОДНУ СТОРОНУ.
-       *
-       * Здесь стояла ещё и обратная — «чтобы переключиться назад тоже без
-       * пароля», — и она отдавала владельцу чужого ящика ключ от нашего.
-       * Проверка выше доказывает ровно одно: вызывающий знает пароль B.
-       * Из этого никак не следует право B ходить в A, а именно оно и
-       * записывалось: строка owner=B, linked=A с зашифрованным паролем A.
-       *
-       * Цена была высокой и незаметной. Администратор, который сам выдал
-       * сотруднику пароль и связал его ящик со своим, чтобы посмотреть
-       * жалобу, тем самым дарил сотруднику вход в СВОЮ почту: тот видел
-       * ящик администратора в списке связанных и входил одним нажатием,
-       * ничего не зная и ничего не подтверждая.
-       *
-       * Вернуться назад по-прежнему можно и без пароля — правом на это
-       * распоряжается сессия, а не общая таблица (см. returnTo в /switch).
-       */
-      const linked = await db.linkAccount(session.email, email, label, box.encrypt(password));
-      return { linked };
-    });
-  });
+      return guard(async () => {
+        /*
+         * Связь заводится ТОЛЬКО В ОДНУ СТОРОНУ.
+         *
+         * Здесь стояла ещё и обратная — «чтобы переключиться назад тоже без
+         * пароля», — и она отдавала владельцу чужого ящика ключ от нашего.
+         * Проверка выше доказывает ровно одно: вызывающий знает пароль B.
+         * Из этого никак не следует право B ходить в A, а именно оно и
+         * записывалось: строка owner=B, linked=A с зашифрованным паролем A.
+         *
+         * Цена была высокой и незаметной. Администратор, который сам выдал
+         * сотруднику пароль и связал его ящик со своим, чтобы посмотреть
+         * жалобу, тем самым дарил сотруднику вход в СВОЮ почту: тот видел
+         * ящик администратора в списке связанных и входил одним нажатием,
+         * ничего не зная и ничего не подтверждая.
+         *
+         * Вернуться назад по-прежнему можно и без пароля — правом на это
+         * распоряжается сессия, а не общая таблица (см. returnTo в /switch).
+         */
+        const linked = await db.linkAccount(session.email, email, label, box.encrypt(password));
+        return { linked };
+      });
+    },
+  );
 
   app.delete('/link/:email', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
@@ -579,7 +639,7 @@ export async function accountsUserRoutes(
       session.email,
       forwarded,
     );
-    await sendAsExternal({
+    const outcome = await sendAsExternal({
       account: found.account,
       password: service.passwordOf(found),
       raw,
@@ -600,7 +660,34 @@ export async function accountsUserRoutes(
         logger.warn(errorInfo(err), 'Не удалось положить копию в «Отправленные» чужого ящика');
       });
 
+    /*
+     * Черновик убирается ТОЙ ЖЕ очередью сохранений, что и автосохранение
+     * окна написания (см. routes/compose.ts). Иначе таймер успел бы
+     * положить новую копию уже отправленного письма — и мы вернулись бы
+     * к тому же дублю, только с другой стороны.
+     *
+     * После отправки, а не до: письмо могло не уйти вовсе, и остаться без
+     * черновика человеку было бы куда хуже, чем с лишним.
+     */
+    await dropDraftAfterSend(
+      draftSequencerFor(app.deps),
+      pool,
+      session,
+      { draftUid: draft.draftUid, draftKey: draft.draftKey },
+      logger,
+    );
+
     await Promise.all(draft.attachmentIds.map((aid) => uploads.delete(aid)));
-    return { ok: true, from: found.account.address };
+    /*
+     * Отвергнутые адреса называются поимённо — как и на своём пути
+     * отправки. `ok: false` при непустом списке значит «ушло не всем»:
+     * письмо у остальных получателей, повторять его целиком нельзя.
+     */
+    return {
+      ok: outcome.rejected.length === 0,
+      from: found.account.address,
+      accepted: outcome.accepted,
+      rejected: outcome.rejected,
+    };
   });
 }

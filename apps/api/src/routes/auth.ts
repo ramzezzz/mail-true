@@ -207,6 +207,22 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         await sessions.delete(unsigned.value);
         if (data) {
           await pool.closeUser(data.email).catch(() => undefined);
+          /*
+           * Наблюдателя гасим, когда у ящика не осталось ни одной сессии.
+           *
+           * Он держит СВОЁ соединение с паролем в памяти и живёт до суток
+           * даже без открытых вкладок — ради уведомлений о новой почте.
+           * После выхода это означало, что человек вышел, а сервер за его
+           * ящиком следит дальше и шлёт уведомления в браузер, из которого
+           * только что вышли. Браузер снимает подписку сам (см. logout в
+           * session.tsx), но полагаться на это одно нельзя: вкладку
+           * закрывают, сеть отваливается, отписка не доезжает.
+           *
+           * Если человек вошёл ещё откуда-то — телефон, второй браузер, —
+           * наблюдатель нужен, поэтому смотрим на оставшиеся сессии.
+           */
+          const stillIn = await sessions.countByEmail(data.email).catch(() => 1);
+          if (stillIn === 0) app.mailNotifier?.dropWatcher(data.email);
           app.deps.accessLog?.record({
             accountEmail: data.email,
             kind: 'logout',
