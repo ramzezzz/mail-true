@@ -243,3 +243,34 @@ input.control {
     min-width: 0;
   }
 }
+
+/*
+ * Граница суток внутри ленты.
+ *
+ * Дата видна там, где меняется, — дублировать её в каждой строке значит
+ * отнять ширину у текста сообщения ради значения, одинакового у сотен
+ * строк подряд. Разделитель липкий: отмотав в середину прошлой недели,
+ * администратор видит день, а не только время.
+ */
+.dayBreak {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 6px 0 2px;
+  padding: 3px 10px;
+  /* Тот же фон, что у самой ленты: разделитель липкий, и под ним
+     не должно просвечивать содержимое при прокрутке. */
+  background: var(--mt-admin-surface);
+  border-top: 1px solid var(--mt-color-separator-primary);
+  border-bottom: 1px solid var(--mt-color-separator-primary);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-font-caption1-size, 12px);
+  font-weight: 500;
+  line-height: 16px;
+  /* Первая буква дня — заглавная: «Суббота, 9 августа» читается как подпись. */
+  text-transform: none;
+}
+
+.dayBreak::first-letter {
+  text-transform: uppercase;
+}

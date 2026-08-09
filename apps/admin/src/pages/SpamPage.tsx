@@ -99,6 +99,23 @@ export function scoreText(score: number): string {
   return score > 0 ? `+${String(score)}` : String(score);
 }
 
+/**
+ * Счёт со словом: «+10 баллов», «-1 балл», «-2,5 балла».
+ *
+ * Слово «балла» было приписано к числу намертво, и списки показывали
+ * «-10 балла» — то есть неграмотно ровно там, где администратор
+ * взвешивает, чего стоит запись в списке.
+ *
+ * Дробный счёт склоняется в единственном числе родительного падежа
+ * («-2,5 балла»), поэтому целое проверяется отдельно, а не через общий
+ * счётчик: у 2,5 последняя цифра 5, и обычное правило дало бы «баллов».
+ */
+export function scoreWithWord(score: number): string {
+  const text = scoreText(score);
+  if (!Number.isInteger(score)) return `${text} балла`;
+  return `${text} ${plural(score, 'балл', 'балла', 'баллов')}`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Вкладки                                                              */
 /* ------------------------------------------------------------------ */
@@ -340,7 +357,7 @@ function ListTable({ list, canEdit }: { list: SpamList; canEdit: boolean }) {
       <p className={styles.hint}>
         {/* Что реально произойдёт с письмом — числом, а не словом
             «важный»: администратор должен видеть цену решения. */}
-        <Badge tone={list.tone === 'allow' ? 'ok' : 'fail'}>{scoreText(list.score)} балла</Badge>{' '}
+        <Badge tone={list.tone === 'allow' ? 'ok' : 'fail'}>{scoreWithWord(list.score)}</Badge>{' '}
         {list.hint}
       </p>
 

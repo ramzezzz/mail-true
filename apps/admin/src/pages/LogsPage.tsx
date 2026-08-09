@@ -27,7 +27,15 @@
  * Когда прилипание выключено, а новое пришло, показывается кнопка со
  * счётчиком непрочитанного — иначе о новом можно вовсе не узнать.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@web/components';
 import { cx } from '@web/lib/cx';
@@ -63,12 +71,65 @@ const WINDOW_LINES = 4000;
 /** Как часто спрашиваем новое при включённом автообновлении. */
 const POLL_MS = 3000;
 
-/** Время строки — только часы:минуты:секунды: дата одна на весь экран. */
+/** Время строки — только часы:минуты:секунды: дату несёт разделитель. */
 function timeOf(iso: string | null): string {
   if (!iso) return '—';
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleTimeString('ru-RU', { hour12: false });
+}
+
+/** Ключ дня строки: «2026-08-09». Пусто — у строки нет разбираемого времени. */
+export function dayKeyOf(iso: string | null): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+/** «9 августа 2026, суббота» — подпись разделителя дней. */
+export function dayTitleOf(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    weekday: 'long',
+  });
+}
+
+/**
+ * Куда вставить разделители дней.
+ *
+ * ------------------------------------------------------------------
+ * ЗАЧЕМ
+ * ------------------------------------------------------------------
+ * У строки показывалось только время. Пока лента — это последние
+ * несколько минут, разницы нет; но она прокручивается вверх на весь файл
+ * журнала, а файл живёт неделю. Строка «03:14:02 postfix connection
+ * timed out» без даты не отвечает на главный вопрос: это сегодня ночью
+ * или в прошлый вторник. Разбираясь, почему письма не доходили в среду,
+ * администратор искал глазами границу суток, которой на экране не было.
+ *
+ * Дублировать дату в каждой строке нельзя: она одинакова у сотен подряд
+ * и съедает ширину, которая нужна тексту. Поэтому дата показывается там,
+ * где меняется, — как в переписке.
+ *
+ * Возвращается набор смещений: строка с таким смещением открывает новый
+ * день. Первая строка ленты — тоже (дата видна сразу, а не после
+ * прокрутки до ближайшей границы).
+ */
+export function dayBreaks(lines: readonly { offset: number; at: string | null }[]): Set<number> {
+  const breaks = new Set<number>();
+  let previous = '';
+  for (const line of lines) {
+    const key = dayKeyOf(line.at);
+    if (key === '') continue;
+    if (key !== previous) breaks.add(line.offset);
+    previous = key;
+  }
+  return breaks;
 }
 
 interface Loaded {
@@ -131,6 +192,8 @@ export function LogsPage() {
 
   /* --- Состояние ленты ---------------------------------------------- */
   const [loaded, setLoaded] = useState<Loaded>(EMPTY);
+  /* Границы суток внутри ленты: дату показываем там, где она меняется. */
+  const breaks = useMemo(() => dayBreaks(loaded.lines), [loaded.lines]);
   const [pending, setPending] = useState(true);
   const [olderPending, setOlderPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -438,16 +501,18 @@ export function LogsPage() {
           </div>
 
           {loaded.lines.map((item) => (
-            <div
-              key={`${item.offset}-${item.text.slice(0, 24)}`}
-              className={cx(styles.line, styles[`level_${item.level}`])}
-            >
-              <span className={styles.time}>{timeOf(item.at)}</span>
-              {/* Уровень словом: цвет — не единственный признак */}
-              <span className={styles.level}>{levelShort(item.level)}</span>
-              <span className={styles.component}>{item.component || '—'}</span>
-              <span className={styles.text}>{item.text}</span>
-            </div>
+            <Fragment key={`${item.offset}-${item.text.slice(0, 24)}`}>
+              {breaks.has(item.offset) && item.at !== null && (
+                <div className={styles.dayBreak}>{dayTitleOf(item.at)}</div>
+              )}
+              <div className={cx(styles.line, styles[`level_${item.level}`])}>
+                <span className={styles.time}>{timeOf(item.at)}</span>
+                {/* Уровень словом: цвет — не единственный признак */}
+                <span className={styles.level}>{levelShort(item.level)}</span>
+                <span className={styles.component}>{item.component || '—'}</span>
+                <span className={styles.text}>{item.text}</span>
+              </div>
+            </Fragment>
           ))}
 
           {pending && <div className={styles.empty}>Читаем журнал…</div>}
