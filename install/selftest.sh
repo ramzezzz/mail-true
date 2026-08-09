@@ -350,6 +350,36 @@ t_eq "load_env вычищает \\r из значений (иначе psql не 
      "$( ENV_FILE="$CRLF_ENV"; load_env >/dev/null 2>&1; printf '%s' "${#POSTGRES_USER}" )" "10"
 rm -f "$CRLF_ENV"
 
+# --- Опасное значение в infra/.env ----------------------------------
+# Файл читают два разборщика: compose берёт остаток строки, а скрипты
+# обслуживания его ИСПОЛНЯЮТ (load_env). Из-за второго значение без
+# кавычек было и поломкой, и дырой:
+#
+#   * «FAIL2BAN_IGNORE_IPS=1.2.3.4 5.6.7.8» (формат из .env.example)
+#     превращался в попытку выполнить «5.6.7.8» — код 127, и падали ВСЕ
+#     скрипты обслуживания, включая автопродление сертификата по таймеру;
+#   * «x;команда» выполнялась при первом же чтении файла, а renew-certs.sh
+#     запускается от root.
+#
+# Проверяем настоящим исполнением, а не видом строки.
+DANGER_ENV="$(mktemp)"
+DANGER_MARK="$(mktemp -u)"
+( ENV_FILE="$DANGER_ENV"
+  env_set PROVIDER_NAME "Почта Компании"
+  env_set EVIL "x;touch $DANGER_MARK"
+  env_set SIMPLE mail.example.ru ) >/dev/null 2>&1
+
+t_eq "значение с пробелом переживает оборот через infra/.env"      "$( ENV_FILE="$DANGER_ENV"; env_get PROVIDER_NAME )" "Почта Компании"
+t_eq "простое значение пишется без кавычек — файл остаётся привычным"      "$(grep '^SIMPLE=' "$DANGER_ENV")" "SIMPLE=mail.example.ru"
+t_ok "исполнение infra/.env не падает на значении с пробелом"      bash -c "set -euo pipefail; set -a; . <(tr -d '' < '$DANGER_ENV'); set +a; [ \"\$PROVIDER_NAME\" = 'Почта Компании' ]"
+( set -a; . <(tr -d '' < "$DANGER_ENV") ; set +a ) >/dev/null 2>&1
+t_ok "команда из значения НЕ выполняется при чтении infra/.env"      bash -c "[ ! -e '$DANGER_MARK' ]"
+rm -f "$DANGER_ENV" "$DANGER_MARK"
+
+# Посредник обязан цитировать то, что пишет: панель принимает и пробел
+# (имя продукта), и знаки, которые оболочка считает своими.
+t_ok "посредник пишет значения в infra/.env в кавычках"      bash -c "grep -q 'sub env_quoted' '$INFRA_DIR/service-agent/agent.pl' && [ \$(grep -c 'env_quoted(\$values' '$INFRA_DIR/service-agent/agent.pl') -eq 2 ]"
+
 # --- Пустые значения в примере --------------------------------------
 # Пустое значение в примере — это «работает по умолчанию» ТОЛЬКО если
 # установщик его заполняет. Иначе установка с нуля молча выключает целый
