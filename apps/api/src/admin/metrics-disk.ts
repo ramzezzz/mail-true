@@ -198,7 +198,12 @@ export async function readMailboxDiskUsage(root: string): Promise<MailboxDiskRep
     for (const box of boxes) {
       // Каталог, отправленный в карантин при удалении ящика, к живым
       // ящикам не относится: он уже не занят никем и скоро исчезнет.
-      if (box.startsWith('.deleted-')) continue;
+      // Карантин удалённых ящиков называется «.deleted» БЕЗ дефиса
+      // (QUARANTINE_DIR в mailbox-cleanup.ts) — с дефисом условие не
+      // совпадало никогда, и каталог карантина шёл в обход как обычный
+      // ящик: файла учёта в нём нет, поэтому он попадал в «ящики без
+      // учёта Dovecot» и портил числа ровно перед сменой домена.
+      if (box === '.deleted' || box.startsWith('.deleted.')) continue;
       let usage: MaildirUsage | null = null;
       try {
         usage = parseMaildirsize(await readFile(join(root, domain, box, 'maildirsize'), 'utf8'));

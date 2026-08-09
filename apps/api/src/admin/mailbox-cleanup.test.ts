@@ -83,6 +83,9 @@ void test('уборщик удаляет карантин и записывае�
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
+    // каталог стороной (см. проверку про заново заведённый ящик).
+    listEmailsIn: async () => [],
     listAllMailboxEmails: async () => [],
   };
 
@@ -137,6 +140,9 @@ void test('карантин не удался — уборщик не смеет
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
+    // каталог стороной (см. проверку про заново заведённый ящик).
+    listEmailsIn: async () => [],
     listAllMailboxEmails: async () => [],
   };
 
@@ -178,6 +184,9 @@ void test('карантин не удался и не удаётся снова 
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
+    // каталог стороной (см. проверку про заново заведённый ящик).
+    listEmailsIn: async () => [],
     listAllMailboxEmails: async () => [],
   };
 
@@ -315,4 +324,61 @@ void test('удаление дерева возвращает освобождё
   const freed = await removeTree(dir);
   assert.ok(freed >= 20_000);
   await assert.rejects(stat(dir));
+});
+
+void test('повторный карантин не трогает ящик, заведённый заново с тем же адресом', async () => {
+  /*
+   * Повтор ходит по ЖИВОМУ пути каталога, и между попытками адрес мог
+   * снова стать чьим-то: администратор заводит ящик с тем же именем,
+   * Dovecot открывает тот же каталог, туда приходит новая почта.
+   *
+   * Дальше уборщик переименовывал этот каталог в карантин и удалял —
+   * вместе с перепиской, которой три дня от роду, — и записывал
+   * «Каталог удалённого ящика убран с диска».
+   *
+   * Случай не выдуманный: повтор написан ровно для тех отказов, которые
+   * чинят руками (том оказался только на чтение, права не те), и между
+   * «не получилось» и «починили» проходят часы — их хватает, чтобы
+   * завести ящик заново.
+   */
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-quar-'));
+  const dir = await seed(root, 'ivan@x.local', 5_000);
+
+  const updates: Array<Record<string, unknown>> = [];
+  const db = {
+    listDeletionsToPurge: async () => [
+      {
+        id: 9,
+        email: 'ivan@x.local',
+        quarantinePath: null,
+        maildirPath: dir,
+        error: 'EROFS: read-only file system',
+      },
+    ],
+    updateMailboxDeletion: async (_id: number, patch: Record<string, unknown>) => {
+      updates.push(patch);
+    },
+    // Ящик с этим адресом снова живой.
+    listEmailsIn: async () => ['ivan@x.local'],
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    listAllMailboxEmails: async () => ['ivan@x.local'],
+  };
+
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger,
+    mailRoot: root,
+    intervalSeconds: 0,
+  });
+  const result = await janitor.runOnce();
+
+  // Каталог на месте, письма целы.
+  assert.ok((await treeSize(dir)) >= 5_000, 'почта заново заведённого ящика обязана уцелеть');
+  assert.equal(result.purgedMaildirs, 0, 'уборщик не должен считать это уборкой');
+  assert.equal(
+    updates[0]?.state,
+    'purged',
+    'запись об удалении закрывается — убирать больше нечего',
+  );
 });

@@ -311,11 +311,19 @@ test('занятость всех ящиков собирается из кат�
   await mkdir(path.join(root, 'mail.local', 'ivan'), { recursive: true });
   await mkdir(path.join(root, 'mail.local', 'petr'), { recursive: true });
   await mkdir(path.join(root, 'mail.local', 'nobody'), { recursive: true });
-  await mkdir(path.join(root, 'mail.local', '.deleted-20260101-old'), { recursive: true });
+  /*
+   * Каталог карантина называется так, как его СОЗДАЁТ продукт:
+   * «.deleted/<ящик>.<номер>» (QUARANTINE_DIR в mailbox-cleanup.ts).
+   * Здесь стояло «.deleted-20260101-old» — имя, которого продукт не
+   * создаёт никогда. Проверка сторожила несуществующий случай, а
+   * настоящий карантин уходил в «ящики без учёта Dovecot» и портил числа
+   * ровно перед сменой домена.
+   */
+  await mkdir(path.join(root, 'mail.local', '.deleted', 'staryi.7'), { recursive: true });
   await writeFile(path.join(root, 'mail.local', 'ivan', 'maildirsize'), '1000S\n600 3\n');
   await writeFile(path.join(root, 'mail.local', 'petr', 'maildirsize'), '1000S\n100 1\n');
   await writeFile(
-    path.join(root, 'mail.local', '.deleted-20260101-old', 'maildirsize'),
+    path.join(root, 'mail.local', '.deleted', 'staryi.7', 'maildirsize'),
     '1000S\n999999 99\n',
   );
 

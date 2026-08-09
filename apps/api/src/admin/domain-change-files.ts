@@ -92,7 +92,12 @@ export async function measureDomainStorage(
     // Каталог удалённого ящика в карантине живым ящиком не считается,
     // но переезжает вместе со всем каталогом домена — уборщик найдёт его
     // по новому пути (путь ему переписывается в той же транзакции).
-    if (box.startsWith('.deleted-')) continue;
+    // Карантин удалённых ящиков называется «.deleted» БЕЗ дефиса
+    // (QUARANTINE_DIR в mailbox-cleanup.ts) — с дефисом условие не
+    // совпадало никогда, и каталог карантина шёл в обход как обычный
+    // ящик: файла учёта в нём нет, поэтому он попадал в «ящики без
+    // учёта Dovecot» и портил числа ровно перед сменой домена.
+    if (box === '.deleted' || box.startsWith('.deleted.')) continue;
     result.mailboxes += 1;
     try {
       const usage = parseMaildirsize(await readFile(join(path, box, 'maildirsize'), 'utf8'));
