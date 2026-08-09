@@ -154,8 +154,21 @@ export const envSchema = z
     RATE_LIMIT_MAX: intVar(300, 1),
     RATE_LIMIT_WINDOW_MS: intVar(60_000, 1000),
 
-    /** Разрешённые Origin для CORS, через запятую */
-    CORS_ORIGIN: z.string().default('http://localhost:5173,http://127.0.0.1:5173'),
+    /**
+     * Разрешённые Origin для CORS, через запятую.
+     *
+     * Портов два, а не один: 5173 — почта, 5174 — панель. Здесь стоял
+     * только первый, и это расходилось с compose, где перечислены оба.
+     * Расхождение молчаливое: через compose до кода доезжает значение из
+     * него, поэтому в контейнере всё работало, а вот запуск api напрямую
+     * (отладка, проверки) оставлял панель без доступа к API с ответом
+     * браузера про CORS — там, где почта рядом работает.
+     */
+    CORS_ORIGIN: z
+      .string()
+      .default(
+        'http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174',
+      ),
 
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })

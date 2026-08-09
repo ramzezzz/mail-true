@@ -425,27 +425,69 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
        * несколько секунд: сервер приложения уже ходил бы с новым
        * секретом к службе, которая ещё живёт со старым.
        */
-      const applied: string[] = [];
-      let first = true;
-      for (const step of secret.applies) {
-        const target = findTarget(step.target);
-        if (!target) continue;
-        await agent.apply(target, step.action, first ? { [secret.key]: value } : {});
-        applied.push(target.id);
-        first = false;
-      }
+      const planned = secret.applies
+        .map((step) => findTarget(step.target))
+        .filter((target): target is NonNullable<typeof target> => target !== undefined);
 
       /*
-       * В журнал аудита — сам факт и затронутые службы. Значения нет
-       * нигде: ни в ответе, ни в аудите, ни в журнале сервера. Аудит
-       * читают из панели, а панель показывают на совещаниях.
+       * В журнал аудита — ДО пересоздания служб, а не после.
+       *
+       * Запись стояла в конце, и для главного секрета — SESSION_SECRET,
+       * подписи сессий и почты, и панели — она не появлялась НИКОГДА:
+       * его перевыпуск пересоздаёт контейнер api, то есть останавливает
+       * тот самый процесс, которому оставалось записать строчку. Смена
+       * секрета, из-за которой все до единого оказываются на странице
+       * входа, не оставляла в журнале ни следа — а это ровно то событие,
+       * которое ищут первым, когда разбираются, что произошло.
+       *
+       * Цена перестановки — запись о начатом действии, которое могло не
+       * доехать до конца. Это честнее пропуска: «перевыпуск начат, службы
+       * такие-то» проверяется одним взглядом на службы, а отсутствие
+       * записи не проверяется ничем.
+       *
+       * Значения секрета нет нигде: ни в ответе, ни в аудите, ни в
+       * журнале сервера. Аудит читают из панели, а панель показывают на
+       * совещаниях.
        */
       await audit(ctx, request, {
         action: 'serversettings.secret.rotate',
         targetType: 'serversettings',
         targetLabel: secret.key,
-        after: { services: applied, by: admin.login },
+        after: { services: planned.map((target) => target.id), by: admin.login },
       });
+
+      const applied: string[] = [];
+      let first = true;
+      for (const target of planned) {
+        const step = secret.applies.find((item) => item.target === target.id);
+        try {
+          await agent.apply(
+            target,
+            step?.action ?? 'recreate',
+            first ? { [secret.key]: value } : {},
+          );
+        } catch (err) {
+          /*
+           * Отказ посреди списка — самое неприятное, что тут бывает: у
+           * общего секрета двух служб одна уже живёт с новым значением, а
+           * вторая со старым. Отдельная запись нужна, чтобы это было
+           * видно в журнале, а не выяснялось по отказам служб.
+           */
+          await audit(ctx, request, {
+            action: 'serversettings.secret.rotate.failed',
+            targetType: 'serversettings',
+            targetLabel: secret.key,
+            after: {
+              done: applied,
+              failedOn: target.id,
+              detail: err instanceof Error ? err.message : String(err),
+            },
+          }).catch(() => undefined);
+          throw err;
+        }
+        applied.push(target.id);
+        first = false;
+      }
 
       return { key: secret.key, services: applied };
     },

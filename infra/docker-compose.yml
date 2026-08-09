@@ -636,6 +636,15 @@ services:
       ADMIN_SESSION_TTL_SECONDS: ${ADMIN_SESSION_TTL_SECONDS:-28800}
       ADMIN_LOGIN_MAX_FAILURES: ${ADMIN_LOGIN_MAX_FAILURES:-5}
       ADMIN_LOCKOUT_MINUTES: ${ADMIN_LOCKOUT_MINUTES:-15}
+      # Вторая половина защиты от подбора: промахи по УЧЁТКЕ со всех
+      # адресов сразу (распределённый подбор) и срок, в течение которого
+      # адрес считается своим — с него запирание учётки не действует.
+      # Обе читаются кодом (admin/config.ts) с первого дня, но сюда их
+      # не выносили: значит задать их в infra/.env было НЕЛЬЗЯ вовсе —
+      # переменная просто не доходила до контейнера, а панель и описание
+      # обещали настройку. Умолчания те же, что в коде.
+      ADMIN_ACCOUNT_LOCK_FAILURES: ${ADMIN_ACCOUNT_LOCK_FAILURES:-30}
+      ADMIN_KNOWN_IP_DAYS: ${ADMIN_KNOWN_IP_DAYS:-30}
       ADMIN_MAILBOX_TTL_SECONDS: ${ADMIN_MAILBOX_TTL_SECONDS:-3600}
       ADMIN_DEFAULT_QUOTA_BYTES: ${ADMIN_DEFAULT_QUOTA_BYTES:-1073741824}
       ADMIN_MAILBOX_PURGE_DELAY_MINUTES: ${ADMIN_MAILBOX_PURGE_DELAY_MINUTES:-0}
@@ -664,7 +673,14 @@ services:
       # его копий.
       COMPOSE_BODY_MAX_BYTES: ${COMPOSE_BODY_MAX_BYTES:-12582912}
       IMAP_POOL_IDLE_MS: ${IMAP_POOL_IDLE_MS:-300000}
-      HEALTH_CACHE_MS: ${HEALTH_CACHE_MS:-2000}
+      # Двадцать секунд, а не две. Здесь стояли две — и умолчание из кода
+      # (20 000, поставленное с подробным разбором) не действовало НИ НА
+      # ОДНОЙ установке: compose подставляет своё значение раньше. Пробу
+      # дёргают дашборд, «Наблюдение» и каждая открытая вкладка; при двух
+      # секундах Dovecot и Postfix записывали каждый стук, и в журналах
+      # почты стояла сплошная лента «Disconnected: no auth attempts»,
+      # в которой тонула настоящая доставка.
+      HEALTH_CACHE_MS: ${HEALTH_CACHE_MS:-20000}
       HEALTH_PROBE_TIMEOUT_MS: ${HEALTH_PROBE_TIMEOUT_MS:-3000}
 
       # --- Уведомления при закрытой вкладке (Web Push) ---
