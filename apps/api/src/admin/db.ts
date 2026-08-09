@@ -709,6 +709,30 @@ export class AdminDb {
       if (!isUndefinedTable(err)) throw err;
     }
 
+    /*
+     * Алиасы, ВЕДУЩИЕ В ЭТОТ ЯЩИК, — отдельным запросом.
+     *
+     * Диалог удаления обещает это прямым текстом («алиасы, которые вели в
+     * этот ящик»), а не убирал их никто: общий реестр адресных колонок
+     * знает `virtual_aliases.source`, но не `destination`, а внешнего
+     * ключа на `virtual_users` у этой таблицы нет — только каскад от
+     * домена.
+     *
+     * Оставленный алиас указывает в пустоту: Postfix переписывает адрес в
+     * несуществующий ящик и отбивает письма отправителям. Пересылка,
+     * работавшая годами, умирает молча, а в панели её не видно — колонка
+     * «Алиасов» в списке ящиков считает только направление `source`.
+     */
+    try {
+      const inbound = await this.pool.query(
+        `DELETE FROM virtual_aliases WHERE lower(destination) = lower($1)`,
+        [email],
+      );
+      removed += inbound.rowCount ?? 0;
+    } catch (err) {
+      if (!isUndefinedTable(err)) throw err;
+    }
+
     const statements = OWNER_ADDRESS_COLUMNS.filter((c) => c.onDelete !== 'keep').map((column) => ({
       /*
        * Имена таблицы и колонки не приходят снаружи: они перечислены в

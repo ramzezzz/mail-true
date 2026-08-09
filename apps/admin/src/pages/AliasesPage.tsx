@@ -190,8 +190,11 @@ export function AliasesPage() {
       {addOpen && (
         <AddAliasModal
           onClose={() => setAddOpen(false)}
-          onAdded={() => {
-            setFlash('Алиас создан');
+          onAdded={(warning) => {
+            // Предупреждение сервера показываем вместо бодрого «создан»:
+            // алиас действительно создан, но ведёт он в никуда, и узнать
+            // об этом человек должен сейчас, а не по жалобам отправителей.
+            setFlash(warning ? `Алиас создан. ${warning}` : 'Алиас создан');
             setAddOpen(false);
             invalidate();
           }}
@@ -201,7 +204,13 @@ export function AliasesPage() {
   );
 }
 
-function AddAliasModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddAliasModal({
+  onClose,
+  onAdded,
+}: {
+  onClose: () => void;
+  onAdded: (warning?: string) => void;
+}) {
   const [source, setSource] = useState('');
   const [destination, setDestination] = useState('');
 
@@ -212,7 +221,7 @@ function AddAliasModal({ onClose, onAdded }: { onClose: () => void; onAdded: () 
   const add = useMutation({
     mutationFn: () =>
       api.createAlias(source.trim().toLowerCase(), destination.trim().toLowerCase()),
-    onSuccess: onAdded,
+    onSuccess: (created) => onAdded(created.warning),
   });
 
   return (

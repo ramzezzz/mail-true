@@ -119,8 +119,15 @@ export function AuditPage() {
                     <td>{entry.adminLogin}</td>
                     <td>{entry.actionLabel}</td>
                     <td className="mt-mono">{entry.targetLabel ?? '—'}</td>
-                    <td className="mt-mono">{summarize(entry.oldValue)}</td>
-                    <td className="mt-mono">{summarize(entry.newValue)}</td>
+                    {/* Полный текст — в подсказке: в колонку он не влезает,
+                        а иногда это единственная копия того, что исчезло
+                        (список алиасов, унесённых удалением домена). */}
+                    <td className="mt-mono" title={fullValue(entry.oldValue)}>
+                      {summarize(entry.oldValue)}
+                    </td>
+                    <td className="mt-mono" title={fullValue(entry.newValue)}>
+                      {summarize(entry.newValue)}
+                    </td>
                     <td className="mt-mono">{entry.ip ?? '—'}</td>
                   </tr>
                 ))}
@@ -186,10 +193,54 @@ export function AuditPage() {
   );
 }
 
+/**
+ * Значение поля записи — словами, а не «[object Object]».
+ *
+ * `String()` от массива объектов даёт `[object Object],[object Object]`, и
+ * это не теория: удаление домена с `force=true` кладёт в запись полный
+ * список уничтоженных алиасов (`aliases_removed`) — единственную копию
+ * того, что исчезло. Отказ маршрута и окно подтверждения обещают
+ * администратору, что список останется в журнале; в журнале же на его
+ * месте была нечитаемая строка, ещё и обрезанная.
+ */
+function describeValue(item: unknown): string {
+  if (item === null || item === undefined) return '—';
+  if (Array.isArray(item)) return item.map((entry) => describeValue(entry)).join('; ');
+  if (typeof item === 'object') {
+    // Алиас `{source, destination, active}` — самый частый случай: его и
+    // читают, когда разбираются, что унесло каскадом.
+    const row = item as Record<string, unknown>;
+    if (typeof row.source === 'string' && typeof row.destination === 'string') {
+      return `${row.source} → ${row.destination}${row.active === false ? ' (выключен)' : ''}`;
+    }
+    return Object.entries(row)
+      .map(([key, value]) => `${key}=${describeValue(value)}`)
+      .join(', ');
+  }
+  /*
+   * Здесь остались только простые значения: объекты и массивы разобраны
+   * выше. Тип сужаем явно — иначе String() однажды снова получит объект,
+   * и в журнале снова появится «[object Object]».
+   */
+  if (typeof item === 'string') return item;
+  if (typeof item === 'number' || typeof item === 'boolean' || typeof item === 'bigint') {
+    return String(item);
+  }
+  return JSON.stringify(item) ?? '—';
+}
+
+/** Значение целиком — для подсказки над ячейкой. */
+function fullValue(value: Record<string, unknown> | null): string {
+  if (!value) return '';
+  return Object.entries(value)
+    .map(([key, item]) => `${key}=${describeValue(item)}`)
+    .join('\n');
+}
+
 /** Короткое представление старого/нового значения для колонки таблицы. */
 function summarize(value: Record<string, unknown> | null): string {
   if (!value) return '—';
-  const parts = Object.entries(value).map(([key, item]) => `${key}=${String(item)}`);
+  const parts = Object.entries(value).map(([key, item]) => `${key}=${describeValue(item)}`);
   const text = parts.join(', ');
   return text.length > 90 ? `${text.slice(0, 90)}…` : text;
 }

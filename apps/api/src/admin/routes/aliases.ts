@@ -120,6 +120,33 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
       const body = patchSchema.parse(request.body);
       const before = await ctx.db.findAliasById(id);
       if (!before) throw new NotFoundError('Алиас не найден');
+
+      /*
+       * ВКЛЮЧЕНИЕ ПРОВЕРЯЕТСЯ ТАК ЖЕ, КАК СОЗДАНИЕ.
+       *
+       * Замок при создании алиаса стоит наглухо: адрес существующего
+       * ящика уводит всю его входящую почту, потому что перенаправления
+       * разбираются раньше ящиков. Но выключенный алиас этот замок
+       * обходил целиком — и обходил буднично:
+       *
+       *   1. алиас `info@d.ru → arc@d.ru` создан, когда ящика ещё не было;
+       *   2. алиас ОТКЛЮЧИЛИ (кнопка рядом с корзиной, выглядит безопаснее);
+       *   3. завели ящик `info@d.ru` — проверка при создании ящика смотрит
+       *      только на АКТИВНЫЕ алиасы и молчит;
+       *   4. алиас включили обратно — здесь не проверялось ничего.
+       *
+       * Дальше вся входящая почта живого ящика уходит на сторону, а ящик
+       * выглядит исправным: он в списке, в него пускают, старая почта на
+       * месте — просто новая больше не приходит.
+       */
+      if (body.active && !before.active) {
+        const problem = await checkAlias(before.source, before.destination, {
+          mailboxExists: async (email) => (await ctx.db.findMailUserByEmail(email)) !== null,
+          aliasTarget: (source) => ctx.db.aliasTargetOf(source),
+        });
+        if (problem?.blocking) throw new BadRequestError(problem.message);
+      }
+
       const after = await ctx.db.setAliasActive(id, body.active);
       if (!after) throw new NotFoundError('Алиас не найден');
       await audit(ctx, request, {

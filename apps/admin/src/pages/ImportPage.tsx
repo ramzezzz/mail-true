@@ -238,7 +238,14 @@ export function ImportPage() {
           <Checkbox
             label="Создавать домены, которых ещё нет"
             checked={allowNewDomains}
-            onChange={(e) => setAllowNewDomains(e.target.checked)}
+            /* Предпросмотр считался при прежнем значении флажка: снятая
+               галка оставляла кнопку с обещанием «Создать 100 ящиков»,
+               хотя импорт создал бы ноль. Правка CSV и квоты предпросмотр
+               сбрасывают — этот переключатель забыли. */
+            onChange={(e) => {
+              setAllowNewDomains(e.target.checked);
+              setPreview(null);
+            }}
           />
           <ToolbarSpacer />
           <Button

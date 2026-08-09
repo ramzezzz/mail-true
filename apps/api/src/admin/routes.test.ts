@@ -38,6 +38,7 @@ import { createImportBox, ImportSecretBox, packResult, unpackResult } from './im
 import { QueueAgent } from './queue-agent.js';
 import { MemoryAdminSessionStore } from './session.js';
 import { adminAuthRoutes } from './routes/auth.js';
+import { adminAliasRoutes } from './routes/aliases.js';
 import { adminDomainRoutes } from './routes/domains.js';
 import { adminMailboxRoutes } from './routes/mailbox.js';
 import { mailboxAccessSelfRoutes } from './routes/self-access.js';
@@ -101,7 +102,10 @@ class FakeDb {
    */
   async aliasTargetOf(source: string): Promise<string | null> {
     for (const alias of this.aliases.values()) {
-      if (String(alias.source).toLowerCase() === source.toLowerCase()) {
+      // Только активные — как в настоящем запросе (db.ts, `AND active`).
+      // Именно из-за этого выключенный алиас проходил мимо замка при
+      // создании ящика, а включение его никто не проверял.
+      if (alias.active !== false && String(alias.source).toLowerCase() === source.toLowerCase()) {
         return String(alias.destination);
       }
     }
@@ -114,6 +118,15 @@ class FakeDb {
   async purgeMailboxData(email: string): Promise<number> {
     this.#note('purgeMailboxData', email);
     return 7;
+  }
+  async findAliasById(id: number): Promise<Record<string, unknown> | null> {
+    return this.aliases.find((a) => a.id === id) ?? null;
+  }
+  async setAliasActive(id: number, active: boolean): Promise<Record<string, unknown> | null> {
+    const row = this.aliases.find((a) => a.id === id);
+    if (!row) return null;
+    row.active = active;
+    return { ...row, domain: 'x.local', created_at: new Date() };
   }
   async listAliases(filters: Record<string, unknown>): Promise<{ rows: unknown[]; total: number }> {
     const rows = this.aliases.filter((a) => a.domain_id === filters.domainId);
@@ -336,6 +349,7 @@ async function harness(options?: {
   await adminAuthRoutes(app);
   await adminUserRoutes(app);
   await adminDomainRoutes(app);
+  await adminAliasRoutes(app);
   await adminMailboxRoutes(app);
   await mailboxAccessSelfRoutes(app, ctx);
 
@@ -833,4 +847,78 @@ void test('в чужую историю входов заглянуть нель
   });
   assert.equal(response.json<{ total: number }>().total, 0);
   await h.app.close();
+});
+
+/* ------------------------------------------------------------------ */
+/* Алиас поверх живого ящика — включением                              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Создание такого алиаса заблокировано наглухо: адрес существующего ящика
+ * уводит ВСЮ его входящую почту, потому что Postfix разбирает карту
+ * перенаправлений раньше карты ящиков. Но замок обходился буднично:
+ *
+ *   1. алиас `info@ → arc@` создан, когда ящика ещё не было;
+ *   2. алиас ОТКЛЮЧИЛИ — кнопка рядом с корзиной, выглядит безопаснее;
+ *   3. завели ящик `info@` — проверка при создании ящика смотрит только
+ *      на активные алиасы и промолчала;
+ *   4. алиас включили обратно — здесь не проверялось НИЧЕГО.
+ *
+ * Дальше ящик выглядит исправным (он в списке, в него пускают, старая
+ * почта на месте), а новая уходит на сторону.
+ */
+test('включить выключенный алиас поверх живого ящика нельзя', async () => {
+  const h = await harness();
+  try {
+    h.db.aliases = [
+      { id: 7, domain_id: 5, source: 'info@x.local', destination: 'arc@x.local', active: false },
+    ];
+    // Ящик, чью почту увёл бы включённый алиас.
+    h.db.users.set(11, {
+      id: 11,
+      domain_id: 5,
+      email: 'info@x.local',
+      display_name: null,
+      quota_bytes: 0,
+      active: true,
+      created_at: new Date(),
+      updated_at: new Date(),
+      domain: 'x.local',
+      alias_count: 0,
+    });
+
+    const response = await h.app.inject({
+      method: 'PATCH',
+      url: '/aliases/7',
+      headers: { cookie: h.cookie },
+      payload: { active: true },
+    });
+
+    assert.equal(response.statusCode, 400, response.body);
+    assert.match(response.json().message, /существующий ящик/);
+    // Алиас остался выключенным: почта ящика никуда не уходит.
+    assert.equal(h.db.aliases[0]?.active, false);
+  } finally {
+    await h.app.close();
+  }
+});
+
+test('обычное включение алиаса по-прежнему работает', async () => {
+  const h = await harness();
+  try {
+    h.db.aliases = [
+      { id: 8, domain_id: 5, source: 'sales@x.local', destination: 'ivan@x.local', active: false },
+    ];
+    const response = await h.app.inject({
+      method: 'PATCH',
+      url: '/aliases/8',
+      headers: { cookie: h.cookie },
+      payload: { active: true },
+    });
+
+    assert.equal(response.statusCode, 200, response.body);
+    assert.equal(h.db.aliases[0]?.active, true);
+  } finally {
+    await h.app.close();
+  }
 });
