@@ -15,6 +15,7 @@ import {
   SSE_DONE,
   completion,
   outboundText,
+  requestMessages,
   sampleMessage,
   sseDelta,
   startFakeAiServer,
@@ -976,5 +977,149 @@ describe('обрыв потокового черновика', () => {
     const snapshot = await assistant.budgetSnapshot(ctx.accountId);
     assert.equal(snapshot.requestsUsed, 0);
     assert.equal(snapshot.tokensUsed, 0);
+  });
+});
+
+describe('свободный разговор', () => {
+  it('вся история разговора уходит поставщику, а не только последний вопрос', async () => {
+    /*
+     * Разговор без памяти бесполезен: «а подробнее?» без предыдущих
+     * реплик превращается в бессмыслицу. История живёт у клиента и
+     * приезжает с каждым вопросом — проверяем, что она доезжает до
+     * запроса целиком и в правильном порядке.
+     */
+    const r = await rig([{ sse: [sseDelta('Конечно.'), SSE_DONE] }]);
+    try {
+      for await (const _ of r.assistant.streamChat(
+        [
+          { role: 'user', content: 'Что такое SPF?' },
+          { role: 'assistant', content: 'Это запись в DNS.' },
+          { role: 'user', content: 'А подробнее?' },
+        ],
+        ctx,
+      )) {
+        void _;
+      }
+
+      const messages = requestMessages(
+        r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null },
+      );
+      assert.deepEqual(
+        messages.map((m) => m.role),
+        ['system', 'user', 'assistant', 'user'],
+      );
+      assert.equal(messages[3]?.content, 'А подробнее?');
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('модели прямо сказано, что доступа к почте у неё нет', async () => {
+    /*
+     * Иначе на «покажи мои письма» она отвечает выдуманным списком — не
+     * по злому умыслу, а потому что её никто не предупредил.
+     */
+    const r = await rig([{ sse: [sseDelta('Не могу.'), SSE_DONE] }]);
+    try {
+      for await (const _ of r.assistant.streamChat([{ role: 'user', content: 'привет' }], ctx)) {
+        void _;
+      }
+      const messages = requestMessages(
+        r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null },
+      );
+      assert.match(messages[0]?.content ?? '', /НЕТ доступа/u);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('опись называет отправляемое: человек видит, что уходит наружу', async () => {
+    const r = await rig([{ sse: [sseDelta('Ответ.'), SSE_DONE] }]);
+    try {
+      let disclosure: OutboundDisclosure | null = null;
+      for await (const event of r.assistant.streamChat(
+        [{ role: 'user', content: 'Расскажи про DKIM' }],
+        ctx,
+      )) {
+        if (event.type === 'disclosure') disclosure = event.disclosure;
+      }
+      assert.ok(disclosure, 'опись не пришла');
+      assert.equal(disclosure.totalChars, 'Расскажи про DKIM'.length);
+
+      // И в журнале объём тот же — показанное совпадает с ушедшим.
+      const entries = await r.assistant.auditList();
+      assert.equal(entries[0]?.outboundChars, disclosure.totalChars);
+      assert.equal(entries[0]?.feature, 'chat');
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('добавка к правилам доезжает до запроса — на ней держится админский разговор', async () => {
+    const r = await rig([{ sse: [sseDelta('Раздел «Домены».'), SSE_DONE] }]);
+    try {
+      for await (const _ of r.assistant.streamChat([{ role: 'user', content: 'где DKIM?' }], ctx, {
+        systemExtra: 'СПРАВОЧНИК: раздел «Домены» выпускает ключ DKIM.',
+      })) {
+        void _;
+      }
+      const messages = requestMessages(
+        r.server.requests[0] ?? { url: '', method: '', headers: {}, raw: '', body: null },
+      );
+      assert.match(messages[0]?.content ?? '', /СПРАВОЧНИК/u);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('пустой разговор не уходит наружу вовсе', async () => {
+    // Пробел вместо вопроса — это не запрос, а промах по клавише. Платить
+    // за него и записывать его в журнал незачем.
+    const r = await rig([{ sse: [sseDelta('нет'), SSE_DONE] }]);
+    try {
+      const kinds: string[] = [];
+      for await (const event of r.assistant.streamChat([{ role: 'user', content: '   ' }], ctx)) {
+        kinds.push(event.type);
+      }
+      assert.deepEqual(kinds, ['error']);
+      assert.equal(r.server.requests.length, 0);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('выключенный помощник отдаёт событие error, а не молчит', async () => {
+    const kinds: string[] = [];
+    for await (const event of disabledAssistant().streamChat(
+      [{ role: 'user', content: 'привет' }],
+      ctx,
+    )) {
+      kinds.push(event.type);
+    }
+    assert.deepEqual(kinds, ['error']);
+  });
+
+  it('исчерпанный предел останавливает разговор до отправки', async () => {
+    const r = await rig([{ sse: [sseDelta('не должно уйти'), SSE_DONE] }], {
+      limits: { maxTokensPerRequest: 5 },
+    });
+    try {
+      const kinds: string[] = [];
+      for await (const event of r.assistant.streamChat(
+        [
+          {
+            role: 'user',
+            content: 'длинный вопрос про устройство почтового сервера и его настройки',
+          },
+        ],
+        ctx,
+      )) {
+        kinds.push(event.type);
+      }
+      assert.ok(kinds.includes('error'));
+      assert.equal(r.server.requests.length, 0, 'запрос ушёл, хотя предел исчерпан');
+    } finally {
+      await r.close();
+    }
   });
 });

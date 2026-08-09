@@ -19,6 +19,7 @@ import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
 import { keyHint } from './secret.js';
 import { describeNetworkFailure, modelsEndpoint, parseModelList } from './models.js';
+import { serverKnowledge } from '../admin/ai-knowledge.js';
 import { AiUnavailableError } from './errors.js';
 import type { AiDomainSettings, AiDomainSettingsPatch } from './db.js';
 import type { AiService } from './service.js';
@@ -77,6 +78,22 @@ const settingsSchema = z.object({
  * поэтому не разойдётся с ним при добавлении новой возможности.
  */
 const TECHNICAL_FEATURES = Object.keys(PROMPT_VERSIONS) as [AiFeature, ...AiFeature[]];
+
+/**
+ * Разговор целиком: история живёт у клиента и приезжает с каждым
+ * вопросом. Сервер её не хранит — закрытая вкладка стирает разговор.
+ */
+const chatSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
 
 const auditQuerySchema = z.object({
   accountId: z.string().max(255).optional(),
@@ -440,6 +457,112 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
         usage: outcome.usage,
         durationMs: outcome.durationMs,
       };
+    },
+  );
+
+  /* --- разговор администратора --------------------------------------- */
+
+  /**
+   * Разговор с помощником, который знает про ЭТОТ сервер.
+   *
+   * ------------------------------------------------------------------
+   * ЧЕМ ОТЛИЧАЕТСЯ ОТ ПОЛЬЗОВАТЕЛЬСКОГО
+   * ------------------------------------------------------------------
+   * Только правилами разговора: сюда добавлен справочник по продукту —
+   * разделы панели, устройство стека и список настроек с назначением
+   * (см. admin/ai-knowledge.ts). Больше ничего: доступа к серверу у
+   * модели нет ни здесь, ни там.
+   *
+   * ЗНАЧЕНИЙ настроек в справочнике нет — только имена и назначение.
+   * Иначе разговор стал бы способом вытащить содержимое infra/.env через
+   * вопрос «а что у меня сейчас стоит», и помощник охотно бы его назвал.
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ УЧЁТ ИДЁТ НА СЛУЖЕБНЫЙ АДРЕС
+   * ------------------------------------------------------------------
+   * Расход считается по домену, а разговор ведёт администратор, у
+   * которого почтового ящика может не быть вовсе. Служебный адрес
+   * ai-admin@домен делает расход видимым в журнале обращений отдельной
+   * строкой: сколько потрачено на разговоры администраторов, видно
+   * сразу, и это честнее, чем прятать их в расход чьего-то ящика.
+   */
+  app.post(
+    '/ai/chat/stream',
+    {
+      preHandler: requireAdmin(app, 'serversettings.read'),
+      config: { rateLimit: { max: 20, timeWindow: 60_000 } },
+    },
+    async (request, reply) => {
+      const db = requireDb();
+      const body = chatSchema.parse(request.body);
+
+      /*
+       * Домен берём основной — тот, которым сервер представляется. У
+       * администратора почтового ящика может не быть, а настройки
+       * помощника живут по доменам.
+       */
+      const rows = await db.listDomainSettings();
+      const mainDomain = ctx.config.MAIL_DOMAIN.toLowerCase();
+      const row = rows.find((item) => item.domain.toLowerCase() === mainDomain) ?? rows[0];
+      if (!row) {
+        throw new AiUnavailableError('Помощник ИИ не настроен ни для одного домена');
+      }
+
+      const availability = await service.availability(`ai-admin@${row.domain}`);
+      if (!availability.available || !availability.assistant) {
+        throw new AiUnavailableError(
+          availability.detail ??
+            'Помощник ИИ выключен или настроен не полностью — включите его на вкладке настроек',
+        );
+      }
+
+      reply.raw.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+
+      // Слушаем закрытие ОТВЕТА, а не запроса: у запроса с телом событие
+      // 'close' приходит сразу после вычитывания тела.
+      const controller = new AbortController();
+      let finished = false;
+      reply.raw.on('close', () => {
+        if (!finished) controller.abort();
+      });
+
+      try {
+        for await (const event of availability.assistant.streamChat(
+          body.messages,
+          { accountId: `ai-admin@${row.domain}`, signal: controller.signal },
+          { systemExtra: serverKnowledge() },
+        )) {
+          /*
+           * Опись отправленного администратору не показывается: она
+           * пересказывает его же вопрос, а справочник в неё не входит по
+           * устройству. Пропускаем её молча, чтобы интерфейс не рисовал
+           * пустую плашку «что ушло наружу».
+           */
+          if (event.type === 'disclosure') continue;
+          reply.raw.write(`data: ${JSON.stringify(event)}
+
+`);
+        }
+      } catch (err) {
+        request.log.warn({ err }, 'Разговор администратора с ИИ оборвался');
+        reply.raw.write(
+          `data: ${JSON.stringify({
+            type: 'error',
+            error: { kind: 'network', message: 'Поток прервался', retryable: true },
+          })}
+
+`,
+        );
+      } finally {
+        finished = true;
+        reply.raw.end();
+      }
+      return reply;
     },
   );
 

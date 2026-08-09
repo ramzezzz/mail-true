@@ -24,6 +24,7 @@ import { SenderLogosPage } from '../pages/SenderLogosPage';
 import { BackupPage } from '../pages/BackupPage';
 import { MigratePage } from '../pages/MigratePage';
 import { UpdatesPage } from '../pages/UpdatesPage';
+import { AiChatPage } from '../pages/AiChatPage';
 import { DomainChangePage } from '../pages/DomainChangePage';
 import { SpamPage } from '../pages/SpamPage';
 import { MonitoringPage } from '../pages/MonitoringPage';
@@ -58,6 +59,7 @@ const router = createBrowserRouter([
       // Перенос почты с чужого сервера (Kerio Connect и прочие)
       { path: 'migrate', element: <MigratePage /> },
       { path: 'updates', element: <UpdatesPage /> },
+      { path: 'ai-chat', element: <AiChatPage /> },
       // Смена основного домена сервера: план и выполнение
       { path: 'domain-change', element: <DomainChangePage /> },
       // Антиспам и исправность сервера. Заглушками эти разделы больше

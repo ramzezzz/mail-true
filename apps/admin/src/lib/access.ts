@@ -195,6 +195,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
        * образов у служб, — то есть карту установки, а не сводку.
        */
       { to: '/updates', title: 'Обновления', requires: ['serversettings.read'] },
+      { to: '/ai-chat', title: 'Помощник', requires: ['serversettings.read'] },
     ],
   },
 ];

@@ -32,6 +32,7 @@ const TITLES: Readonly<Record<string, string>> = {
   '/backups': 'Резервные копии',
   '/migrate': 'Перенос почты',
   '/updates': 'Обновления',
+  '/ai-chat': 'Помощник',
   '/domain-change': 'Смена домена',
   '/server-settings': 'Настройки сервера',
   '/tls': 'Сертификат',

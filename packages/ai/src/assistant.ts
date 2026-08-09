@@ -41,6 +41,7 @@ import {
   classifyPrompt,
   continuePrompt,
   extractPrompt,
+  chatPrompt,
   replyVariantsPrompt,
   rewritePrompt,
   searchQueryPrompt,
@@ -780,6 +781,163 @@ export class MailAssistant {
       await settle(
         text.length > 0 ? guessedUsage() : null,
         aiFail('aborted', 'Поток черновика прерван').error,
+      );
+    }
+  }
+
+  /**
+   * Свободный разговор с потоковой выдачей.
+   *
+   * ------------------------------------------------------------------
+   * ЧЕМ ОТЛИЧАЕТСЯ ОТ ОСТАЛЬНЫХ ВОЗМОЖНОСТЕЙ
+   * ------------------------------------------------------------------
+   * У всех прочих на входе письмо: его разбирают, вырезают лишнее,
+   * составляют опись отправляемого. Здесь письма нет вовсе — уходит
+   * ровно то, что человек написал сам, и опись это честно называет.
+   * Ни ящик, ни настройки сервера сюда не попадают, и никаких средств
+   * до них добраться у модели нет.
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ ИСТОРИЯ ПРИХОДИТ ЦЕЛИКОМ
+   * ------------------------------------------------------------------
+   * Разговор без памяти бесполезен, а хранить его на сервере — значит
+   * завести ещё одно место, где лежит переписка человека. История живёт
+   * у клиента и присылается с каждым вопросом: сервер её не запоминает,
+   * и закрытая вкладка стирает разговор насовсем.
+   *
+   * Обратная сторона — расход: каждый вопрос оплачивается вместе со
+   * всей историей. Поэтому её длину ограничивает вызывающий, а учёт
+   * считает ровно то, что ушло.
+   *
+   * `systemExtra` — добавка к правилам для админского разговора: там
+   * модели рассказывают об устройстве этого сервера. Ничего исполняемого
+   * в ней нет и быть не может — это текст.
+   */
+  async *streamChat(
+    history: readonly { role: 'user' | 'assistant'; content: string }[],
+    ctx: AiCallContext,
+    options?: { systemExtra?: string },
+  ): AsyncGenerator<
+    StreamEvent | { type: 'disclosure'; disclosure: OutboundDisclosure },
+    void,
+    void
+  > {
+    if (!this.#config.enabled) {
+      yield { type: 'error', error: this.#disabled().error };
+      return;
+    }
+    const turns = history.filter((item) => item.content.trim() !== '');
+    if (turns.length === 0) {
+      yield {
+        type: 'error',
+        error: aiFail('invalid-input', 'Нечего спрашивать: сообщение пустое').error,
+      };
+      return;
+    }
+
+    const system = chatPrompt(this.#language(ctx), options?.systemExtra);
+    const chars = turns.reduce((sum, item) => sum + item.content.length, 0);
+
+    /*
+     * Опись для разговора проще письменной, но нужна ровно так же:
+     * человек имеет право видеть, что именно уходит наружу и куда. Поля
+     * перечисляют его собственные реплики — их он и отправляет.
+     */
+    const disclosure: OutboundDisclosure = {
+      endpoint: this.endpoint,
+      model: this.#config.model,
+      providerLabel: this.#config.providerLabel,
+      local: this.#config.local,
+      fields: [
+        {
+          field: 'chat',
+          label: turns.length === 1 ? 'Ваш вопрос' : 'Ваш вопрос и предыдущие реплики разговора',
+          value: turns[turns.length - 1]?.content ?? '',
+          chars,
+        },
+      ],
+      removed: [],
+      attachmentsExcluded: [],
+      totalChars: chars,
+      approxTokens: estimateMessagesTokens([system, ...turns.map((item) => item.content)]),
+    };
+    yield { type: 'disclosure', disclosure };
+
+    const promptTokens = disclosure.approxTokens;
+    const decision = await this.#budget.reserve(
+      ctx.accountId,
+      promptTokens + this.#config.maxOutputTokens,
+      promptTokens,
+    );
+    if (!decision.allowed) {
+      await this.#record({
+        ctx,
+        feature: 'chat',
+        messageId: null,
+        usage: ZERO_USAGE,
+        cached: false,
+        outboundChars: 0,
+        durationMs: 0,
+        ok: false,
+        errorKind: decision.error.kind,
+      });
+      yield { type: 'error', error: decision.error };
+      return;
+    }
+    const reserved = decision.reserved;
+
+    const started = this.#now();
+    const messages: ChatMessage[] = [
+      { role: 'system', content: system },
+      ...turns.map((item) => ({ role: item.role, content: item.content })),
+    ];
+
+    let text = '';
+    let settled = false;
+    const settle = async (usage: TokenUsage | null, error: AiError | null): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      await this.#budget.settle(ctx.accountId, reserved, usage);
+      await this.#record({
+        ctx,
+        feature: 'chat',
+        messageId: null,
+        usage: usage ?? ZERO_USAGE,
+        cached: false,
+        outboundChars: disclosure.totalChars,
+        durationMs: this.#now() - started,
+        ok: error === null,
+        errorKind: error?.kind ?? null,
+      });
+    };
+
+    const guessedUsage = (): TokenUsage => ({
+      promptTokens,
+      completionTokens: estimateTokens(text),
+      totalTokens: promptTokens + estimateTokens(text),
+      estimated: true,
+    });
+
+    try {
+      for await (const event of this.#provider.stream(
+        { messages, temperature: 0.7, maxTokens: this.#config.maxOutputTokens },
+        ctx.signal,
+      )) {
+        if (event.type === 'delta') {
+          text += event.text;
+        } else if (event.type === 'done') {
+          await settle(event.usage, null);
+        } else {
+          const spent = SPENT_ON_FAILURE.has(event.error.kind) || text.length > 0;
+          await settle(spent ? guessedUsage() : null, event.error);
+        }
+        yield event;
+      }
+    } finally {
+      // Разговор бросили на середине — модель всё равно работала.
+      await settle(
+        text.length > 0 ? guessedUsage() : null,
+        aiFail('aborted', 'Разговор прерван').error,
       );
     }
   }

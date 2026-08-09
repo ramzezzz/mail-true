@@ -11,7 +11,19 @@
  */
 
 /** Возможность помощника в терминах интерфейса. */
-export type AiFeatureKey = 'summary' | 'classify' | 'reply' | 'extract' | 'translate' | 'search';
+export type AiFeatureKey =
+  | 'summary'
+  | 'classify'
+  | 'reply'
+  | 'extract'
+  | 'translate'
+  | 'search'
+  /**
+   * Свободный разговор. Стоит особняком: у остальных на входе письмо, а
+   * здесь — только то, что человек написал сам. Почты помощник в этом
+   * режиме не видит и изменить ничего не может.
+   */
+  | 'chat';
 
 /** Кто именно получит данные. */
 export interface AiProviderInfo {

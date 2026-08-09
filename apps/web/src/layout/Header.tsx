@@ -12,7 +12,11 @@
  * место строке поиска — иначе на неё оставалось четыре пикселя.
  */
 
+import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAiState } from '../api/aiQueries';
+import { ChatPanel } from '../ai/ChatPanel';
+import { aiFeatureVisible } from '../ai/aiVisibility';
 import { IconButton, Tooltip } from '../components';
 import { cx } from '../lib/cx';
 import { IconSettings } from '../mail/icons';
@@ -38,6 +42,16 @@ export interface HeaderProps {
 export function Header({ navOpen, onToggleNav }: HeaderProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { data: aiState } = useAiState();
+  const [chatOpen, setChatOpen] = useState(false);
+
+  /*
+   * Кнопки разговора нет, пока возможность не разрешена администратором
+   * и не включена самим человеком: правило видимости одно на весь
+   * помощник (aiVisibility), и обходить его здесь нельзя. Кнопка,
+   * ведущая к отказу, хуже отсутствующей кнопки.
+   */
+  const chatVisible = aiFeatureVisible(aiState, 'chat');
 
   // В режиме поиска логотип уступает место кнопке «‹ Сбросить поиск»
   const inSearch = location.pathname.startsWith(SEARCH_PATH.replace(/\/$/u, ''));
@@ -79,6 +93,23 @@ export function Header({ navOpen, onToggleNav }: HeaderProps) {
       <SearchBar />
 
       <div className={styles.rightZone}>
+        {chatVisible && (
+          <Tooltip text="Разговор с помощником">
+            <IconButton
+              label="Разговор с помощником"
+              className={styles.headerButton}
+              onClick={() => setChatOpen(true)}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+                <path
+                  d="M10 2.5c4.14 0 7.5 2.8 7.5 6.25 0 3.45-3.36 6.25-7.5 6.25-.7 0-1.38-.08-2.02-.23l-3.3 1.6a.6.6 0 0 1-.86-.62l.36-2.5C2.85 12.1 2.5 10.72 2.5 8.75 2.5 5.3 5.86 2.5 10 2.5Zm-3 5.4a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Zm3 0a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Zm3 0a.95.95 0 1 0 0 1.9.95.95 0 0 0 0-1.9Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </IconButton>
+          </Tooltip>
+        )}
+
         <Tooltip text="Настройки">
           <IconButton
             label="Настройки"
@@ -93,6 +124,8 @@ export function Header({ navOpen, onToggleNav }: HeaderProps) {
 
         <AccountMenu />
       </div>
+
+      {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
     </header>
   );
 }

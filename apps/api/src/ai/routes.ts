@@ -85,6 +85,29 @@ const streamSchema = z.object({
   instruction: z.string().trim().max(500).optional(),
 });
 
+/**
+ * Разговор целиком: история живёт у клиента и приезжает с каждым
+ * вопросом. Сервер её не хранит — закрытая вкладка стирает разговор
+ * насовсем, и ещё одного места, где лежит переписка человека, не
+ * появляется.
+ *
+ * Пределы здесь — не формальность, а плата: каждый вопрос уходит в
+ * сервис вместе со всей историей и оплачивается вместе с ней. Двадцать
+ * реплик по четыре тысячи символов — это уже заметная часть дневного
+ * предела домена за одно нажатие.
+ */
+const chatSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().trim().min(1).max(4000),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+
 /* ------------------------------------------------------------------ */
 /* Вспомогательное                                                      */
 /* ------------------------------------------------------------------ */
@@ -374,6 +397,83 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
       const body = searchQuerySchema.parse(request.body);
       const { assistant } = await service.forFeature(mail.email, 'search');
       return unwrap(await assistant.parseSearchQuery(body.query, { accountId: mail.email }));
+    },
+  );
+
+  /* --- разговор ------------------------------------------------------ */
+
+  /**
+   * Свободный разговор с помощником (Server-Sent Events).
+   *
+   * ------------------------------------------------------------------
+   * ЧТО ЗДЕСЬ ЕСТЬ И ЧЕГО НЕТ
+   * ------------------------------------------------------------------
+   * Есть: то, что человек написал сам, и ответ модели кусками.
+   *
+   * Нет: доступа к почте, к настройкам, к чему бы то ни было на сервере.
+   * И это не только текст в правилах для модели — сюда просто нечего
+   * передать: маршрут не читает ни одного письма и не даёт модели
+   * никаких средств что-либо запросить. Даже уговорив её, получить через
+   * разговор чужой пароль или настройку невозможно, потому что их здесь
+   * нет.
+   *
+   * Возможность отдельная («chat») и по умолчанию выключена: разговоры
+   * тратят тот же предел домена, что и разбор писем.
+   */
+  app.post(
+    '/chat/stream',
+    { preHandler: app.requireSession, config: { rateLimit: { max: 20, timeWindow: 60_000 } } },
+    async (request, reply) => {
+      const mail = session(request);
+      const body = chatSchema.parse(request.body);
+      const { assistant } = await service.forFeature(mail.email, 'chat');
+
+      reply.raw.writeHead(200, {
+        'content-type': 'text/event-stream; charset=utf-8',
+        'cache-control': 'no-cache, no-transform',
+        connection: 'keep-alive',
+        'x-accel-buffering': 'no',
+      });
+
+      // Слушаем закрытие ОТВЕТА, а не запроса: у запроса с телом 'close'
+      // приходит сразу после вычитывания тела, и разговор обрывался бы
+      // до первой буквы.
+      const controller = new AbortController();
+      let finished = false;
+      reply.raw.on('close', () => {
+        if (!finished) controller.abort();
+      });
+
+      const send = (event: StreamEventLike): void => {
+        reply.raw.write(`data: ${JSON.stringify(publicStreamEvent(event))}
+
+`);
+      };
+
+      try {
+        for await (const event of assistant.streamChat(body.messages, {
+          accountId: mail.email,
+          signal: controller.signal,
+        })) {
+          send(event);
+        }
+      } catch (err) {
+        request.log.warn(errorInfo(err), 'Поток разговора с ИИ оборвался');
+        send({
+          type: 'error',
+          error: {
+            kind: 'network',
+            message: 'Поток прервался',
+            retryable: true,
+            status: null,
+            details: null,
+          },
+        });
+      } finally {
+        finished = true;
+        reply.raw.end();
+      }
+      return reply;
     },
   );
 
