@@ -49,6 +49,7 @@ import {
   groupIdsByFolder,
   requireFolder,
   requireOrCreateFolder,
+  searchUids,
 } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import type { SnoozeStore, SnoozedRow } from './snooze-db.js';
@@ -349,13 +350,21 @@ export class SnoozeService {
     return items;
   }
 
-  /** Все номера писем в уже открытой папке. */
+  /**
+   * Все номера писем в уже открытой папке.
+   *
+   * Через searchUids, а не через client.search: тот при отказе команды
+   * ошибку не бросает, а возвращает `false`, и подстановка пустого
+   * массива превращала отказ сервера в честное «отложенных нет».
+   * Человек видел пустой список при живых письмах, лежащих в папке и
+   * ждущих срока, — отличить это от правды было нечем. Ровно тот приём,
+   * ради отказа от которого и написан searchUids.
+   */
   async #allUids(client: ImapFlow): Promise<number[]> {
     const mailbox = client.mailbox;
     const exists = typeof mailbox === 'object' && mailbox ? mailbox.exists : 0;
     if (exists === 0) return [];
-    const found = await client.search({ all: true }, { uid: true });
-    return Array.isArray(found) ? found : [];
+    return searchUids(client, { all: true });
   }
 
   /**

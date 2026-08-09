@@ -29,7 +29,13 @@ import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
-import { existingUids, groupIdsByFolder, listFolders, requireFolder } from '../imap/service.js';
+import {
+  existingUids,
+  groupIdsByFolder,
+  listFolders,
+  requireFolder,
+  searchUids,
+} from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { MAX_ENTITY_ID_LENGTH } from './folders.js';
 import {
@@ -149,8 +155,17 @@ export async function purgeKeyword(
     let lock: { release(): void } | null = null;
     try {
       lock = await client.getMailboxLock(folder.path);
-      const uids = await client.search({ keyword }, { uid: true });
-      if (uids && uids.length > 0) {
+      /*
+       * Через searchUids: `client.search` при отказе команды ошибку не
+       * бросает, а возвращает `false`. Здесь это значило, что папка, в
+       * которой поиск не выполнился, молча пропускалась: метку из
+       * справочника убрали, а на письмах этой папки ключевое слово
+       * осталось — и число «снято N» было занижено, ничем этого не
+       * показывая. Теперь отказ поиска попадает в catch ниже и виден в
+       * журнале с именем папки.
+       */
+      const uids = await searchUids(client, { keyword });
+      if (uids.length > 0) {
         await client.messageFlagsRemove(uids, [keyword], { uid: true });
         removed += uids.length;
       }
