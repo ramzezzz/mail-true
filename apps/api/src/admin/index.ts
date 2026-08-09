@@ -270,6 +270,8 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     dest: migrationDest,
     stateConnectionString: adminConfig.databaseUrl,
     concurrency: adminConfig.MIGRATION_CONCURRENCY,
+    maxJobs: adminConfig.MIGRATION_MAX_JOBS,
+    chunkSize: adminConfig.MIGRATION_CHUNK_SIZE,
     maxHours: adminConfig.MIGRATION_MAX_HOURS,
   });
 

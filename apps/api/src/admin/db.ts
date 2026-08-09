@@ -1561,23 +1561,55 @@ export class AdminDb {
    * со «стухшим» биением подхватывается и продолжается с того места, где
    * его застал перезапуск (состояние докачки лежит в migrate_cursors).
    *
+   * СКОЛЬКО ЗАДАНИЙ БРАТЬ ЗА РАЗ — ОТДЕЛЬНЫЙ ВОПРОС.
+   *
+   * Здесь не было предела вовсе: забирались ВСЕ незавершённые задания
+   * сразу, и на каждое заводился свой перенос со своим пулом соединений
+   * к базе. Переезд по отделам (список на 50 ящиков, потом следующий)
+   * означал столько живых заданий, сколько их успели завести, и десятки
+   * соединений сверх собственных пулов api. Postgres с умолчанием
+   * max_connections = 100 отвечает на это «too many clients» — а из той же
+   * базы берут данные Postfix и Dovecot, то есть сервер перестаёт
+   * принимать почту и пускать людей в ящики. Фоновая работа не имеет права
+   * ронять доставку, поэтому число одновременных заданий задаёт работник.
+   *
    * @param staleSeconds после какого молчания считать прежнего работника мёртвым
+   * @param limit        сколько заданий взять за этот проход
+   * @param skipIds      задания, которые этот работник уже ведёт (их
+   *                     биение обновляет отдельный таймер, и место в
+   *                     пределе они занимать не должны)
    */
-  async claimMigrationJobs(runner: string, staleSeconds: number): Promise<MigrationJobRow[]> {
+  async claimMigrationJobs(
+    runner: string,
+    staleSeconds: number,
+    limit: number,
+    skipIds: number[] = [],
+  ): Promise<MigrationJobRow[]> {
+    if (limit <= 0) return [];
     return this.query<MigrationJobRow>(
       `UPDATE mail_migration_jobs
           SET runner = $1, heartbeat_at = now(), updated_at = now()
-        WHERE state IN ('queued', 'running')
-          AND (runner IS NULL
-               OR runner = $1
-               OR heartbeat_at IS NULL
-               OR heartbeat_at < now() - make_interval(secs => $2::double precision))
+        WHERE id IN (
+          SELECT id FROM mail_migration_jobs
+           WHERE state IN ('queued', 'running')
+             AND NOT (id = ANY($4::bigint[]))
+             AND (runner IS NULL
+                  OR runner = $1
+                  OR heartbeat_at IS NULL
+                  OR heartbeat_at < now() - make_interval(secs => $2::double precision))
+           -- По возрастанию номера: кто встал в очередь раньше, тот и едет
+           -- раньше. SKIP LOCKED — чтобы два процесса не ждали друг друга
+           -- на одной и той же строке.
+           ORDER BY id
+           LIMIT $3
+           FOR UPDATE SKIP LOCKED
+        )
         RETURNING id::text, admin_login, state, stop_requested, source_host, source_port,
                   source_secure, source_insecure_tls, source_master_user,
                   source_master_separator, secret_enc, total, done_count, copied,
                   skipped, failed, error, runner, heartbeat_at, created_at, updated_at,
                   started_at, finished_at`,
-      [runner, staleSeconds],
+      [runner, staleSeconds, limit, skipIds],
     );
   }
 

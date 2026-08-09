@@ -5,17 +5,25 @@
  *   1. Подключиться к обоим серверам, получить список папок источника
  *      и спец-папки приёмника (SPECIAL-USE), построить план сопоставления.
  *   2. Для каждой папки источника:
- *      a) создать папку-приёмник (иерархию) при необходимости;
- *      b) собрать набор дедупликации: ключи писем, уже лежащих в
+ *      a) взять список номеров (UID) писем — только номера, не письма;
+ *      b) создать папку-приёмник (иерархию) при необходимости;
+ *      c) собрать набор дедупликации: ключи писем, уже лежащих в
  *         папке-приёмнике, плюс ключи из хранилища состояния;
- *      c) одним FETCH прочитать «лёгкие» метаданные всех писем источника
- *         (UID, размер, флаги, INTERNALDATE, нужные заголовки) — без тел;
- *      d) письма, которых нет в наборе дедупликации, скачивать по одному
+ *      d) дальше — ПОРЦИЯМИ (chunkSize): прочитать «лёгкие» метаданные
+ *         порции писем (UID, размер, флаги, INTERNALDATE, заголовки для
+ *         ключа дедупликации) — без тел;
+ *      e) письма, которых нет в наборе дедупликации, скачивать по одному
  *         (в памяти держится максимум одно письмо) и класть APPEND'ом
  *         с исходными флагами и INTERNALDATE;
- *      e) после каждого письма фиксировать состояние, периодически — курсор.
+ *      f) после каждого письма фиксировать состояние, после каждой
+ *         порции — курсор.
  *   3. При обрыве соединения — переподключиться и продолжить с того же
  *      места (набор дедупликации уже наполнен, докачиваются только новые).
+ *
+ * Почему порциями: ящик бывает на полмиллиона писем, а потолок кучи у
+ * процесса — 512 МБ (infra/docker-compose.yml), и делит он его с веб-почтой
+ * и админкой. «Прочитать всё, потом перенести всё» означало падение всего
+ * процесса, а не только переноса.
  *
  * Флаги: переносятся \Seen, \Answered, \Flagged, \Draft, \Deleted и
  * пользовательские метки (ключевые слова без «\»). Флаг \Recent не
@@ -46,6 +54,32 @@ import type {
 
 /** Заголовки, запрашиваемые для вычисления ключа дедупликации. */
 const DEDUP_HEADER_FIELDS = ['message-id', 'date', 'from', 'to', 'subject'];
+
+/**
+ * Размер порции по умолчанию — сколько писем папки читается и переносится
+ * за один заход. Объяснение числа — в MigrateMailboxOptions.chunkSize.
+ */
+export const DEFAULT_CHUNK_SIZE = 2000;
+
+/**
+ * Перевод строки. В имени папки IMAP его быть не может (RFC 3501), поэтому
+ * им помечается служебная запись в хранилище состояния — см. destScanKey.
+ */
+const IMPOSSIBLE_IN_FOLDER_NAME = String.fromCharCode(10);
+
+/**
+ * Под каким именем в хранилище состояния лежит отметка «до какого UID
+ * папка-приёмник уже просмотрена».
+ *
+ * Курсоры хранятся парой (ящик, папка), своей полки для приёмника там нет,
+ * а заводить её — это правка схемы базы, которая может быть и не нашей:
+ * строка подключения к состоянию произвольная (см. state.ts). Поэтому имя
+ * помечено символом, который в имени папки не встречается никогда, — с
+ * настоящей папкой-источником такая запись не столкнётся.
+ */
+function destScanKey(destPath: string): string {
+  return `${IMPOSSIBLE_IN_FOLDER_NAME}dest-scan${IMPOSSIBLE_IN_FOLDER_NAME}${destPath}`;
+}
 
 /** Метаданные одного письма источника (без тела). */
 interface SourceMessageMeta {
@@ -390,6 +424,7 @@ export class CursorTracker {
 export class MailboxMigrator extends EventEmitter {
   private readonly options: MigrateMailboxOptions;
   private readonly batchSize: number;
+  private readonly chunkSize: number;
   private readonly maxAttempts: number;
   private source: ImapFlow | null = null;
   private dest: ImapFlow | null = null;
@@ -400,6 +435,7 @@ export class MailboxMigrator extends EventEmitter {
     super();
     this.options = options;
     this.batchSize = options.batchSize ?? 50;
+    this.chunkSize = Math.max(1, options.chunkSize ?? DEFAULT_CHUNK_SIZE);
     this.maxAttempts = options.maxAttempts ?? 5;
   }
 
@@ -438,9 +474,22 @@ export class MailboxMigrator extends EventEmitter {
     return `${source.user}@${source.host} -> ${dest.user}@${dest.host}`;
   }
 
+  /**
+   * Завести подключение к серверу.
+   *
+   * Отдельным методом — чтобы проверки могли подставить вместо чужого
+   * IMAP-сервера свой. Поднимать настоящий сервер ради проверки того,
+   * ПОРЦИЯМИ ли читается папка и сколько раз мы спросили хранилище
+   * состояния, — это проверка не того. Тот же приём, что в работнике
+   * переноса (createState / runBatch в admin/migrate-runner.ts).
+   */
+  protected makeClient(endpoint: ImapEndpoint): ImapFlow {
+    return createClient(endpoint, this.options.logger);
+  }
+
   private async connectSource(): Promise<ImapFlow> {
     if (this.source?.usable) return this.source;
-    this.source = createClient(this.options.source, this.options.logger);
+    this.source = this.makeClient(this.options.source);
     // Ошибки соединения ловим сами при выполнении операций
     this.source.on('error', () => undefined);
     await connectWithReason(this.source, this.options.source, 'исходному');
@@ -449,7 +498,7 @@ export class MailboxMigrator extends EventEmitter {
 
   private async connectDest(): Promise<ImapFlow> {
     if (this.dest?.usable) return this.dest;
-    this.dest = createClient(this.options.dest, this.options.logger);
+    this.dest = this.makeClient(this.options.dest);
     this.dest.on('error', () => undefined);
     await connectWithReason(this.dest, this.options.dest, 'целевому');
     return this.dest;
@@ -726,28 +775,191 @@ export class MailboxMigrator extends EventEmitter {
    * Считаем именно КОЛИЧЕСТВО копий каждого ключа, а не факт его наличия:
    * ключ не уникален, и «ключ встречался — значит дубль» выбрасывало
    * законно новые письма при втором проходе.
+   *
+   * ЧТО БЫЛО. Обход шёл по ВСЕЙ папке-приёмнику при каждом сборе. Для
+   * разового переноса это верно: приёмник обычно пуст, и обходить там
+   * нечего. Но этим же переносом работает сборщик чужой почты
+   * (accounts/collector.ts) с проверкой раз в 15 минут — и ящик на сто
+   * тысяч писем означал сто тысяч наборов заголовков каждые четверть часа
+   * на пустом ходу: и по сети, и по диску нашего же Dovecot.
+   *
+   * ПОЧЕМУ ТАК. Читаем только то, что появилось в приёмнике после прошлого
+   * обхода; отметка «до какого UID приёмник просмотрен» лежит в том же
+   * хранилище состояния, что и курсор источника. Свои копии, положенные
+   * после отметки, следующий обход увидит и посчитает — а состояние знает,
+   * что они наши, и вычтет их (см. migrateFolder). Сокращение применяется
+   * ТОЛЬКО когда источник тоже читается по курсору: полное чтение источника
+   * обязано сверяться с полным содержимым приёмника, иначе будут дубли.
+   *
+   * @param reduceByCursor читать только новое в приёмнике (см. выше)
    */
-  private async collectDestCounts(dest: ImapFlow, destPath: string): Promise<Map<string, number>> {
+  private async collectDestCounts(
+    dest: ImapFlow,
+    destPath: string,
+    reduceByCursor: boolean,
+  ): Promise<Map<string, number>> {
     const counts = new Map<string, number>();
+    const state = this.options.state;
     const lock = await dest.getMailboxLock(destPath);
     try {
       const mailbox = typeof dest.mailbox === 'object' ? dest.mailbox : null;
       if (!mailbox || mailbox.exists === 0) return counts;
-      for await (const msg of dest.fetch('1:*', {
-        uid: true,
-        size: true,
-        headers: DEDUP_HEADER_FIELDS,
-      })) {
+      const uidValidity = String(mailbox.uidValidity ?? '0');
+      const scanKey = destScanKey(destPath);
+      const previous =
+        reduceByCursor && state ? await state.getCursor(this.accountKey, scanKey) : null;
+      // Папку-приёмник могли пересоздать — тогда прежние UID ничего не значат
+      // и обходить приходится заново.
+      const since =
+        previous !== null && previous.uidValidity === uidValidity ? previous.lastUid : 0;
+      const range = since > 0 ? `${since + 1}:*` : '1:*';
+      let lastUid = since;
+      for await (const msg of dest.fetch(
+        range,
+        { uid: true, size: true, headers: DEDUP_HEADER_FIELDS },
+        { uid: since > 0 },
+      )) {
+        // «uid:*» у некоторых серверов возвращает последнее письмо, даже
+        // если его UID меньше нижней границы — отфильтруем.
+        if (msg.uid <= since) continue;
         const key = keyOf(msg);
         counts.set(key, (counts.get(key) ?? 0) + 1);
+        if (msg.uid > lastUid) lastUid = msg.uid;
       }
+      // Отметку ставим и после полного обхода: со следующего запуска он
+      // станет коротким.
+      if (state) await state.setCursor(this.accountKey, scanKey, { uidValidity, lastUid });
     } finally {
       lock.release();
     }
     return counts;
   }
 
-  /** Основной цикл переноса одной папки (одна попытка). */
+  /**
+   * Список UID писем папки-источника, которые предстоит разобрать.
+   *
+   * Берём именно список номеров, а не метаописания: на полумиллионе писем
+   * это единицы мегабайт вместо сотен, а порезать работу на порции без
+   * списка нечем. Метаописания читаются потом, по одной порции за раз.
+   */
+  private async readSourcePlan(
+    source: ImapFlow,
+    sourcePath: string,
+    folderReport: FolderReport,
+  ): Promise<{
+    uidValidity: string;
+    uids: number[];
+    sinceUid: number;
+    incremental: boolean;
+  }> {
+    const state = this.options.state;
+    const lock = await source.getMailboxLock(sourcePath, { readOnly: true });
+    try {
+      const mailbox = typeof source.mailbox === 'object' ? source.mailbox : null;
+      const uidValidity = String(mailbox?.uidValidity ?? '0');
+      const exists = mailbox?.exists ?? 0;
+      folderReport.total = exists;
+      if (exists === 0) return { uidValidity, uids: [], sinceUid: 0, incremental: false };
+
+      // Курсор: если UIDVALIDITY не изменился, разбираем только письма
+      // новее последнего обработанного UID. Но только при наличии
+      // состояния — без него всегда читаем всё и полагаемся на
+      // дедупликацию по приёмнику.
+      const cursor = state ? await state.getCursor(this.accountKey, sourcePath) : null;
+      const cursorValid = cursor !== null && cursor.uidValidity === uidValidity;
+      const sinceUid = cursorValid ? cursor.lastUid : 0;
+      const incremental = state !== undefined && cursorValid && sinceUid > 0;
+      const found = await source.search(
+        { uid: incremental ? `${sinceUid + 1}:*` : '1:*' },
+        { uid: true },
+      );
+      if (found === false) {
+        throw new Error(
+          'сервер-источник не ответил на поиск писем (SEARCH) — ' +
+            'список писем папки взять нечем',
+        );
+      }
+      // «uid:*» у части серверов отдаёт последнее письмо папки, даже если
+      // его номер меньше нижней границы.
+      const uids = found.filter((uid) => uid > sinceUid).sort((a, b) => a - b);
+      return { uidValidity, uids, sinceUid, incremental };
+    } finally {
+      lock.release();
+    }
+  }
+
+  /**
+   * Метаописания писем одной порции: UID, размер, флаги, дата и ключ
+   * дедупликации. Тела не читаются — они скачиваются по одному при
+   * копировании, и больше одного письма в памяти не бывает никогда.
+   */
+  private async readChunkMetas(
+    source: ImapFlow,
+    sourcePath: string,
+    chunk: readonly number[],
+  ): Promise<SourceMessageMeta[]> {
+    const first = chunk[0];
+    const last = chunk[chunk.length - 1];
+    if (first === undefined || last === undefined) return [];
+    // Диапазон first:last накрывает ровно эту порцию: номера выданы
+    // поиском по возрастанию, а новые письма получают номера больше
+    // последнего. Список нужных номеров всё же держим — письмо могли
+    // удалить между поиском и чтением.
+    const wanted = new Set(chunk);
+    const metas: SourceMessageMeta[] = [];
+    const lock = await source.getMailboxLock(sourcePath, { readOnly: true });
+    try {
+      for await (const msg of source.fetch(
+        `${first}:${last}`,
+        {
+          uid: true,
+          size: true,
+          flags: true,
+          internalDate: true,
+          headers: DEDUP_HEADER_FIELDS,
+        },
+        { uid: true },
+      )) {
+        if (!wanted.has(msg.uid)) continue;
+        const internalDate =
+          msg.internalDate instanceof Date
+            ? msg.internalDate
+            : msg.internalDate
+              ? new Date(msg.internalDate)
+              : undefined;
+        metas.push({
+          uid: msg.uid,
+          size: msg.size ?? 0,
+          flags: storableFlags(msg.flags),
+          internalDate,
+          key: keyOf(msg),
+        });
+      }
+    } finally {
+      lock.release();
+    }
+    metas.sort((a, b) => a.uid - b.uid);
+    return metas;
+  }
+
+  /**
+   * Основной цикл переноса одной папки (одна попытка).
+   *
+   * ЧТО БЫЛО. «Прочитать всё → перенести всё»: метаописания каждого письма
+   * папки (номер, размер, флаги, дата, ключ дедупликации) собирались в один
+   * массив и держались до конца копирования, а рядом лежал полный перечень
+   * содержимого папки-приёмника. На INBOX в 300–500 тысяч писем это сотни
+   * мегабайт при потолке кучи в 512 МБ, да ещё умноженных на число
+   * одновременно переносимых ящиков. Работник переноса живёт в процессе
+   * api, поэтому кончалось это не отказом переноса, а падением ВСЕЙ
+   * веб-почты вместе с админкой: контейнер поднимался, работник брал то же
+   * задание и падал снова.
+   *
+   * ПОЧЕМУ ТАК. Папка разбирается порциями (chunkSize): прочитали
+   * метаописания порции — перенесли — записали курсор — забыли. Расход
+   * памяти перестал зависеть от размера ящика, а перезапуск продолжает
+   * работу с последней записанной порции, а не с начала папки.
+   */
   private async migrateFolder(mapping: FolderMapping, folderReport: FolderReport): Promise<void> {
     const state = this.options.state;
     const source = await this.connectSource();
@@ -755,73 +967,18 @@ export class MailboxMigrator extends EventEmitter {
     const sourcePath = mapping.source.path;
     const dryRun = this.options.dryRun === true;
 
-    // 1. Метаданные писем источника.
+    // 1. Что разбирать и с какого места.
     //    Читаем ДО создания папки-приёмника: если папку создать не удастся,
     //    в отчёте всё равно будет видно, сколько писем осталось непереехавшими.
-    const sourceLock = await source.getMailboxLock(sourcePath, { readOnly: true });
-    const metas: SourceMessageMeta[] = [];
-    let uidValidity = '0';
-    let sinceUid = 0;
-    /** Читаем только письма новее курсора (а не всю папку). */
-    let incremental = false;
-    try {
-      const mailbox = typeof source.mailbox === 'object' ? source.mailbox : null;
-      uidValidity = String(mailbox?.uidValidity ?? '0');
-      const exists = mailbox?.exists ?? 0;
-      folderReport.total = exists;
+    const { uidValidity, uids, sinceUid, incremental } = await this.readSourcePlan(
+      source,
+      sourcePath,
+      folderReport,
+    );
 
-      if (exists > 0) {
-        // Курсор: если UIDVALIDITY не изменился, метаданные читаем только
-        // для писем новее последнего обработанного UID …
-        const cursor = state ? await state.getCursor(this.accountKey, sourcePath) : null;
-        const cursorValid = cursor !== null && cursor.uidValidity === uidValidity;
-        if (cursorValid) sinceUid = cursor.lastUid;
-        // … но только если и набор состояния есть; без состояния всегда
-        // читаем всё и полагаемся на дедупликацию по приёмнику.
-        const range = state && cursorValid && sinceUid > 0 ? `${sinceUid + 1}:*` : '1:*';
-        incremental = range !== '1:*';
-
-        for await (const msg of source.fetch(
-          range,
-          {
-            uid: true,
-            size: true,
-            flags: true,
-            internalDate: true,
-            headers: DEDUP_HEADER_FIELDS,
-          },
-          { uid: range !== '1:*' },
-        )) {
-          // «uid:*» у некоторых серверов возвращает последнее письмо, даже
-          // если его UID меньше нижней границы — отфильтруем.
-          if (range !== '1:*' && msg.uid <= sinceUid) continue;
-          const internalDate =
-            msg.internalDate instanceof Date
-              ? msg.internalDate
-              : msg.internalDate
-                ? new Date(msg.internalDate)
-                : undefined;
-          metas.push({
-            uid: msg.uid,
-            size: msg.size ?? 0,
-            flags: storableFlags(msg.flags),
-            internalDate,
-            key: keyOf(msg),
-          });
-        }
-        if (range !== '1:*') {
-          // При инкрементальном чтении общее число — уже обработанные + новые
-          folderReport.total = exists;
-        }
-      }
-    } finally {
-      sourceLock.release();
-    }
-    metas.sort((a, b) => a.uid - b.uid);
-
-    // Чтение метаданных большой папки (десятки тысяч писем) занимает
-    // минуты, и всё это время нажатая кнопка «Остановить» выглядела бы
-    // непрожатой. Здесь ничего ещё не записано — выходить безопасно.
+    // Опрос большой папки занимает время, и всё это время нажатая кнопка
+    // «Остановить» выглядела бы непрожатой. Здесь ничего ещё не записано —
+    // выходить безопасно.
     this.checkStopped();
 
     // 2. Папка-приёмник. Имя может измениться (Maildir++ не принимает точку
@@ -835,53 +992,230 @@ export class MailboxMigrator extends EventEmitter {
       }
     }
 
-    // 3. Учёт копий: содержимое приёмника + хранилище состояния.
-    //    Не «ключ встречался», а «сколько копий уже лежит»: иначе второй
-    //    проход теряет законно новые письма с повторным Message-ID и
-    //    автоуведомления, одинаковые по всем заголовкам и размеру.
-    const destCounts = dryRun
+    // 3. Сколько копий каждого письма уже лежит в приёмнике.
+    //    Не «ключ встречался», а «сколько копий лежит»: иначе второй проход
+    //    теряет законно новые письма с повторным Message-ID и автоуведомления,
+    //    одинаковые по всем заголовкам и размеру. Расходуется этот запас по
+    //    ходу разбора, поэтому карта живёт на всю папку и убывает.
+    const destFree = dryRun
       ? new Map<string, number>()
-      : await this.collectDestCounts(dest, destPath);
-    const ledger = new DedupLedger();
-    const keySeen = new Set<string>();
+      : await this.collectDestCounts(dest, destPath, incremental);
 
-    const toCopy: SourceMessageMeta[] = [];
-    for (const meta of metas) {
-      if (!keySeen.has(meta.key)) {
-        keySeen.add(meta.key);
-        const inDest = destCounts.get(meta.key) ?? 0;
-        const inState = state ? await state.migratedCount(this.accountKey, destPath, meta.key) : 0;
-        // При инкрементальном чтении письма, ради которых копии уже лежат
-        // в приёмнике, в metas не попали (их UID меньше курсора) — значит,
-        // эти копии заняты и «съесть» новое письмо не могут. Иначе дельта
-        // объявляла бы новое письмо с повторным Message-ID дублем.
-        ledger.setPresent(
-          meta.key,
-          incremental ? Math.max(0, inDest - inState) : Math.max(inDest, inState),
-        );
-      }
-      if (ledger.consume(meta.key)) {
-        folderReport.skipped++;
-      } else if (
-        this.options.maxMessageSize !== undefined &&
-        meta.size > this.options.maxMessageSize
-      ) {
-        folderReport.errors.push(
-          `UID ${meta.uid}: пропущено, размер ${meta.size} байт превышает лимит`,
-        );
-        folderReport.failed++;
-      } else {
-        toCopy.push(meta);
-      }
-    }
+    /*
+     * Участвует ли счёт из состояния в решении «дубль или нет».
+     *
+     * При ПОЛНОМ чтении источника — нет. Обход приёмника при этом тоже
+     * полный, а всё, что мы туда положили, в приёмнике и лежит, то есть
+     * этим обходом уже посчитано. Спрашивать вдобавок состояние опасно:
+     * счёт в нём растёт по ходу переноса (каждое скопированное письмо), и
+     * для следующей порции наши же свежие копии выглядели бы «уже
+     * лежавшими» — то есть законно новое письмо с повторным Message-ID
+     * объявлялось бы дублем. Ровно эту потерю почты здесь однажды уже
+     * чинили (см. DedupLedger).
+     *
+     * При чтении по курсору — да. Обход приёмника сокращён, и только
+     * состояние знает, какие из увиденных копий положили туда мы сами.
+     * Пересчёт по порциям здесь безопасен: он лишь уменьшает число
+     * свободных копий, то есть склоняет решение к «перенести», а не к
+     * «выбросить».
+     *
+     * В сухом прогоне тоже да: копий не появляется, счёт не растёт, а
+     * показать «столько уже перенесено» — это и есть смысл прогона.
+     */
+    const useStateCounts = state !== undefined && (incremental || dryRun);
 
     this.progress({
       type: 'folder-start',
       sourcePath,
       destPath,
-      toCopy: toCopy.length,
+      toCopy: uids.length,
       total: folderReport.total,
     });
+
+    /*
+     * Курсор папки: до какого UID включительно всё разобрано.
+     *
+     * Двигается ТОЛЬКО по непрерывному префиксу успешных писем — первая же
+     * неудача его замораживает (CursorTracker). Раньше он двигался и через
+     * неудавшиеся письма: после отказа по квоте повторный запуск начинал
+     * читать источник уже ПОСЛЕ потерянных писем, докачивал ноль и
+     * рапортовал «ошибок 0» — письма терялись навсегда. Заморозка
+     * распространяется на всю папку: порция после неудавшейся не имеет
+     * права сдвинуть курсор за неё.
+     */
+    let cursorUid = sinceUid;
+    let cursorFrozen = false;
+    let quotaHit = false;
+    let stopped = false;
+    let sinceCursorWrite = 0;
+
+    const writeCursor = async (): Promise<void> => {
+      if (!state) return;
+      await state.setCursor(this.accountKey, sourcePath, { uidValidity, lastUid: cursorUid });
+    };
+
+    // 4. Разбор и перенос порциями.
+    for (let offset = 0; offset < uids.length; offset += this.chunkSize) {
+      const chunkUids = uids.slice(offset, offset + this.chunkSize);
+      const metas = await this.readChunkMetas(source, sourcePath, chunkUids);
+      if (this.stopRequested) {
+        stopped = true;
+        break;
+      }
+
+      /*
+       * Сколько копий каждого письма порции уже перенесено — ОДНИМ
+       * запросом на порцию.
+       *
+       * Здесь стоял запрос на КАЖДОЕ письмо папки. На папке в 200 тысяч
+       * писем это 200 тысяч обращений к базе до того, как будет скопировано
+       * хотя бы одно письмо: десятки минут неподвижных счётчиков (перенос
+       * выглядел зависшим) и всё это время занятая база — та самая, из
+       * которой Postfix берёт карты доставки.
+       */
+      const keys = [...new Set(metas.map((m) => m.key))];
+      const stateCounts =
+        useStateCounts && state
+          ? await state.migratedCounts(this.accountKey, destPath, keys)
+          : new Map<string, number>();
+
+      const ledger = new DedupLedger();
+      const keySeen = new Set<string>();
+      const toCopy: SourceMessageMeta[] = [];
+      for (const meta of metas) {
+        if (!keySeen.has(meta.key)) {
+          keySeen.add(meta.key);
+          const inDest = destFree.get(meta.key) ?? 0;
+          const inState = stateCounts.get(meta.key) ?? 0;
+          // При чтении по курсору письма, ради которых копии уже лежат в
+          // приёмнике, в разбор не попали (их UID меньше курсора) — значит,
+          // эти копии заняты и «съесть» новое письмо не могут.
+          ledger.setPresent(
+            meta.key,
+            incremental ? Math.max(0, inDest - inState) : Math.max(inDest, inState),
+          );
+        }
+        if (ledger.consume(meta.key)) {
+          folderReport.skipped++;
+          // Копию засчитали этому письму — следующая порция не должна
+          // засчитать её второй раз.
+          destFree.set(meta.key, Math.max(0, (destFree.get(meta.key) ?? 0) - 1));
+        } else if (
+          this.options.maxMessageSize !== undefined &&
+          meta.size > this.options.maxMessageSize
+        ) {
+          folderReport.errors.push(
+            `UID ${meta.uid}: пропущено, размер ${meta.size} байт превышает лимит`,
+          );
+          folderReport.failed++;
+        } else {
+          toCopy.push(meta);
+        }
+      }
+
+      if (dryRun) continue;
+
+      // Копирование: по одному письму в памяти.
+      const cursor = cursorFrozen
+        ? null
+        : new CursorTracker(
+            chunkUids,
+            toCopy.map((m) => m.uid),
+            cursorUid, // назад курсор не отматываем
+          );
+
+      for (const meta of toCopy) {
+        // Остановка проверяется ПЕРЕД письмом, а не после: письмо либо
+        // переехало целиком и отмечено в состоянии, либо не начиналось.
+        // Оборвать APPEND на середине означало бы половину письма в приёмнике.
+        if (this.stopRequested) {
+          stopped = true;
+          break;
+        }
+        try {
+          // Скачиваем письмо потоком и собираем в Buffer (одно письмо за раз)
+          const sourceLock = await source.getMailboxLock(sourcePath, { readOnly: true });
+          let raw: Buffer;
+          try {
+            const download = await source.download(String(meta.uid), undefined, { uid: true });
+            if (!download.content) {
+              throw new Error('сервер-источник не вернул тело письма');
+            }
+            raw = await streamToBuffer(download.content);
+          } finally {
+            sourceLock.release();
+          }
+          if (raw.length === 0) {
+            throw new Error('пустое тело письма (возможно, письмо удалено на источнике)');
+          }
+
+          const appended = await dest.append(destPath, raw, meta.flags, meta.internalDate);
+          if (appended === false) {
+            throw new Error('APPEND отклонён сервером-приёмником');
+          }
+
+          ledger.markCopied(meta.key);
+          cursor?.markCopied(meta.uid);
+          folderReport.copied++;
+          if (state) await state.markMigrated(this.accountKey, destPath, meta.key);
+          this.progress({
+            type: 'message',
+            sourcePath,
+            destPath,
+            uid: meta.uid,
+            status: 'copied',
+            copied: folderReport.copied,
+            skipped: folderReport.skipped,
+            failed: folderReport.failed,
+            total: folderReport.total,
+          });
+        } catch (err) {
+          // Ошибка соединения — пробрасываем выше, сработает retry;
+          // ошибка конкретного письма — фиксируем и идём дальше.
+          if (!source.usable || !dest.usable) throw err;
+          // Раньше здесь был голый err.message, и отказ по квоте приходил как
+          // «UID 5: Command failed» — слова «квота» в отчёте не было вовсе.
+          const message = describeImapError(err);
+          if (isQuotaError(err)) quotaHit = true;
+          cursor?.markFailed(meta.uid);
+          folderReport.failed++;
+          folderReport.errors.push(`UID ${meta.uid}: ${message}`);
+          this.progress({
+            type: 'message',
+            sourcePath,
+            destPath,
+            uid: meta.uid,
+            status: 'failed',
+            copied: folderReport.copied,
+            skipped: folderReport.skipped,
+            failed: folderReport.failed,
+            total: folderReport.total,
+          });
+        }
+
+        sinceCursorWrite++;
+        if (state && cursor && sinceCursorWrite >= this.batchSize) {
+          cursorUid = cursor.uid;
+          await writeCursor();
+          sinceCursorWrite = 0;
+        }
+      }
+
+      // Курсор в конец непрерывного разобранного префикса порции. Если по
+      // дороге была неудача, он остановится ПЕРЕД первым непереехавшим
+      // письмом, и повторный запуск начнёт именно с него. При остановке
+      // это верно и без особого случая: письма, до которых не дошли,
+      // остались в pending, а advance() перед первым таким письмом встаёт.
+      if (cursor) {
+        cursorUid = cursor.finish();
+        if (cursor.isFrozen) cursorFrozen = true;
+      }
+      // Запись курсора после КАЖДОЙ порции — то, ради чего порции и нужны:
+      // упавший (или перезапущенный) процесс продолжит с этого места, а не
+      // перечитает папку заново.
+      if (state) await writeCursor();
+      if (stopped) break;
+    }
 
     if (dryRun) {
       this.progress({
@@ -894,108 +1228,6 @@ export class MailboxMigrator extends EventEmitter {
       });
       return;
     }
-
-    // 4. Копирование: по одному письму в памяти, пачками между записями курсора.
-    //
-    // Курсор двигаем ТОЛЬКО по непрерывному префиксу разобранных писем.
-    // Раньше он двигался и через неудавшиеся письма: после отказа по квоте
-    // повторный запуск начинал читать источник уже ПОСЛЕ потерянных писем,
-    // докачивал ноль и рапортовал «ошибок 0» — письма терялись навсегда.
-    const cursor = new CursorTracker(
-      metas.map((m) => m.uid),
-      toCopy.map((m) => m.uid),
-      sinceUid, // назад курсор не отматываем
-    );
-    let quotaHit = false;
-
-    const writeCursor = async (): Promise<void> => {
-      if (!state) return;
-      await state.setCursor(this.accountKey, sourcePath, { uidValidity, lastUid: cursor.uid });
-    };
-
-    let sinceLastCursor = 0;
-    for (const meta of toCopy) {
-      // Остановка проверяется ПЕРЕД письмом, а не после: письмо либо
-      // переехало целиком и отмечено в состоянии, либо не начиналось.
-      // Оборвать APPEND на середине означало бы половину письма в приёмнике.
-      if (this.stopRequested) break;
-      try {
-        // Скачиваем письмо потоком и собираем в Buffer (одно письмо за раз)
-        const sourceLock2 = await source.getMailboxLock(sourcePath, { readOnly: true });
-        let raw: Buffer;
-        try {
-          const download = await source.download(String(meta.uid), undefined, { uid: true });
-          if (!download.content) {
-            throw new Error('сервер-источник не вернул тело письма');
-          }
-          raw = await streamToBuffer(download.content);
-        } finally {
-          sourceLock2.release();
-        }
-        if (raw.length === 0) {
-          throw new Error('пустое тело письма (возможно, письмо удалено на источнике)');
-        }
-
-        const appended = await dest.append(destPath, raw, meta.flags, meta.internalDate);
-        if (appended === false) {
-          throw new Error('APPEND отклонён сервером-приёмником');
-        }
-
-        ledger.markCopied(meta.key);
-        cursor.markCopied(meta.uid);
-        folderReport.copied++;
-        if (state) await state.markMigrated(this.accountKey, destPath, meta.key);
-        this.progress({
-          type: 'message',
-          sourcePath,
-          destPath,
-          uid: meta.uid,
-          status: 'copied',
-          copied: folderReport.copied,
-          skipped: folderReport.skipped,
-          failed: folderReport.failed,
-          total: folderReport.total,
-        });
-      } catch (err) {
-        // Ошибка соединения — пробрасываем выше, сработает retry;
-        // ошибка конкретного письма — фиксируем и идём дальше.
-        if (!source.usable || !dest.usable) throw err;
-        // Раньше здесь был голый err.message, и отказ по квоте приходил как
-        // «UID 5: Command failed» — слова «квота» в отчёте не было вовсе.
-        const message = describeImapError(err);
-        if (isQuotaError(err)) quotaHit = true;
-        cursor.markFailed(meta.uid);
-        folderReport.failed++;
-        folderReport.errors.push(`UID ${meta.uid}: ${message}`);
-        this.progress({
-          type: 'message',
-          sourcePath,
-          destPath,
-          uid: meta.uid,
-          status: 'failed',
-          copied: folderReport.copied,
-          skipped: folderReport.skipped,
-          failed: folderReport.failed,
-          total: folderReport.total,
-        });
-      }
-
-      sinceLastCursor++;
-      if (state && sinceLastCursor >= this.batchSize) {
-        await writeCursor();
-        sinceLastCursor = 0;
-      }
-    }
-
-    // Курсор в конец непрерывного разобранного префикса. Если по дороге
-    // была неудача, курсор остановится ПЕРЕД первым непереехавшим письмом,
-    // и повторный запуск начнёт именно с него.
-    //
-    // При остановке это тоже верно и без особого случая: письма, до которых
-    // мы не дошли, остались в pending, а advance() перед первым же таким
-    // письмом останавливается. Продолжение задания начнёт именно с него.
-    cursor.finish();
-    if (state) await writeCursor();
 
     if (quotaHit) {
       folderReport.errors.push(

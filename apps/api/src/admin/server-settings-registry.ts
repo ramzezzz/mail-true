@@ -1058,6 +1058,33 @@ const RESTART_SPECS: readonly SettingSpec[] = [
       'чужой почтовый сервер, который в это же время обслуживает живых людей.',
   },
   {
+    key: 'MIGRATION_MAX_JOBS',
+    section: 'migration',
+    group: 'restart',
+    kind: 'int',
+    def: '2',
+    min: 1,
+    max: 16,
+    unit: 'count',
+    description:
+      'Сколько заданий переноса вести одновременно. Не то же, что число ящиков в задании: ' +
+      'каждое задание — это ещё соединения к базе, из которой работают Postfix и Dovecot. ' +
+      'Очередь разбирается вся, просто по порядку.',
+  },
+  {
+    key: 'MIGRATION_CHUNK_SIZE',
+    section: 'migration',
+    group: 'restart',
+    kind: 'int',
+    def: '2000',
+    min: 100,
+    max: 100_000,
+    unit: 'count',
+    description:
+      'Сколько писем папки читать и переносить за один заход. Порция целиком лежит в памяти, ' +
+      'поэтому от этого числа зависит расход памяти, а не от размера ящика.',
+  },
+  {
     key: 'MIGRATION_MAX_HOURS',
     section: 'migration',
     group: 'restart',

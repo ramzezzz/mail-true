@@ -39,6 +39,7 @@ const nullState: StateStore = {
   init: async () => undefined,
   wasMigrated: async () => false,
   migratedCount: async () => 0,
+  migratedCounts: async () => new Map<string, number>(),
   markMigrated: async () => undefined,
   getCursor: async () => null,
   setCursor: async () => undefined,
@@ -102,7 +103,9 @@ function itemRow(position: number, patch: Partial<MigrationItemRow> = {}): Migra
 
 /** Подменённая база: запоминает всё, что ей велели записать. */
 class FakeDb {
-  claimed: Array<{ runner: string; stale: number }> = [];
+  claimed: Array<{ runner: string; stale: number; limit: number; skip: number[] }> = [];
+  /** Задания, лежащие в очереди «в базе». */
+  queue: MigrationJobRow[] = [];
   jobPatches: Array<Record<string, unknown>> = [];
   itemPatches: Array<{ position: number; patch: Record<string, unknown> }> = [];
   items: MigrationItemRow[] = [];
@@ -116,9 +119,16 @@ class FakeDb {
   async expireStaleMigrationJobs(): Promise<number> {
     return 0;
   }
-  async claimMigrationJobs(runner: string, stale: number): Promise<MigrationJobRow[]> {
-    this.claimed.push({ runner, stale });
-    return [];
+  async claimMigrationJobs(
+    runner: string,
+    stale: number,
+    limit = 0,
+    skip: number[] = [],
+  ): Promise<MigrationJobRow[]> {
+    this.claimed.push({ runner, stale, limit, skip });
+    // Так же, как настоящий запрос: не больше предела и без тех, что
+    // работник уже ведёт.
+    return this.queue.filter((job) => !skip.includes(Number(job.id))).slice(0, Math.max(0, limit));
   }
   async touchMigrationJob(): Promise<void> {
     /* биение проверяется отдельно */
@@ -405,6 +415,103 @@ test('проход работника ищет брошенные задания
   assert.equal(db.claimed.length, 1);
   assert.equal(db.claimed[0]?.runner, runner.runnerId);
   assert.ok((db.claimed[0]?.stale ?? 0) > 0, 'без срока молчания задание никто бы не подхватил');
+});
+
+/* ------------------------------------------------------------------ */
+/* Сколько заданий работник ведёт разом                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Задание, которое «идёт», пока его не отпустят: перенос ящика длится
+ * часами, и проверять надо именно поведение работника в это время.
+ */
+function batchHeldBy(held: Promise<void>): NonNullable<MigrationRunnerOptions['runBatch']> {
+  return async () => {
+    await held;
+    return {
+      startedAt: new Date().toISOString(),
+      finishedAt: new Date().toISOString(),
+      accounts: [],
+      ok: 0,
+      partial: 0,
+      failed: 0,
+      stopped: 0,
+    };
+  };
+}
+
+test('работник берёт не больше заданий, чем ему разрешено вести', async () => {
+  /*
+   * Здесь не было предела вовсе: забирались ВСЕ незавершённые задания
+   * сразу. Переезд по отделам (список на 50 ящиков, следом второй, третий)
+   * означал столько живых заданий, сколько их успели завести, и на каждое
+   * — свои соединения к базе. Postgres отвечает на это «too many clients»,
+   * а из той же базы работают Postfix и Dovecot: сервер перестаёт
+   * принимать почту и пускать людей в ящики.
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  const secret = packSecrets(box, { mailboxPasswords: { '0': 'parol' } });
+  db.queue = [1, 2, 3, 4].map((id) => jobRow({ id: String(id), secret_enc: secret }));
+  db.items = [itemRow(0)];
+  const runner = runnerWith(db, box, { maxJobs: 2, runBatch: batchHeldBy(Promise.resolve()) });
+
+  const started = await runner.scan();
+
+  assert.equal(db.claimed[0]?.limit, 2, 'за заданиями идём с пределом, а не за всеми разом');
+  assert.ok(started <= 2, `начато заданий: ${String(started)} — предел не соблюдён`);
+  await runner.drain();
+});
+
+test('пока задания идут, за новыми работник не ходит вовсе', async () => {
+  // Иначе предел был бы только на вид: заданий берётся по два, но каждый
+  // проход (раз в десять секунд) добавлял бы ещё два.
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  const secret = packSecrets(box, { mailboxPasswords: { '0': 'parol' } });
+  db.queue = [1, 2, 3].map((id) => jobRow({ id: String(id), secret_enc: secret }));
+  db.items = [itemRow(0)];
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = () => resolve();
+  });
+  const runner = runnerWith(db, box, {
+    maxJobs: 2,
+    runBatch: batchHeldBy(held),
+  });
+
+  await runner.scan();
+  const afterFirst = db.claimed.length;
+  await runner.scan();
+
+  assert.equal(db.claimed.length, afterFirst, 'мест нет — а работник снова пошёл за заданиями');
+  release();
+  await runner.drain();
+});
+
+test('пул состояния один на работника, а не на каждое задание', async () => {
+  /*
+   * Хранилище состояния заводилось на каждое задание, а внутри — свой пул
+   * соединений к Postgres (умолчание pg — десять). Пять заданий означали
+   * полсотни соединений сверх собственных пулов api — та самая нехватка
+   * соединений, из-за которой перестаёт работать доставка почты.
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0, { state: 'ok' })];
+  let created = 0;
+  const runner = runnerWith(db, box, {
+    createState: () => {
+      created += 1;
+      return nullState;
+    },
+  });
+
+  await runner.runJob(jobRow({ id: '1', secret_enc: packSecrets(box, {}) }));
+  await runner.runJob(jobRow({ id: '2', secret_enc: packSecrets(box, {}) }));
+
+  assert.equal(created, 1, 'на каждое задание заводился свой пул соединений');
+  await runner.drain();
 });
 
 /* ------------------------------------------------------------------ */

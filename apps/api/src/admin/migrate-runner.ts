@@ -76,6 +76,9 @@ export interface MigrationRunnerOptions {
    * всё и делается). Переопределяется только в проверках: поднимать
    * Postgres ради проверки того, что задание пропускает уже перенесённые
    * ящики, — это проверка не того.
+   *
+   * Зовётся ОДИН раз на работника, а не на задание: хранилище (а с ним и
+   * пул соединений к базе) общее для всех заданий — см. #state.
    */
   createState?: () => StateStore;
   /**
@@ -91,8 +94,22 @@ export interface MigrationRunnerOptions {
   staleSeconds?: number;
   /** Сколько ящиков переносить одновременно. */
   concurrency?: number;
+  /**
+   * Сколько ЗАДАНИЙ вести одновременно.
+   *
+   * Отдельно от concurrency, и это разные вещи: concurrency ограничивает
+   * ящики ВНУТРИ задания, а число самих заданий не ограничивал никто.
+   * Переезд по отделам (список на 50 ящиков, следом второй, третий) давал
+   * столько живых заданий, сколько их успели завести, и на каждое — свой
+   * пул соединений к базе. Postgres отвечал «too many clients», а из той
+   * же базы берут данные Postfix и Dovecot: сервер переставал принимать
+   * почту и пускать людей в ящики.
+   */
+  maxJobs?: number;
   /** Через сколько часов задание сдаётся и пароли стираются. */
   maxHours?: number;
+  /** Сколько писем папки читать и переносить за один заход (порция). */
+  chunkSize?: number;
 }
 
 /**
@@ -118,7 +135,10 @@ const MAX_JOB_ATTEMPTS = 5;
 
 export class MigrationRunner {
   readonly #opts: Required<
-    Pick<MigrationRunnerOptions, 'intervalSeconds' | 'staleSeconds' | 'concurrency' | 'maxHours'>
+    Pick<
+      MigrationRunnerOptions,
+      'intervalSeconds' | 'staleSeconds' | 'concurrency' | 'maxJobs' | 'maxHours'
+    >
   > &
     MigrationRunnerOptions;
   /** Свой идентификатор. У перезапущенного контейнера он другой — на этом всё и держится. */
@@ -151,12 +171,29 @@ export class MigrationRunner {
    * база отвечать отказывается. В дело идёт больший из двух.
    */
   readonly #localAttempts = new Map<number, number>();
+  /**
+   * Хранилище состояния докачки — ОДНО на работника, а не на задание.
+   *
+   * Оно заводилось на каждое задание, а внутри — свой пул соединений
+   * к Postgres (умолчание pg — десять). Пять заданий означали полсотни
+   * соединений сверх собственных пулов api, и база отвечала «too many
+   * clients» — та самая база, из которой Postfix берёт карты доставки.
+   * Записи в хранилище ключуются парой «ящик-источник → ящик-приёмник»,
+   * поэтому одно хранилище безопасно делить между всеми заданиями: так
+   * же оно уже делится между ящиками пакета в командной строке (cli.ts).
+   */
+  #state: StateStore | null = null;
 
   constructor(options: MigrationRunnerOptions) {
     this.#opts = {
       intervalSeconds: 10,
       staleSeconds: 60,
       concurrency: 2,
+      // Два задания — это два переноса по два ящика и один общий пул
+      // состояния: нагрузка на чужой сервер и на нашу базу остаётся
+      // предсказуемой, а очередь заданий всё равно разбирается вся,
+      // просто по порядку.
+      maxJobs: 2,
       maxHours: 48,
       ...options,
     };
@@ -165,6 +202,16 @@ export class MigrationRunner {
   /** Идентификатор работника — нужен проверкам и журналу. */
   get runnerId(): string {
     return this.#runner;
+  }
+
+  /** Общее хранилище состояния докачки (заводится при первом задании). */
+  #stateStore(): StateStore {
+    const existing = this.#state;
+    if (existing !== null) return existing;
+    const created =
+      this.#opts.createState?.() ?? new PgStateStore(this.#opts.stateConnectionString);
+    this.#state = created;
+    return created;
   }
 
   start(): void {
@@ -210,11 +257,17 @@ export class MigrationRunner {
    */
   async drain(timeoutMs = 15_000): Promise<void> {
     const pending = [...this.#running.values()];
-    if (pending.length === 0) return;
-    await Promise.race([
-      Promise.allSettled(pending),
-      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref()),
-    ]);
+    if (pending.length > 0) {
+      await Promise.race([
+        Promise.allSettled(pending),
+        new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref()),
+      ]);
+    }
+    // Общий пул состояния закрывается здесь, а не после каждого задания:
+    // он один на работника и живёт столько же, сколько сам работник.
+    const state = this.#state;
+    this.#state = null;
+    if (state) await state.close().catch(() => undefined);
   }
 
   /** Один проход: забрать задания и запустить те, что ещё не идут. */
@@ -223,7 +276,17 @@ export class MigrationRunner {
     this.#scanning = true;
     try {
       await this.#opts.db.expireStaleMigrationJobs(this.#opts.maxHours).catch(() => 0);
-      const jobs = await this.#opts.db.claimMigrationJobs(this.#runner, this.#opts.staleSeconds);
+      // Берём ровно столько заданий, сколько ещё можем вести. Задания,
+      // которые уже идут у нас, место в пределе не занимают: их биение
+      // обновляет отдельный таймер, и никто другой их не отберёт.
+      const capacity = this.#opts.maxJobs - this.#active.size;
+      if (capacity <= 0) return 0;
+      const jobs = await this.#opts.db.claimMigrationJobs(
+        this.#runner,
+        this.#opts.staleSeconds,
+        capacity,
+        [...this.#active.keys()],
+      );
       let started = 0;
       for (const job of jobs) {
         const id = Number(job.id);
@@ -259,7 +322,7 @@ export class MigrationRunner {
     }, 5000);
     beat.unref();
 
-    const state = this.#opts.createState?.() ?? new PgStateStore(this.#opts.stateConnectionString);
+    const state = this.#stateStore();
     try {
       if (box === null) {
         await db.updateMigrationJob(id, {
@@ -602,7 +665,8 @@ export class MigrationRunner {
     } finally {
       clearInterval(beat);
       this.#active.delete(id);
-      await state.close().catch(() => undefined);
+      // Хранилище НЕ закрывается: оно общее на работника и нужно
+      // следующему заданию. Закрывается при остановке процесса (drain).
     }
   }
 
@@ -783,7 +847,11 @@ export class MigrationRunner {
       // в журнале сервера открытым текстом. Требование «паролей в журнале
       // нет ни в каком виде» важнее удобства отладки; отказы и без того
       // разобраны словами (describeImapError).
-      migrate: { state: input.state, signal: input.signal },
+      migrate: {
+        state: input.state,
+        signal: input.signal,
+        ...(this.#opts.chunkSize !== undefined ? { chunkSize: this.#opts.chunkSize } : {}),
+      },
       onProgress: (index, _account, event: ProgressEvent) => {
         const position = positions[index];
         if (position === undefined) return;

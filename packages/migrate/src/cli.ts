@@ -160,7 +160,7 @@ function printProgress(prefix: string, event: ProgressEvent): void {
       break;
     case 'folder-start':
       out(
-        `папка ${event.sourcePath} -> ${event.destPath}: к переносу ${event.toCopy} из ${event.total}`,
+        `папка ${event.sourcePath} -> ${event.destPath}: к разбору ${event.toCopy} из ${event.total}`,
       );
       break;
     case 'message':
@@ -213,6 +213,7 @@ function printReport(report: MailboxReport): void {
 async function cmdRun(options: Map<string, string[]>): Promise<number> {
   const statePath = opt(options, 'state');
   const batchSize = opt(options, 'batch-size');
+  const chunkSize = opt(options, 'chunk-size');
   const maxAttempts = opt(options, 'max-attempts');
   const report = await migrateMailbox({
     source: await endpointFromArgs(options, 'source'),
@@ -220,6 +221,7 @@ async function cmdRun(options: Map<string, string[]>): Promise<number> {
     mapping: mappingFromArgs(options),
     ...(statePath !== undefined ? { state: createStateStore(statePath) } : {}),
     ...(batchSize !== undefined ? { batchSize: Number.parseInt(batchSize, 10) } : {}),
+    ...(chunkSize !== undefined ? { chunkSize: Number.parseInt(chunkSize, 10) } : {}),
     ...(maxAttempts !== undefined ? { maxAttempts: Number.parseInt(maxAttempts, 10) } : {}),
     ...(options.has('dry-run') ? { dryRun: true } : {}),
     onProgress: (e) => printProgress('', e),
@@ -336,6 +338,9 @@ const HELP = `Перенос почты Mail.True (IMAP -> IMAP)
   --map 'Источник=Приёмник'                  переопределение папки (повторяемый)
   --exclude 'Папка'                          не переносить папку (повторяемый)
   --batch-size N        писем между записями курсора (50)
+  --chunk-size N        писем в порции чтения (2000): порция целиком лежит
+                        в памяти, поэтому от неё зависит расход памяти,
+                        а не от размера ящика
   --max-attempts N      попыток при обрыве (5)
   --dry-run             только показать план и объёмы
   --strict-tls          строгая проверка сертификатов

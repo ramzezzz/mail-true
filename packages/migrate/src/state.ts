@@ -40,6 +40,19 @@ export interface StateStore {
    * факту «ключ встречался» — иначе второй проход теряет новые письма.
    */
   migratedCount(account: string, destFolder: string, key: string): Promise<number>;
+  /**
+   * То же самое, но сразу про пачку ключей — ОДНИМ обращением к хранилищу.
+   *
+   * Поштучный migratedCount стоял внутри цикла по всем письмам папки: на
+   * папке в 200 тысяч писем это 200 тысяч запросов в Postgres до того, как
+   * будет скопировано хотя бы одно письмо. Человек в это время смотрел на
+   * неподвижные счётчики и считал перенос зависшим, а база, из которой
+   * Postfix берёт карты доставки, всё это время работала вхолостую.
+   *
+   * Возвращается карта «ключ → сколько копий»; ключи, которых в хранилище
+   * нет, в карту не попадают (это и означает ноль).
+   */
+  migratedCounts(account: string, destFolder: string, keys: string[]): Promise<Map<string, number>>;
   /** Отметить перенос ещё одной копии письма с этим ключом. */
   markMigrated(account: string, destFolder: string, key: string): Promise<void>;
   getCursor(account: string, sourceFolder: string): Promise<FolderCursor | null>;
@@ -104,6 +117,21 @@ export class FileStateStore implements StateStore {
     return this.migrated.get(`${account}\u0000${destFolder}\u0000${key}`) ?? 0;
   }
 
+  async migratedCounts(
+    account: string,
+    destFolder: string,
+    keys: string[],
+  ): Promise<Map<string, number>> {
+    // Журнал целиком прочитан в память ещё в init, ходить никуда не нужно:
+    // пачка здесь только ради одинакового обращения с обоими хранилищами.
+    const result = new Map<string, number>();
+    for (const key of keys) {
+      const count = await this.migratedCount(account, destFolder, key);
+      if (count > 0) result.set(key, count);
+    }
+    return result;
+  }
+
   async markMigrated(account: string, destFolder: string, key: string): Promise<void> {
     // Каждая перенесённая копия — отдельная запись журнала. Раньше повторная
     // запись с тем же ключом отбрасывалась, и хранилище не умело отличить
@@ -141,6 +169,25 @@ export class FileStateStore implements StateStore {
 /* ------------------------------------------------------------------ */
 
 /**
+ * Сколько соединений держит пул одного хранилища состояния.
+ *
+ * Четыре, а не умолчание pg (десять). Хранилище заводится на задание
+ * переноса, заданий бывает несколько сразу, и все они идут в ТУ ЖЕ базу,
+ * из которой Postfix берёт карты доставки, а Dovecot — учётные записи.
+ * Пять заданий по десять соединений — это полсотни соединений сверх пулов
+ * самого api, и Postgres с его умолчанием max_connections = 100 начинает
+ * отвечать «too many clients»: сервер перестаёт принимать почту и пускать
+ * людей в ящики. То есть перенос, задуманный как фоновая работа, кладёт
+ * почтовый сервер целиком.
+ *
+ * Четырёх хватает с запасом: обращений к состоянию ровно два вида —
+ * отметка перенесённого письма и запись курсора, обе поштучные и короткие,
+ * а идут они по числу одновременно переносимых ящиков (MIGRATION_CONCURRENCY,
+ * по умолчанию два).
+ */
+const DEFAULT_POOL_SIZE = 4;
+
+/**
  * Состояние в Postgres — удобно, когда перенос запускается из API
  * и состояние должно переживать перезапуски контейнеров.
  *
@@ -160,8 +207,12 @@ export class FileStateStore implements StateStore {
 export class PgStateStore implements StateStore {
   private readonly pool: pg.Pool;
 
-  constructor(connectionString: string) {
-    this.pool = new pg.Pool({ connectionString });
+  /**
+   * @param connectionString строка подключения к базе состояния
+   * @param options.max      сколько соединений держит пул этого хранилища
+   */
+  constructor(connectionString: string, options: { max?: number } = {}) {
+    this.pool = new pg.Pool({ connectionString, max: options.max ?? DEFAULT_POOL_SIZE });
   }
 
   async init(): Promise<void> {
@@ -200,6 +251,26 @@ export class PgStateStore implements StateStore {
       [account, destFolder, key],
     );
     return Number(res.rows[0]?.copies ?? 0);
+  }
+
+  async migratedCounts(
+    account: string,
+    destFolder: string,
+    keys: string[],
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    if (keys.length === 0) return result;
+    // Один запрос на всю порцию писем вместо запроса на письмо. На папке
+    // в 200 тысяч писем разница — между «перенос пошёл через секунду» и
+    // «счётчики не двигаются десятки минут, и всё это время база занята
+    // нами, а не доставкой почты».
+    const res = await this.pool.query<{ dedup_key: string; copies: string }>(
+      `SELECT dedup_key, copies FROM migrate_messages
+        WHERE account = $1 AND dest_folder = $2 AND dedup_key = ANY($3::text[])`,
+      [account, destFolder, keys],
+    );
+    for (const row of res.rows) result.set(row.dedup_key, Number(row.copies));
+    return result;
   }
 
   async markMigrated(account: string, destFolder: string, key: string): Promise<void> {
