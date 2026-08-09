@@ -554,6 +554,19 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
    * и молчания всё равно не выходит.
    */
   const lastFailure = new Map<string, SendFailureReason>();
+  /**
+   * Конверты, о которых человеку уже сказали.
+   *
+   * Нужно потому, что письмо, не попавшее в «Черновики», остаётся в
+   * очереди и работник вернётся к нему на следующем обходе. Извещение
+   * при этом одно на письмо: «письмо не отправлено» раз в полминуты —
+   * это не забота, а шум, в котором тонет всё остальное.
+   *
+   * Память переживает не всё: после перезапуска сервера извещение может
+   * выписаться второй раз. Это сознательный размен — лучше повтор раз в
+   * перезапуск, чем запись на диске ради того, чтобы не повториться.
+   */
+  const noticed = new Set<string>();
 
   /**
    * Извещает человека, что письмо не отправлено.
@@ -731,29 +744,70 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         lastAttemptAt: new Date().toISOString(),
         envelopeTo: entry.envelopeTo,
       };
-      lastFailure.delete(entry.id);
-
       let draftUid: number | null = null;
+      /*
+       * Отказ укладки в черновики — типа Error, потому что его придётся
+       * бросить дальше (см. ниже), а бросать не-Error значит потерять и
+       * стек, и внятную запись в журнале работника очереди.
+       */
+      let keepFailure: Error | null = null;
       try {
         draftUid = await pool.withClient(entry.owner, password, async (client) => {
           const folder = await requireDraftsFolder(client);
           // Черновик несёт причину заголовком — окно написания покажет её
-          // полосой, как только человек этот черновик откроет
-          const appended = await client.append(folder.path, withFailureHeader(raw, reason), [
-            '\\Draft',
-          ]);
+          // полосой, как только человек этот черновик откроет. Скрытая
+          // копия возвращается туда же: в отправляемых байтах её нет.
+          const appended = await client.append(
+            folder.path,
+            withFailureHeader(raw, reason, entry.bcc ?? []),
+            ['\\Draft'],
+          );
           return appended && appended.uid ? appended.uid : null;
         });
       } catch (err) {
         // Черновик не лёг — тем более надо сказать. Извещение ниже
         // пишется в любом случае: без него человек не узнает вообще ничего.
+        keepFailure = err instanceof Error ? err : new Error(String(err));
         app.log.error(
           errorInfo(err, { deferredId: entry.id }),
           'Письмо не отправлено и не сохранилось в черновиках',
         );
       }
 
-      await noticeSendFailure(entry, reason, draftUid);
+      /*
+       * Извещение выписывается ОДИН раз на конверт. Письмо, которое не
+       * удалось убрать в черновики, остаётся в очереди (см. ниже), и без
+       * этой отметки работник выписывал бы человеку одно и то же
+       * извещение каждые полминуты.
+       */
+      if (!noticed.has(entry.id)) {
+        await noticeSendFailure(entry, reason, draftUid);
+        noticed.add(entry.id);
+      }
+
+      /*
+       * ЗДЕСЬ ЗАКАНЧИВАЕТСЯ ЖИЗНЬ ПИСЬМА — И ТОЛЬКО ЕСЛИ ОНО СПАСЕНО.
+       *
+       * Раньше неудача укладки в черновики гасилась в этом же catch, и
+       * onGiveUp завершался успешно. Работник очереди понимал это как
+       * «убрано» и стирал с диска и конверт, и тело письма, и
+       * удерживаемые вложения — то есть письмо исчезало навсегда.
+       * Человек получал извещение «письмо не отправлено» без кнопки
+       * «открыть»: знать знал, а восстановить было нечего. Достижимо это
+       * не в теории — сменившийся пароль ящика, переполненный ящик,
+       * недоступный IMAP: любая из этих причин роняет APPEND.
+       *
+       * Защита от этого в работнике очереди написана (deferred-send.ts,
+       * «письмо стирается ТОЛЬКО после успешной уборки»), но она ждёт
+       * ИСКЛЮЧЕНИЯ, а его гасили здесь. Пробрасываем — и письмо остаётся
+       * лежать в очереди, пока причина не уйдёт. Лежащий конверт мозолит
+       * глаза и разбирается руками; это несравнимо лучше исчезнувшего
+       * письма, которое человек считал отправленным.
+       */
+      if (keepFailure !== null) throw keepFailure;
+
+      lastFailure.delete(entry.id);
+      noticed.delete(entry.id);
       // Вложения уже внутри черновика — держать их копии незачем
       await dropHeldUploads(entry);
     },
@@ -874,6 +928,10 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           sendAt: schedule.at.toISOString(),
           envelopeTo: allRecipients(payload),
           subject: payload.subject,
+          // Скрытых получателей в собранных байтах нет и быть не должно —
+          // они едут отдельно, чтобы вернуться в письмо, если оно уедет
+          // в «Черновики» (см. DeferredEntry.bcc).
+          bcc: payload.bcc.map((a) => a.address),
         },
         raw,
       );
@@ -920,6 +978,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           envelopeTo: allRecipients(payload),
           subject: payload.subject,
           attachmentIds: payload.attachmentIds,
+          bcc: payload.bcc.map((a) => a.address),
         },
         raw,
       );

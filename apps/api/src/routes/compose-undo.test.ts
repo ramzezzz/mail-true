@@ -134,7 +134,11 @@ class FakeClient {
   /** Что лежит под каким UID — по этому FETCH читает черновик обратно. */
   private readonly sources = new Map<number, Buffer>();
 
+  /** Ящик не принимает письма: сменился пароль, кончилось место, отвалился IMAP. */
+  appendFails = false;
+
   async append(path: string, raw: Buffer): Promise<{ uid: number }> {
+    if (this.appendFails) throw new Error('ящик не принял письмо');
     const uid = this.nextUid++;
     this.appended.push({ path, raw });
     this.sources.set(uid, raw);
@@ -751,5 +755,77 @@ test('успешная отправка извещений не плодит', a
     const res = await app.inject({ method: 'GET', url: '/api/messages/send/failures' });
     assert.deepEqual((res.json() as { items: unknown[] }).items, []);
     assert.deepEqual(wsEvents, []);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Письмо не должно исчезать, если его некуда убрать                   */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Самый дорогой случай во всей очереди: письмо не ушло И не легло в
+ * «Черновики». Раньше отказ укладки гасился внутри обработчика, работник
+ * очереди считал дело сделанным и стирал с диска конверт, тело письма и
+ * удерживаемые вложения. Человек получал извещение «письмо не отправлено»
+ * без кнопки «открыть»: знал, что письма нет, а восстановить было нечего.
+ *
+ * Причины отказа APPEND житейские: сменился пароль ящика, кончилось место
+ * по квоте, отвалился IMAP.
+ */
+test('письмо остаётся в очереди, если убрать его в черновики не удалось', async () => {
+  await withApp(
+    { undoSendSeconds: 5, smtpRejects: true },
+    async ({ app, scope, client, spoolDir }) => {
+      const body = await send(app);
+      client.appendFails = true;
+
+      await scope.deferredSender.tick(new Date(Date.now() + 60_000));
+
+      const spool = new DeferredSpool(spoolDir);
+      const left = await spool.all();
+      assert.equal(left.length, 1, 'письмо стёрто, хотя убрать его в черновики не удалось');
+      assert.ok(await spool.raw(left[0]!.id), 'тело письма обязано остаться на диске');
+
+      // Сказать при этом обязаны: человек уже ушёл, и больше узнать неоткуда.
+      const failures = await spool.failures('test@mail.local');
+      assert.equal(failures.length, 1, 'извещение не выписано');
+      assert.equal(failures[0]?.draftUid, null, 'черновика нет — обещать его нельзя');
+
+      // Повторный обход не плодит извещений: конверт лежит и ждёт починки,
+      // а «письмо не отправлено» раз в полминуты — это шум, а не забота.
+      await scope.deferredSender.tick(new Date(Date.now() + 120_000));
+      assert.equal((await spool.failures('test@mail.local')).length, 1);
+
+      // Ящик починили — письмо уезжает в черновики, и очередь пустеет.
+      client.appendFails = false;
+      await scope.deferredSender.tick(new Date(Date.now() + 180_000));
+      assert.equal((await spool.all()).length, 0, 'после починки конверт обязан уйти');
+      assert.equal(client.drafts.size, 1, 'письмо должно было лечь в «Черновики»');
+      assert.ok(body.pendingId, 'у отправки с отменой обязан быть идентификатор');
+    },
+  );
+});
+
+/*
+ * Скрытая копия в собранных байтах отсутствует намеренно: адресаты Bcc
+ * живут в конверте SMTP и не должны попасть на глаза остальным. Но те же
+ * байты уезжают в «Черновики» при неудаче — и человек, дописав спасённое
+ * письмо, отправлял его уже БЕЗ скрытых получателей. Ни он, ни они об
+ * этом не узнавали.
+ */
+test('спасённый черновик сохраняет скрытых получателей', async () => {
+  await withApp({ undoSendSeconds: 5, smtpRejects: true }, async ({ app, scope, client }) => {
+    await send(app, { bcc: [{ name: null, address: 'tihiy@mail.local' }] });
+    await scope.deferredSender.tick(new Date(Date.now() + 60_000));
+
+    const raw = client.appended.find((a) => a.path === 'Drafts')?.raw;
+    assert.ok(raw, 'черновик должен был лечь в «Черновики»');
+    const text = raw.toString('utf8');
+    assert.match(text, /^Bcc: tihiy@mail\.local$/m, 'скрытая копия потерялась в черновике');
+
+    // А в том, что уходило почтовому серверу, заголовка Bcc быть не должно:
+    // это была бы выдача скрытых адресатов остальным получателям.
+    const sentToSmtp = client.appended.find((a) => a.path === 'Sent');
+    assert.equal(sentToSmtp, undefined, 'отвергнутое письмо не кладут в «Отправленные»');
   });
 });
