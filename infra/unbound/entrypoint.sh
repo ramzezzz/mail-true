@@ -13,6 +13,34 @@ PACKAGED=/usr/share/dnssec-root/trusted-key.key
 : "${UNBOUND_LOG_QUERIES:=no}"
 : "${UNBOUND_VERBOSITY:=1}"
 
+# ------------------------------------------------------------------
+# Приведение «да/нет» к тому виду, который понимает unbound
+# ------------------------------------------------------------------
+# Настройки сервера в панели хранят логические значения строками
+# «true»/«false» и записывают их в infra/.env как есть. Здесь это стоило
+# двух разных бед, и обе тихие:
+#
+#   * UNBOUND_DNSSEC=true не равно "yes" — ветка ниже уходила в else, и
+#     проверка подписей МОЛЧА выключалась. Контейнер при этом здоров,
+#     панель показывает «включено, применено», а на ответах DNS держатся
+#     SPF, DKIM и DMARC;
+#   * UNBOUND_LOG_QUERIES=true подставлялось прямо в `log-queries:` —
+#     unbound принимает только yes/no и с «true» не стартует вовсе. Через
+#     него ходят в DNS Postfix и rspamd, то есть включение отладочного
+#     журнала одним переключателем останавливало резолвинг всего стека.
+#
+# Принимаем оба написания. Умолчания при этом разные и намеренно: DNSSEC
+# по умолчанию включён (что не похоже на «нет» — то «да»), журнал
+# запросов по умолчанию выключен (что не похоже на «да» — то «нет»).
+case "$(printf '%s' "$UNBOUND_DNSSEC" | tr 'A-Z' 'a-z')" in
+    no|false|0|off) UNBOUND_DNSSEC=no ;;
+    *)              UNBOUND_DNSSEC=yes ;;
+esac
+case "$(printf '%s' "$UNBOUND_LOG_QUERIES" | tr 'A-Z' 'a-z')" in
+    yes|true|1|on) UNBOUND_LOG_QUERIES=yes ;;
+    *)             UNBOUND_LOG_QUERIES=no ;;
+esac
+
 mkdir -p /var/lib/unbound /etc/unbound/conf.d
 
 if [ "$UNBOUND_DNSSEC" = "yes" ]; then

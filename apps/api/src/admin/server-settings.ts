@@ -167,8 +167,43 @@ export function typedValue(spec: SettingSpec, raw: string): SettingValue {
     const n = Number(raw);
     return Number.isFinite(n) ? n : 0;
   }
-  if (spec.kind === 'bool') return raw === 'true' || raw === '1';
+  /*
+   * «Да» пишут по-разному, и панель обязана понимать все написания.
+   *
+   * Раньше здесь стояло `raw === 'true' || raw === '1'`, а соседняя
+   * функция bool() — та, по которой значение читает САМ СЕРВЕР, —
+   * принимала ещё yes и on. Расхождение стоило прямой лжи на экране: в
+   * infra/.env штатно лежат `DOVECOT_DISABLE_PLAINTEXT_AUTH=yes` и
+   * `UNBOUND_DNSSEC=yes` (так их пишет установщик и так их читают сами
+   * службы), а панель показывала оба переключателя ВЫКЛЮЧЕННЫМИ. То есть
+   * сообщала, что пароль принимается по нешифрованному соединению и
+   * подписи DNS не проверяются, — когда всё было наоборот.
+   *
+   * Список написаний здесь и в bool() обязан совпадать: это одно и то же
+   * значение, прочитанное для двух разных читателей.
+   */
+  if (spec.kind === 'bool') return isTruthy(raw);
   return raw;
+}
+
+/**
+ * «Да» во всех написаниях, которые встречаются в infra/.env.
+ *
+ * Одна функция на двоих читателей — экран и код сервера — намеренно.
+ * Раньше их было две, и они разошлись: панель принимала только true/1, а
+ * `bool()` ещё yes/on. В файле же штатно лежат
+ * `DOVECOT_DISABLE_PLAINTEXT_AUTH=yes` и `UNBOUND_DNSSEC=yes` (так их
+ * пишет установщик и так их читают сами службы) — и панель показывала оба
+ * переключателя ВЫКЛЮЧЕННЫМИ. То есть сообщала, что пароль ходит по
+ * нешифрованному соединению и подписи DNS не проверяются, когда всё было
+ * ровно наоборот.
+ *
+ * Регистр и пробелы по краям не значат ничего: значение правят руками в
+ * текстовом файле, и «YES» с пробелом на конце — обычное дело.
+ */
+export function isTruthy(raw: string): boolean {
+  const value = raw.trim().toLowerCase();
+  return value === 'true' || value === '1' || value === 'yes' || value === 'on';
 }
 
 /**
@@ -341,7 +376,7 @@ export class ServerSettings {
 
   async bool(key: string): Promise<boolean> {
     const { raw } = await this.resolve(key);
-    return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+    return isTruthy(raw);
   }
 
   async text(key: string): Promise<string> {

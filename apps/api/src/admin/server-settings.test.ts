@@ -545,6 +545,31 @@ void test('да/нет принимается в человеческих нап
   assert.throws(() => parseSettingValue(spec, 'может быть'), /да или нет/u);
 });
 
+void test('панель и сервер одинаково читают «да», как бы оно ни было записано', async () => {
+  /*
+   * Разошлись — и панель соврала ровно наоборот.
+   *
+   * `typedValue` готовит значение ДЛЯ ЭКРАНА, `bool()` — для кода
+   * сервера. Первая принимала только true/1, вторая ещё yes/on. А в
+   * infra/.env штатно лежат `DOVECOT_DISABLE_PLAINTEXT_AUTH=yes` и
+   * `UNBOUND_DNSSEC=yes` — так их пишет установщик и так их читают сами
+   * службы. Панель показывала оба переключателя выключенными, то есть
+   * сообщала, что пароль ходит по нешифрованному соединению и подписи
+   * DNS не проверяются. Обе настройки при этом работали.
+   */
+  const spec = findSetting('PUSH_ENABLED')!;
+  for (const yes of ['true', '1', 'yes', 'YES', 'on', ' On ']) {
+    const { settings } = make([], { PUSH_ENABLED: yes });
+    assert.equal(typedValue(spec, yes), true, `панель не поняла «${yes}»`);
+    assert.equal(await settings.bool('PUSH_ENABLED'), true, `сервер не понял «${yes}»`);
+  }
+  for (const no of ['false', '0', 'no', 'Off']) {
+    const { settings } = make([], { PUSH_ENABLED: no });
+    assert.equal(typedValue(spec, no), false, `панель не поняла «${no}»`);
+    assert.equal(await settings.bool('PUSH_ENABLED'), false, `сервер не понял «${no}»`);
+  }
+});
+
 void test('перечисление принимает только известные значения', () => {
   const spec = findSetting('LOG_LEVEL')!;
   assert.equal(parseSettingValue(spec, 'debug'), 'debug');
