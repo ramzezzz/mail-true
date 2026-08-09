@@ -310,3 +310,78 @@ describe('Ctrl+Enter — отправить', () => {
     expect(send).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * Сервер отвечает 200 и тогда, когда письмо приняли не все получатели, и
+ * тогда, когда копия не легла в «Отправленные». Раньше окно просто
+ * закрывалось: оба исхода были неотличимы от полного успеха, а молчание
+ * здесь читается как «дошло всем». Ответ сервера при этом уже содержал и
+ * список отвергнутых адресов, и готовый текст про копию — их выбрасывали.
+ */
+describe('отправка прошла не целиком', () => {
+  it('отвергнутые адреса называются поимённо', async () => {
+    const send = vi.spyOn(api, 'sendMessage').mockResolvedValue({
+      ok: false,
+      sentMessageId: 'sent:1',
+      accepted: ['anna@mail.local'],
+      rejected: [{ address: 'kolya@mail.local', message: '550 User unknown' }],
+      savedToSent: true,
+      warning: null,
+    });
+
+    render();
+    act(() => useUiStore.getState().openCompose());
+    type(byLabel('Кому')!, 'anna@mail.local, kolya@mail.local');
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку письма');
+    await waitFor(
+      () => (useUiStore.getState().notice ?? '').includes('kolya@mail.local'),
+      'сообщение об отвергнутом адресе',
+    );
+    expect(useUiStore.getState().notice).toContain('не приняты');
+  });
+
+  it('несохранённая копия в «Отправленных» тоже называется', async () => {
+    const send = vi.spyOn(api, 'sendMessage').mockResolvedValue({
+      ok: true,
+      sentMessageId: null,
+      accepted: ['anna@mail.local'],
+      rejected: [],
+      savedToSent: false,
+      warning:
+        'Письмо отправлено, но копия не сохранена в «Отправленных» — возможно, закончилось место в ящике.',
+    });
+
+    render();
+    act(() => useUiStore.getState().openCompose());
+    type(byLabel('Кому')!, 'anna@mail.local');
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку письма');
+    await waitFor(
+      () => (useUiStore.getState().notice ?? '').includes('копия не сохранена'),
+      'предупреждение о копии',
+    );
+  });
+
+  it('обычная отправка молчит — сказать нечего', async () => {
+    const send = vi.spyOn(api, 'sendMessage').mockResolvedValue({
+      ok: true,
+      sentMessageId: 'sent:1',
+      accepted: ['anna@mail.local'],
+      rejected: [],
+      savedToSent: true,
+      warning: null,
+    });
+
+    render();
+    act(() => useUiStore.getState().openCompose());
+    type(byLabel('Кому')!, 'anna@mail.local');
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку письма');
+    await waitFor(() => useUiStore.getState().composeWindows.length === 0, 'закрытие окна');
+    expect(useUiStore.getState().notice).toBeNull();
+  });
+});

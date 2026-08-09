@@ -595,6 +595,8 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     entry: DeferredEntry,
     reason: SendFailureReason,
     draftUid: number | null,
+    /** Письмо ушло, но не всем: заголовок извещения от этого меняется. */
+    partial = false,
   ): Promise<void> {
     let notice;
     try {
@@ -606,6 +608,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         rejected: reason.rejected,
         attempts: reason.attempts,
         lastAttemptAt: reason.lastAttemptAt,
+        partial,
         draftUid,
       });
     } catch (err) {
@@ -717,6 +720,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
             envelopeTo: entry.envelopeTo,
           },
           null,
+          true,
         );
       }
       return 'sent';

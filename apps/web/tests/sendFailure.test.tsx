@@ -310,3 +310,35 @@ describe('текст причины', () => {
     expect(text).toBe('Отказано.');
   });
 });
+
+/*
+ * Частичная доставка — не отказ. Письмо ушло большинству получателей, и
+ * заголовок «Письмо не отправлено» над ним прямо толкал отправить его
+ * заново: у получивших оказывался дубль. Причина под заголовком при этом
+ * говорила обратное — интерфейс спорил сам с собой.
+ */
+describe('письмо дошло не всем', () => {
+  it('заголовок говорит о частичной доставке, а не об отказе', async () => {
+    vi.spyOn(api, 'getSendFailures').mockResolvedValue([
+      notice({
+        partial: true,
+        reason: 'Письмо доставлено не всем получателям',
+        draftUid: null,
+      }),
+    ]);
+    render();
+
+    await waitFor(() => host.textContent?.includes('Письмо дошло не всем') ?? false, 'плашку');
+    expect(host.textContent).not.toContain('Письмо не отправлено');
+    // Кнопки «Открыть письмо» здесь нет намеренно: письмо ушло, править
+    // и отправлять заново нечего — правится список получателей.
+    expect(buttonByText('Открыть письмо')).toBeUndefined();
+  });
+
+  it('полный отказ по-прежнему называется отказом', async () => {
+    vi.spyOn(api, 'getSendFailures').mockResolvedValue([notice()]);
+    render();
+    await waitFor(() => host.textContent?.includes('Письмо не отправлено') ?? false, 'плашку');
+    expect(host.textContent).not.toContain('Письмо дошло не всем');
+  });
+});

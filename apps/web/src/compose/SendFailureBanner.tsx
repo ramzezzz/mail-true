@@ -99,8 +99,15 @@ export function SendFailureBanner() {
   return (
     <div className={styles.banner} role="alert">
       <div className={styles.body}>
+        {/*
+          Заголовок обязан совпадать с тем, что случилось. Раньше он был
+          безусловным «Письмо не отправлено» — в том числе над письмом,
+          которое большинство получателей уже получило. Человек читал это
+          и отправлял письмо заново: у получивших оказывался дубль, а
+          строка причины ниже говорила обратное заголовку.
+        */}
         <div className={styles.title}>
-          Письмо не отправлено
+          {notice.partial ? 'Письмо дошло не всем' : 'Письмо не отправлено'}
           {notice.subject ? <span className={styles.subject}>: «{notice.subject}»</span> : null}
         </div>
         <div className={styles.reason}>{failureSummary(notice)}</div>
