@@ -34,6 +34,18 @@ export interface SessionStore {
   touch(id: string, ttlSeconds: number): Promise<void>;
   delete(id: string): Promise<void>;
   /**
+   * Закрывает ВСЕ сессии ящика. Возвращает, сколько закрыла.
+   *
+   * Нужен смене пароля и блокировке ящика. До этого способа отозвать
+   * сессию не существовало вовсе: сессия хранит пароль, каким он был при
+   * входе, и продлевается на каждом запросе — то есть смена пароля,
+   * единственное средство владельца против угнанной сессии, не делала
+   * ничего. Уволенный сотрудник с открытой вкладкой точно так же
+   * продолжал читать почту после блокировки: Dovecot отсеивает
+   * заблокированных только при проверке пароля.
+   */
+  revokeByEmail(email: string): Promise<number>;
+  /**
    * Отвечает ли хранилище. Нужна пробе состояния: без хранилища сессий
    * ни один вошедший пользователь не сделает ни одного запроса.
    * Проверка идёт по УЖЕ ОТКРЫТОМУ соединению — своего не заводит.
@@ -48,6 +60,20 @@ export interface ProbeOutcome {
 }
 
 const PREFIX = 'mt:sess:';
+/**
+ * Указатель «ящик → его сессии».
+ *
+ * Без него перечислить сессии ящика нечем: ключи именуются
+ * идентификатором сессии, а поиск по значению в Redis — это перебор всей
+ * базы. Держим множество идентификаторов и подчищаем его на лету: в нём
+ * могут оставаться уже истёкшие, и это нормально — читатель их
+ * пропускает.
+ */
+const EMAIL_INDEX = 'mt:sess:by-email:';
+
+function indexKey(email: string): string {
+  return EMAIL_INDEX + email.trim().toLowerCase();
+}
 
 export class RedisSessionStore implements SessionStore {
   constructor(private readonly redis: Redis) {}
@@ -64,6 +90,11 @@ export class RedisSessionStore implements SessionStore {
 
   async set(id: string, data: SessionData, ttlSeconds: number): Promise<void> {
     await this.redis.set(PREFIX + id, JSON.stringify(data), 'EX', ttlSeconds);
+    // Указатель живёт дольше самой сессии: лишний идентификатор в нём
+    // безвреден (читатель проверяет каждую сессию), а потерянный означал
+    // бы, что сессию не отозвать.
+    await this.redis.sadd(indexKey(data.email), id);
+    await this.redis.expire(indexKey(data.email), ttlSeconds * 2);
   }
 
   async touch(id: string, ttlSeconds: number): Promise<void> {
@@ -71,7 +102,22 @@ export class RedisSessionStore implements SessionStore {
   }
 
   async delete(id: string): Promise<void> {
+    const data = await this.get(id);
     await this.redis.del(PREFIX + id);
+    if (data) await this.redis.srem(indexKey(data.email), id);
+  }
+
+  async revokeByEmail(email: string): Promise<number> {
+    const key = indexKey(email);
+    const ids = await this.redis.smembers(key);
+    if (ids.length === 0) return 0;
+    let closed = 0;
+    for (const id of ids) {
+      const removed = await this.redis.del(PREFIX + id);
+      if (removed > 0) closed += 1;
+    }
+    await this.redis.del(key);
+    return closed;
   }
 
   async ping(): Promise<ProbeOutcome> {
@@ -126,6 +172,18 @@ export class MemorySessionStore implements SessionStore {
 
   async delete(id: string): Promise<void> {
     this.map.delete(id);
+  }
+
+  async revokeByEmail(email: string): Promise<number> {
+    this.sweep();
+    const wanted = email.trim().toLowerCase();
+    let closed = 0;
+    for (const [id, entry] of this.map) {
+      if (entry.data.email.trim().toLowerCase() !== wanted) continue;
+      this.map.delete(id);
+      closed += 1;
+    }
+    return closed;
   }
 
   async ping(): Promise<ProbeOutcome> {

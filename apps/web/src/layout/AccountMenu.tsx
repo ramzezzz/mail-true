@@ -194,7 +194,20 @@ export function AccountMenu() {
   const aiNeedsSetup = aiNeedsConsent(aiState);
 
   const currentEmail = accounts?.current ?? account?.email ?? session?.email ?? '…';
+  /*
+   * Список ящиков строится по связям ТЕКУЩЕГО ящика, а связь
+   * односторонняя: переключившись в B, человек не видел ни A, ни
+   * остальных ящиков A — переключатель обнулялся одним нажатием, и
+   * вернуться было нечем, кроме выхода с вводом пароля. Единственной
+   * кнопкой оставалось «Добавить ящик», то есть человек заводил из B
+   * связь на A своими руками — ровно ту, которую продукт не заводит
+   * намеренно.
+   *
+   * Право вернуться живёт в сессии (`returnTo`) и работало всегда;
+   * не хватало только строки в меню.
+   */
   const linked = accounts?.linked ?? [];
+  const returnTo = accounts?.returnTo ?? null;
   const external = accounts?.external ?? [];
 
   /** Непрочитанные конкретного ящика из общего ответа сервера. */
@@ -270,6 +283,25 @@ export function AccountMenu() {
             <span className={styles.currentEmail}>{currentEmail}</span>
           </span>
         </div>
+
+        {returnTo && (
+          <>
+            <MenuSeparator />
+            <button
+              type="button"
+              className={styles.mailbox}
+              disabled={switching === returnTo.email}
+              onClick={() => void onSwitch(returnTo.email)}
+            >
+              <span className={styles.mailboxText}>
+                <span className={styles.mailboxEmail}>{returnTo.email}</span>
+                <span className={styles.mailboxHint}>
+                  {switching === returnTo.email ? 'Переходим…' : 'Вернуться в свой ящик'}
+                </span>
+              </span>
+            </button>
+          </>
+        )}
 
         {linked.length > 0 && <MenuSeparator />}
 

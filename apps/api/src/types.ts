@@ -76,7 +76,11 @@ declare module 'fastify' {
      * сказать в открытую вкладку об отказе отправки из очереди.
      * Необязателен: в проверках маршруты поднимают без него.
      */
-    mailNotifier?: { notify(email: string, payload: unknown): boolean };
+    mailNotifier?: {
+      notify(email: string, payload: unknown): boolean;
+      /** Прекратить наблюдение за ящиком: нужно смене пароля и блокировке. */
+      dropWatcher(email: string): boolean;
+    };
   }
   interface FastifyRequest {
     mailSession: MailSession | null;

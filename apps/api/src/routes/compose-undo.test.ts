@@ -288,6 +288,8 @@ async function buildTestApp(
       wsEvents.push({ email, payload });
       return true;
     },
+    // Наблюдение здесь не заводится — закрывать нечего.
+    dropWatcher: () => false,
   });
   app.decorate('settingsService', {
     available: options.settingsAvailable ?? true,

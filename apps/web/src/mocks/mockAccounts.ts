@@ -111,6 +111,8 @@ export const mockAccountsApi: AccountsApi = {
       current,
       linked: linked.map((a) => ({ ...a })),
       external: external.map((a) => ({ ...a, state: { ...a.state } })),
+      // На заглушках переключения не было — возвращаться некуда.
+      returnTo: null,
       secrets: { available: true, reason: null },
       collector: { scheduler: true, masterConfigured: true },
     };

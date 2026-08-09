@@ -263,6 +263,15 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       const after = await ctx.db.updateMailUser(id, patch);
       if (!after) throw new NotFoundError('Ящик не найден');
 
+      /*
+       * Блокировка обязана выгонять СЕЙЧАС, а не при следующем входе.
+       * Dovecot отсеивает заблокированных в проверке пароля, поэтому
+       * уволенный сотрудник с открытой вкладкой продолжал читать почту.
+       */
+      if (body.active === false && before.active) {
+        await dropMailboxAccess(after.email, 'ящик заблокирован');
+      }
+
       const action =
         body.active === false && before.active
           ? 'user.block'
@@ -282,6 +291,29 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
   );
 
   /* --- смена пароля ------------------------------------------------ */
+  /**
+   * Выкидывает ящик из веб-почты немедленно.
+   *
+   * Смена пароля — единственное, что есть у владельца против угнанной
+   * сессии, и до этой правки она не делала НИЧЕГО: сессия хранит пароль,
+   * каким он был при входе, продлевается на каждом запросе, а открытое
+   * соединение с ящиком переиспользуется без сверки пароля. Тот, кто увёл
+   * cookie, продолжал читать почту — и его же браузер делал это сам.
+   * Блокировка ящика вела себя так же: Dovecot отсеивает `active` только
+   * при проверке пароля, уже открытую сессию это не трогает.
+   *
+   * Поэтому закрываем всё разом: сессии, соединения пула и наблюдателя
+   * (он держит своё соединение и живёт до суток даже без открытых
+   * вкладок, продолжая слать события о новых письмах).
+   */
+  async function dropMailboxAccess(email: string, why: string): Promise<void> {
+    const deps = app.deps;
+    const closed = await deps.sessions.revokeByEmail(email).catch(() => 0);
+    await deps.pool.closeUser(email).catch(() => undefined);
+    const watcher = app.mailNotifier?.dropWatcher(email) ?? false;
+    app.log.info({ email, sessions: closed, watcher, why }, 'Доступ к ящику закрыт');
+  }
+
   app.post<{ Params: { id: string } }>(
     '/users/:id/password',
     { preHandler: requireAdmin(app, 'users.password') },
@@ -293,6 +325,9 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
 
       const password = body.password ?? generatePassword();
       await ctx.db.setMailUserPassword(id, dovecotHash(password));
+      // Старые сессии и соединения — закрыть: иначе смена пароля не
+      // выгоняет никого (см. dropMailboxAccess).
+      await dropMailboxAccess(row.email, 'смена пароля');
       await audit(ctx, request, {
         action: 'user.password',
         targetType: 'user',

@@ -155,6 +155,21 @@ export async function accountsUserRoutes(
         ...account,
         label: decodeLabel(account.label).label,
       })),
+      /*
+       * Куда можно ВЕРНУТЬСЯ, не вводя пароль.
+       *
+       * Право на возврат живёт в сессии того, кто переключился (см.
+       * SessionData.returnTo), и работало оно всегда — вот только клиенту
+       * о нём никто не говорил. Список ящиков строится по связям ТЕКУЩЕГО
+       * ящика, а связь односторонняя: из ящика B исходный A не виден,
+       * ввести адрес руками негде. Одно переключение обнуляло
+       * переключатель целиком.
+       *
+       * Хуже того, единственной оставшейся кнопкой было «Добавить ящик» —
+       * и человек вводил из B пароль от A, заводя ту самую обратную
+       * связь, которую мы намеренно убрали.
+       */
+      returnTo: session.returnTo ? { email: session.returnTo.email } : null,
       secrets: { available: service.secretsAvailable, reason: service.secretsReason },
       collector: {
         scheduler: service.config.COLLECTOR_SCHEDULER && service.config.masterConfigured,

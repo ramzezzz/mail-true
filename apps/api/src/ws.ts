@@ -324,6 +324,22 @@ export class MailNotifier {
     this.closeWatcher(email, watcher);
   }
 
+  /**
+   * Прекращает наблюдение за ящиком немедленно.
+   *
+   * Нужен смене пароля и блокировке ящика: наблюдатель держит СВОЁ
+   * соединение с открытым паролем и живёт до суток даже без единой
+   * открытой вкладки (ради уведомлений). После смены пароля он продолжал
+   * читать ящик и слать события о новых письмах — то есть человек,
+   * которого только что «выкинули», узнавал о переписке дальше.
+   */
+  dropWatcher(email: string): boolean {
+    const watcher = this.watchers.get(email);
+    if (!watcher) return false;
+    this.closeWatcher(email, watcher);
+    return true;
+  }
+
   private closeWatcher(email: string, watcher: Watcher): void {
     watcher.closed = true;
     if (this.watchers.get(email) === watcher) this.watchers.delete(email);
