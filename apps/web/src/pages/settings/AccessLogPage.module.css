@@ -142,19 +142,48 @@
  * колонку способа входа ужимаем: там короткая пометка.
  */
 @media (max-width: 600px) {
-  .timeCell {
-    padding: 10px 8px;
-    white-space: normal;
+  /*
+   * На телефоне запись показывается СТРОКОЙ, а не таблицей.
+   *
+   * Колонок четыре — когда, как, откуда и что произошло, — и последняя
+   * содержит целое предложение. В сумме строке нужно вдвое больше места,
+   * чем есть внутри карточки настроек, поэтому страница настроек ехала
+   * вбок целиком. Управляющих элементов в срезанной части нет, но именно
+   * сюда заходят с телефона, когда заметили чужой вход, — и читать
+   * журнал, дёргая страницу вбок, невозможно.
+   *
+   * Заголовок таблицы прячем: подписи «Когда» и «Откуда» в столбик
+   * ничего не объясняют, а место занимают. Сами значения остаются на
+   * своих местах и читаются сверху вниз.
+   */
+  .table,
+  .table tbody,
+  .row {
+    display: block;
+    width: 100%;
   }
 
-  .channelCell {
+  .table thead {
+    display: none;
+  }
+
+  .row {
+    padding: 10px 0;
+  }
+
+  .timeCell,
+  .channelCell,
+  .whereCell,
+  .detailCell {
+    display: block;
     width: auto;
-    padding: 10px 6px;
-  }
-
-  .whereCell {
-    padding: 10px 8px;
+    padding: 0 4px 2px;
     white-space: normal;
     word-break: break-word;
+  }
+
+  .timeCell {
+    font-size: var(--mt-font-caption1-size, 12px);
+    color: var(--mt-color-text-secondary);
   }
 }
