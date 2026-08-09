@@ -64,6 +64,17 @@ import styles from './MigratePage.module.css';
  */
 const POLL_MS = 3000;
 
+/**
+ * Сколько заданий переноса показывает список.
+ *
+ * Раньше число стояло прямо в запросе, и обрезка была молчаливой: на
+ * двадцать первом задании список выглядел полным, а старые переносы
+ * просто исчезали — при том что искать в них приходится именно старое
+ * («когда мы переезжали с того сервера»). Теперь предел назван и виден
+ * человеку, а кнопка показывает больше.
+ */
+const JOBS_PAGE = 20;
+
 export function MigratePage() {
   const { session } = useSession();
   const mayRun = can(session?.permissions, 'migration.run');
@@ -97,13 +108,40 @@ export function MigratePage() {
 
   const [openJob, setOpenJob] = useState<number | null>(null);
 
+  /*
+   * Разбор списка и проверка связи относятся к ТЕМ значениям формы, при
+   * которых их получили. Поменяли форму — прежний ответ больше не про
+   * неё, и показывать его нельзя.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Оба ответа переживали любую правку. На экране висело зелёное «Связь
+   * есть» — про ДРУГОЙ сервер, и таблица «Откуда → Куда» — про другой
+   * домен, а «Начать перенос» уезжал с текущими значениями. Человек
+   * читал подтверждение, которого никто не давал.
+   *
+   * В соседнем импорте ровно это сделано наоборот и намеренно: правка
+   * файла гасит предпросмотр.
+   */
+  useEffect(() => {
+    setProbe(null);
+  }, [host, port, secure, allowInsecureTls, useMaster, masterUser, masterSeparator]);
+
+  useEffect(() => {
+    setPreview(null);
+  }, [listText, sourceDomain, destDomain]);
+
   const settings = useQuery({
     queryKey: ['migrate-settings'],
     queryFn: () => api.migrateSettings(),
   });
+  /** Сколько заданий просим сейчас: растёт по кнопке «Показать ещё». */
+  const [jobsLimit, setJobsLimit] = useState(JOBS_PAGE);
+
   const jobs = useQuery({
-    queryKey: ['migrate-jobs'],
-    queryFn: () => api.migrateJobs(20),
+    queryKey: ['migrate-jobs', jobsLimit],
+    queryFn: () => api.migrateJobs(jobsLimit),
     // Пока хоть одно задание идёт, список сам обновляется: иначе человек
     // видит «в очереди» и не понимает, взялся ли кто-нибудь за работу.
     refetchInterval: (query) => ((query.state.data?.jobs ?? []).some(isJobLive) ? POLL_MS : false),
@@ -193,7 +231,17 @@ export function MigratePage() {
   const doRetry = useMutation({
     mutationFn: (id: number) =>
       api.migrateRetry(id, {
-        ...(masterPassword !== '' ? { masterPassword } : {}),
+        /*
+         * Служебный пароль отправляется, только если режим включён —
+         * ровно как при запуске.
+         *
+         * Здесь проверки `useMaster` не было, и повтор слал пароль в
+         * режиме, где его быть не должно. Сервер отвечал отказом про
+         * поле, которого на экране уже нет: флажок снят, поле спрятано,
+         * очистить его нечем — только включить режим обратно, стереть
+         * пароль и выключить снова.
+         */
+        ...(useMaster && masterPassword !== '' ? { masterPassword } : {}),
         ...(listText.trim() !== '' ? { list: listBody } : {}),
       }),
     onSuccess: (data) => {
@@ -492,6 +540,18 @@ export function MigratePage() {
             </tbody>
           </Table>
         </TableWrap>
+        {/*
+          Признак обрезки. Список ровно в предел — верный признак того,
+          что за ним что-то есть: молчаливая обрезка читается как «это
+          всё», и старые переносы человек считает пропавшими.
+        */}
+        {(jobs.data?.jobs ?? []).length >= jobsLimit && (
+          <div style={{ marginTop: 8 }}>
+            <Button mode="secondary" size="s" onClick={() => setJobsLimit((n) => n + JOBS_PAGE)}>
+              Показано последних {jobsLimit} — показать ещё
+            </Button>
+          </div>
+        )}
       </Panel>
 
       {job && (
