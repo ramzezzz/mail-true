@@ -102,6 +102,8 @@ async function deadPort(): Promise<number> {
 interface FakeClientOptions {
   /** APPEND в «Отправленные» отбивается по квоте. */
   sentAppendFails?: boolean;
+  /** APPEND в «Черновики» не проходит: квота, права, пропавшая папка. */
+  draftAppendFails?: boolean;
   /** Какие UID «находит» поиск по Message-ID. */
   answerable?: number[];
 }
@@ -110,9 +112,37 @@ class FakeClient {
   readonly drafts = new Set<number>();
   readonly sent = new Set<number>();
   readonly flagsAdded: Array<{ uids: number[]; flags: string[] }> = [];
+  /** Что именно легло в ящик — по нему видно, какой текст спасён. */
+  readonly sources = new Map<number, Buffer>();
   private nextUid = 100;
 
   constructor(private readonly options: FakeClientOptions = {}) {}
+
+  /**
+   * Текст единственного оставшегося черновика — уже раскодированный.
+   *
+   * Части письма едут base64 (иначе кириллица не пережила бы SMTP), и
+   * искать в сыром исходнике слова письма бесполезно.
+   */
+  draftText(): string {
+    const uid = [...this.drafts][0];
+    if (uid === undefined) return '';
+    const raw = this.sources.get(uid)?.toString('utf8') ?? '';
+    let text = raw;
+    // Части base64 переносятся по 76 символов — собираем подряд идущие
+    // строки обратно в одну и раскодируем
+    let chunk = '';
+    const flush = (): void => {
+      if (chunk.length >= 8) text += `\n${Buffer.from(chunk, 'base64').toString('utf8')}`;
+      chunk = '';
+    };
+    for (const line of raw.split(/\r?\n/)) {
+      if (/^[A-Za-z0-9+/]+={0,2}$/.test(line) && line.length >= 8) chunk += line;
+      else flush();
+    }
+    flush();
+    return text;
+  }
 
   async list(): Promise<unknown[]> {
     const folder = (path: string, specialUse: string): unknown => ({
@@ -127,7 +157,7 @@ class FakeClient {
     return [folder('INBOX', '\\Inbox'), folder('Sent', '\\Sent'), folder('Drafts', '\\Drafts')];
   }
 
-  async append(path: string): Promise<{ uid: number }> {
+  async append(path: string, raw: Buffer): Promise<{ uid: number }> {
     if (path === 'Sent') {
       if (this.options.sentAppendFails) {
         // Так отвечает Dovecot при исчерпанной квоте
@@ -137,10 +167,13 @@ class FakeClient {
       }
       const uid = this.nextUid++;
       this.sent.add(uid);
+      this.sources.set(uid, raw);
       return { uid };
     }
+    if (this.options.draftAppendFails) throw new Error('ящик не принял письмо: кончилось место');
     const uid = this.nextUid++;
     this.drafts.add(uid);
+    this.sources.set(uid, raw);
     return { uid };
   }
 
@@ -171,8 +204,14 @@ class FakeClient {
    */
   async noop(): Promise<void> {}
 
+  /** UID, которые удалили из «Черновиков». */
+  readonly deleted: number[] = [];
+
   async messageDelete(uids: number[]): Promise<boolean> {
-    for (const uid of uids) this.drafts.delete(uid);
+    for (const uid of uids) {
+      this.deleted.push(uid);
+      this.drafts.delete(uid);
+    }
     return true;
   }
 
@@ -339,8 +378,82 @@ test('временный отказ не плодит копию уже суще
       payload: sendPayload({ draftKey: 'окно-1', draftUid: uid }),
     });
     assert.equal(res.statusCode, 503);
-    assert.equal(client.drafts.size, 1);
-    assert.equal((res.json() as { details: { draftUid: number } }).details.draftUid, uid);
+    assert.equal(client.drafts.size, 1, 'в «Черновиках» должно остаться одно письмо, а не два');
+    // Черновик заменён новой версией, а не оставлен прежним: названный
+    // в ответе UID обязан существовать, иначе окно пошлёт человека
+    // за письмом, которого нет
+    const kept = (res.json() as { details: { draftUid: number } }).details.draftUid;
+    assert.equal(client.drafts.has(kept), true);
+    assert.equal(client.deleted.includes(uid), true, 'прежняя версия обязана уйти');
+  } finally {
+    await app.close();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Открытый черновик обещали сохранить — и не сохраняли                */
+/* ------------------------------------------------------------------ */
+
+test('отказ отправки сохраняет ДОПИСАННЫЙ текст, а не версию недельной давности', async () => {
+  /*
+   * Как это выглядело. Человек открыл сохранённый черновик, дописал две
+   * страницы, нажал «Отправить» — почтовый сервер отказал. В ответе:
+   * «Письмо сохранено в черновиках». В черновиках при этом лежала СТАРАЯ
+   * версия: сохранение черновика после отказа выходило первой же строкой,
+   * увидев присланный draftUid («черновик прислан, значит он на месте»).
+   * На месте он и был — только без того, что человек написал сегодня.
+   */
+  const port = await deadPort();
+  const client = new FakeClient();
+  const app = await buildTestApp(client, testConfig({ SMTP_PORT: port }));
+  try {
+    const saved = await app.inject({
+      method: 'POST',
+      url: '/api/drafts',
+      payload: sendPayload({ draftKey: 'окно-9', bodyHtml: '<p>первая версия</p>' }),
+    });
+    const uid = saved.json().draftUid as number;
+    assert.match(client.draftText(), /первая версия/);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload({
+        draftKey: 'окно-9',
+        draftUid: uid,
+        bodyHtml: '<p>дописанное за сегодня, чего терять нельзя</p>',
+      }),
+    });
+    assert.equal(res.statusCode, 503, res.body);
+    assert.match(res.json<{ message: string }>().message, /черновик/i);
+
+    assert.equal(client.drafts.size, 1, 'копий черновика больше становиться не должно');
+    assert.match(
+      client.draftText(),
+      /дописанное за сегодня/,
+      'в «Черновиках» осталась прежняя версия, а ответ обещал сохранить письмо',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('не сохранился — так и сказано: обещать черновик нельзя', async () => {
+  // Обратный ход: ящик не принимает письма вовсе. Тогда и совет должен
+  // быть другим — «не закрывайте окно», потому что текст сейчас только там.
+  const port = await deadPort();
+  const client = new FakeClient({ draftAppendFails: true });
+  const app = await buildTestApp(client, testConfig({ SMTP_PORT: port }));
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload({ draftKey: 'окно-10', draftUid: 100 }),
+    });
+    assert.equal(res.statusCode, 503, res.body);
+    const body = res.json() as { message: string; details: { draftUid: number | null } };
+    assert.equal(body.details.draftUid, null);
+    assert.doesNotMatch(body.message, /сохранён в черновиках/i);
   } finally {
     await app.close();
   }

@@ -53,7 +53,10 @@ test('связывание не заводит обратную связь с н
    * поломки: он просто резал пустоту и считал в ней ноль вызовов.
    */
   const linkBlock = ROUTES.slice(ROUTES.indexOf("'/link'"), ROUTES.indexOf("'/link/:email'"));
-  assert.ok(linkBlock.length > 0, 'блок маршрута связывания не найден — проверка ничего не проверяет');
+  assert.ok(
+    linkBlock.length > 0,
+    'блок маршрута связывания не найден — проверка ничего не проверяет',
+  );
 
   const links = linkBlock.match(/db\.linkAccount\(/g) ?? [];
   assert.equal(

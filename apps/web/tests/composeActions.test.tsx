@@ -462,4 +462,123 @@ describe('отправка с чужого адреса', () => {
     expect(request.attachMessageIds, 'вложенные письма потерялись по дороге').toEqual(['inbox:9']);
     expect(request.requestReadReceipt, 'просьба о прочтении потерялась').toBe(true);
   });
+
+  /** Подставной список подключений: один чужой адрес с рабочим SMTP. */
+  function spyAccounts() {
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue({
+      current: 'demo@mail.local',
+      linked: [],
+      external: [
+        {
+          id: 7,
+          address: 'staraya@yandex.ru',
+          label: 'Старая почта',
+          mode: 'collector',
+          enabled: true,
+          smtp: { host: 'smtp.yandex.ru', port: 465, secure: true, user: 'staraya@yandex.ru' },
+          state: {
+            lastRunAt: null,
+            lastOkAt: null,
+            status: 'ok',
+            error: null,
+            lastCopied: 0,
+            totalCopied: 0,
+          },
+        },
+      ],
+      secrets: { available: true, reason: null },
+      collector: { scheduler: true, masterConfigured: true },
+    });
+  }
+
+  /** Открывает окно, дожидается списка адресов и выбирает чужой отправителем. */
+  async function pickExternalSender(): Promise<void> {
+    const senderButton = () =>
+      [...host.querySelectorAll('button')].find((b) =>
+        (b.getAttribute('aria-label') ?? '').startsWith('Отправить с адреса'),
+      );
+    await waitFor(() => Boolean(senderButton()), 'кнопку выбора отправителя');
+    const id = useUiStore.getState().composeWindows[0]?.id ?? 0;
+    act(() => useUiStore.getState().updateComposeDraft(id, () => ({ fromExternalId: 7 })));
+    await waitFor(
+      () => (senderButton()?.getAttribute('aria-label') ?? '').includes('staraya@yandex.ru'),
+      'выбранного чужого отправителя',
+    );
+  }
+
+  /*
+   * Черновик у обоих путей отправки один и тот же и лежит в НАШЕМ ящике.
+   * Сервер узнаёт, какой убрать, только по этим двум полям — а окно их
+   * в этот запрос не клало вовсе. Письмо уходило, черновик оставался
+   * лежать: через неделю человек находил его в папке и отправлял ещё раз.
+   */
+  it('черновик едет с письмом — иначе он останется лежать в папке', async () => {
+    const send = vi
+      .spyOn(accountsApi, 'sendAsExternal')
+      .mockResolvedValue({ ok: true, from: 'staraya@yandex.ru' });
+    spyAccounts();
+
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'kolya@mail.local' }));
+    const id = useUiStore.getState().composeWindows[0]?.id ?? 0;
+    // Так и бывает: автосохранение уже положило черновик, окно знает его UID
+    act(() => useUiStore.getState().updateComposeDraft(id, () => ({ draftUid: 42 })));
+    await pickExternalSender();
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку с чужого адреса');
+    const request = send.mock.calls[0]?.[1] as { draftUid?: number; draftKey?: string };
+    expect(request.draftUid, 'сервер не узнает, какой черновик убрать').toBe(42);
+    expect(request.draftKey, 'ключ окна нужен, когда UID ещё не доехал').toBeTruthy();
+  });
+
+  /*
+   * Чужой SMTP отвечает по каждому получателю отдельно, и отказ ЧАСТИ
+   * адресов приходит внутри УСПЕШНОГО ответа. Окно писало «Письмо
+   * отправлено с адреса …» безусловно и закрывалось — молчание об
+   * отвергнутом адресе читается как «дошло всем».
+   */
+  it('не принятый адрес назван, а не спрятан за «Письмо отправлено»', async () => {
+    const send = vi.spyOn(accountsApi, 'sendAsExternal').mockResolvedValue({
+      ok: false,
+      from: 'staraya@yandex.ru',
+      accepted: ['kolya@mail.local'],
+      rejected: [{ address: 'net-takogo@mail.local', message: '550 User unknown' }],
+    });
+    spyAccounts();
+
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'kolya@mail.local, net-takogo@mail.local' }));
+    await pickExternalSender();
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку с чужого адреса');
+    await waitFor(() => useUiStore.getState().notice !== null, 'извещение об исходе');
+    const notice = useUiStore.getState().notice ?? '';
+    expect(notice, 'человеку не сказали, что один адрес не принят').toContain(
+      'net-takogo@mail.local',
+    );
+    expect(notice).toContain('не приняты');
+  });
+
+  it('принятое всеми письмо по-прежнему отвечает коротким «отправлено»', async () => {
+    // Обратный ход: без него проверка выше «работала» бы и на письме,
+    // которое дошло всем, — а лишняя тревога не лучше молчания.
+    const send = vi.spyOn(accountsApi, 'sendAsExternal').mockResolvedValue({
+      ok: true,
+      from: 'staraya@yandex.ru',
+      accepted: ['kolya@mail.local'],
+      rejected: [],
+    });
+    spyAccounts();
+
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'kolya@mail.local' }));
+    await pickExternalSender();
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку с чужого адреса');
+    await waitFor(() => useUiStore.getState().notice !== null, 'извещение об исходе');
+    expect(useUiStore.getState().notice).toBe('Письмо отправлено с адреса staraya@yandex.ru');
+  });
 });

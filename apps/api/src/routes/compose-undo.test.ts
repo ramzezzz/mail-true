@@ -28,7 +28,7 @@ import type { ImapFlow } from 'imapflow';
 import type { AppConfig } from '../config.js';
 import { SecretBox } from '../crypto.js';
 import { registerErrorHandling } from '../http-errors.js';
-import { DeferredSpool, readFailureFromRaw } from '../mail/deferred-send.js';
+import { DeferredSpool, readFailureFromRaw, retryDelayMs } from '../mail/deferred-send.js';
 import type { AppDeps } from '../types.js';
 import type { UploadStore } from '../uploads.js';
 import { composeRoutes } from './compose.js';
@@ -806,6 +806,63 @@ test('письмо остаётся в очереди, если убрать е�
       assert.ok(body.pendingId, 'у отправки с отменой обязан быть идентификатор');
     },
   );
+});
+
+test('письмо, чей пароль больше не расшифровывается, не пропадает молча', async () => {
+  /*
+   * СМЕНА SESSION_SECRET — И ЧЕЛОВЕК НЕ УЗНАЁТ НИЧЕГО.
+   *
+   * Пароль ящика лежит в конверте зашифрованным. После смены секрета
+   * сессий (плановая ротация, перенос установки, восстановление тома)
+   * расшифровка бросает. Обработчик «письмо не ушло и не уйдёт»
+   * начинался ИМЕННО С НЕЁ, и начинался вне try: исключение улетало
+   * до того, как человеку выпишут извещение.
+   *
+   * Работник очереди понимал исключение правильно — письмо оставалось
+   * в очереди, чтобы не пропасть. Но человек не получал ни черновика,
+   * ни записи, ни строки в почте: письмо молча крутилось в очереди, а он
+   * ждал ответа от адресата.
+   */
+  await withApp({ undoSendSeconds: 5 }, async ({ scope, spoolDir, wsEvents }) => {
+    const spool = new DeferredSpool(spoolDir);
+    const entry = await spool.add(
+      {
+        owner: 'test@mail.local',
+        // Ровно то, что остаётся от конверта после смены секрета сессий
+        passwordEnc: 'этим-ключом-больше-ничего-не-открыть',
+        sendAt: new Date(Date.now() - 1000).toISOString(),
+        envelopeTo: ['to@mail.local'],
+        subject: 'Письмо после ротации секрета',
+      },
+      Buffer.from('текст, который нельзя терять'),
+    );
+
+    // Пароль не открывается и при отправке, поэтому попытки идут одна за
+    // другой — с откатом между ними, как и положено (см. retryDelayMs)
+    let when = Date.now();
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      await scope.deferredSender.tick(new Date(when));
+      when += retryDelayMs(attempt) + 1000;
+    }
+
+    // Черновика нет — черновик без пароля не положить. Но извещение
+    // пароля не требует, и оно обязано быть.
+    const failures = await spool.failures('test@mail.local');
+    assert.equal(failures.length, 1, 'человеку не сказали вообще ничего');
+    assert.equal(failures[0]?.subject, 'Письмо после ротации секрета');
+    assert.equal(failures[0]?.draftUid, null, 'черновика нет — обещать его нельзя');
+    assert.equal(wsEvents.length, 1, 'открытой вкладке тоже говорят');
+
+    // И само письмо цело: чинить нечего, если оно исчезло
+    const left = await spool.all();
+    assert.equal(left.length, 1);
+    assert.equal(left[0]?.id, entry.id);
+    assert.equal(
+      (await spool.raw(entry.id))?.toString('utf8'),
+      'текст, который нельзя терять',
+      'тело письма обязано остаться нетронутым',
+    );
+  });
 });
 
 /*

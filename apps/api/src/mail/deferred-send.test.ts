@@ -19,10 +19,18 @@ import {
   normalizeUndoSeconds,
   readFailureFromRaw,
   readFailureHeader,
+  retryDelayMs,
+  RETRY_BASE_DELAY_MS,
+  RETRY_MAX_DELAY_MS,
   withFailureHeader,
   type DeferredEntry,
   type DeliveryOutcome,
 } from './deferred-send.js';
+
+/** Момент, когда письму снова пора: срок отката плюс запас. */
+function afterBackoff(from: Date, attempts: number): Date {
+  return new Date(from.getTime() + retryDelayMs(attempts) + 1000);
+}
 
 async function tempSpool(): Promise<{ spool: DeferredSpool; dir: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-deferred-'));
@@ -117,7 +125,8 @@ test('временный отказ оставляет письмо в очер�
     assert.equal((await spool.get(added.id))?.attempts, 1, 'письмо должно остаться в очереди');
 
     outcome = 'sent';
-    assert.equal(await sender.tick(now), 1);
+    // Ждём отката: сразу после неудачи письмо намеренно не «пора отправлять»
+    assert.equal(await sender.tick(afterBackoff(now, 1)), 1);
     assert.equal(await spool.get(added.id), null);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -159,10 +168,14 @@ test('после исчерпания попыток письмо тоже ух�
       maxAttempts: 3,
     });
 
-    const now = new Date('2026-08-06T09:05:00.000Z');
+    // Каждая следующая попытка — после отката (см. retryDelayMs), поэтому
+    // время между проходами идёт вперёд: одним обходом попытки не сгорают
+    let now = new Date('2026-08-06T09:05:00.000Z');
     await sender.tick(now);
+    now = afterBackoff(now, 1);
     await sender.tick(now);
     assert.equal(kept, 0, 'пока попытки не кончились, письмо остаётся в очереди');
+    now = afterBackoff(now, 2);
     await sender.tick(now);
     assert.equal(kept, 1);
     assert.deepEqual(await readdir(dir), []);
@@ -211,6 +224,162 @@ test('уборка в черновики не удалась — письмо о
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('письмо, которое не удалось убрать в черновики, второй раз не отправляется', async () => {
+  /*
+   * САМАЯ ДОРОГАЯ ИЗ ОШИБОК ЭТОГО ОБХОДА, И ОНА РАССЫЛАЛА ПИСЬМА.
+   *
+   * Письмо, которое не удалось положить в «Черновики» (переполненный ящик,
+   * сменившийся пароль, пропавшая папка), намеренно остаётся в очереди —
+   * иначе оно исчезло бы совсем. Но срок отправки у него в прошлом, а
+   * проверки «на это письмо уже поставлен крест» перед вызовом deliver не
+   * было вовсе: работник отдавал его SMTP на КАЖДОМ обходе, то есть раз
+   * в полминуты, бесконечно.
+   *
+   * Что видел человек: извещение «письмо не отправлено», он писал и
+   * отправлял заново — а получатель тем временем собирал копию исходного
+   * каждые полминуты.
+   */
+  const { spool, dir } = await tempSpool();
+  try {
+    await spool.add(entry('2026-08-06T09:00:00.000Z'), Buffer.from('письмо'));
+    let delivered = 0;
+    const sender = new DeferredSender({
+      spool,
+      deliver: async () => {
+        delivered += 1;
+        return 'failed';
+      },
+      onGiveUp: async () => {
+        throw new Error('ящик не принял письмо: кончилось место');
+      },
+    });
+
+    await sender.tick(new Date('2026-08-06T09:05:00.000Z'));
+    assert.equal(delivered, 1);
+    assert.equal((await spool.all()).length, 1, 'письмо обязано остаться в очереди');
+
+    // Обходов дальше сколько угодно — почтовому серверу письмо больше не
+    // отдают ни разу. Повторяется только попытка УБОРКИ.
+    await sender.tick(new Date('2026-08-06T09:35:00.000Z'));
+    await sender.tick(new Date('2026-08-06T10:05:00.000Z'));
+    assert.equal(delivered, 1, 'письмо ушло получателю ещё раз — и не один');
+    assert.equal((await spool.all()).length, 1);
+
+    // Крест лежит в конверте, а не в памяти: перезапуск сервера не должен
+    // возобновлять рассылку сам собой
+    const afterRestart = new DeferredSpool(dir);
+    assert.equal((await afterRestart.all())[0]?.gaveUp, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('исчерпанные попытки тоже не дают отправить письмо ещё раз', async () => {
+  const { spool, dir } = await tempSpool();
+  try {
+    await spool.add(entry('2026-08-06T09:00:00.000Z'), Buffer.from('письмо'));
+    let delivered = 0;
+    const sender = new DeferredSender({
+      spool,
+      deliver: async () => {
+        delivered += 1;
+        return 'retry';
+      },
+      onGiveUp: async () => {
+        throw new Error('ящик не принял письмо');
+      },
+      maxAttempts: 2,
+    });
+
+    let now = new Date('2026-08-06T09:05:00.000Z');
+    await sender.tick(now);
+    now = afterBackoff(now, 1);
+    await sender.tick(now);
+    assert.equal(delivered, 2, 'обе попытки должны были состояться');
+
+    // Попытки кончились, уборка не удалась — письмо лежит. Отправлять его
+    // больше нельзя ни на этом обходе, ни на следующем.
+    now = afterBackoff(now, 2);
+    await sender.tick(now);
+    await sender.tick(afterBackoff(now, 3));
+    assert.equal(delivered, 2, 'письмо отдали SMTP после того, как попытки кончились');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('между попытками есть откат — иначе пять попыток сгорают за секунды', async () => {
+  /*
+   * ЧТО БЫЛО. Неудачная попытка увеличивала счётчик и НЕ трогала срок:
+   * письмо оставалось «пора отправлять» и бралось следующим же обходом.
+   * А обход ходит не только раз в полминуты — на каждую отправку с отменой
+   * ставится внеочередной будильник, и он будит работника со всей очередью
+   * сразу.
+   *
+   * Чего это стоило: перезапуск Postfix из панели (штатное действие, сорок
+   * секунд) превращал ВСЮ очередь в неудавшиеся черновики с извещениями
+   * «письмо не отправлено» — включая отложенные «на понедельник, 9:00»,
+   * до которых оставались сутки.
+   */
+  const { spool, dir } = await tempSpool();
+  try {
+    const added = await spool.add(entry('2026-08-06T09:00:00.000Z'), Buffer.from('письмо'));
+    let delivered = 0;
+    const sender = new DeferredSender({
+      spool,
+      deliver: async () => {
+        delivered += 1;
+        return 'retry';
+      },
+      onGiveUp: async () => undefined,
+      maxAttempts: 5,
+    });
+
+    const start = new Date('2026-08-06T09:05:00.000Z');
+    await sender.tick(start);
+    assert.equal(delivered, 1);
+
+    // Сорок секунд перезапуска почтового сервера — это ОДНА неудачная
+    // попытка, а не все пять. Сколько бы раз работника ни будили в эти
+    // секунды, письмо он не трогает.
+    for (const seconds of [1, 5, 20, 40]) {
+      await sender.tick(new Date(start.getTime() + seconds * 1000));
+    }
+    assert.equal(delivered, 1, 'все попытки сгорели, пока служба перезапускалась');
+
+    const waiting = await spool.get(added.id);
+    assert.equal(waiting?.attempts, 1);
+    assert.equal(
+      Date.parse(waiting?.sendAt ?? '') - start.getTime(),
+      retryDelayMs(1),
+      'срок следующей попытки не назначен — письмо снова «пора отправлять»',
+    );
+
+    // Обратный ход: откат кончился — попытка состоялась
+    await sender.tick(afterBackoff(start, 1));
+    assert.equal(delivered, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('откат растёт вдвое и упирается в потолок', () => {
+  // Минута, две, четыре, восемь: пятая попытка приходится примерно на
+  // пятнадцатую минуту — столько живёт и перезапуск служб, и обновление
+  // продукта, и короткий обрыв связи.
+  assert.equal(retryDelayMs(1), RETRY_BASE_DELAY_MS);
+  assert.equal(retryDelayMs(2), RETRY_BASE_DELAY_MS * 2);
+  assert.equal(retryDelayMs(3), RETRY_BASE_DELAY_MS * 4);
+  assert.equal(retryDelayMs(4), RETRY_BASE_DELAY_MS * 8);
+  // Потолок: ждать сутками бессмысленно — письмо к тому времени уже
+  // неактуально, и человеку полезнее получить его обратно в «Черновики»
+  assert.equal(retryDelayMs(20), RETRY_MAX_DELAY_MS);
+  assert.equal(retryDelayMs(1000), RETRY_MAX_DELAY_MS);
+  // Мусор на входе не должен превращаться в «отправить прямо сейчас»
+  assert.equal(retryDelayMs(0), RETRY_BASE_DELAY_MS);
+  assert.equal(retryDelayMs(-3), RETRY_BASE_DELAY_MS);
 });
 
 test('отметка попытки переживает обрыв: конверт не остаётся обрезанным', async () => {

@@ -153,7 +153,11 @@ class FakeClient {
     return [];
   }
 
+  /** Ящик не даёт ставить ключевые слова: квота, права, обрыв соединения. */
+  flagsFail = false;
+
   async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
+    if (this.flagsFail) throw new Error('[OVERQUOTA] Quota exceeded (mailbox for user is full)');
     this.flagsAdded.push({ uids, flags });
     for (const flag of flags) this.messageFlags.add(flag);
     return true;
@@ -323,6 +327,63 @@ test('отказ не шлёт ничего, но и спрашивать вто
       payload: { send: true },
     });
     assert.equal(again.json().alreadyAnswered, true);
+    assert.equal(smtp.messages.length, 0);
+  });
+});
+
+test('неудачная отметка не выдаёт уже отправленное уведомление за неотправленное', async () => {
+  /*
+   * Как это выглядело. Уведомление уходило отправителю, а следом маршрут
+   * ставил письму `$MDNSent`. Отказ этой отметки (ящик упёрся в квоту,
+   * оборвалось соединение, сервер не даёт ключевые слова) ронял маршрут
+   * пятисоткой — при том, что уведомление УЖЕ у отправителя. Человек читал
+   * «Не удалось отправить уведомление», нажимал ещё раз — и отправителю
+   * уходило второе.
+   */
+  await withApp(async ({ app, smtp, client }) => {
+    client.flagsFail = true;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/inbox%3A5/read-receipt',
+      payload: { send: true },
+    });
+
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json() as { sent: boolean; flagged: boolean; warning: string | null };
+    assert.equal(body.sent, true, 'уведомление ушло — говорить обратное нельзя');
+    assert.equal(smtp.messages.length, 1);
+    // Про несделанное сказано отдельно, а не вместо
+    assert.equal(body.flagged, false);
+    assert.match(body.warning ?? '', /пометить/i);
+
+    // Обратный ход: исправный ящик отвечает без оговорок
+    client.flagsFail = false;
+    const again = await app.inject({
+      method: 'POST',
+      url: '/api/messages/inbox%3A5/read-receipt',
+      payload: { send: true },
+    });
+    const ok = again.json() as { flagged: boolean; warning: string | null };
+    assert.equal(ok.flagged, true);
+    assert.equal(ok.warning, null);
+  });
+});
+
+test('отказ человека без отметки — это неудача, и о ней говорят', async () => {
+  /*
+   * Обратная сторона: уведомления не было вовсе, и отметка — всё
+   * содержание запроса. Промолчать о её неудаче нельзя, иначе вопрос
+   * «уведомить отправителя?» вернётся при следующем открытии письма,
+   * а человек будет уверен, что уже отказался.
+   */
+  await withApp(async ({ app, smtp, client }) => {
+    client.flagsFail = true;
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/inbox%3A5/read-receipt',
+      payload: { send: false },
+    });
+    assert.equal(res.statusCode, 503, res.body);
     assert.equal(smtp.messages.length, 0);
   });
 });
