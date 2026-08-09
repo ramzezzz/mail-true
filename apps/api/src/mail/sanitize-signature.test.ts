@@ -64,3 +64,38 @@ test('разрешённая метка не открывает дороги с�
   assert.ok(html.includes(BLOCKED_PIXEL));
   assert.equal(blockedRemote, 1, 'внешняя картинка должна быть заблокирована как обычно');
 });
+
+/*
+ * Метка со ЗНАЧЕНИЕМ — отдельный случай, и он был сломан.
+ *
+ * Разрешения атрибута мало: DOMPurify пропускал `data-mt-signature`
+ * только пустым, а `data-mt-signature="1"` снимал молча. Само окно
+ * ставит метку пустой, поэтому обычный путь работал; ломался черновик,
+ * сохранённый другой почтовой программой или прежней версией продукта —
+ * метка терялась, окно заводило второй блок подписи, и в письме их
+ * оказывалось два. Найдено живой проверкой на сервере, тестами не
+ * ловилось: они проверяли только пустую метку.
+ */
+test('метка с любым значением тоже переживает санитизацию', () => {
+  for (const html of [
+    '<div data-mt-signature="1">Иван Петров</div>',
+    '<div data-mt-signature="true">Иван Петров</div>',
+    '<div data-mt-signature="mt">Иван Петров</div>',
+  ]) {
+    const clean = sanitizeEmailHtml(html, { allowRemote: true }).html;
+    assert.ok(clean.includes('data-mt-signature'), `метка стёрта: ${html}`);
+    assert.ok(clean.includes('Иван Петров'));
+  }
+});
+
+test('значение метки не открывает дороги ничему постороннему', () => {
+  const { html } = sanitizeEmailHtml(
+    '<div data-mt-signature="1" data-track="px" onclick="steal()">' +
+      '<script>alert(1)</script>подпись</div>',
+    { allowRemote: false },
+  );
+  assert.ok(html.includes('data-mt-signature'));
+  assert.ok(!html.includes('data-track'), 'разрешён весь класс data-*, а не одна метка');
+  assert.ok(!html.includes('onclick'));
+  assert.ok(!html.includes('<script'));
+});
