@@ -54,12 +54,20 @@ interface Audit {
 }
 
 /** Посредник, который пересоздаёт api — то есть убивает этот процесс. */
-function agentThatKillsApi(order: string[], failOn?: string) {
+function agentThatKillsApi(order: string[], failOn?: string, downOn?: string) {
   return {
     configured: true,
     apply: async (target: { id: string }) => {
       order.push(target.id);
       if (failOn === target.id) throw new Error('посредник не ответил');
+      /*
+       * Служба ОТВЕТИЛА, но не поднялась. Настоящий посредник различает
+       * это с «команда не выполнилась» намеренно: там 500, а здесь
+       * обычный ответ с ok=false.
+       */
+      if (downOn === target.id) {
+        return { up: false, detail: 'контейнер вышел с кодом 1' };
+      }
       // Настоящий посредник в этот момент останавливает контейнер api:
       // всё, что стоит в коде после этой строки, может не выполниться.
       return { up: true };
@@ -67,7 +75,7 @@ function agentThatKillsApi(order: string[], failOn?: string) {
   };
 }
 
-async function harness(options: { failOn?: string } = {}): Promise<{
+async function harness(options: { failOn?: string; downOn?: string } = {}): Promise<{
   app: FastifyInstance;
   cookie: string;
   audits: Audit[];
@@ -116,7 +124,7 @@ async function harness(options: { failOn?: string } = {}): Promise<{
       } as NodeJS.ProcessEnv,
       cacheMs: 0,
     }),
-    serviceAgent: agentThatKillsApi(order, options.failOn),
+    serviceAgent: agentThatKillsApi(order, options.failOn, options.downOn),
   } as unknown as AdminContext;
 
   app.decorate('adminCtx', ctx);
@@ -197,4 +205,32 @@ test('отказ посреди списка виден отдельной за�
     h.audits.some((item) => item.action === 'serversettings.secret.rotate'),
     'запись о самом перевыпуске обязана быть даже тогда, когда применение сорвалось',
   );
+});
+
+test('служба ответила, но не встала — это отказ, а не «пересоздана»', async () => {
+  /*
+   * Посредник различает «команда не выполнилась» (500) и «выполнилась,
+   * служба не поднялась» (обычный ответ с ok=false). Второй случай сюда
+   * приходил как удача: результат apply выбрасывался, и служба попадала
+   * в список пересозданных.
+   *
+   * Цена прямая. Перевыпуск QUEUE_AGENT_TOKEN пересоздаёт postfix, новое
+   * значение уже в infra/.env и назад не откатывается. Контейнер не
+   * встал — почта не принимается вовсе, а администратор прочитал
+   * «Секрет выпущен заново. Пересозданы службы: postfix» и ушёл.
+   */
+  const h = await harness({ downOn: 'api' });
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/server-settings/secrets/SESSION_SECRET/rotate',
+    headers: { cookie: h.cookie },
+  });
+
+  assert.notEqual(response.statusCode, 200, 'не поднявшаяся служба выдана за успех');
+  assert.match(response.body, /не поднялась/i, 'человеку не сказано, что именно случилось');
+  assert.match(response.body, /вручную|проверьте/i, 'не сказано, что делать дальше');
+
+  // И это обязано быть в журнале: секрет уже сменён, состояние половинчатое.
+  const failed = h.audits.find((item) => item.action === 'serversettings.secret.rotate.failed');
+  assert.ok(failed, 'в журнале нет следа о том, что перевыпуск не доехал');
 });

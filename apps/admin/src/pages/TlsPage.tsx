@@ -271,9 +271,35 @@ function LetsEncryptPanel({
   const [staging, setStaging] = useState(false);
   const [includeOptional, setIncludeOptional] = useState(true);
   const [output, setOutput] = useState('');
+  /** Согласие затереть свой сертификат — спрашивается отдельным окном. */
+  const [confirmReplace, setConfirmReplace] = useState(false);
+  /*
+   * Право на запись проверяется и здесь. Кнопка была живой у любой роли,
+   * а отказ прилетал уже от сервера — при том что на этой же странице
+   * написано, что менять сертификат может только владелец.
+   */
+  const { can } = useSession();
+  const mayWrite = can('serversettings.write');
+
+  /*
+   * Сейчас стоит СВОЙ сертификат от удостоверяющего центра.
+   *
+   * Выпуск Let's Encrypt разложит поверх него новый ключ, и приватный ключ
+   * купленного сертификата пропадёт безвозвратно — вернуть можно только из
+   * внешней копии. Консольный путь это давно закрывает (renew-certs.sh
+   * требует MT_REPLACE_CUSTOM_CERT=1), а панель шла мимо: кнопка стояла
+   * рядом, без подтверждения и без проверки права на запись.
+   */
+  const overwritesCustom = current.source === 'custom' && !staging;
 
   const issue = useMutation({
-    mutationFn: () => api.issueLetsEncrypt({ email: email.trim(), staging, includeOptional }),
+    mutationFn: () =>
+      api.issueLetsEncrypt({
+        email: email.trim(),
+        staging,
+        includeOptional,
+        ...(overwritesCustom ? { replaceCustom: true } : {}),
+      }),
     onSuccess: (result) => {
       setOutput(result.output);
       onIssued(result.message);
@@ -328,9 +354,31 @@ function LetsEncryptPanel({
           Let&rsquo;s Encrypt (их пять в час на домен). Такой сертификат никуда не устанавливается.
         </p>
 
+        {overwritesCustom ? (
+          <Notice tone="error">
+            Сейчас установлен свой сертификат от удостоверяющего центра ({current.sourceLabel}).
+            Выпуск заменит его вместе с приватным ключом — вернуть прежний можно будет только из
+            своей копии.
+          </Notice>
+        ) : null}
+
+        {overwritesCustom ? (
+          <Checkbox
+            label="Да, заменить свой сертификат на Let’s Encrypt"
+            checked={confirmReplace}
+            onChange={(event) => setConfirmReplace(event.target.checked)}
+          />
+        ) : null}
+
         <div>
           <Button
-            disabled={issue.isPending || email.trim() === ''}
+            disabled={
+              issue.isPending ||
+              email.trim() === '' ||
+              !mayWrite ||
+              (overwritesCustom && !confirmReplace)
+            }
+            title={mayWrite ? undefined : 'Менять сертификат может только владелец сервера'}
             onClick={() => {
               setOutput('');
               issue.mutate();

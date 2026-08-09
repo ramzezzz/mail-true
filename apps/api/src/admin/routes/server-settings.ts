@@ -38,6 +38,7 @@ import type { AdminContext } from '../types.js';
 import { SETTING_SECTIONS } from '../server-settings-registry.js';
 import { findTarget } from '../restart-targets.js';
 import { findRotatable, generateSecret, ROTATABLE_SECRETS } from '../secret-rotation.js';
+import { ServiceAgentUnavailableError } from '../service-agent.js';
 import {
   parseSettingValue,
   typedValue,
@@ -467,11 +468,38 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
       for (const target of planned) {
         const step = secret.applies.find((item) => item.target === target.id);
         try {
-          await agent.apply(
+          const state = await agent.apply(
             target,
             step?.action ?? 'recreate',
             first ? { [secret.key]: value } : {},
           );
+          /*
+           * Служба ОТВЕТИЛА, но не встала — это отказ, а не успех.
+           *
+           * Посредник различает два случая намеренно: «команда не
+           * выполнилась» он отдаёт кодом 500, а «выполнилась, служба не
+           * поднялась» — обычным ответом с ok=false (agent.pl, ветка
+           * ожидания). Второй случай сюда приходил как удача: результат
+           * `apply` выбрасывался, и в `applied` попадала служба, которой
+           * на самом деле нет.
+           *
+           * Цена ошибки прямая. Перевыпуск QUEUE_AGENT_TOKEN пересоздаёт
+           * postfix; новое значение уже в infra/.env и назад не
+           * откатывается. Контейнер не встал — почта не принимается
+           * вовсе, а администратор прочитал «Секрет выпущен заново.
+           * Пересозданы службы: postfix, api» и ушёл. С RSPAMD_PASSWORD
+           * то же самое означает почту без антиспама и без подписи DKIM.
+           *
+           * Маршрут одиночного перезапуска это различие уже уважает
+           * (routes/restart.ts) — здесь оно было потеряно.
+           */
+          if (!state.up) {
+            throw new ServiceAgentUnavailableError(
+              `Служба «${target.id}» не поднялась после перевыпуска секрета` +
+                (state.detail === null ? '.' : `: ${state.detail}`) +
+                ' Значение секрета уже заменено — проверьте службу и поднимите её вручную.',
+            );
+          }
         } catch (err) {
           /*
            * Отказ посреди списка — самое неприятное, что тут бывает: у

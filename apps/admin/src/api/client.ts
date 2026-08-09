@@ -558,7 +558,13 @@ export const api = {
    * Выпустить Let's Encrypt. Долгая операция: обращение к центру плюс
    * остановка nginx на время проверки домена.
    */
-  issueLetsEncrypt: (body: { email: string; staging: boolean; includeOptional: boolean }) =>
+  issueLetsEncrypt: (body: {
+    email: string;
+    staging: boolean;
+    includeOptional: boolean;
+    /** Согласие заменить свой сертификат от удостоверяющего центра. */
+    replaceCustom?: boolean;
+  }) =>
     post<{
       ok: true;
       staging: boolean;
