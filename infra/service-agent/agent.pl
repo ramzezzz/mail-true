@@ -843,9 +843,19 @@ sub do_version {
     my $git = sub {
         my (@args) = @_;
         return '' if $PROJECT_DIR eq '' || $OWN_IMAGE eq '';
+        #
+        # Монтируем РОДИТЕЛЬСКИЙ каталог: $PROJECT_DIR — это infra/
+        # (там лежит docker-compose.yml), а .git на уровень выше, в
+        # корне репозитория. Найдено живой проверкой: с самим
+        # $PROJECT_DIR git отвечал пустотой, потому что репозитория там
+        # нет.
+        #
+        my $root = $PROJECT_DIR;
+        $root =~ s{/[^/]+/?\z}{};
+        return '' if $root eq '';
         my ($rc, $out) = run(
             'docker', 'run', '--rm',
-            '-v', "$PROJECT_DIR:/repo:ro",
+            '-v', "$root:/repo:ro",
             '--entrypoint', 'git',
             $OWN_IMAGE,
             '-c', 'safe.directory=/repo', '-C', '/repo', @args,
