@@ -374,8 +374,15 @@ export interface CurrentSnapshot {
   mailboxes: string[];
   aliases: string[];
   admins: string[];
-  /** Адрес ящика -> сколько у него сейчас правил и подписей. */
-  userSettings: Map<string, { filters: number; signatures: number }>;
+  /**
+   * Адрес ящика -> что у него сейчас есть.
+   *
+   * `settings` — есть ли у ящика строка личных настроек (тема, обои,
+   * автоответчик, срок отмены отправки, срок хранения в корзине).
+   * Считалось, что для плана хватает правил и подписей; из-за этого план
+   * врал — см. пояснение в buildRestorePlan.
+   */
+  userSettings: Map<string, { filters: number; signatures: number; settings: boolean }>;
   ai: string[];
   brandingLogo: boolean;
 }
@@ -511,16 +518,52 @@ export function buildRestorePlan(
   split('admins', file.data.admins, (a) => a.login, lower(current.admins), adminWarnings);
 
   if (wanted.has('userSettings')) {
+    /*
+     * ------------------------------------------------------------------
+     * ПЛАН ОБЯЗАН НАЗЫВАТЬ ПЕРЕЗАПИСЬЮ ВСЁ, ЧТО БУДЕТ ПЕРЕЗАПИСАНО
+     * ------------------------------------------------------------------
+     * Раздел «Настройки ящиков» — это ТРИ разные вещи: личные настройки
+     * ящика (тема, обои, автоответчик, срок отмены отправки, срок
+     * хранения в корзине), подписи и правила фильтрации. Восстановление
+     * (backup-store.ts, restoreUserSettings) переписывает строку личных
+     * настроек и заменяет ЦЕЛИКОМ наборы подписей и правил.
+     *
+     * План же смотрел только на счётчики правил и подписей. У ящика, где
+     * их нет, но настройки заданы — а это самый обычный ящик: человек
+     * поменял тему и завёл автоответчик, но фильтров не делал, — план
+     * писал «будет создано», то есть «ничего своего вы не потеряете».
+     * После восстановления у него менялись тема, обои и текст
+     * автоответчика, и ни одна строка плана об этом не предупреждала.
+     * Предупреждение о замене «целиком» тоже показывалось только при
+     * непустом списке перезаписи, то есть ровно в этом случае молчало.
+     *
+     * Теперь «перезапись» — это наличие ЛЮБОГО из трёх, и в строке
+     * названо, что именно меняется у этого ящика.
+     * ------------------------------------------------------------------
+     */
     const create: string[] = [];
     const overwrite: string[] = [];
     for (const entry of file.data.userSettings) {
       const key = entry.accountEmail.toLowerCase();
       const now = current.userSettings.get(key);
-      if (now && (now.filters > 0 || now.signatures > 0)) {
-        overwrite.push(
-          `${entry.accountEmail}: правил ${now.filters} → ${entry.filters.length}, ` +
-            `подписей ${now.signatures} → ${entry.signatures.length}`,
-        );
+      const hasSomething =
+        now !== undefined && (now.filters > 0 || now.signatures > 0 || now.settings);
+      if (now && hasSomething) {
+        const parts: string[] = [];
+        if (now.settings) {
+          parts.push(
+            entry.settings === null
+              ? 'личные настройки останутся прежними (в копии их нет)'
+              : 'личные настройки будут заменены',
+          );
+        }
+        if (now.filters > 0 || entry.filters.length > 0) {
+          parts.push(`правил ${now.filters} → ${entry.filters.length}`);
+        }
+        if (now.signatures > 0 || entry.signatures.length > 0) {
+          parts.push(`подписей ${now.signatures} → ${entry.signatures.length}`);
+        }
+        overwrite.push(`${entry.accountEmail}: ${parts.join(', ')}`);
       } else {
         create.push(entry.accountEmail);
       }
@@ -538,8 +581,10 @@ export function buildRestorePlan(
         overwrite.length > 0
           ? [
               'Правила и подписи ящика заменяются целиком, а не дополняются: правило, ' +
-                'заведённое пользователем после снятия копии, исчезнет. Файл правил Sieve ' +
-                'будет пересобран, иначе база и Dovecot разойдутся.',
+                'заведённое пользователем после снятия копии, исчезнет. Личные настройки ' +
+                '(тема, обои, автоответчик, сроки отмены отправки и хранения в корзине) ' +
+                'тоже берутся из копии. Файл правил Sieve будет пересобран, иначе база ' +
+                'и Dovecot разойдутся.',
             ]
           : [],
     });

@@ -274,25 +274,48 @@ export async function readCurrentSnapshot(
     )
   ).map((r) => r.domain);
 
-  const counts = await optional<{ account_email: string; filters: string; signatures: string }>(
+  /*
+   * mail_user_settings стоит в этом объединении не для полноты.
+   *
+   * Восстановление переписывает строку личных настроек ящика (тема, обои,
+   * автоответчик, сроки отмены отправки и хранения в корзине) наравне с
+   * правилами и подписями. Пока сюда попадали только два счётчика, ящик,
+   * у которого настройки заданы, а правил и подписей нет, был для плана
+   * неизвестен — и план обещал «будет создано», то есть «своего вы не
+   * потеряете». См. buildRestorePlan в backup-format.ts.
+   */
+  const counts = await optional<{
+    account_email: string;
+    filters: string;
+    signatures: string;
+    settings: string;
+  }>(
     db,
     `SELECT account_email,
             sum(filters) AS filters,
-            sum(signatures) AS signatures
+            sum(signatures) AS signatures,
+            sum(settings) AS settings
        FROM (
-         SELECT lower(account_email) AS account_email, count(*) AS filters, 0 AS signatures
+         SELECT lower(account_email) AS account_email, count(*) AS filters, 0 AS signatures, 0 AS settings
            FROM mail_filters GROUP BY 1
          UNION ALL
-         SELECT lower(account_email) AS account_email, 0 AS filters, count(*) AS signatures
+         SELECT lower(account_email) AS account_email, 0 AS filters, count(*) AS signatures, 0 AS settings
            FROM mail_signatures GROUP BY 1
+         UNION ALL
+         SELECT lower(account_email) AS account_email, 0 AS filters, 0 AS signatures, count(*) AS settings
+           FROM mail_user_settings GROUP BY 1
        ) t
       GROUP BY account_email`,
   );
-  const userSettings = new Map<string, { filters: number; signatures: number }>();
+  const userSettings = new Map<
+    string,
+    { filters: number; signatures: number; settings: boolean }
+  >();
   for (const row of counts) {
     userSettings.set(row.account_email, {
       filters: Number(row.filters),
       signatures: Number(row.signatures),
+      settings: Number(row.settings) > 0,
     });
   }
 
@@ -329,6 +352,17 @@ export interface RestoreOutcome {
    * сообщаем текстом, ровно как о непересобранных правилах Sieve.
    */
   brandingError: string | null;
+  /**
+   * Алиасы из копии, чей исходный адрес занят ЖИВЫМ ящиком: они не
+   * заведены. Такой алиас увёл бы всю входящую почту ящика в сторону —
+   * панель запрещает это с обеих сторон (см. alias-check.ts и
+   * routes/users.ts), а восстановление шло мимо обоих замков.
+   *
+   * Список пустой в подавляющем большинстве случаев; непустой обязан
+   * дойти до человека и до журнала — иначе «восстановили копию, а часть
+   * перенаправлений не вернулась» выглядит как потеря данных.
+   */
+  skippedAliases: string[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -453,6 +487,7 @@ export async function applyRestore(
   const want = new Set(sections);
   const applied: RestoreOutcome['applied'] = {};
   const resyncSieve: string[] = [];
+  const skippedAliases: string[] = [];
   const note = (id: string, key: 'created' | 'updated'): void => {
     const row = (applied[id] ??= { created: 0, updated: 0 });
     row[key] += 1;
@@ -529,6 +564,34 @@ export async function applyRestore(
           where.label = `${alias.source} → ${alias.destination}`;
           const domainName = alias.source.split('@')[1] ?? '';
           if (domainName === '') continue;
+          /*
+           * АЛИАС ПОВЕРХ ЖИВОГО ЯЩИКА НЕ ЗАВОДИТСЯ — ДАЖЕ ИЗ КОПИИ.
+           *
+           * Postfix разбирает карту алиасов РАНЬШЕ карты ящиков
+           * (`virtual_alias_maps` до `virtual_mailbox_maps` в main.cf).
+           * Алиас, чей исходный адрес совпадает с адресом ящика, уводит
+           * ВСЮ его входящую почту в сторону. Ящик при этом выглядит
+           * целым: он в списке, в него можно войти, в нём лежит старая
+           * почта — просто новая перестаёт приходить.
+           *
+           * Панель это запрещает с обеих сторон: alias-check.ts не даёт
+           * завести такой алиас, routes/users.ts не даёт завести ящик на
+           * адрес, занятый алиасом. Восстановление шло мимо обоих замков
+           * и молча делало то, что панель считает гарантированной потерей
+           * почты, — а копию восстанавливают как раз тогда, когда за
+           * сервером следят меньше всего.
+           *
+           * Пропущенный алиас — не тихий пропуск: он возвращается наружу
+           * и попадает и в ответ, и в журнал аудита.
+           */
+          const liveMailbox = await client.query(
+            `SELECT 1 FROM virtual_users WHERE lower(email) = lower($1)`,
+            [alias.source],
+          );
+          if ((liveMailbox.rowCount ?? 0) > 0) {
+            skippedAliases.push(`${alias.source} → ${alias.destination}`);
+            continue;
+          }
           const domainId = await ensureDomain(client, domainName);
           const updated = await client.query(
             `UPDATE virtual_aliases SET active = $3, domain_id = $4
@@ -672,7 +735,7 @@ export async function applyRestore(
     }
   }
 
-  return { applied, resyncSieve, brandingError };
+  return { applied, resyncSieve, brandingError, skippedAliases };
 }
 
 /** Домен по имени; заводит, если его нет. Возвращает id. */

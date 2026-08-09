@@ -23,7 +23,13 @@ EXTERNAL=''
 while [ $# -gt 0 ]; do
     case "$1" in
         --quick)    QUICK=1; shift ;;
-        --external) EXTERNAL="${2:-}"; shift 2 ;;
+        # «${2:?…}», а не «${2:-}». Разница не стилистическая: при
+        # «--external» последним аргументом сдвигать было нечего, `shift 2`
+        # возвращал единицу — а `set -e` здесь намеренно выключен (проверки
+        # обязаны доходить до конца), значит цикл не заканчивался НИКОГДА.
+        # Самопроверка молча висела, съедая процессор, и её приходилось
+        # убивать. Тот же приём уже стоит в install/restore.sh.
+        --external) EXTERNAL="${2:?--external требует адрес: --external you@example.org}"; shift 2 ;;
         --help|-h)
             sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
             exit 0 ;;
@@ -491,10 +497,32 @@ else
         hint "задайте DOVECOT_MASTER_USER и DOVECOT_MASTER_PASSWORD в infra/.env"
     else
         AUTH_USER="${ADMIN_EMAIL}*${DOVECOT_MASTER_USER}"
-        if dc exec -T postfix swaks --server postfix:587 --tls \
-                --auth PLAIN --auth-user "$AUTH_USER" --auth-password "$DOVECOT_MASTER_PASSWORD" \
-                --from "$ADMIN_EMAIL" --to "$ADMIN_EMAIL" \
-                --header "Subject: selfcheck-out $TOKEN" --body "selfcheck outbound $TOKEN" \
+        # ------------------------------------------------------------------
+        # ПАРОЛЬ НЕ ПОПАДАЕТ В КОМАНДНУЮ СТРОКУ НА ХОСТЕ.
+        #
+        # Здесь стояло «dc exec -T postfix swaks … --auth-password "$PW"», и
+        # весь этот запуск — строка процесса `docker` на хосте. Она лежит в
+        # /proc/<pid>/cmdline с правами 444, то есть пароль служебного
+        # доступа КО ВСЕМ ЯЩИКАМ показывался любому, у кого есть учётная
+        # запись на сервере. Самопроверку гоняют не раз в год, а всякий раз,
+        # когда что-то чинят, — то есть когда на машине сидят люди.
+        #
+        # Теперь секрет уходит в контейнер через ввод и живёт в окружении
+        # процесса (/proc/<pid>/environ читает только владелец и root).
+        #
+        # Честно о том, что осталось: внутри контейнера swaks по-прежнему
+        # получает пароль аргументом — другого способа передать его swaks
+        # не имеет (ни ключа с файлом, ни переменной окружения). Это уже
+        # НЕ путь «наружу»: снаружи видна только оболочка. Но полностью
+        # аргумент уходит только вместе со сменой swaks на другой клиент,
+        # и делать это вслепую, без живого стенда, дороже, чем оставить.
+        # ------------------------------------------------------------------
+        if dc_exec_secret postfix MT_PW "$DOVECOT_MASTER_PASSWORD" \
+                'exec swaks --server postfix:587 --tls --auth PLAIN \
+                     --auth-user "$1" --auth-password "$MT_PW" \
+                     --from "$2" --to "$3" \
+                     --header "Subject: selfcheck-out $4" --body "selfcheck outbound $4"' \
+                "$AUTH_USER" "$ADMIN_EMAIL" "$ADMIN_EMAIL" "$TOKEN" \
                 >/dev/null 2>&1; then
             ok "отправка через submission:587 с аутентификацией работает"
         else
@@ -526,12 +554,15 @@ else
 
     # --- Наружу (по запросу) --------------------------------------
     if [ -n "$EXTERNAL" ]; then
-        if dc exec -T postfix swaks --server postfix:587 --tls \
-                --auth PLAIN --auth-user "${ADMIN_EMAIL}*${DOVECOT_MASTER_USER:-}" \
-                --auth-password "${DOVECOT_MASTER_PASSWORD:-}" \
-                --from "$ADMIN_EMAIL" --to "$EXTERNAL" \
-                --header "Subject: Mail.True selfcheck $TOKEN" \
-                --body "Проверка доставки наружу. Токен $TOKEN" >/dev/null 2>&1; then
+        # Пароль — через ввод, по той же причине, что и у проверки выше.
+        if dc_exec_secret postfix MT_PW "${DOVECOT_MASTER_PASSWORD:-}" \
+                'exec swaks --server postfix:587 --tls --auth PLAIN \
+                     --auth-user "$1" --auth-password "$MT_PW" \
+                     --from "$2" --to "$3" \
+                     --header "Subject: Mail.True selfcheck $4" \
+                     --body "Проверка доставки наружу. Токен $4"' \
+                "${ADMIN_EMAIL}*${DOVECOT_MASTER_USER:-}" "$ADMIN_EMAIL" "$EXTERNAL" "$TOKEN" \
+                >/dev/null 2>&1; then
             ok "письмо на $EXTERNAL принято к отправке"
             sleep 8
             QUEUE="$(dc exec -T postfix mailq 2>/dev/null | tail -5)"
@@ -633,11 +664,49 @@ if [ -f "$ENV_FILE" ]; then
     else
         ok "концы строк в infra/.env обычные (LF)"
     fi
-    if grep -qE '^(POSTGRES_PASSWORD|REDIS_PASSWORD|RSPAMD_PASSWORD)=change-me' "$ENV_FILE"; then
-        fail "в infra/.env остались пароли из примера (change-me-…)"
-        hint "перезапустите установщик или поменяйте пароли вручную"
+    # ------------------------------------------------------------------
+    # ЗАГЛУШКИ ИЩЕМ ВО ВСЕХ СЕКРЕТАХ, А НЕ В ТРЁХ ИЗ ДЕСЯТИ.
+    #
+    # Здесь стояло `grep -qE '^(POSTGRES|REDIS|RSPAMD)_PASSWORD=change-me'`
+    # — три ключа из десяти, да ещё и по одному написанию заглушки. Вне
+    # проверки оставались SESSION_SECRET, ADMIN_SESSION_SECRET,
+    # AI_ENCRYPTION_KEY, EXTERNAL_ACCOUNTS_KEY и, что хуже всего,
+    # DOVECOT_MASTER_PASSWORD: в образце он записан не «change-me-…», а
+    # «смените-этот-пароль», то есть под шаблон не подходил в принципе.
+    # А это пароль служебного доступа КО ВСЕМ ЯЩИКАМ сразу.
+    #
+    # И на таком сервере печаталось «ok: пароли в infra/.env не из
+    # примера» — самопроверка подтверждала ровно то, чего не было.
+    #
+    # Список ключей и распознавание заглушек — общие с установщиком
+    # (MT_GENERATED_SECRETS и is_placeholder_password в lib/common.sh):
+    # разойтись им больше негде.
+    # ------------------------------------------------------------------
+    SC_PLACEHOLDERS=''
+    SC_EMPTY=''
+    for sc_pair in "${MT_GENERATED_SECRETS[@]}"; do
+        sc_key="${sc_pair%%:*}"
+        sc_value="$(env_get "$sc_key")"
+        if [ -z "$sc_value" ]; then
+            # У пустого QUEUE_AGENT_TOKEN ниже своя проверка, и она
+            # объясняет последствие («раздел „Очередь“ недоступен»).
+            # Два пункта об одном и том же читаются как сбой проверки.
+            case "$sc_key" in QUEUE_AGENT_TOKEN) continue ;; esac
+            SC_EMPTY="$SC_EMPTY $sc_key"
+        elif is_placeholder_password "$sc_value"; then
+            SC_PLACEHOLDERS="$SC_PLACEHOLDERS $sc_key"
+        fi
+    done
+    if [ -n "$SC_PLACEHOLDERS" ]; then
+        fail "в infra/.env остались значения из примера:$SC_PLACEHOLDERS"
+        hint "это не «пароли по умолчанию», а общеизвестные строки из документации:"
+        hint "их знает любой, кто видел infra/.env.example."
+        hint "заменит повторный запуск: sudo bash install/install.sh"
+    elif [ -n "$SC_EMPTY" ]; then
+        fail "в infra/.env пусты обязательные секреты:$SC_EMPTY"
+        hint "заполнит повторный запуск: sudo bash install/install.sh"
     else
-        ok "пароли в infra/.env не из примера"
+        ok "все секреты в infra/.env настоящие (проверено ключей: ${#MT_GENERATED_SECRETS[@]})"
     fi
 
     # --- Посредник видит ТОТ ЖЕ infra/.env, что и мы ---------------
@@ -737,12 +806,36 @@ process.stdin.on("end", () => {
     fi
 fi
 
-# Тот же пароль-заглушка мог остаться и у почтового ящика
-if dc exec -T dovecot doveadm auth test "$ADMIN_EMAIL" 'смените-этот-пароль' >/dev/null 2>&1; then
+# ------------------------------------------------------------------
+# Тот же пароль-заглушка мог остаться и у почтового ящика.
+#
+# ПРОВЕРКА, КОТОРАЯ НЕ МОГЛА ПРОВАЛИТЬСЯ.
+#
+# Здесь стояло просто «не пустил — значит всё хорошо»: `doveadm auth test
+# … >/dev/null 2>&1` и ветка else с зелёным «ящик администратора не
+# открывается паролем-заглушкой». Но ненулевой код у этой команды бывает
+# по десятку причин, и «пароль не подошёл» — только одна из них: не
+# поднят контейнер dovecot, нет самого doveadm, не отвечает база
+# пользователей, опечатались в имени службы. Любая из них печатала
+# зелёную строку. То есть проверка отвечала «хорошо» и на сервере, где
+# пароль-заглушка прекрасно работает, — просто спросить об этом не
+# удалось.
+#
+# Теперь различаем три исхода: пустил (беда), честно отказал (хорошо),
+# не смогли спросить (жёлтое «не проверено» с причиной). Признак отказа —
+# слово «auth failed» в ответе doveadm; всё прочее — не наш случай.
+# ------------------------------------------------------------------
+PW_RC=0
+PW_OUT="$(dc exec -T dovecot doveadm auth test "$ADMIN_EMAIL" 'смените-этот-пароль' 2>&1)" || PW_RC=$?
+if [ "$PW_RC" -eq 0 ]; then
     fail "ящик $ADMIN_EMAIL открывается паролем-заглушкой из примера"
     hint "смените: bash infra/scripts/create-mailbox.sh $ADMIN_EMAIL 'свой-пароль'"
-else
+elif printf '%s' "$PW_OUT" | grep -qi 'auth failed\|authentication failed'; then
     ok "ящик администратора не открывается паролем-заглушкой"
+else
+    warn "не удалось проверить пароль ящика $ADMIN_EMAIL: doveadm не ответил внятно"
+    hint "ответ был: ${PW_OUT:-<пусто>}"
+    hint "проверьте службу: docker compose -f infra/docker-compose.yml ps dovecot"
 fi
 
 # --- Место на диске -------------------------------------------------
@@ -907,12 +1000,32 @@ if [ -z "${DOVECOT_MASTER_USER:-}" ] || [ -z "${DOVECOT_MASTER_PASSWORD:-}" ]; t
     fail "служебный пользователь Dovecot не настроен — вход администратора в чужой ящик не работает"
     hint "в infra/.env нет DOVECOT_MASTER_USER или DOVECOT_MASTER_PASSWORD."
     hint "заполнит повторный запуск: sudo bash install/install.sh"
+elif is_placeholder_password "$DOVECOT_MASTER_PASSWORD"; then
+    # ------------------------------------------------------------------
+    # ЗАГЛУШКА ПРОВЕРЯЕТСЯ ДО ЖИВОГО ВХОДА, А НЕ ПОСЛЕ.
+    #
+    # Ниже стоит настоящий `doveadm auth test`, и он на таком сервере
+    # проходит: пароль-то верный, он просто общеизвестный. Проверка
+    # печатала «служебный вход Dovecot работает» и засчитывалась зелёной
+    # на сервере, где пароль доступа КО ВСЕМ ЯЩИКАМ взят из образца
+    # infra/.env.example. Формально — правда; по сути — подтверждение
+    # худшего, что может быть с этим паролем.
+    # ------------------------------------------------------------------
+    fail "DOVECOT_MASTER_PASSWORD — заглушка из примера: служебный вход открыт всем, кто видел infra/.env.example"
+    hint "этим паролем открывается ЛЮБОЙ ящик сервера, без пароля владельца."
+    hint "заменить и перечитать:"
+    hint "  sudo bash install/install.sh   (повторный запуск заменяет заглушки)"
 else
     # Проверяем настоящим входом: файл может существовать и быть пустым.
     # Разделитель «*» — DOVECOT_MASTER_SEPARATOR по умолчанию.
-    # shellcheck disable=SC2016
-    if dc exec -T -e MU="$DOVECOT_MASTER_USER" -e MP="$DOVECOT_MASTER_PASSWORD" -e MB="$ADMIN_EMAIL" \
-            dovecot sh -c 'doveadm auth test "$MB*$MU" "$MP"' >/dev/null 2>&1; then
+    #
+    # Пароль передаётся ЧЕРЕЗ ВВОД, а не ключом «-e MP=…». Ключ выглядел
+    # безопасным («в списке процессов не будет»), но это неправда: «-e
+    # MP=пароль» — такой же аргумент команды `docker` на хосте и точно так
+    # же лежит в /proc/<pid>/cmdline с правами на чтение для всех.
+    if dc_exec_secret dovecot MT_PW "$DOVECOT_MASTER_PASSWORD" \
+            'exec doveadm auth test "$1*$2" "$MT_PW"' \
+            "$ADMIN_EMAIL" "$DOVECOT_MASTER_USER" >/dev/null 2>&1; then
         ok "служебный вход Dovecot работает (администратор может открыть чужой ящик)"
     else
         fail "служебный вход Dovecot не работает при заданном пароле"
@@ -936,15 +1049,16 @@ else
     # Секрет посредник ждёт в заголовке X-Agent-Token (infra/postfix/queue-agent.pl):
     # без него любой путь отвечает 401, и wget вернёт пустоту.
     #
-    # Секрет передаём переменной окружения контейнера, а не подстановкой в
-    # строку команды: так он не попадает в список процессов на машине и не
-    # зависит от кавычек. Спрашиваем ИЗ КОНТЕЙНЕРА api — важно проверить тот
-    # самый путь, которым ходит панель, а не доступность порта с хоста
-    # (наружу он и не публикуется).
-    # shellcheck disable=SC2016
-    QUEUE_HTTP="$(dc exec -T -e Q_TOKEN="$QUEUE_AGENT_TOKEN" -e Q_PORT="${QUEUE_AGENT_PORT:-11345}" api \
-        sh -c 'wget -qO- --header="X-Agent-Token: $Q_TOKEN" "http://postfix:$Q_PORT/healthz" 2>/dev/null' \
-        2>/dev/null | tr -d '\r')"
+    # Секрет уходит в контейнер ЧЕРЕЗ ВВОД. Раньше он передавался ключом
+    # «-e Q_TOKEN=…» с пояснением «так он не попадает в список процессов»
+    # — и это было неправдой: «-e Q_TOKEN=значение» такой же аргумент
+    # команды `docker` на хосте, и /proc/<pid>/cmdline читают все.
+    # Спрашиваем ИЗ КОНТЕЙНЕРА api — важно проверить тот самый путь,
+    # которым ходит панель, а не доступность порта с хоста (наружу он и
+    # не публикуется).
+    QUEUE_HTTP="$(dc_exec_secret api Q_TOKEN "$QUEUE_AGENT_TOKEN" \
+        'wget -qO- --header="X-Agent-Token: $Q_TOKEN" "http://postfix:$1/healthz" 2>/dev/null' \
+        "${QUEUE_AGENT_PORT:-11345}" 2>/dev/null | tr -d '\r')"
     case "$QUEUE_HTTP" in
         *ok*|*queue*) ok "посредник к очереди Postfix отвечает — раздел «Очередь» работает" ;;
         '')  fail "посредник к очереди Postfix не отвечает — раздел «Очередь» покажет ошибку"

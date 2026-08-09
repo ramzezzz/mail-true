@@ -258,6 +258,23 @@ if [ "$MAILBOX_PASSWORD" != "$ADMIN_PASSWORD" ]; then
     fi
 fi
 
+# ------------------------------------------------------------------
+# Антивирус.
+#
+# УМОЛЧАНИЕ ПРИ ПОВТОРНОМ ЗАПУСКЕ — ТО, ЧТО СЕЙЧАС ВКЛЮЧЕНО.
+#
+# Здесь всегда стояло «no», и обновление на сервере с антивирусом молча
+# его выключало: человек запускал install.sh ради новой версии, отвечал
+# Enter на все вопросы — и вложения переставали проверяться. Ни строки в
+# выводе о том, что защиту сняли; узнать об этом было неоткуда, кроме
+# как заметить пропавший контейнер clamav.
+#
+# Поэтому умолчание берётся из действующей установки (CLAMAV_ENABLED в
+# infra/.env). Свежая установка по-прежнему предлагает «no»: антивирус
+# стоит гигабайт памяти, и включать его без спроса нельзя.
+# ------------------------------------------------------------------
+CLAMAV_PREV=no
+case "$(env_get CLAMAV_ENABLED)" in true|yes|1) CLAMAV_PREV=yes ;; esac
 CLAMAV_CHOICE="${MAILTRUE_CLAMAV:-}"
 if [ -z "$CLAMAV_CHOICE" ] && [ "$MT_NONINTERACTIVE" != "1" ]; then
     printf '\n'
@@ -266,9 +283,22 @@ if [ -z "$CLAMAV_CHOICE" ] && [ "$MT_NONINTERACTIVE" != "1" ]; then
     info "  тогда как весь остальной стек занимает около 310 МБ."
     info "  На машине с 2 ГБ это больше половины памяти. Включать имеет смысл,"
     info "  если памяти 4 ГБ и больше. Включить можно и потом."
+    if [ "$CLAMAV_PREV" = "yes" ]; then
+        info "  Сейчас антивирус ВКЛЮЧЁН — ответ по умолчанию оставляет его включённым."
+    fi
 fi
-ask_yes_no CLAMAV_CHOICE "Включить антивирус ClamAV" "no"
-if [ "$CLAMAV_CHOICE" = "yes" ] && [ "$RAM_MB" -lt "$MT_MIN_RAM_CLAMAV_MB" ] && [ "$RAM_MB" -gt 0 ]; then
+ask_yes_no CLAMAV_CHOICE "Включить антивирус ClamAV" "$CLAMAV_PREV"
+# ------------------------------------------------------------------
+# Хватит ли памяти.
+#
+# RAM_MB заполняется ЗДЕСЬ. Раньше переменная не заполнялась нигде, и под
+# `set -euo pipefail` ответ «да» на вопрос про антивирус обрывал установку
+# целиком строкой «RAM_MB: unbound variable» — то есть включить ClamAV
+# было нельзя ни из консоли, ни через мастер в браузере. Сообщение при
+# этом не имело никакого отношения ни к антивирусу, ни к памяти.
+# ------------------------------------------------------------------
+RAM_MB="$(ram_total_mb)"
+if [ "$CLAMAV_CHOICE" = "yes" ] && [ "$RAM_MB" -gt 0 ] && [ "$RAM_MB" -lt "$MT_MIN_RAM_CLAMAV_MB" ]; then
     warn "памяти ${RAM_MB} МБ, а с антивирусом нужно от ${MT_MIN_RAM_CLAMAV_MB} МБ"
     if ! confirm "Всё равно включить антивирус?"; then
         CLAMAV_CHOICE=no
@@ -342,33 +372,12 @@ env_set BIND_ADDRESS  "$BIND_ADDRESS"
 # Секреты: генерируются один раз и при повторной установке не меняются —
 # иначе пароль в .env разъехался бы с паролем внутри уже созданной базы.
 #
-# QUEUE_AGENT_TOKEN и SERVICE_AGENT_TOKEN стоят в этом списке не для красоты. В infra/.env.example
-# он ПУСТОЙ, а пустое значение означает «посредника к очереди Postfix не
-# запускать вовсе» (infra/postfix/entrypoint.sh) и «раздел „Очередь“ в панели
-# недоступен». Установщик копирует образец как есть и раньше этот ключ не
-# трогал — значит на КАЖДОЙ установке с нуля целый раздел панели молча
-# отсутствовал, и узнать, что его надо включить руками, было неоткуда.
-NEW_SECRETS=0
-for pair in \
-    "POSTGRES_PASSWORD:32" \
-    "REDIS_PASSWORD:32" \
-    "RSPAMD_PASSWORD:24" \
-    "DOVECOT_MASTER_PASSWORD:32" \
-    "AI_ENCRYPTION_KEY:48" \
-    "SESSION_SECRET:48" \
-    "ADMIN_SESSION_SECRET:48" \
-    "EXTERNAL_ACCOUNTS_KEY:48" \
-    "QUEUE_AGENT_TOKEN:64" \
-    "SERVICE_AGENT_TOKEN:64"
-do
-    key="${pair%%:*}"; len="${pair##*:}"
-    current="$(env_get "$key")"
-    case "$current" in
-        ''|change-me*|смените*)
-            env_set "$key" "$(rand_secret "$len")"
-            NEW_SECRETS=$((NEW_SECRETS + 1)) ;;
-    esac
-done
+# Список ключей живёт в install/lib/common.sh (MT_GENERATED_SECRETS): по
+# нему же самопроверка ищет оставшиеся заглушки. Пока список был здесь,
+# самопроверка знала только три ключа из десяти и печатала «пароли в
+# infra/.env не из примера» на сервере, где пароль служебного доступа ко
+# ВСЕМ ящикам был взят из документации.
+NEW_SECRETS="$(ensure_generated_secrets)"
 if [ "$NEW_SECRETS" -gt 0 ]; then
     ok "сгенерировано случайных секретов: $NEW_SECRETS"
 else
@@ -794,7 +803,11 @@ MAILBOX_EXISTS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 if [ "$MAILBOX_EXISTS" = "1" ]; then
     ok "ящик $ADMIN_EMAIL уже есть — пароль не трогаем"
     hint "сменить пароль ящика: в панели, раздел «Ящики»"
-elif bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" "$MAILBOX_PASSWORD" >/dev/null 2>&1; then
+elif printf '%s\n' "$MAILBOX_PASSWORD" |
+        bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" - >/dev/null 2>&1; then
+    # Пароль подаётся на ВВОД, а не вторым аргументом: аргументы видны в
+    # /proc любому пользователю машины, и пароль ящика администратора
+    # светился там всё время установки.
     ok "ящик $ADMIN_EMAIL создан"
 else
     fail "не удалось создать ящик $ADMIN_EMAIL"
@@ -856,35 +869,17 @@ step "8. Настоящий TLS-сертификат"
 # ==================================================================
 
 issue_letsencrypt() {
-    local names=("$MAIL_HOST")
-    if [ "$MAIL_HOST" != "$DOMAIN" ]; then names+=("$DOMAIN"); fi
-    # mail.<домен> и admin.<домен> — веб-интерфейс почты и админка.
-    # В сертификат попадут только те имена, чья запись уже указывает на
-    # этот сервер: из-за одного неопубликованного имени Let's Encrypt
-    # отказал бы во всём выпуске целиком.
-    names+=("mail.$DOMAIN" "admin.$DOMAIN" "autoconfig.$DOMAIN" "autodiscover.$DOMAIN")
-
-    local server_ip resolved matched=0 name
-    server_ip="$(public_ip)"
-    info "внешний адрес сервера: ${server_ip:-не определён}"
-
-    # Выпуск не начнётся, пока имя не указывает на нас: Let's Encrypt
-    # проверяет владение через HTTP-запрос по этому имени.
+    # Имена, чья A-запись уже указывает на этот сервер. Собирает их
+    # cert_reachable_names (install/lib/common.sh): тот же список нужен
+    # renew-certs.sh --force, когда сертификата на машине ещё нет.
+    local name
     local reachable=()
-    for name in "${names[@]}"; do
-        resolved="$(resolve_a "$name" | tr '\n' ' ' || true)"
-        if [ -z "$resolved" ]; then
-            warn "$name — A-записи нет, имя в сертификат не попадёт"
-            continue
-        fi
-        if [ -n "$server_ip" ] && printf '%s' "$resolved" | grep -qw "$server_ip"; then
-            ok "$name → $resolved (это мы)"
-            reachable+=("$name"); matched=1
-        else
-            warn "$name → $resolved, а сервер имеет адрес ${server_ip:-?}"
-        fi
-    done
-    if [ "$matched" = "0" ]; then
+    if cert_reachable_names "$MAIL_HOST" "$DOMAIN"; then
+        reachable=("${MT_CERT_NAMES[@]}")
+    fi
+    if [ "${#reachable[@]}" -eq 0 ]; then
+        local server_ip
+        server_ip="$(public_ip)"
         fail "ни одно имя не указывает на этот сервер — Let's Encrypt откажет"
         hint "Опубликуйте A-запись $MAIL_HOST → ${server_ip:-<адрес сервера>}"
         hint "и CNAME mail.$DOMAIN, admin.$DOMAIN, autoconfig.$DOMAIN,"
@@ -921,7 +916,13 @@ issue_letsencrypt() {
     # честно называлась установкой, а не «запуском руками»: иначе панель
     # на свежем сервере показывала бы «последний раз продление запускали
     # вручную», чего никто не делал.
-    MT_RENEW_TRIGGER=install bash "$INSTALL_DIR/renew-certs.sh" --deploy-only || return 1
+    # MT_REPLACE_CUSTOM_CERT=1 — потому что раскладка идёт СРАЗУ ПОСЛЕ
+    # удачного выпуска, о котором попросили явно (MAILTRUE_TLS=letsencrypt
+    # поверх своего сертификата). Без этого renew-certs.sh отказался бы
+    # раскладывать: он теперь бережёт свой сертификат и в режиме
+    # --deploy-only тоже.
+    MT_RENEW_TRIGGER=install MT_REPLACE_CUSTOM_CERT=1 \
+        bash "$INSTALL_DIR/renew-certs.sh" --deploy-only || return 1
     return 0
 }
 

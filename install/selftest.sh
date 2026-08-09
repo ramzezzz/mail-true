@@ -223,8 +223,19 @@ t_ok "восстановление применяет миграции пове�
 # опечатка вроде «--only base» проходила все шаги, не восстановив ничего,
 # и заканчивалась бодрым отчётом. Хуже места для тихой ошибки нет:
 # восстановление запускают один раз, в аварии.
-t_ok "restore.sh отвергает неизвестный раздел в --only" \
-    bash -c "! bash '$INSTALL_DIR/restore.sh' /nonexistent.tar.gz --only base >/dev/null 2>&1"
+# ПРОВЕРКА, КОТОРАЯ НЕ МОГЛА ПРОВАЛИТЬСЯ.
+#
+# Было просто «! bash restore.sh /nonexistent.tar.gz --only base», то есть
+# «любой ненулевой код — зачёт». А restore.sh с несуществующим архивом
+# заканчивается ошибкой ВСЕГДА, по совсем другой причине («файл не
+# найден»). Убери кто-нибудь разбор --only целиком — проверка осталась бы
+# зелёной, а опечатка «--only base» снова проходила бы все шаги, ничего
+# не восстановив, и заканчивалась бодрым отчётом.
+#
+# Поэтому спрашиваем ПРИЧИНУ отказа, а не только его наличие.
+t_ok "restore.sh отвергает неизвестный раздел в --only, назвав причину" \
+    bash -c "out=\"\$(bash '$INSTALL_DIR/restore.sh' /nonexistent.tar.gz --only base 2>&1)\"
+             printf '%s' \"\$out\" | grep -q 'only принимает db, mail или config'"
 t_ok "restore.sh принимает известные разделы --only" \
     bash -c "for s in db mail config; do
                 out=\"\$(bash '$INSTALL_DIR/restore.sh' /nonexistent.tar.gz --only \$s 2>&1)\"
@@ -434,8 +445,12 @@ EMPTY_UNSET=''
 while read -r key; do
     [ -n "$key" ] || continue
     printf '%s' "$EMPTY_OK" | grep -qw "$key" && continue
+    # Ищем в обоих файлах: список секретов «ключ:длина» переехал из
+    # install.sh в lib/common.sh (MT_GENERATED_SECRETS), чтобы им же
+    # пользовалась самопроверка и не проверяла три ключа из десяти.
     grep -qE "(env_set|env_ensure)[[:space:]]+${key}\b|\"${key}:[0-9]+\"" \
-        "$INSTALL_DIR/install.sh" || EMPTY_UNSET="$EMPTY_UNSET $key"
+        "$INSTALL_DIR/install.sh" "$INSTALL_DIR/lib/common.sh" \
+        || EMPTY_UNSET="$EMPTY_UNSET $key"
 done < <(sed -n 's/^\([A-Z_0-9]\{1,\}\)=[[:space:]]*$/\1/p' "$ENV_EXAMPLE")
 t_eq "пустые ключи из .env.example заполняет установщик" "${EMPTY_UNSET# }" ""
 
@@ -666,10 +681,39 @@ COMPOSE_INSTALLER="$(sed -n '/^  installer:/,/^  [a-z]/p' "$COMPOSE_FILE")"
 # 1. Службы нет в обычном запуске стека — она под своим профилем.
 t_ok "служба installer объявлена под профилем" \
     bash -c "printf '%s' \"\$1\" | grep -q \"profiles: \\['installer'\\]\"" _ "$COMPOSE_INSTALLER"
+# ------------------------------------------------------------------
 # Профиль работает, только если он единственный способ её поднять:
 # `docker compose up -d` без --profile не должен её видеть.
-t_no "обычный docker compose config не поднимает установщик" \
-    bash -c "grep -A2 '^  installer:' '$COMPOSE_FILE' | grep -q 'restart: unless-stopped'"
+#
+# ПРОВЕРКА, КОТОРАЯ НЕ МОГЛА ПРОВАЛИТЬСЯ.
+#
+# Было: «grep -A2 '^  installer:' | grep -q 'restart: unless-stopped'» с
+# ожиданием отказа. Две строки после имени службы — это её первые ключи, и
+# слова unless-stopped там не было НИКОГДА. Проверка не имела отношения ни
+# к своему названию (про профиль в ней ни слова), ни к тому, что она
+# якобы стережёт: убери у installer строку profiles — она бы этого не
+# заметила, а служба стала бы подниматься обычной командой вместе с
+# сокетом Docker.
+#
+# Считаем НАСТОЯЩИЙ список служб по умолчанию: те, у кого в блоке нет
+# ключа profiles. Установщика в нём быть не должно.
+# ------------------------------------------------------------------
+DEFAULT_SERVICES="$(awk '
+    # Только блок services: у томов и сетей отступ такой же, и без этого
+    # в «службы по умолчанию» попадали бы pgdata, vmail и прочие тома.
+    /^services:/ { inside = 1; next }
+    /^[a-z]/     { if (svc != "" && !profiled) print svc; svc = ""; inside = 0 }
+    inside && /^  [a-z][a-z0-9_-]*:/ {
+        if (svc != "" && !profiled) print svc
+        svc = $1; sub(/:$/, "", svc); profiled = 0; next
+    }
+    inside && /^    profiles:/ { profiled = 1 }
+    END { if (svc != "" && !profiled) print svc }
+' "$COMPOSE_FILE" | tr '\n' ' ')"
+t_ok "список служб по умолчанию вообще посчитан" \
+    bash -c "printf '%s' \"\$1\" | grep -q 'postfix'" _ "$DEFAULT_SERVICES"
+t_no "обычный docker compose up не поднимает установщик" \
+    bash -c "printf '%s' \"\$1\" | grep -qw installer" _ "$DEFAULT_SERVICES"
 
 # 2. Демон не поднимает её сам: ни после падения, ни после перезагрузки.
 #    unless-stopped вернул бы установщика в строй вместе с машиной — то есть
@@ -785,9 +829,24 @@ t_ok "отказ по формату называет команду перев�
 t_ok "нехватка имён называет, что перестанет работать" \
     bash -c "grep -q 'панель управления' '$SHARED_TLS'"
 
-# --- Приватный ключ наружу не уходит -----------------------------------
-t_no "панель не отдаёт приватный ключ в ответе" \
-    bash -c "grep -qE 'privateKey:|privateKeyPem:' '$REPO_DIR/apps/api/src/admin/routes/tls.ts' && grep -q 'return.*privateKey' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+# ------------------------------------------------------------------
+# Приватный ключ наружу не уходит.
+#
+# ПРОВЕРКА, КОТОРАЯ НЕ МОГЛА ПРОВАЛИТЬСЯ.
+#
+# Было: «grep 'privateKey:|privateKeyPem:' И grep 'return.*privateKey'» с
+# ожиданием отказа. Достаточно было ЛЮБОМУ из двух не совпасть — и
+# проверка зеленела. Второй никогда и не совпадал, так что первый вообще
+# ничего не решал. То есть строка про «ключ не уходит в ответ» не
+# проверяла ничего: добавь кто-нибудь ключ в ответ маршрута — молчание.
+#
+# Проверяем то, что и требовалось: ключ в файле УПОМИНАЕТСЯ (иначе
+# следующая проверка пуста), но ни один возврат ответа его не содержит.
+# ------------------------------------------------------------------
+t_ok "панель читает закрытый ключ — иначе пару проверить нечем" \
+    bash -c "grep -q 'privateKeyPem' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
+t_no "ни один ответ панели не содержит закрытого ключа" \
+    bash -c "grep -nE '(return|reply\\.send\\(|res\\.send\\()[^;]*privateKey' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
 t_ok "в аудит пишется отпечаток, а не содержимое ключа" \
     bash -c "grep -q 'fingerprint256' '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
 
@@ -957,6 +1016,230 @@ t_no "панель не заводит собственного запуска �
     bash -c "grep -qE \"'/tls/renew'|renewNow\" '$REPO_DIR/apps/api/src/admin/routes/tls.ts'"
 t_no "посредник не научился выполнять произвольные команды" \
     bash -c "grep -qE '=> \{ (renew|exec|run) =>' '$INFRA_DIR/service-agent/agent.pl'"
+
+# ==================================================================
+step "13. Память, антивирус и обрыв установки под set -u"
+# ==================================================================
+# Включение антивируса срывало установку целиком — и в консоли, и через
+# браузер. Причина: install.sh сверял RAM_MB с порогом, а заполнять RAM_MB
+# было некому. При `set -euo pipefail` обращение к незаданной переменной —
+# не «ноль», а конец работы: «RAM_MB: unbound variable». Человек отвечал
+# «да» на вопрос про ClamAV и получал обрыв с сообщением, в котором нет ни
+# антивируса, ни памяти.
+t_ok "память определяется общей функцией и возвращает число" \
+    bash -c "v=\"\$(. '$MT_LIB_DIR/common.sh'; ram_total_mb)\"; case \"\$v\" in ''|*[!0-9]*) exit 1 ;; esac"
+# Тот самый кусок install.sh, целиком, под теми же set-ами.
+t_ok "выбор «включить антивирус» не обрывает работу под set -euo pipefail" \
+    bash -c "
+        set -euo pipefail
+        . '$MT_LIB_DIR/common.sh'
+        RAM_MB=\"\$(ram_total_mb)\"
+        CLAMAV_CHOICE=yes
+        if [ \"\$CLAMAV_CHOICE\" = yes ] && [ \"\$RAM_MB\" -gt 0 ] && [ \"\$RAM_MB\" -lt \"\$MT_MIN_RAM_CLAMAV_MB\" ]; then
+            :
+        fi
+        printf 'дожили\n'
+    "
+# И в самом install.sh переменная обязана быть ЗАДАНА раньше, чем прочитана:
+# ровно это и было сломано. Первое упоминание — присваивание.
+t_eq "install.sh задаёт RAM_MB прежде, чем читать" \
+     "$(grep -vE '^[[:space:]]*#' "$INSTALL_DIR/install.sh" | grep -n 'RAM_MB' | head -1 |
+        sed 's/^[0-9]*://' | sed 's/^[[:space:]]*//' | cut -c1-8)" \
+     "RAM_MB=\""
+
+# --- Обновление не выключает антивирус молча ---------------------------
+# Умолчание вопроса было жёстко «no». Человек запускал install.sh ради
+# новой версии, жал Enter — и проверка вложений отключалась без единого
+# слова в выводе.
+t_no "умолчание вопроса про антивирус больше не «no» намертво" \
+    bash -c "grep -q 'ask_yes_no CLAMAV_CHOICE .*\"no\"' '$INSTALL_DIR/install.sh'"
+t_ok "умолчание берётся из действующей установки" \
+    bash -c "grep -q 'CLAMAV_PREV' '$INSTALL_DIR/install.sh' && grep -q 'env_get CLAMAV_ENABLED' '$INSTALL_DIR/install.sh'"
+# Само чтение прежнего значения — на настоящем файле.
+cat > "$TMPD/clamav.env" <<'EOF'
+CLAMAV_ENABLED=true
+EOF
+t_eq "включённый антивирус читается как «yes»" \
+     "$(prev=no; case "$(env_get CLAMAV_ENABLED "$TMPD/clamav.env")" in true|yes|1) prev=yes ;; esac; printf '%s' "$prev")" \
+     "yes"
+
+# ==================================================================
+step "14. Секреты infra/.env: один список на генерацию и на проверку"
+# ==================================================================
+# Самопроверка искала заглушки в трёх ключах из десяти и по одному
+# написанию («change-me»). Вне её оставались SESSION_SECRET,
+# ADMIN_SESSION_SECRET, AI_ENCRYPTION_KEY, EXTERNAL_ACCOUNTS_KEY и
+# DOVECOT_MASTER_PASSWORD — а последний в образце записан как
+# «смените-этот-пароль» и под шаблон не подходил в принципе. При этом
+# печаталось «ok: пароли в infra/.env не из примера»: подтверждение
+# ровно того, чего не было. Пароль служебного доступа КО ВСЕМ ЯЩИКАМ
+# оставался общеизвестным.
+# Сначала — что список вообще есть и не пуст: иначе все проверки ниже
+# прошли бы по пустому циклу, ничего не проверив.
+t_ok "список секретов не пуст" bash -c "[ ${#MT_GENERATED_SECRETS[@]} -ge 8 ]"
+for pair in "${MT_GENERATED_SECRETS[@]}"; do
+    key="${pair%%:*}"
+    value="$(env_get "$key" "$ENV_EXAMPLE")"
+    if [ -n "$value" ]; then
+        t_ok "заглушка $key из образца распознаётся" is_placeholder_password "$value"
+    fi
+done
+
+# Полный прогон генерации на копии образца: после неё заглушек
+# не остаётся НИ ОДНОЙ, а повторный запуск ничего не меняет.
+cp "$ENV_EXAMPLE" "$TMPD/gen.env"
+SECRETS_ENV_FILE="$TMPD/gen.env"
+( ENV_FILE="$SECRETS_ENV_FILE"; ensure_generated_secrets >/dev/null )
+LEFT=''
+for pair in "${MT_GENERATED_SECRETS[@]}"; do
+    key="${pair%%:*}"
+    value="$(env_get "$key" "$SECRETS_ENV_FILE")"
+    if [ -z "$value" ] || is_placeholder_password "$value"; then LEFT="$LEFT $key"; fi
+done
+t_eq "после генерации заглушек и пустых секретов не осталось" "${LEFT# }" ""
+BEFORE_SECOND="$(env_get SESSION_SECRET "$SECRETS_ENV_FILE")"
+( ENV_FILE="$SECRETS_ENV_FILE"; ensure_generated_secrets >/dev/null )
+t_eq "повторный запуск не меняет уже сгенерированный секрет" \
+     "$(env_get SESSION_SECRET "$SECRETS_ENV_FILE")" "$BEFORE_SECOND"
+
+# Мастер в браузере кладёт образец и поднимает себя; настоящие секреты
+# генерировала только install.sh последним шагом. Любой обрыв мастера
+# оставлял на машине боевой файл с публичными значениями.
+t_ok "веб-установщик заменяет заглушки сразу, а не «когда-нибудь потом»" \
+    bash -c "grep -q 'ensure_generated_secrets' '$INSTALL_DIR/web-install.sh'"
+t_ok "самопроверка ищет заглушки по общему списку" \
+    bash -c "grep -q 'MT_GENERATED_SECRETS' '$INSTALL_DIR/selfcheck.sh' && grep -q 'is_placeholder_password' '$INSTALL_DIR/selfcheck.sh'"
+t_no "прежней проверки трёх ключей из десяти больше нет" \
+    bash -c "grep -q 'POSTGRES_PASSWORD|REDIS_PASSWORD|RSPAMD_PASSWORD)=change-me' '$INSTALL_DIR/selfcheck.sh'"
+# Служебный вход проверялся настоящим doveadm и зеленел на сервере с
+# паролем-заглушкой: пароль ведь верный, он просто известен всем.
+t_ok "заглушка служебного пароля Dovecot ловится до живого входа" \
+    bash -c "grep -q 'is_placeholder_password \"\$DOVECOT_MASTER_PASSWORD\"' '$INSTALL_DIR/selfcheck.sh'"
+
+# ==================================================================
+step "15. Секреты не попадают в командную строку"
+# ==================================================================
+# Строку запуска процесса (/proc/<pid>/cmdline) читает ЛЮБОЙ пользователь
+# машины: права на файл 444. Значит «docker compose exec -e PGPASSWORD=…»
+# показывал пароль базы всем, у кого есть учётная запись на сервере.
+# Проверяем НАСТОЯЩИМ запуском: подставной docker записывает свои
+# аргументы и свой ввод в файлы.
+mkdir -p "$TMPD/secretbin"
+cat > "$TMPD/secretbin/docker" <<EOS
+#!/usr/bin/env bash
+printf '%s\n' "\$*" > "$TMPD/argv.txt"
+cat > "$TMPD/stdin.txt"
+exit 0
+EOS
+chmod +x "$TMPD/secretbin/docker"
+(
+    PATH="$TMPD/secretbin:$PATH"
+    . "$MT_LIB_DIR/common.sh"
+    dc_exec_secret postgres PGPASSWORD 'ОченьТайныйПароль' 'psql -h postgres' >/dev/null 2>&1
+)
+# Сначала убеждаемся, что docker вообще вызвали: без этого «секрета в
+# аргументах нет» было бы правдой и при полном отсутствии запуска.
+t_ok "подставной docker получил вызов" bash -c "[ -s '$TMPD/argv.txt' ]"
+t_no "секрет не виден в аргументах docker" \
+    bash -c "grep -q 'ОченьТайныйПароль' '$TMPD/argv.txt'"
+t_ok "секрет доехал до контейнера вводом" \
+    bash -c "grep -q 'ОченьТайныйПароль' '$TMPD/stdin.txt'"
+
+# Ни один скрипт обслуживания не должен снова начать передавать секрет
+# аргументом команды на хосте. Комментарии из поиска убираем: они как раз
+# и рассказывают, как было раньше, — иначе проверка ловила бы объяснение
+# вместо кода.
+t_no "восстановление не передаёт пароль базы ключом -e" \
+    bash -c "grep -vE '^[[:space:]]*#' '$INSTALL_DIR/restore.sh' | grep -q -- '-e PGPASSWORD='"
+t_no "резервное копирование не передаёт пароль Redis ключом -a" \
+    bash -c "grep -vE '^[[:space:]]*#' '$INSTALL_DIR/backup.sh' | grep -q -- 'redis-cli -a '"
+t_no "самопроверка не передаёт пароль swaks в строке запуска docker" \
+    bash -c "grep -vE '^[[:space:]]*#' '$INSTALL_DIR/selfcheck.sh' | grep -q 'dc exec .*--auth-password'"
+t_no "сброс пароля администратора не кладёт его в строку запуска docker" \
+    bash -c "grep -vE '^[[:space:]]*#' '$INSTALL_DIR/reset-admin-password.sh' | grep -q 'admin_cli set-password'"
+t_ok "создание ящика умеет принимать пароль на вводе" \
+    bash -c "grep -q 'PASSWORD\" = \"-\"' '$INFRA_DIR/scripts/create-mailbox.sh'"
+t_ok "установщик пользуется именно этим способом" \
+    bash -c "grep -q 'create-mailbox.sh\" \"\$ADMIN_EMAIL\" -' '$INSTALL_DIR/install.sh'"
+
+# --- После полного удаления не остаётся копий с секретами --------------
+# В .env лежит всё сразу: пароль базы, ключи шифрования чужих паролей,
+# секрет сессий, пароль доступа ко всем ящикам. Копии этого файла делают
+# смена домена (.before-domain-change-<id>) и восстановление, а закрытый
+# ключ TLS копирует смена домена (mail.key.before-<id>). «Удалено
+# безвозвратно» было сказано, а файлы оставались — на машине, которую
+# после снятия сервера передают дальше.
+t_ok "полное удаление сносит все копии infra/.env" \
+    bash -c "grep -q 'for f in \"\$ENV_FILE\".\\*' '$INSTALL_DIR/uninstall.sh'"
+t_ok "полное удаление сносит каталог сертификатов целиком" \
+    bash -c "grep -q 'rm -rf \"\${CERT_DIR:?}\"$' '$INSTALL_DIR/uninstall.sh'"
+
+# ==================================================================
+step "16. Свой сертификат и ключ DKIM переживают обслуживание"
+# ==================================================================
+# --deploy-only обходил защиту своего сертификата: он обрабатывался ВЫШЕ
+# проверки и шёл прямо в раскладку файлов Let's Encrypt поверх чужого
+# сертификата. Ключ этот советуют в разделе «Сертификат» и им же
+# пользуется установщик — то есть человек уверен, что ничего не
+# перевыпускает, а получал затёртый сертификат.
+GUARD_LINE="$(grep -n 'MT_REPLACE_CUSTOM_CERT:-0' "$INSTALL_DIR/renew-certs.sh" | head -1 | cut -d: -f1)"
+DEPLOY_LINE="$(grep -n 'MODE" = "deploy"' "$INSTALL_DIR/renew-certs.sh" | head -1 | cut -d: -f1)"
+t_ok "защита своего сертификата стоит ДО режима --deploy-only" \
+    bash -c "[ -n '$GUARD_LINE' ] && [ -n '$DEPLOY_LINE' ] && [ '$GUARD_LINE' -lt '$DEPLOY_LINE' ]"
+# --force обязан УМЕТЬ ВЫПУСКАТЬ: на него отсылают с сервера, где
+# сертификата ещё нет, а `certbot renew` там отвечает «no certificate
+# found with name mailtrue» и выходит с ошибкой.
+t_ok "--force выпускает сертификат, когда его ещё нет" \
+    bash -c "grep -q 'certonly' '$INSTALL_DIR/renew-certs.sh' && grep -q 'cert_reachable_names' '$INSTALL_DIR/renew-certs.sh'"
+t_ok "имена для сертификата собирает общая функция" \
+    bash -c "grep -q 'cert_reachable_names' '$INSTALL_DIR/install.sh'"
+
+# --- Смена домена ------------------------------------------------------
+# Проверялся только издатель сертификата: «не Let's Encrypt — значит можно
+# перевыпустить». Купленный сертификат под это правило попадал, и смена
+# домена молча заменяла его самоподписанным.
+t_ok "смена домена читает отметку «свой сертификат»" \
+    bash -c "grep -q 'CERT_SOURCE' '$INFRA_DIR/scripts/change-domain.sh' && grep -q 'MT_REPLACE_CUSTOM_CERT' '$INFRA_DIR/scripts/change-domain.sh'"
+# Повторный запуск (а он объявлен безопасным) перевыпускал ключ DKIM. В
+# DNS при этом опубликован открытый ключ от прежнего файла — и каждое
+# исходящее письмо перестаёт проходить проверку подписи.
+t_ok "смена домена не перевыпускает уже выпущенный ключ DKIM" \
+    bash -c "grep -q 'test -s \"\$KEY_PATH\"' '$INFRA_DIR/scripts/change-domain.sh'"
+
+# ==================================================================
+step "17. Восстановление на ДРУГУЮ машину поднимает стек"
+# ==================================================================
+# ADMIN_LOCAL_BIND — адрес резервного входа в панель, у каждой машины
+# свой. Файл .env берётся из копии целиком, и на новом сервере такого
+# адреса нет: docker отказывается публиковать порт («cannot assign
+# requested address») и не поднимает ВЕСЬ стек. Восстановление честно
+# печатало «стек не поднимается», и человек в аварии искал причину в базе
+# и томах, а речь шла про порт 8081.
+mkdir -p "$TMPD/ipbin"
+cat > "$TMPD/ipbin/ip" <<'EOS'
+#!/usr/bin/env bash
+# Изображаем машину с одним адресом 192.168.7.7 и петлёй.
+printf '1: lo    inet 127.0.0.1/8 scope host lo\n'
+printf '2: eth0  inet 192.168.7.7/24 scope global eth0\n'
+EOS
+chmod +x "$TMPD/ipbin/ip"
+# Отдельным файлом, а не строкой для «bash -c»: кавычки внутри кавычек
+# уже однажды превратили PATH в мусор, и проверка падала не по делу.
+cat > "$TMPD/has_ip.sh" <<EOS
+#!/usr/bin/env bash
+PATH="$TMPD/ipbin:\$PATH"
+. "$MT_LIB_DIR/common.sh"
+host_has_ip "\$1"
+EOS
+chmod +x "$TMPD/has_ip.sh"
+t_ok "адрес этой машины признаётся своим" bash "$TMPD/has_ip.sh" 192.168.7.7
+t_no "адрес прежнего сервера своим не признаётся" bash "$TMPD/has_ip.sh" 10.20.30.40
+t_ok "петля своя всегда — даже там, где нет команды ip" \
+    bash -c ". '$MT_LIB_DIR/common.sh'; host_has_ip 127.0.0.1"
+t_ok "восстановление сверяет привязанные к машине ключи" \
+    bash -c "grep -q 'MT_MACHINE_BOUND_ENV_KEYS' '$INSTALL_DIR/restore.sh'"
+t_ok "ADMIN_LOCAL_BIND объявлен привязанным к машине" \
+    bash -c "printf '%s' ' ${MT_MACHINE_BOUND_ENV_KEYS[*]} ' | grep -q ' ADMIN_LOCAL_BIND '"
 
 # ==================================================================
 step "Итог"

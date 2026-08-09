@@ -110,7 +110,16 @@ step "2. Письма, ключи и очередь"
 # этом вслух, а не молчим.
 if REDIS_PASSWORD="$(grep -E '^REDIS_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)" \
    && [ -n "${REDIS_PASSWORD:-}" ]; then
-    redis_cli() { dc exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning "$@" 2>/dev/null; }
+    # Пароль уходит в контейнер ЧЕРЕЗ ВВОД, а не ключом «-a пароль»:
+    # строка запуска процесса лежит в /proc/<pid>/cmdline и читается любым
+    # пользователем машины. Копию снимает таймер, то есть регулярно и без
+    # свидетелей — а пароль Redis открывает и обучение антиспама, и все
+    # сессии. redis-cli берёт пароль из REDISCLI_AUTH, ровно для этого
+    # переменная у него и есть. Подробнее — dc_exec_secret в lib/common.sh.
+    redis_cli() {
+        dc_exec_secret redis REDISCLI_AUTH "$REDIS_PASSWORD" \
+            'exec redis-cli --no-auth-warning "$@"' "$@" 2>/dev/null
+    }
     BEFORE="$(redis_cli lastsave | tr -d '\r' || true)"
     if [ -n "$BEFORE" ] && redis_cli bgsave >/dev/null; then
         for _ in $(seq 1 30); do

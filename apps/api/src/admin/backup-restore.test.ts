@@ -218,3 +218,104 @@ void test('поломка сервера остаётся поломкой се�
     },
   );
 });
+
+/* ------------------------------------------------------------------ */
+/* Алиас поверх живого ящика                                            */
+/*                                                                      */
+/* Postfix разбирает карту алиасов РАНЬШЕ карты ящиков                   */
+/* (virtual_alias_maps до virtual_mailbox_maps в main.cf). Алиас, чей    */
+/* исходный адрес совпадает с адресом существующего ящика, уводит ВСЮ    */
+/* его входящую почту в сторону. Ящик при этом выглядит целым: он в      */
+/* списке, в него можно войти, в нём лежит старая почта — просто новая   */
+/* перестаёт приходить, и без знания про порядок карт причину не найти.  */
+/*                                                                      */
+/* Панель запрещает это с обеих сторон: alias-check.ts не даёт завести   */
+/* такой алиас, routes/users.ts не даёт завести ящик на адрес, занятый   */
+/* алиасом. Восстановление шло мимо ОБОИХ замков и молча делало то, что  */
+/* панель считает гарантированной потерей почты, — причём в момент,      */
+/* когда за сервером следят меньше всего.                               */
+/* ------------------------------------------------------------------ */
+
+/** Копия с одним перенаправлением. */
+function backupWithAlias(source: string, destination: string): SettingsBackupFile {
+  return buildSettingsBackup({
+    source: { hostname: 'mail.staraya.ru', domain: 'staraya.ru' },
+    data: {
+      domains: [],
+      mailboxes: [],
+      aliases: [{ source, destination, active: true }],
+      admins: [],
+      userSettings: [],
+      ai: [],
+      branding: null,
+    },
+  });
+}
+
+/**
+ * База, в которой ящики из списка `mailboxes` существуют. Записывает все
+ * изменяющие запросы: по ним видно, тронули ли карту алиасов вообще.
+ */
+function dbWithMailboxes(mailboxes: readonly string[]): { db: AdminDb; writes: string[] } {
+  const writes: string[] = [];
+  const db = {
+    transaction: async <T>(fn: (client: unknown) => Promise<T>): Promise<T> =>
+      fn({
+        query: async (text: string, params: unknown[] = []) => {
+          const sql = text.replace(/\s+/gu, ' ').trim();
+          if (sql.startsWith('SELECT 1 FROM virtual_users')) {
+            const email = String(params[0] ?? '').toLowerCase();
+            const found = mailboxes.some((m) => m.toLowerCase() === email);
+            return { rows: found ? [{ '?column?': 1 }] : [], rowCount: found ? 1 : 0 };
+          }
+          if (sql.startsWith('SELECT id FROM virtual_domains')) {
+            return { rows: [{ id: 7 }], rowCount: 1 };
+          }
+          if (sql.startsWith('SELECT') === false) writes.push(sql);
+          return { rows: [], rowCount: 0 };
+        },
+      }),
+  } as unknown as AdminDb;
+  return { db, writes };
+}
+
+void test('алиас поверх ЖИВОГО ящика не заводится и назван в ответе', async () => {
+  const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
+  const { db, writes } = dbWithMailboxes(['ivanov@nasha.ru']);
+
+  const outcome = await applyRestore(
+    db,
+    branding,
+    backupWithAlias('ivanov@nasha.ru', 'petrov@nasha.ru'),
+    ['aliases'],
+  );
+
+  assert.deepEqual(outcome.skippedAliases, ['ivanov@nasha.ru → petrov@nasha.ru']);
+  // Ни одной записи в карту алиасов: пропуск обязан быть настоящим.
+  assert.equal(
+    writes.some((w) => w.includes('virtual_aliases')),
+    false,
+    'в карту алиасов ничего писать нельзя — иначе почта ящика уйдёт в сторону',
+  );
+  // И раздел не отчитывается о несделанной работе.
+  assert.equal(outcome.applied.aliases, undefined);
+});
+
+void test('обычный алиас на свободный адрес заводится как прежде', async () => {
+  const branding = { importSnapshot: async () => undefined } as unknown as BrandingStore;
+  const { db, writes } = dbWithMailboxes(['ivanov@nasha.ru']);
+
+  const outcome = await applyRestore(
+    db,
+    branding,
+    backupWithAlias('sales@nasha.ru', 'ivanov@nasha.ru'),
+    ['aliases'],
+  );
+
+  assert.deepEqual(outcome.skippedAliases, []);
+  assert.ok(
+    writes.some((w) => w.includes('virtual_aliases')),
+    'свободный адрес — обычное перенаправление, его надо восстановить',
+  );
+  assert.deepEqual(outcome.applied.aliases, { created: 1, updated: 0 });
+});

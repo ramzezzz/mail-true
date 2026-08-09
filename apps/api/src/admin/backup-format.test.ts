@@ -322,7 +322,7 @@ test('перенос на другой сервер отмечается пре�
 
 test('замена правил ящика показана числами «было → станет»', () => {
   const current = emptyCurrent();
-  current.userSettings.set('ivan@staraya.ru', { filters: 3, signatures: 2 });
+  current.userSettings.set('ivan@staraya.ru', { filters: 3, signatures: 2, settings: true });
   const plan = buildRestorePlan(sampleBackup(), current, {
     currentAdminLogin: 'admin',
     hostname: 'mail.staraya.ru',
@@ -331,6 +331,59 @@ test('замена правил ящика показана числами «б�
   assert.ok(settings?.overwrite[0]?.includes('правил 3 → 1'));
   assert.ok(settings?.overwrite[0]?.includes('подписей 2 → 1'));
   assert.ok(settings?.warnings.some((w) => /заменяются целиком/u.test(w)));
+});
+
+/* ------------------------------------------------------------------ */
+/* План не имеет права занижать перезапись                              */
+/*                                                                      */
+/* Раздел «Настройки ящиков» — это ТРИ разные вещи: личные настройки     */
+/* ящика (тема, обои, автоответчик, срок отмены отправки, срок хранения  */
+/* в корзине), подписи и правила. Восстановление переписывает строку     */
+/* личных настроек наравне с остальным, а план смотрел ТОЛЬКО на         */
+/* счётчики правил и подписей.                                          */
+/*                                                                      */
+/* У ящика, где правил и подписей нет, а настройки заданы — самый        */
+/* обычный ящик: человек поменял тему и завёл автоответчик, — план       */
+/* писал «будет создано», то есть «своего вы не потеряете». После        */
+/* восстановления у него менялись тема, обои и текст автоответчика, и    */
+/* ни одна строка плана об этом не предупреждала. Предупреждение о       */
+/* замене «целиком» показывалось только при непустом списке перезаписи,  */
+/* то есть в этом случае молчало тоже.                                   */
+/* ------------------------------------------------------------------ */
+
+test('ящик с личными настройками, но без правил, — это ПЕРЕЗАПИСЬ, а не «появится»', () => {
+  const current = emptyCurrent();
+  // Ни одного правила и ни одной подписи — только личные настройки.
+  current.userSettings.set('ivan@staraya.ru', { filters: 0, signatures: 0, settings: true });
+
+  const plan = buildRestorePlan(sampleBackup(), current, {
+    currentAdminLogin: 'admin',
+    hostname: 'mail.staraya.ru',
+  });
+  const settings = plan.sections.find((s) => s.id === 'userSettings');
+
+  assert.deepEqual(settings?.create, [], 'называть перезапись «созданием» — это обман');
+  assert.equal(settings?.overwrite.length, 1);
+  assert.match(settings?.overwrite[0] ?? '', /ivan@staraya\.ru/u);
+  assert.match(
+    settings?.overwrite[0] ?? '',
+    /личные настройки будут заменены/u,
+    'человек должен видеть, что именно у него заменят',
+  );
+  assert.ok(
+    settings?.warnings.some((w) => /тема, обои, автоответчик/u.test(w)),
+    'предупреждение обязано быть и тогда, когда правил нет',
+  );
+});
+
+test('у ящика, о котором мы ничего не знаем, план по-прежнему говорит «появится»', () => {
+  const plan = buildRestorePlan(sampleBackup(), emptyCurrent(), {
+    currentAdminLogin: 'admin',
+    hostname: 'mail.staraya.ru',
+  });
+  const settings = plan.sections.find((s) => s.id === 'userSettings');
+  assert.deepEqual(settings?.create, ['ivan@staraya.ru']);
+  assert.deepEqual(settings?.overwrite, []);
 });
 
 test('ключ ИИ отдельно предупреждается: его в копии нет и он не восстановится', () => {

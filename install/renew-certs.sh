@@ -3,7 +3,8 @@
 # Продление TLS-сертификата Let's Encrypt и раскладка его по стеку.
 #
 #   sudo bash install/renew-certs.sh              # обычное продление (по таймеру)
-#   sudo bash install/renew-certs.sh --force      # выпустить заново, не глядя на срок
+#   sudo bash install/renew-certs.sh --force      # выпустить (или перевыпустить,
+#                                                 # не глядя на срок)
 #   sudo bash install/renew-certs.sh --deploy-only  # только скопировать текущий
 #
 # Почему не штатный хук certbot: сертификат нужен внутри контейнеров, а они
@@ -134,13 +135,6 @@ deploy() {
     ok "сервисы перечитали сертификат"
 }
 
-if [ "$MODE" = "deploy" ]; then
-    deploy
-    RENEW_OUTCOME=deployed
-    RENEW_MESSAGE="Сертификат разложен по стеку из $LE_DIR; выпуск и продление при этом не запускались"
-    exit 0
-fi
-
 # ------------------------------------------------------------------
 # Свой сертификат продлением Let's Encrypt не перезаписывается.
 #
@@ -152,6 +146,18 @@ fi
 #
 # Отметку ставит тот, кто ставил сертификат: файл source рядом с ним.
 # Снимается она осознанно — переменной в командной строке, а не молча.
+#
+# ------------------------------------------------------------------
+# ПРОВЕРКА СТОИТ ДО ВСЕХ РЕЖИМОВ, В ТОМ ЧИСЛЕ ДО --deploy-only.
+#
+# Раньше «--deploy-only» обрабатывался ВЫШЕ этого места и шёл прямиком в
+# deploy(), то есть в `install ... $LE_DIR/fullchain.pem -> mail.crt`.
+# Защита своего сертификата оставалась ниже по тексту и до дела не
+# доходила. Ключ этот не экзотический: им пользуется сам установщик, его
+# советуют в разделе «Сертификат», и он ровно за тем и нужен, чтобы
+# «просто разложить файлы» — то есть человек уверен, что ничего не
+# перевыпускает. А получал он затёртый свой сертификат: молча, с бодрым
+# «сертификат разложен» на экране.
 # ------------------------------------------------------------------
 # ------------------------------------------------------------------
 # Отметку читаем ЧЕРЕЗ ПРОВЕРКУ НАЛИЧИЯ ФАЙЛА, а не через `cat 2>/dev/null`.
@@ -184,6 +190,14 @@ if [ "$CERT_SOURCE" = "custom" ] && [ "${MT_REPLACE_CUSTOM_CERT:-0}" != "1" ]; t
          MT_REPLACE_CUSTOM_CERT=1 sudo bash $0 ${1:-}"
 fi
 
+# Раскладка без выпуска — теперь ПОСЛЕ проверки своего сертификата.
+if [ "$MODE" = "deploy" ]; then
+    deploy
+    RENEW_OUTCOME=deployed
+    RENEW_MESSAGE="Сертификат разложен по стеку из $LE_DIR; выпуск и продление при этом не запускались"
+    exit 0
+fi
+
 if ! have certbot; then
     RENEW_MESSAGE='На машине нет certbot — продлевать нечем. Установить: apt-get install -y certbot'
     die "certbot не установлен: apt-get install -y certbot"
@@ -200,8 +214,56 @@ step "Продление сертификата"
 info "останавливаем nginx на время проверки Let's Encrypt"
 dc stop nginx >/dev/null 2>&1 || true
 
+# ------------------------------------------------------------------
+# --force УМЕЕТ ВЫПУСКАТЬ, А НЕ ТОЛЬКО ПРОДЛЕВАТЬ.
+#
+# `certbot renew` работает с уже существующей записью о сертификате. На
+# сервере, где сертификата ещё нет (самоподписанный, выпуск при установке
+# не удался — не разошёлся DNS, был занят 80-й порт), она отвечает
+# «no certificate found with name mailtrue» и выходит с ошибкой.
+#
+# А на «--force» отсылают из пяти мест, и все они — про сервер БЕЗ
+# сертификата: подсказка неудавшегося выпуска в установщике, отказ
+# deploy(), документация, панель. Человек делал ровно то, что ему велели,
+# и получал отказ, из которого не следует ничего: слова «renew» он не
+# просил, имени mailtrue не знает.
+#
+# Поэтому: нет записи — выпускаем (certonly), есть — продлеваем (renew).
+# ------------------------------------------------------------------
 RC=0
-if [ "$MODE" = "force" ]; then
+if [ ! -d "$LE_DIR" ] && [ "$MODE" = "force" ]; then
+    info "сертификата $CERT_NAME на машине ещё нет — выпускаем впервые"
+    # Адрес для уведомлений об истечении Let's Encrypt требует обязательно.
+    # Берём тот, что записала установка (install/state/install.conf), —
+    # иначе человеку пришлось бы вспоминать, какой он указывал.
+    LE_EMAIL=''
+    if [ -f "$STATE_FILE" ]; then
+        # «|| true» обязателен: скрипт идёт под set -euo pipefail, и любая
+        # единица внутри конвейера оборвала бы продление молча — ровно тот
+        # сорт поломки, ради которого затеян отчёт.
+        LE_EMAIL="$(sed -n 's/^LE_EMAIL=//p' "$STATE_FILE" | tail -1 | tr -d '\r' || true)"
+    fi
+    [ -n "$LE_EMAIL" ] || LE_EMAIL="postmaster@${MAIL_DOMAIN:-localhost}"
+    if cert_reachable_names "${MAIL_HOSTNAME:-${MAIL_DOMAIN:-}}" "${MAIL_DOMAIN:-}"; then
+        CERTBOT_ARGS=(certonly --standalone --non-interactive --agree-tos
+                      --cert-name "$CERT_NAME" --keep-until-expiring
+                      --email "$LE_EMAIL")
+        for name in "${MT_CERT_NAMES[@]}"; do CERTBOT_ARGS+=(-d "$name"); done
+        certbot "${CERTBOT_ARGS[@]}" || RC=$?
+    else
+        # Отдельный код и отдельная причина: «certbot вернул 1» здесь
+        # было бы неправдой — certbot даже не запускался, а править надо
+        # записи DNS, а не сервер.
+        RC=0
+        dc start nginx >/dev/null 2>&1 || true
+        fail "ни одно имя не указывает на этот сервер — Let's Encrypt откажет"
+        hint "опубликуйте A-запись $MAIL_HOSTNAME и CNAME mail./admin./autoconfig.$MAIL_DOMAIN"
+        hint "затем повторите: sudo bash $0 --force"
+        RENEW_OUTCOME=failed
+        RENEW_MESSAGE="Выпуск не начинался: ни одно имя ($MAIL_HOSTNAME, mail./admin./autoconfig.$MAIL_DOMAIN) не ведёт на этот сервер. Опубликуйте записи DNS и повторите."
+        exit 1
+    fi
+elif [ "$MODE" = "force" ]; then
     certbot renew --cert-name "$CERT_NAME" --standalone --force-renewal --non-interactive || RC=$?
 else
     certbot renew --cert-name "$CERT_NAME" --standalone --non-interactive || RC=$?
