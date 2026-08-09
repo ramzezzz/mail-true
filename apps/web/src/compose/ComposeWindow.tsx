@@ -1054,7 +1054,10 @@ export function ComposeWindow({
           </button>
           {attachments.map((a) => (
             <span key={a.id} className={styles.attachChip}>
-              {a.filename}
+              {/* Имя в отдельном узле: обрезаться многоточием должно ОНО,
+                  а не плашка целиком — крестик «Убрать» обязан остаться
+                  на экране при любой длине имени. */}
+              <span className={styles.attachChipName}>{a.filename}</span>
               <button
                 type="button"
                 className={styles.attachChipRemove}
@@ -1075,7 +1078,7 @@ export function ComposeWindow({
           {attachedMessages.map((m) => (
             <span key={m.id} className={cx(styles.attachChip, styles.attachChipMessage)}>
               <IconForward size={14} />
-              {m.label}
+              <span className={styles.attachChipName}>{m.label}</span>
               <button
                 type="button"
                 className={styles.attachChipRemove}

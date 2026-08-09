@@ -30,6 +30,25 @@ export interface ModalProps {
   className?: string | undefined;
 }
 
+const FOCUSABLE =
+  'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled),' +
+  ' textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Видимые элементы окна, на которые можно встать с клавиатуры.
+ *
+ * Скрытое отсеиваем по вычисленным стилям, а не по offsetParent: тот
+ * опирается на раскладку, которой в тестовой среде нет вовсе — там по нему
+ * отсеялось бы всё содержимое окна, и ловушка «схлопнулась» бы.
+ */
+function focusableIn(root: HTMLElement): HTMLElement[] {
+  const view = root.ownerDocument.defaultView;
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => {
+    const style = view?.getComputedStyle(element);
+    return style?.display !== 'none' && style?.visibility !== 'hidden';
+  });
+}
+
 export function Modal({ title, onClose, children, footer, className }: ModalProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [closing, setClosing] = useState(false);
@@ -48,6 +67,36 @@ export function Modal({ title, onClose, children, footer, className }: ModalProp
       if (e.key === 'Escape') {
         e.stopPropagation();
         requestClose();
+        return;
+      }
+      /*
+       * Ловушка фокуса.
+       *
+       * Одного focus() на карточку от ухода Tab не защищает: дойдя до
+       * последнего элемента диалога, Tab уводит в страницу ПОД
+       * затемнением — ровно туда, куда комментарий ниже обещал не
+       * пускать. Клавиатурой это выглядело так: несколько нажатий, и
+       * человек «печатает» в невидимый список писем позади, не понимая,
+       * где он.
+       *
+       * Тот же приём, что в панели управления (admin/components/ui.tsx).
+       */
+      if (e.key !== 'Tab') return;
+      const card = cardRef.current;
+      if (!card) return;
+      const stops = focusableIn(card);
+      if (stops.length === 0) {
+        e.preventDefault();
+        card.focus();
+        return;
+      }
+      const first = stops[0]!;
+      const last = stops[stops.length - 1]!;
+      const active = document.activeElement;
+      const outside = !card.contains(active);
+      if (e.shiftKey ? active === first || outside : active === last || outside) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
       }
     };
     document.addEventListener('keydown', onKeyDown);
@@ -59,9 +108,22 @@ export function Modal({ title, onClose, children, footer, className }: ModalProp
     };
   }, [requestClose]);
 
-  // Фокус внутрь окна: иначе Tab уводит в страницу под затемнением
+  /*
+   * Фокус внутрь окна — и обратно при закрытии.
+   *
+   * Возврат на вызвавшую кнопку так же важен, как вход: без него после
+   * Esc фокус оказывается в начале страницы, и человек, работающий
+   * клавиатурой, заново идёт до того места, откуда открыл окно.
+   */
   useEffect(() => {
-    cardRef.current?.focus();
+    const opener = document.activeElement;
+    const card = cardRef.current;
+    if (card && !card.contains(document.activeElement)) {
+      (focusableIn(card)[0] ?? card).focus();
+    }
+    return () => {
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
 
   return (

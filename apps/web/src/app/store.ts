@@ -4,7 +4,7 @@
  * Данные писем живут в react-query, не здесь.
  */
 
-import type { DraftContent } from '@mail-true/shared';
+import type { DraftContent, MessageFilter } from '@mail-true/shared';
 import { create } from 'zustand';
 import { readCachedTheme, writeCachedTheme } from '../appearance/cache';
 import { persistAppearance } from '../appearance/persist';
@@ -290,6 +290,21 @@ interface UiState {
    * «вот отсюда ты вышел» и в другой папке не значит ничего.
    */
   visitedMessage: { folderId: string; messageId: string } | null;
+  /**
+   * Каким был список, из которого ушли в письмо.
+   *
+   * Живёт здесь по той же причине, что и visitedMessage: страница папки
+   * при уходе в письмо размонтируется и всё своё состояние теряет.
+   *
+   * Нужно стрелкам «предыдущее/следующее»: они спрашивали соседей с
+   * жёстко заданными «без группировки, отбор — все», независимо от того,
+   * какой список человек на самом деле видел. В папке с включённым
+   * отбором «Непрочитанные» стрелка уводила в прочитанное письмо,
+   * которого в его списке не было, — а вернувшись «К списку», он не
+   * находил места, где остановился.
+   */
+  listView: { threaded: boolean; filter: MessageFilter; labelFilter: string | null };
+  setListView(view: { threaded: boolean; filter: MessageFilter; labelFilter: string | null }): void;
   setVisitedMessage(folderId: string, messageId: string): void;
   clearVisitedMessage(): void;
 
@@ -381,6 +396,8 @@ export const useUiStore = create<UiState>((set) => ({
     }),
 
   visitedMessage: null,
+  listView: { threaded: false, filter: 'all', labelFilter: null },
+  setListView: (view) => set({ listView: view }),
   setVisitedMessage: (folderId, messageId) => set({ visitedMessage: { folderId, messageId } }),
   clearVisitedMessage: () => set({ visitedMessage: null }),
 

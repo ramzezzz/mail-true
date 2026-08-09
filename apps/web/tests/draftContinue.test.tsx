@@ -258,13 +258,15 @@ describe('щелчок по черновику открывает окно на�
     expect(byLabel('Скрытая')?.value).toBe('hidden@mail.local');
     expect(byLabel('Тема')?.value).toBe('Договор на подпись');
     expect(editor()?.textContent).toContain('Отправляю договор');
-    // Вложение черновика на месте — ровно одно
+    // Вложение черновика на месте — ровно одно.
+    //
+    // Считаем по кнопке «Убрать <имя>»: она есть у каждой плашки ровно
+    // одна. Прежний счёт по классу «attachChip» ломался от любого узла
+    // внутри плашки — например, от отдельного узла имени, который завели,
+    // чтобы длинное имя обрезалось многоточием и не уносило крестик
+    // «Убрать» за край экрана.
     expect(host.textContent).toContain('договор.pdf');
-    expect(
-      [...host.querySelectorAll('[class*="attachChip"]')].filter((chip) =>
-        chip.textContent?.includes('договор.pdf'),
-      ),
-    ).toHaveLength(1);
+    expect(host.querySelectorAll('[aria-label="Убрать договор.pdf"]')).toHaveLength(1);
   });
 
   it('Ctrl+щелчок остаётся ссылкой: открывается просмотр, а не окно', async () => {

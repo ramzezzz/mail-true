@@ -12,6 +12,7 @@ import {
   hasMore,
   loadedCount,
   nextPageOffset,
+  markAllReadLabel,
   selectAllLabel,
   totalCount,
 } from '../src/lib/paging';
@@ -73,5 +74,21 @@ describe('selectAllLabel', () => {
     expect(selectAllLabel(187, 187)).toBe('Выделить все');
     expect(selectAllLabel(12, 12)).toBe('Выделить все');
     expect(selectAllLabel(0, 0)).toBe('Выделить все');
+  });
+});
+
+describe('markAllReadLabel', () => {
+  it('пока загружено не всё — не обещает «все»', () => {
+    /*
+     * Та же беда, что была у соседней кнопки. В папке с четырьмя тысячами
+     * непрочитанных счётчик падал на сотню и замирал: человек жал ещё раз
+     * — снова сотня. Ничего не сломано, а выглядит как поломка.
+     */
+    expect(markAllReadLabel(100, 4000)).toBe('Отметить загруженные (100 из 4000)');
+  });
+
+  it('когда загружено всё — обычная подпись', () => {
+    expect(markAllReadLabel(187, 187)).toBe('Отметить все прочитанными');
+    expect(markAllReadLabel(0, 0)).toBe('Отметить все прочитанными');
   });
 });

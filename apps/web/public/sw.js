@@ -111,8 +111,11 @@ function toNotification(view, options) {
       // бы о нём, только посмотрев на экран.
       renotify: true,
       // Окно не должно исчезать само: уведомление о письме — это то,
-      // что человек мог не увидеть в первые пять секунд.
-      requireInteraction: false,
+      // что человек мог не увидеть в первые пять секунд. Значение здесь
+      // стояло ПРОТИВОПОЛОЖНОЕ комментарию — false как раз и означает
+      // «спрячь через несколько секунд», и Chrome прятал. Человек отошёл,
+      // письмо пришло, окно растворилось — вернувшись, он о нём не узнал.
+      requireInteraction: true,
       data: {
         url: typeof source.url === 'string' ? source.url : FALLBACK.url,
         ids: Array.isArray(source.ids) ? source.ids.filter((id) => typeof id === 'string') : [],

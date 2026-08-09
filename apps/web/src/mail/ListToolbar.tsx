@@ -53,6 +53,8 @@ export interface ListToolbarProps {
    * выделять сотню — обман (см. lib/paging.ts).
    */
   selectAllLabel?: string;
+  /** Подпись «Отметить все прочитанными» — та же честность, что и рядом. */
+  markAllReadLabel?: string;
   /**
    * В папке нет ни одного письма. Тогда «Выделить все» и «Отметить все
    * прочитанными» выключены: выделять и отмечать нечего, а живая кнопка
@@ -191,7 +193,7 @@ export function ListToolbar(props: ListToolbarProps) {
           onClick={props.onMarkAllRead}
           disabled={props.emptyFolder}
         >
-          Отметить все прочитанными
+          {props.markAllReadLabel ?? 'Отметить все прочитанными'}
         </Button>
         {/*
           «Разобрать ящик» стоит здесь, а не в настройках, намеренно:

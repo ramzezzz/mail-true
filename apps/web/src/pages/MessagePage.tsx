@@ -151,12 +151,22 @@ export function MessagePage() {
     error,
     refetch,
   } = useMessage(id, { images: showImages });
+  /*
+   * Соседи берутся из ТОГО ЖЕ списка, из которого человек пришёл.
+   *
+   * Здесь стояло «threaded: false, filter: all» жёстко, независимо от
+   * вида списка. В папке с отбором «Непрочитанные» стрелка «Следующее»
+   * уводила в прочитанное письмо, которого в списке человека не было, а
+   * возврат «К списку» приводил не туда, где он остановился.
+   */
+  const listView = useUiStore((s) => s.listView);
   const { data: page } = useMessages({
     folderId,
     offset: 0,
     limit: MESSAGES_PAGE_SIZE,
-    threaded: false,
-    filter: 'all',
+    threaded: listView.threaded,
+    filter: listView.filter,
+    ...(listView.labelFilter ? { label: listView.labelFilter } : {}),
   });
   const { data: folders } = useFolders();
   const setFlags = useSetFlags();

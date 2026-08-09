@@ -102,6 +102,10 @@ export async function showNotificationView(view: NotificationView): Promise<bool
           // Заменяя прежнее окно, привлечь внимание ещё раз: иначе
           // второе письмо подряд обновило бы текст молча.
           renotify: true,
+          // И не гасить окно само по себе — то же правило, что в
+          // служебном сценарии: уведомление о письме ждёт человека, а не
+          // отсчитывает секунды до исчезновения.
+          requireInteraction: true,
         } as NotificationOptions);
         return true;
       }

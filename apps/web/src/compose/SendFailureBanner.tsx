@@ -26,6 +26,7 @@
 
 import { useAckSendFailure, useSendFailures } from '../api/queries';
 import { useMailEvents } from '../app/mailEvents';
+import { useUiStore } from '../app/store';
 import { useOpenDraft } from './useOpenDraft';
 import styles from './SendFailureBanner.module.css';
 
@@ -80,6 +81,7 @@ export function failureSummary(notice: {
 
 export function SendFailureBanner() {
   const { data, refetch } = useSendFailures();
+  const showNotice = useUiStore((s) => s.showNotice);
   const ack = useAckSendFailure();
   const { openDraft, loading } = useOpenDraft();
 
@@ -124,7 +126,17 @@ export function SendFailureBanner() {
             type="button"
             className={styles.action}
             disabled={ack.isPending}
-            onClick={() => ack.mutate(notice.id)}
+            /*
+              Отказ виден. Раньше обработчика отказа не было вовсе:
+              не прошло «Понятно» — кнопка просто снова становилась
+              доступной, а извещение оставалось на месте. Человек жал
+              второй раз и третий, не понимая, почему плашка не уходит.
+            */
+            onClick={() =>
+              ack.mutate(notice.id, {
+                onError: () => showNotice('Не удалось убрать извещение — попробуйте ещё раз'),
+              })
+            }
           >
             Понятно
           </button>

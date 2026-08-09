@@ -23,7 +23,7 @@ import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { collectForwardAttachments } from '../lib/forwardAttachments';
 import { actionErrorText, errorText } from '../lib/errorText';
 import { serializeRulePrefill } from '../lib/filterRules';
-import { selectAllLabel } from '../lib/paging';
+import { markAllReadLabel, selectAllLabel } from '../lib/paging';
 import { hotkeyFor } from '../lib/hotkeys';
 import { useGeneralPreferences } from '../settings/generalSettings';
 import { searchUrlFor } from '../search/searchParams';
@@ -102,6 +102,17 @@ export function FolderPage() {
   // а в папке их бывает вдвое больше — раньше остальные были недостижимы.
   // С группировкой страница — это сотня ПЕРЕПИСОК, а не писем.
   const page = useFolderMessages(folderId, filter, threaded, labelFilter);
+
+  /*
+   * Запоминаем вид списка для страницы письма: её стрелки
+   * «предыдущее/следующее» обязаны листать ТОТ ЖЕ список, а не какой-то
+   * свой. Пишем при каждом изменении — уход в письмо размонтирует эту
+   * страницу вместе со всем её состоянием.
+   */
+  const setListView = useUiStore((s) => s.setListView);
+  useEffect(() => {
+    setListView({ threaded, filter, labelFilter });
+  }, [setListView, threaded, filter, labelFilter]);
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
 
@@ -135,11 +146,20 @@ export function FolderPage() {
 
   const messages = page.items;
 
-  // Смена папки: сбрасываем выделение, курсор и фильтр
+  // Смена папки: сбрасываем выделение, курсор и фильтры
   useEffect(() => {
     clearSelection();
     setFocusedId(null);
     setFilter('all');
+    /*
+     * Отбор по метке сбрасывается вместе с остальным.
+     *
+     * Раньше он переживал смену папки, а признак его действия нарисован
+     * только галочкой ВНУТРИ выпадающего меню «Фильтр» — на самой панели
+     * ничего. Человек отбирал «Входящие» по метке «Оплатить», переходил в
+     * «Отправленные» и видел неполный список без единого указания почему.
+     */
+    setLabelFilter(null);
     setContextMenu(null);
     setLeavingIds([]);
   }, [folderId, clearSelection]);
@@ -666,6 +686,7 @@ export function FolderPage() {
       <ListToolbar
         selectedCount={selectedIds.size}
         selectAllLabel={selectAllLabel(page.loaded, page.total)}
+        markAllReadLabel={markAllReadLabel(page.loaded, page.total)}
         emptyFolder={emptyFolder}
         filter={filter}
         /* Со сменой отбора список становится другим, и подсветка «отсюда ты

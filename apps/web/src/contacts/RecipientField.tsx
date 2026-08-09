@@ -38,6 +38,7 @@ import { normalizeAddress } from '@mail-true/shared';
 import styles from './RecipientField.module.css';
 import { setContactHidden, type ContactSuggestion } from './contactsApi';
 import { useContactSuggest } from './useContactSuggest';
+import { useUiStore } from '../app/store';
 
 export interface RecipientFieldProps {
   value: string;
@@ -105,6 +106,7 @@ export function RecipientField(props: RecipientFieldProps): JSX.Element {
   const [dismissed, setDismissed] = useState(false);
   const [active, setActive] = useState(0);
   const [hiddenLocally, setHiddenLocally] = useState<string[]>([]);
+  const showNotice = useUiStore((s) => s.showNotice);
 
   const { current, exclude } = useMemo(() => {
     const parts = splitRecipients(value);
@@ -148,10 +150,26 @@ export function RecipientField(props: RecipientFieldProps): JSX.Element {
     [onChange, value],
   );
 
-  const hide = useCallback((address: string) => {
-    setHiddenLocally((prev) => (prev.includes(address) ? prev : [...prev, address]));
-    void setContactHidden(address, true);
-  }, []);
+  /**
+   * Убрать адрес из подсказок.
+   *
+   * Скрываем сразу, не дожидаясь сервера, — так отклик мгновенный. Но
+   * ОТКАЗ обязан откатить: раньше результат запроса не смотрели вовсе, и
+   * адрес пропадал из подсказок до перезагрузки страницы, после чего
+   * возвращался. Человеку при этом не говорили ничего, и выглядело это
+   * как «оно само».
+   */
+  const hide = useCallback(
+    (address: string) => {
+      setHiddenLocally((prev) => (prev.includes(address) ? prev : [...prev, address]));
+      void setContactHidden(address, true).then((ok) => {
+        if (ok) return;
+        setHiddenLocally((prev) => prev.filter((item) => item !== address));
+        showNotice('Не удалось убрать адрес из подсказок — попробуйте ещё раз');
+      });
+    },
+    [showNotice],
+  );
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
     if (event.key === 'Escape') {
