@@ -199,6 +199,10 @@ class FakeMailbox {
   calls: string[] = [];
   /** Сервер не поддерживает UIDPLUS: MOVE не отвечает соответствием номеров. */
   noUidPlus = false;
+  /** На какой по счёту команде переноса ответить отказом (0 — никогда). */
+  failMoveAtCall = 0;
+  /** Сколько команд переноса уже прошло — для нарезки длинных списков. */
+  moveCalls = 0;
   #selected = 'Trash';
   #nextUid = 100;
 
@@ -280,6 +284,10 @@ class FakeMailbox {
       async messageMove(range: string | number[], target: string) {
         const uids = uidsOf(range);
         self.calls.push(`move:${self.#selected}->${target}:${uids.join(',')}`);
+        // Отказ на N-й по счёту команде: так изображается обрыв связи
+        // посреди нарезки длинного списка номеров.
+        self.moveCalls += 1;
+        if (self.failMoveAtCall === self.moveCalls) return false;
         const from = self.folders.get(self.#selected)!;
         const to = self.folders.get(target)!;
         const uidMap = new Map<number, number>();
@@ -507,4 +515,56 @@ test('срок ограничивается потолком сервера, а 
   // Настройки ещё нет — это семь дней, а не ноль: поведение до и после
   // первого сохранения обязано совпадать.
   assert.equal(await svc.daysFor('new@mail.local'), 7);
+});
+
+/*
+ * Перенос уехал наполовину — записать надо то, что уехало.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Длинный список номеров режется на команды (Dovecot отвергает слишком
+ * длинный аргумент), и отказ на второй порции бросался прямо из цикла —
+ * унося с собой всё, что успела перенести первая. Вызывающий держит откат
+ * только вокруг записи в базу, сюда управление уже не доходило.
+ *
+ * Цена: несколько сотен писем остаются в скрытой служебной папке БЕЗ
+ * строки в базе. Их не видно ни в почте, ни в разделе «Восстановление
+ * писем», работник удаления по сроку читает базу и не найдёт их никогда —
+ * они лежат вечно и едят квоту. До нарезки этот исход был недостижим:
+ * один MOVE либо переносил всё, либо ничего.
+ */
+void test('отказ на второй порции не теряет письма, перенесённые первой', async () => {
+  const store = new MemoryStore();
+  const box = new FakeMailbox();
+  // Номера через один: свернуть в диапазон нечего, список режется на
+  // несколько команд — ровно случай разросшейся корзины.
+  const uids: number[] = [];
+  const trash = box.folders.get('Trash')!;
+  for (let i = 0; i < 5000; i += 1) {
+    const uid = i * 2 + 1;
+    uids.push(uid);
+    trash.push({
+      uid,
+      subject: `Письмо ${String(uid)}`,
+      size: 1000,
+      messageId: `m${String(uid)}@t`,
+    });
+  }
+  box.failMoveAtCall = 2;
+  const svc = service(store);
+
+  await assert.rejects(
+    () => svc.sweep(box.client, 'test@mail.local', TRASH, uids, 7),
+    'отказ переноса обязан дойти до человека',
+  );
+
+  const moved = box.folders.get('Recovery')!.length;
+  assert.ok(moved > 0, 'первая порция никуда не переехала — проверка бессмысленна');
+  assert.equal(
+    store.rows.length,
+    moved,
+    'письма лежат в служебной папке без записи в базе: вернуть их нечем, ' +
+      'и работник удаления по сроку их не найдёт',
+  );
 });

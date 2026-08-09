@@ -42,6 +42,7 @@ import {
   ensureRecoveryFolder,
   locateRecovered,
   moveToRecovery,
+  type RecoveryPlacement,
   readRecoverySource,
   resolveRestorePath,
   returnFromRecovery,
@@ -193,14 +194,31 @@ export class RecoveryService {
     const purgeAt = new Date(now.getTime() + days * 24 * 3600_000);
 
     /* Шаг 1: перенос. Под блокировкой очищаемой папки — и только она. */
-    let placements: Awaited<ReturnType<typeof moveToRecovery>> = [];
+    let placements: RecoveryPlacement[] = [];
+    /** Перенос оборвался посреди нарезки — сказать об этом после записи. */
+    let moveFailure: Error | null = null;
     let present: number[] = [];
     const lock = await client.getMailboxLock(source.path);
     try {
       present = await existingUids(client, uids);
       if (present.length === 0) return { kept: 0, removed: 0, restoreUntil: null };
       const info = await readRecoverySource(client, present);
-      placements = await moveToRecovery(client, target, present, info);
+      /*
+       * Перенос может уехать наполовину: список номеров режется на
+       * команды, и вторая порция способна упереться в обрыв связи. То,
+       * что уже переехало, обязано попасть в базу — иначе письма
+       * останутся в скрытой служебной папке навсегда, не видимые ни в
+       * почте, ни в разделе возврата, и работник удаления по сроку их не
+       * найдёт (он читает базу). Поэтому сначала записываем перенесённое,
+       * и только потом сообщаем об отказе.
+       */
+      const outcome = await moveToRecovery(client, target, present, info);
+      if (Array.isArray(outcome)) {
+        placements = outcome;
+      } else {
+        placements = outcome.placements;
+        moveFailure = outcome.failure;
+      }
     } finally {
       lock.release();
     }
@@ -213,6 +231,7 @@ export class RecoveryService {
      * в служебной папке видны отдельной строкой (см. summary).
      */
     if (placements.length === 0) {
+      if (moveFailure) throw moveFailure;
       return { kept: 0, removed: present.length, restoreUntil: null };
     }
 
@@ -261,6 +280,14 @@ export class RecoveryService {
       ).catch(() => undefined);
       throw err;
     }
+
+    /*
+     * Записали то, что успело переехать, — теперь можно честно сказать,
+     * что дальше не пошло. Человек увидит отказ и повторит очистку;
+     * уже перенесённые письма к тому моменту видны в разделе возврата и
+     * никуда не денутся.
+     */
+    if (moveFailure) throw moveFailure;
 
     return {
       kept: placements.length,

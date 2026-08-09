@@ -153,7 +153,7 @@ export async function moveToRecovery(
   target: Folder,
   uids: number[],
   info: Map<number, RecoverySourceInfo>,
-): Promise<RecoveryPlacement[]> {
+): Promise<RecoveryPlacement[] | { placements: RecoveryPlacement[]; failure: Error }> {
   if (uids.length === 0) return [];
   /*
    * ОТКАЗ переноса и «сервер не назвал номера» — разные вещи.
@@ -170,15 +170,39 @@ export async function moveToRecovery(
    * длинный аргумент примерно с двенадцати тысяч писем — и это снова
    * `false`, снова «удалено N» и снова письма на месте.
    */
+  /*
+   * ОТКАЗ ПОСРЕДИ НАРЕЗКИ НЕ ИМЕЕТ ПРАВА УНОСИТЬ УЖЕ ПЕРЕНЕСЁННОЕ.
+   *
+   * Здесь стоял `throw` прямо в цикле — и он терял `map`, набранный
+   * предыдущими порциями. А порции появляются как раз на разросшейся
+   * корзине: примерно с тысячи несмежных номеров. Первая порция уезжает
+   * в скрытую служебную папку, вторая упирается в обрыв связи или
+   * таймаут — и несколько сотен писем остаются там БЕЗ единой строки в
+   * базе. Такие письма не видно нигде: ни в почте, ни в разделе
+   * «Восстановление писем», а работник удаления по сроку читает ту же
+   * базу и не найдёт их никогда. Они лежат вечно и едят квоту.
+   *
+   * Поэтому отказ запоминается, цикл прекращается, а перенесённое
+   * возвращается наверх: вызывающий сперва запишет его в базу (тогда
+   * письма видны и возвращаемы), и только потом сообщит об отказе.
+   */
   const map = new Map<number, number>();
   let uidValidityFromServer = 0;
+  let failure: Error | null = null;
   for (const range of chunkUidSets(uids)) {
-    const result = (await client.messageMove(range, target.path, { uid: true })) as
-      UidMapResult | boolean | undefined;
+    let result: UidMapResult | boolean | undefined;
+    try {
+      result = (await client.messageMove(range, target.path, { uid: true })) as
+        UidMapResult | boolean | undefined;
+    } catch (err) {
+      failure = err instanceof Error ? err : new Error(String(err));
+      break;
+    }
     if (result === false) {
-      throw new UpstreamUnavailableError(
+      failure = new UpstreamUnavailableError(
         'Почтовый сервер не смог очистить корзину. Повторите попытку позже.',
       );
+      break;
     }
     const chunkMap = typeof result === 'object' && result ? result.uidMap : undefined;
     if (chunkMap) {
@@ -187,7 +211,10 @@ export async function moveToRecovery(
       if (validity > 0) uidValidityFromServer = validity;
     }
   }
-  if (map.size === 0) return [];
+  if (map.size === 0) {
+    if (failure) throw failure;
+    return [];
+  }
   const uidValidity = uidValidityFromServer || Number(target.uidValidity ?? 0);
   const placements: RecoveryPlacement[] = [];
   for (const [sourceUid, recoveryUid] of map) {
@@ -195,6 +222,10 @@ export async function moveToRecovery(
     if (!source) continue;
     placements.push({ sourceUid, recoveryUid, recoveryUidValidity: uidValidity, info: source });
   }
+  // Часть уехала, часть — нет. Отдаём перенесённое и говорим, что дальше
+  // не пошло: записать эти письма в базу обязательно, иначе они пропадут
+  // из виду навсегда.
+  if (failure) return { placements, failure };
   return placements;
 }
 
