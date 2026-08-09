@@ -387,11 +387,45 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s !== '');
+    /*
+     * Ожидаемый ключ DKIM берём У RSPAMD, а не из базы.
+     *
+     * ------------------------------------------------------------------
+     * ЧТО БЫЛО
+     * ------------------------------------------------------------------
+     * Проверка сверяла опубликованную запись со значением
+     * `domain_settings.dkim_public_key` — то есть с тем, что кто-то
+     * когда-то вписал в панель. Подписывает же письма rspamd своим
+     * ключом из тома, и эти двое могут не совпадать.
+     *
+     * Самый быстрый способ их развести — восстановить копию настроек на
+     * другой установке: приватного ключа в копии нет и быть не может (он
+     * лежит в томе rspamd, куда серверу приложения ходу нет), а вот
+     * публичный переезжает вместе с доменом. В базе оказывается чужой
+     * ключ, DNS его подтверждает, панель показывает зелёный DKIM — а
+     * письма подписываются другим. Обнаруживается это по массовому
+     * попаданию всей исходящей почты организации в спам.
+     *
+     * Поэтому спрашиваем настоящий ключ у посредника. Он недоступен —
+     * возвращаемся к значению из базы: проверка без сверки лучше, чем
+     * отсутствие проверки, а расхождение поймается в следующий раз.
+     */
+    const selector = row.dkim_selector ?? 'mail';
+    let expectedDkim = row.dkim_public_key;
+    const agent = ctx.serviceAgent;
+    if (agent) {
+      const real = await agent
+        .dkimRecord(row.name, selector)
+        .then((record) => publicKeyOf(record))
+        .catch(() => null);
+      if (real !== null && real !== '') expectedDkim = real;
+    }
+
     return checkDomainDns(row.name, {
       mailHostname: host,
       publicIpv4: await settings.text('MAIL_PUBLIC_IPV4'),
-      dkimSelector: row.dkim_selector ?? 'mail',
-      dkimPublicKey: row.dkim_public_key,
+      dkimSelector: selector,
+      dkimPublicKey: expectedDkim,
       imapsPort: ctx.config.IMAPS_PORT,
       submissionPort: ctx.config.SUBMISSION_PORT,
       pop3sPort: ctx.config.POP3S_PORT,
