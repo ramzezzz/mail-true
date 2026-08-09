@@ -11,7 +11,7 @@
  *    перекладывание чужой почты по всем папкам без ведома владельца;
  *  - роль «только чтение» видит всё то же самое, но без кнопок.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 import { Button, Checkbox } from '@web/components';
@@ -133,8 +133,39 @@ export function UserSettingsPage() {
   /* Черновик формы: правится локально, уходит на сервер одной кнопкой —
      ровно как в пользовательских настройках. */
   const [draft, setDraft] = useState<UserGeneralSettings | null>(null);
+  /*
+   * Что в последний раз пришло с сервера. По нему и только по нему
+   * решается, трогал ли человек форму.
+   *
+   * Раньше черновик перезаписывался при КАЖДОМ обновлении запроса —
+   * `if (bundle.data) setDraft(bundle.data.general)`. Обновляется же он
+   * не только при заходе на страницу: правила фильтрации живут в том же
+   * запросе, и любое действие с ними (сохранить, удалить, переставить
+   * стрелкой) вызывает invalidate.
+   *
+   * Отсюда потеря. Человек пишет подпись — длинную, с должностью и
+   * телефонами, — потом замечает, что правило стоит не в том порядке,
+   * жмёт стрелку… и подпись пропадает. Молча, без единого слова: поле
+   * просто снова показывает то, что лежит на сервере. Ни «сохранить»,
+   * ни «отменить» он не нажимал.
+   *
+   * Теперь свежие данные принимаются только тогда, когда правок нет.
+   * Если человек что-то менял — его текст остаётся, а серверная версия
+   * подхватится после сохранения (там черновик и обновляется).
+   */
+  const serverGeneral = useRef<UserGeneralSettings | null>(null);
   useEffect(() => {
-    if (bundle.data) setDraft(bundle.data.general);
+    const next = bundle.data?.general;
+    if (!next) return;
+    const untouched =
+      draft === null ||
+      serverGeneral.current === null ||
+      JSON.stringify(draft) === JSON.stringify(serverGeneral.current);
+    serverGeneral.current = next;
+    if (untouched) setDraft(next);
+    // draft намеренно не в списке: эффект отвечает на приход данных с
+    // сервера, а не на каждое нажатие клавиши в форме.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle.data]);
 
   const folders = bundle.data?.folders ?? [];

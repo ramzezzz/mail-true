@@ -167,12 +167,31 @@ export function ServerSettingsPage() {
 
   const save = useMutation({
     mutationFn: (values: Record<string, SettingValue | null>) => api.saveServerSettings(values),
-    onSuccess: (result) => {
+    onSuccess: (result, sent) => {
       queryClient.setQueryData(['server-settings'], {
         sections: result.sections,
         counts: result.counts,
       });
-      setDraft({});
+      /*
+       * Из черновика уходит ТОЛЬКО отправленное.
+       *
+       * Здесь стоял `setDraft({})` — черновик стирался целиком. А
+       * отправляется не всё: значения, не прошедшие проверку, submit
+       * пропускает намеренно, и панель об этом честно пишет — «такие не
+       * отправятся: исправьте или отмените».
+       *
+       * Обещание было пустым. Человек правит десяток настроек, в одной
+       * ошибается, жмёт «Сохранить» — девять сохраняются, а десятая, над
+       * которой он и думал, исчезает вместе с набранным. Исправлять
+       * оказывается нечего: поле снова показывает старое значение.
+       */
+      setDraft((previous) => {
+        const rest: Record<string, SettingValue> = {};
+        for (const [key, value] of Object.entries(previous)) {
+          if (!(key in sent)) rest[key] = value;
+        }
+        return rest;
+      });
 
       /*
        * Перезапуск идёт ЗДЕСЬ, после успешного сохранения, а не рядом с

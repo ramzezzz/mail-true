@@ -23,7 +23,7 @@
  * разбирается — имя слева, домен справа, и домен выбирается в списке,
  * когда он там есть.
  */
-import { useId, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import styles from './AddressInput.module.css';
 
 export interface AddressInputProps {
@@ -72,7 +72,23 @@ export function AddressInput({
   const listId = useId();
   const { local, domain } = splitAddress(value);
   const fallback = domains[0] ?? '';
-  const current = domain === '' ? fallback : domain;
+  /*
+   * Выбранный домен помнится ОТДЕЛЬНО от значения.
+   *
+   * Полный адрес — единственное, что уходит наружу, и при пустом имени
+   * он пуст: «@mail.local» никому не нужен. Но из пустого значения не
+   * восстановить домен, и раньше он молча возвращался к первому в
+   * списке. Живой сценарий: в системе три домена, человек выбирает
+   * второй, потом стирает имя, чтобы набрать другое, — и ящик уезжает в
+   * ПЕРВЫЙ домен. Никакого сигнала: поле домена просто показывает
+   * другое значение, а смотрит человек в это время на имя.
+   *
+   * Это ровно та беда, ради которой компонент и заводили: «опечатка в
+   * домене создаёт ящик, на который почта не придёт никогда, и заметно
+   * это далеко не сразу». Только здесь даже не опечатка, а подмена.
+   */
+  const [sticky, setSticky] = useState('');
+  const current = domain !== '' ? domain : sticky !== '' ? sticky : fallback;
   // Домен, которого нет в списке (внешний адрес пересылки), тоже должен
   // быть виден в выпадающем списке — иначе он молча заменится на первый.
   const options = domains.includes(current) || current === '' ? domains : [...domains, current];
@@ -81,6 +97,7 @@ export function AddressInput({
     if (raw.includes('@')) {
       // Вставили адрес целиком — разбираем, а не приписываем домен второй раз.
       const parsed = splitAddress(raw);
+      if (parsed.domain !== '') setSticky(parsed.domain);
       onChange(joinAddress(parsed.local, parsed.domain));
       return;
     }
@@ -105,7 +122,13 @@ export function AddressInput({
             list={listId}
             value={current}
             placeholder={fallback}
-            onChange={(e) => onChange(joinAddress(local, e.target.value.trim()))}
+            onChange={(e) => {
+              const next = e.target.value.trim();
+              // Запоминаем ДО сборки адреса: при пустом имени адрес
+              // окажется пустым, и восстановить домен будет неоткуда.
+              setSticky(next);
+              onChange(joinAddress(local, next));
+            }}
             aria-label="Домен"
           />
         ) : (
