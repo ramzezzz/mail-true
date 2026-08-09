@@ -234,18 +234,26 @@ export async function accountsUserRoutes(
      *
      * Второй и заменил прежнюю обратную связь в таблице: право вернуться
      * принадлежит человеку за этим сеансом, а не учётной записи вообще.
+     *
+     * Ключи у этих двух путей РАЗНЫЕ, и путать их нельзя: связи лежат под
+     * ключом внешних учётных записей (service.requireSecretBox), а всё,
+     * что живёт в сессии, — под ключом сессий (secretBox). Первая же
+     * живая проверка это и показала: возврат отвечал 500, потому что
+     * пароль из сессии расшифровывали чужим ключом.
      */
     const back = session.returnTo;
-    const enc =
-      back && back.email === email
-        ? back.passwordEnc
-        : await guard(() => db.findLinkedSecret(session.email, email));
-    if (!enc) {
-      throw new BadRequestError(
-        'Этот ящик не связан с текущим. Сначала добавьте его с вводом пароля.',
-      );
+    let password: string;
+    if (back && back.email === email) {
+      password = secretBox.decrypt(back.passwordEnc);
+    } else {
+      const enc = await guard(() => db.findLinkedSecret(session.email, email));
+      if (!enc) {
+        throw new BadRequestError(
+          'Этот ящик не связан с текущим. Сначала добавьте его с вводом пароля.',
+        );
+      }
+      password = box.decrypt(enc);
     }
-    const password = box.decrypt(enc);
     // Пароль мог измениться на стороне ящика — проверяем перед выдачей сессии.
     await pool.verify(email, password);
 
