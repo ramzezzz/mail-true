@@ -25,6 +25,7 @@ import {
   useSetFlags,
 } from '../api/queries';
 import { MESSAGES_PAGE_SIZE } from '../api/client';
+import { useAccountAddress } from '../app/session';
 import { useUiStore } from '../app/store';
 import {
   Button,
@@ -39,6 +40,7 @@ import { LabelMenu } from '../mail/LabelMenu';
 import { LabelPills } from '../mail/LabelPill';
 import { useApplyLabels, useLabelsState } from '../mail/useLabels';
 import { isReliable, messageCategory } from '../lib/categories';
+import { recipientLabel } from '../lib/recipients';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { collectForwardAttachments } from '../lib/forwardAttachments';
 import { errorText, isNotFoundError } from '../lib/errorText';
@@ -137,6 +139,8 @@ function formatSize(bytes: number): string {
 export function MessagePage() {
   const { folderId = 'inbox', messageId } = useParams();
   const navigate = useNavigate();
+  // Адрес открытого ящика: по нему решается, писали ли письмо «вам».
+  const myAddress = useAccountAddress();
   const id = messageId ? decodeURIComponent(messageId) : undefined;
   /**
    * Внешние картинки. Блокирует их сервер: без `images=1` в теле стоят
@@ -595,8 +599,17 @@ export function MessagePage() {
   // Заголовки сервер отдаёт в нижнем регистре, поэтому ищем без учёта
   // регистра и понимаем сводный `list` от mailparser (см. lib/unsubscribe.ts)
   const unsubscribe = unsubscribeLinks(message.headers);
-  const toMe =
-    message.to.length === 1 ? 'вам' : message.to.map((a) => a.name ?? a.address).join(', ');
+  /*
+   * «вам» пишется, только если письмо и правда адресовано ЭТОМУ ящику.
+   *
+   * Условие было «получатель ровно один», и адрес учётной записи здесь не
+   * спрашивался ни разу. Поэтому у любого письма с одним адресатом
+   * подпись выходила «Кому: вам» — в том числе в «Отправленных», где
+   * каждое письмо сообщало человеку, что он написал его сам себе.
+   * Подпись под адресом отвечает на вопрос «а мне ли это писали», и
+   * отвечать на него неправдой хуже, чем не отвечать вовсе.
+   */
+  const toMe = recipientLabel(message.to, myAddress);
   /**
    * Отправитель просит уведомить о прочтении. Плашка показывается, пока
    * человек не ответил: флаг `$MDNSent` сервер ставит и на «отправить»,

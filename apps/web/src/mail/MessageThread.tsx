@@ -15,9 +15,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { MessageSummary } from '@mail-true/shared';
 import { useMessage } from '../api/queries';
+import { useAccountAddress } from '../app/session';
 import { Spinner } from '../components';
 import { cx } from '../lib/cx';
 import { formatListDate, formatMessageDate } from '../lib/listDates';
+import { recipientLabel } from '../lib/recipients';
 import { threadRowStates } from '../lib/threads';
 import { IconAttach, IconNewTab } from './icons';
 import styles from './MessageThread.module.css';
@@ -94,6 +96,16 @@ function ThreadLetter({
   onToggle,
 }: ThreadLetterProps) {
   const sender = message.from.name?.trim() || message.from.address;
+  /*
+   * Кому письмо — по адресам, а не «вам» на любое письмо подряд.
+   *
+   * Строка «Кому: вам» была зашита в разметку: она показывалась у
+   * КАЖДОГО развёрнутого письма переписки, включая свои же исходящие. То
+   * есть интерфейс сообщал человеку, что письмо, которое он сам написал
+   * коллеге, адресовано ему самому. Читается это как факт, поэтому либо
+   * правда, либо ничего.
+   */
+  const recipients = recipientLabel(message.to, useAccountAddress());
 
   return (
     <div
@@ -134,7 +146,7 @@ function ThreadLetter({
             <span className={styles.sender}>{sender}</span>
             {!expanded && <span className={styles.snippet}>{message.snippet}</span>}
           </span>
-          {expanded && <span className={styles.to}>Кому: вам</span>}
+          {expanded && recipients !== '' && <span className={styles.to}>Кому: {recipients}</span>}
         </span>
         {message.hasAttachments && (
           <span className={styles.attachIcon} title="С вложением">

@@ -55,7 +55,13 @@ import { ListToolbar } from '../mail/ListToolbar';
 import { MailboxReview, type ReviewTab } from '../mail/MailboxReview';
 import { useMailboxReviewAvailable } from '../mail/useMailings';
 import { MessageList } from '../mail/MessageList';
-import { chunkIds, expandThreadIds, isRowFlagged, rowLabelKeys } from '../mail/threadList';
+import {
+  chunkIds,
+  expandThreadIds,
+  isRowFlagged,
+  rowLabelKeys,
+  runInChunks,
+} from '../mail/threadList';
 import { PRESET_TITLES, formatWakeAt, type SnoozePreset } from '../mail/snoozeApi';
 import { useSnoozeMessages, useSnoozeState, useUnsnoozeMessages } from '../mail/useSnooze';
 import { useMuteThreads, useMutedState, useUnmuteThreads } from '../mail/useMute';
@@ -321,12 +327,9 @@ export function FolderPage() {
       // Строки гаснут сразу: ждать ответа сервера, чтобы показать отклик,
       // нельзя — при неудаче метка снимается и письма возвращаются на место.
       markLeaving(ids);
-      for (const chunk of chunkIds(ids)) {
-        moveMessages.mutate(
-          { ids: chunk, targetFolderId },
-          { onError: () => unmarkLeaving(chunk) },
-        );
-      }
+      void runInChunks(ids, (chunk) =>
+        moveMessages.mutateAsync({ ids: chunk, targetFolderId }),
+      ).then(({ failed }) => unmarkLeaving(failed));
       clearSelection();
       setFocusedId(null);
     },
@@ -619,12 +622,13 @@ export function FolderPage() {
       // правда уезжает — ждать ответа сервера, чтобы показать отклик,
       // значило бы на секунду делать вид, что нажатие не сработало.
       markLeaving(ids);
-      for (const chunk of chunkIds(ids)) {
-        snoozeMessages.mutate(
-          { ids: chunk, preset: choice.preset, ...(choice.until ? { until: choice.until } : {}) },
-          { onError: () => unmarkLeaving(chunk) },
-        );
-      }
+      void runInChunks(ids, (chunk) =>
+        snoozeMessages.mutateAsync({
+          ids: chunk,
+          preset: choice.preset,
+          ...(choice.until ? { until: choice.until } : {}),
+        }),
+      ).then(({ failed }) => unmarkLeaving(failed));
       clearSelection();
       setFocusedId(null);
     },
@@ -639,9 +643,9 @@ export function FolderPage() {
       const ids = expand(rowIds);
       if (ids.length === 0) return;
       markLeaving(ids);
-      for (const chunk of chunkIds(ids)) {
-        unsnooze.mutate(chunk, { onError: () => unmarkLeaving(chunk) });
-      }
+      void runInChunks(ids, (chunk) => unsnooze.mutateAsync(chunk)).then(({ failed }) =>
+        unmarkLeaving(failed),
+      );
       clearSelection();
       setFocusedId(null);
     },
@@ -687,9 +691,9 @@ export function FolderPage() {
       // Строки гаснут сразу: письма уезжают в «Заглушённые», и делать вид,
       // что нажатие не сработало, пока идёт запрос, нельзя.
       markLeaving(ids);
-      for (const chunk of chunkIds(ids)) {
-        muteThreads.mutate(chunk, { onError: () => unmarkLeaving(chunk) });
-      }
+      void runInChunks(ids, (chunk) => muteThreads.mutateAsync(chunk)).then(({ failed }) =>
+        unmarkLeaving(failed),
+      );
       clearSelection();
       setFocusedId(null);
     },
