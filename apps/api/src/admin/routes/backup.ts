@@ -348,15 +348,65 @@ export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
        * при этом записан и Dovecot соберёт его сам при первой доставке.
        */
       const sieveErrors: string[] = [];
-      for (const email of outcome.resyncSieve) {
+      /**
+       * Сколько ящиков не успели пересобрать в теле запроса — они уедут
+       * в фон.
+       *
+       * ------------------------------------------------------------------
+       * ЗАЧЕМ ПРЕДЕЛ ПО ВРЕМЕНИ
+       * ------------------------------------------------------------------
+       * Пересборка идёт по ящику за раз, и каждый — это пара запросов к
+       * базе плюс запись файла. На нескольких сотнях ящиков запрос
+       * упирается в предел ожидания прокси, и браузер показывает ошибку
+       * у восстановления, которое УЖЕ ПРИМЕНЕНО: в базе всё записано,
+       * коммит прошёл строчкой выше. Человек видит красное и повторяет
+       * необратимое действие.
+       *
+       * Ровно этот расчёт в этом же продукте однажды заставил переделать
+       * импорт ящиков в фоновое задание.
+       *
+       * Поэтому: сколько успеваем — делаем сразу и показываем ошибки
+       * поимённо (это ценно, их надо видеть), остальное доделываем в
+       * фоне и честно говорим, сколько ящиков ждёт. Пока фон не дошёл,
+       * письма у них раскладываются по старым правилам — и это сказано
+       * прямо, а не оставлено на догадку.
+       */
+      const SIEVE_INLINE_MS = 20_000;
+      const sieveStarted = Date.now();
+      const pending: string[] = [];
+
+      const resyncOne = async (email: string): Promise<string | null> => {
         try {
           const state = await app.settingsService.syncSieve(email);
-          if (!state.written) {
-            sieveErrors.push(`${email}: ${state.error || 'причина неизвестна'}`);
-          }
+          return state.written ? null : `${email}: ${state.error || 'причина неизвестна'}`;
         } catch (err) {
-          sieveErrors.push(`${email}: ${err instanceof Error ? err.message : String(err)}`);
+          return `${email}: ${err instanceof Error ? err.message : String(err)}`;
         }
+      };
+
+      for (const email of outcome.resyncSieve) {
+        if (Date.now() - sieveStarted > SIEVE_INLINE_MS) {
+          pending.push(email);
+          continue;
+        }
+        const problem = await resyncOne(email);
+        if (problem !== null) sieveErrors.push(problem);
+      }
+
+      if (pending.length > 0) {
+        // Фоном и без ожидания: ответ человеку важнее, а отказы уйдут в
+        // журнал сервера — там их и ищут, когда письма разложились не так.
+        void (async () => {
+          for (const email of pending) {
+            const problem = await resyncOne(email);
+            if (problem !== null) {
+              app.log.error(
+                { email, problem },
+                'правила Sieve не пересобраны после восстановления',
+              );
+            }
+          }
+        })();
       }
 
       /*
@@ -438,6 +488,12 @@ export async function adminBackupRoutes(app: FastifyInstance): Promise<void> {
         sieve: {
           resynced: outcome.resyncSieve.length - sieveErrors.length,
           errors: sieveErrors,
+          /**
+           * Ящики, чьи правила дособираются в фоне: в теле запроса их
+           * не успели. Пока это идёт, письма у них раскладываются по
+           * старым правилам.
+           */
+          pending: pending.length,
         },
         /**
          * Оформление применяется последним и вне транзакции. Его отказ

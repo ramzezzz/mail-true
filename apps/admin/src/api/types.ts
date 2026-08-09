@@ -911,7 +911,15 @@ export interface BackupRestoreResponse {
   ok: true;
   applied: Record<string, { created: number; updated: number }>;
   plan: BackupRestorePlan;
-  sieve: { resynced: number; errors: string[] };
+  sieve: {
+    resynced: number;
+    errors: string[];
+    /**
+     * Ящики, чьи правила дособираются в фоне: в теле запроса не успели.
+     * Пока это идёт, письма у них раскладываются по старым правилам.
+     */
+    pending: number;
+  };
   /**
    * Почему не применилось оформление; null — применилось или не просили.
    * Отдельно от общей ошибки: всё остальное к этому моменту уже записано,
