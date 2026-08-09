@@ -1,0 +1,17 @@
+.dialog {
+  max-width: var(--mt-size-popup-small, 480px);
+}
+
+.confirmText {
+  margin: 0;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 22px;
+  color: var(--mt-color-text-secondary);
+}
+
+.error {
+  margin: 12px 0 0;
+  font-size: var(--mt-font-caption-size, 13px);
+  line-height: 18px;
+  color: var(--mt-color-text-negative, var(--mt-color-accent-red));
+}

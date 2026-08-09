@@ -30,6 +30,7 @@ import {
 } from '../../lib/filterRules';
 import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '../../mail/icons';
 import { useLabelDictionary } from '../../mail/useLabels';
+import { ConfirmDialog } from '../../settings/ConfirmDialog';
 import { FilterDialog } from '../../settings/FilterDialog';
 import {
   SettingsEmpty,
@@ -54,6 +55,12 @@ export function FiltersPage() {
 
   const [showAuto, setShowAuto] = useState(false);
   const [editing, setEditing] = useState<FilterRule | null>(null);
+  /*
+   * Правило, которое собрались удалить. Раньше корзина удаляла сразу, а
+   * правило — это несколько экранов настроенных условий и действий, и
+   * восстановления у нас нет: один промах мышью — и настраивать заново.
+   */
+  const [removing, setRemoving] = useState<FilterRule | null>(null);
 
   // «Создать фильтр» из письма приходит параметром ?new=<поле>:<значение>
   useEffect(() => {
@@ -158,13 +165,37 @@ export function FiltersPage() {
               label="Удалить правило"
               className={styles.delete}
               disabled={deleteRule.isPending}
-              onClick={() => deleteRule.mutate(rule.id)}
+              onClick={() => {
+                // Отказ прошлого удаления не должен висеть в новом окне.
+                deleteRule.reset();
+                setRemoving(rule);
+              }}
             >
               <IconTrash />
             </IconButton>
           </div>
         ))}
       </div>
+
+      {removing && (
+        <ConfirmDialog
+          title="Удалить правило?"
+          text={`Правило «${describeConditions(removing)}» будет удалено вместе со всеми его действиями. Восстановить его нельзя — настраивать придётся заново.`}
+          confirmText="Удалить"
+          busy={deleteRule.isPending}
+          /*
+           * Отказ сервера остаётся на глазах, а окно не закрывается.
+           * Раньше результат удаления не смотрели вовсе: при отказе окон
+           * не было и подавно, строка правила возвращалась на место при
+           * следующем обновлении списка — и это выглядело как «оно само».
+           */
+          error={deleteRule.isError ? 'Не удалось удалить правило. Попробуйте ещё раз.' : null}
+          onClose={() => setRemoving(null)}
+          onConfirm={() => {
+            deleteRule.mutate(removing.id, { onSuccess: () => setRemoving(null) });
+          }}
+        />
+      )}
 
       {editing && (
         <FilterDialog

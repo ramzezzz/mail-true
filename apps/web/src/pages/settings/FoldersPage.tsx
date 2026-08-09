@@ -22,6 +22,7 @@ import { cx } from '../../lib/cx';
 import { folderTitle } from '../../lib/folderNames';
 import { folderRights, formatFolderCount } from '../../lib/folderRights';
 import { IconBroom, IconFolderRole, IconPencil, IconPlus, IconTrash } from '../../mail/icons';
+import { ConfirmDialog } from '../../settings/ConfirmDialog';
 import { SettingsError, SettingsRow, SettingsSkeleton, SettingsTitle } from '../../settings/ui';
 import styles from './FoldersPage.module.css';
 
@@ -145,6 +146,7 @@ export function FoldersPage() {
           text={`Папка «${folderTitle(dialog.folder)}» и все её вложенные папки будут удалены вместе с письмами. Отменить это нельзя.`}
           confirmText="Удалить"
           busy={remove.isPending}
+          error={remove.isError ? remove.error.message : null}
           onClose={() => setDialog(null)}
           onConfirm={() => remove.mutate(dialog.folder.id, { onSuccess: () => setDialog(null) })}
         />
@@ -156,6 +158,7 @@ export function FoldersPage() {
           text={`Все письма папки «${folderTitle(dialog.folder)}» будут удалены. Сама папка останется.`}
           confirmText="Очистить"
           busy={clear.isPending}
+          error={clear.isError ? clear.error.message : null}
           onClose={() => setDialog(null)}
           onConfirm={() => clear.mutate(dialog.folder.id, { onSuccess: () => setDialog(null) })}
         />
@@ -268,42 +271,6 @@ function RenameFolderDialog({
         error={error}
         onChange={(e) => setName(e.target.value)}
       />
-    </Modal>
-  );
-}
-
-function ConfirmDialog({
-  title,
-  text,
-  confirmText,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  title: string;
-  text: string;
-  confirmText: string;
-  busy: boolean;
-  onClose(): void;
-  onConfirm(): void;
-}) {
-  return (
-    <Modal
-      title={title}
-      onClose={onClose}
-      className={styles.dialog}
-      footer={
-        <>
-          <Button disabled={busy} onClick={onConfirm}>
-            {busy ? 'Выполняем…' : confirmText}
-          </Button>
-          <Button mode="secondary" disabled={busy} onClick={onClose}>
-            Отменить
-          </Button>
-        </>
-      }
-    >
-      <p className={styles.confirmText}>{text}</p>
     </Modal>
   );
 }
