@@ -92,6 +92,21 @@ class FakeDb {
     }
     return null;
   }
+  /**
+   * Куда ведёт перенаправление с этого адреса.
+   *
+   * Спрашивается перед созданием ящика: адрес, занятый перенаправлением,
+   * дал бы ящик, в который никогда ничего не придёт (Postfix разбирает
+   * карту алиасов раньше карты ящиков).
+   */
+  async aliasTargetOf(source: string): Promise<string | null> {
+    for (const alias of this.aliases.values()) {
+      if (String(alias.source).toLowerCase() === source.toLowerCase()) {
+        return String(alias.destination);
+      }
+    }
+    return null;
+  }
   async deleteMailUser(id: number): Promise<void> {
     this.#note('deleteMailUser', id);
     this.users.delete(id);
@@ -424,6 +439,40 @@ async function seedMaildir(root: string, email: string): Promise<string> {
   await writeFile(path.join(dir, 'cur', '1234.mail'), 'From: someone\r\n\r\nстарое письмо');
   return dir;
 }
+
+void test('ящик поверх перенаправления не заводится: он был бы пустым навсегда', async () => {
+  /*
+   * Postfix разбирает карту алиасов РАНЬШЕ карты ящиков. Поэтому ящик,
+   * заведённый на адрес, с которого уже стоит перенаправление, не получит
+   * ни одного письма — они все уйдут по перенаправлению. Выглядит он при
+   * этом полностью рабочим: создан, виден в списке, пускает по IMAP.
+   *
+   * Обратное направление (алиас поверх живого ящика) заблокировано давно
+   * и подробно объяснено в alias-check.ts. Это не проверялось вовсе.
+   */
+  const h = await harness();
+  h.db.aliases.push({
+    id: 1,
+    domain_id: 5,
+    source: 'sales@x.local',
+    destination: 'ivan@x.local',
+    active: true,
+  });
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/users',
+    headers: { cookie: h.cookie },
+    payload: { email: 'sales@x.local', password: 'Parol12345', active: true },
+  });
+
+  assert.equal(response.statusCode, 409, 'ящик поверх перенаправления создавать нельзя');
+  const body = response.json<{ message: string }>();
+  // Отказ обязан назвать, КУДА уходит почта: без этого человек не поймёт,
+  // что именно удалять в разделе «Алиасы».
+  assert.match(body.message, /ivan@x\.local/u);
+  assert.match(body.message, /перенаправлени/u);
+});
 
 void test('удаление ящика уводит Maildir из-под нового ящика с тем же адресом', async () => {
   const h = await harness();

@@ -673,6 +673,42 @@ export class AdminDb {
    * ящика не должно падать из-за необязательного раздела.
    */
   async purgeMailboxData(email: string): Promise<number> {
+    /*
+     * ОДНОРАЗОВЫЙ АДРЕС — ЭТО ДВЕ СТРОКИ, И УДАЛЯТЬ НАДО ОБЕ.
+     *
+     * Маршрут живёт в `virtual_aliases` — именно его читает Postfix. Рядом
+     * стоит пристройка в `disposable_aliases` со ссылкой
+     * `alias_id REFERENCES virtual_aliases(id) ON DELETE CASCADE`, то есть
+     * каскад работает ТОЛЬКО в одну сторону: убрали маршрут — пристройка
+     * ушла сама; убрали пристройку — маршрут остался.
+     *
+     * Общий цикл ниже идёт по реестру и удаляет ровно пристройку. Из-за
+     * этого одноразовые адреса удалённого ящика оставались действующими:
+     * имя занято, почта на них принимается и разворачивается в
+     * несуществующий ящик. Из раздела «Одноразовые адреса» строка при этом
+     * исчезала — выключить её владельцу было нечем, а в разделе «Алиасы»
+     * она висела без хозяина. Хуже всего третье: ящик, заведённый заново с
+     * тем же адресом, получал весь спам, накопленный на старых одноразовых
+     * адресах прежнего владельца.
+     *
+     * Поэтому маршруты сносятся отдельным запросом ДО общего цикла — а
+     * пристройки к ним уносит каскад. То, что общий цикл потом не найдёт
+     * ни одной строки, нормально: он и не должен знать про эту связь.
+     */
+    let removed = 0;
+    try {
+      const routes = await this.pool.query(
+        `DELETE FROM virtual_aliases
+           WHERE id IN (SELECT alias_id FROM disposable_aliases WHERE lower(owner_email) = lower($1))`,
+        [email],
+      );
+      removed += routes.rowCount ?? 0;
+    } catch (err) {
+      // Раздела одноразовых адресов может не быть вовсе (миграция не
+      // применена) — удаление ящика из-за этого падать не должно.
+      if (!isUndefinedTable(err)) throw err;
+    }
+
     const statements = OWNER_ADDRESS_COLUMNS.filter((c) => c.onDelete !== 'keep').map((column) => ({
       /*
        * Имена таблицы и колонки не приходят снаружи: они перечислены в
@@ -683,7 +719,6 @@ export class AdminDb {
       values: [email] as unknown[],
     }));
 
-    let removed = 0;
     for (const statement of statements) {
       try {
         const result = await this.pool.query(statement.sql, statement.values);

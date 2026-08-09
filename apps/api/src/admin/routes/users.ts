@@ -180,6 +180,31 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
     const existing = await ctx.db.findMailUserByEmail(body.email);
     if (existing) throw new ConflictError(`Ящик ${body.email} уже существует`);
 
+    /*
+     * АДРЕС ЗАНЯТ ПЕРЕНАПРАВЛЕНИЕМ — ящик получится пустым навсегда.
+     *
+     * Postfix разбирает карту алиасов РАНЬШЕ карты ящиков
+     * (`virtual_alias_maps` до `virtual_mailbox_maps` в main.cf), поэтому
+     * письмо, пришедшее на такой адрес, уходит по перенаправлению и до
+     * ящика не доходит вовсе. Ящик при этом выглядит полностью рабочим:
+     * он создан, виден в списке, в него можно войти по IMAP — просто в нём
+     * никогда ничего не появляется.
+     *
+     * Обратное направление (алиас поверх живого ящика) заблокировано
+     * наглухо и подробно объяснено в alias-check.ts. Это же направление не
+     * проверялось вовсе, хотя ломает ровно так же и диагностируется так же
+     * тяжело: без знания про порядок карт причину не найти.
+     */
+    const aliasTarget = await ctx.db.aliasTargetOf(body.email);
+    if (aliasTarget !== null) {
+      throw new ConflictError(
+        `Адрес ${body.email} уже занят перенаправлением на ${aliasTarget}. ` +
+          'Почта на него уходит туда, и заведённый ящик остался бы пустым навсегда: ' +
+          'Postfix разбирает перенаправления раньше ящиков. ' +
+          'Сначала удалите перенаправление в разделе «Алиасы».',
+      );
+    }
+
     const domainName = body.email.slice(body.email.indexOf('@') + 1);
     const allowCreateDomain = body.createDomain && admin.role === 'owner';
     const domain = await ctx.db.resolveDomain(domainName, allowCreateDomain);
@@ -579,11 +604,24 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
             try {
               const domainName = row.email.slice(row.email.indexOf('@') + 1);
               const domain = await ctx.db.resolveDomain(domainName, allowNewDomains);
+              // Тот же замок, что и при создании ящика поодиночке: адрес,
+              // занятый перенаправлением, дал бы ящик, в который никогда
+              // ничего не придёт. В импорте это особенно тихо — тысяча
+              // строк заезжает без единого взгляда на каждую.
+              const takenBy = domain ? await ctx.db.aliasTargetOf(row.email) : null;
               if (!domain) {
                 result.failed.push({
                   line: row.line,
                   email: row.email,
                   error: `Домен «${domainName}» не заведён`,
+                });
+              } else if (takenBy !== null) {
+                result.failed.push({
+                  line: row.line,
+                  email: row.email,
+                  error:
+                    `Адрес занят перенаправлением на ${takenBy}: ящик остался бы пустым — ` +
+                    'Postfix разбирает перенаправления раньше ящиков',
                 });
               } else {
                 const generated = row.password === null;
