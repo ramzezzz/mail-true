@@ -130,6 +130,18 @@
   color: var(--mt-color-text-tertiary);
 }
 
+/*
+  Оговорка к ГОТОВОМУ архиву: чего в нём нет. Не красная — задание не
+  сорвалось, файл есть и его нужно скачать; но и не серая — это
+  предупреждение о недостающей почте, и пройти мимо него нельзя.
+*/
+.jobWarning {
+  margin: 0 0 10px;
+  color: #8a4b08;
+  font-size: var(--mt-font-paragraph-size, 15px);
+  line-height: 20px;
+}
+
 .download {
   display: inline-flex;
   align-items: center;

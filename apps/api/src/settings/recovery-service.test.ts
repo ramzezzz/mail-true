@@ -201,6 +201,17 @@ class FakeMailbox {
   noUidPlus = false;
   /** На какой по счёту команде переноса ответить отказом (0 — никогда). */
   failMoveAtCall = 0;
+  /**
+   * Сервер отказывает в переносе и в удалении — БЕЗ исключения.
+   *
+   * Так и ведёт себя imapflow: `messageMove` и `messageDelete` при неудаче
+   * возвращают `false` (ящик у квоты, папку удалили из соседней вкладки,
+   * слишком длинный аргумент), а бросает у него только APPEND. Изобразить
+   * это на живом Dovecot нельзя, и ровно поэтому такие отказы дважды
+   * проходили мимо кода.
+   */
+  refuseMoves = false;
+  refuseDeletes = false;
   /** Сколько команд переноса уже прошло — для нарезки длинных списков. */
   moveCalls = 0;
   #selected = 'Trash';
@@ -287,6 +298,7 @@ class FakeMailbox {
         // Отказ на N-й по счёту команде: так изображается обрыв связи
         // посреди нарезки длинного списка номеров.
         self.moveCalls += 1;
+        if (self.refuseMoves) return false;
         if (self.failMoveAtCall === self.moveCalls) return false;
         const from = self.folders.get(self.#selected)!;
         const to = self.folders.get(target)!;
@@ -304,6 +316,7 @@ class FakeMailbox {
       async messageDelete(rangeOrUids: string | number[]) {
         const uids = uidsOf(rangeOrUids);
         self.calls.push(`delete:${self.#selected}:${uids.join(',')}`);
+        if (self.refuseDeletes) return false;
         const list = self.folders.get(self.#selected)!;
         for (const uid of uids) {
           const at = list.findIndex((m) => m.uid === uid);
@@ -464,6 +477,114 @@ test('письмо, унесённое мимо нас, закрывает за�
   assert.equal(result.restored, 1);
   assert.equal(result.missing, 1, 'пропавшее письмо не должно останавливать остальные');
   assert.equal(store.rows[0]!.state, 'gone');
+});
+
+/*
+ * Возврат письма, который сервер НЕ выполнил, — потеря письма навсегда.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Перенос делался голым `client.messageMove`, а его ответ выбрасывался.
+ * imapflow при отказе MOVE не бросает — он возвращает `false`, и отказать
+ * может буднично: ящик у квоты, корзину удалили из соседней вкладки.
+ * Сразу за переносом стояло `closeRecovery(row.id, 'restored')`, а по
+ * состоянию 'pending' работают ВСЕ выборки: и список раздела, и работник
+ * удаления по сроку. Письмо оставалось в служебной папке «Recovery»,
+ * скрытой из дерева папок: ответ «Восстановлено писем: N», запись в
+ * журнале — и письма нет ни в корзине, ни в разделе восстановления, ни в
+ * дереве. Найти и удалить его не мог уже никто: квота занята навсегда.
+ */
+void test('письмо, которое сервер отказался вернуть, остаётся в списке возвращаемых', async () => {
+  const store = new MemoryStore();
+  const box = new FakeMailbox();
+  box.seedTrash(2);
+  const svc = service(store);
+  await svc.sweep(box.client, 'test@mail.local', TRASH, [1, 2], 7);
+
+  // Ящик у квоты: MOVE отвечает отказом, а не исключением.
+  box.refuseMoves = true;
+  const result = await svc.restore(
+    box.client,
+    'test@mail.local',
+    store.rows.map((r) => r.id),
+  );
+
+  assert.equal(result.restored, 0, 'сервер не перенёс ни одного письма — обещать возврат нельзя');
+  assert.equal(result.failed, 2);
+  assert.equal(box.folders.get('Recovery')!.length, 2, 'письма и правда остались на месте');
+  assert.equal(box.folders.get('Trash')!.length, 0);
+  assert.ok(
+    store.rows.every((r) => r.state === 'pending'),
+    'закрытая запись = письмо в скрытой папке, невидимое всем и вечное',
+  );
+
+  // Отказ прошёл — повторить можно той же кнопкой, письма на месте.
+  box.refuseMoves = false;
+  const again = await svc.restore(
+    box.client,
+    'test@mail.local',
+    store.rows.map((r) => r.id),
+  );
+  assert.equal(again.restored, 2);
+  assert.equal(box.folders.get('Trash')!.length, 2);
+});
+
+/*
+ * «Удалить всё сейчас» отчитывалось об удалении писем, которые остались.
+ *
+ * `messageDelete` (EXPUNGE) у imapflow при неудаче тоже возвращает
+ * `false`, а не бросает; try/catch вокруг ловил только исключения. Запись
+ * закрывалась как 'purged', человек читал «Удалено окончательно: N» — и
+ * место в ящике не освобождалось. Тем же путём идёт удаление по сроку,
+ * поэтому такие письма не удалялись уже никогда: их запись закрыта, и
+ * следующий проход работника их не выберет.
+ */
+void test('письма, которые сервер отказался удалить, не считаются удалёнными', async () => {
+  const store = new MemoryStore();
+  const box = new FakeMailbox();
+  box.seedTrash(3);
+  const svc = service(store, box);
+  await svc.sweep(box.client, 'test@mail.local', TRASH, [1, 2, 3], 7);
+
+  box.refuseDeletes = true;
+  const result = await svc.purgeNow(box.client, 'test@mail.local', 'all');
+
+  assert.equal(result.purged, 0, 'ответ «удалено N» о письмах, которые на месте, — ложь');
+  assert.equal(result.failed, 3);
+  assert.equal(box.folders.get('Recovery')!.length, 3, 'письма никуда не делись');
+  assert.deepEqual(
+    await svc.totals('test@mail.local'),
+    { count: 3, bytes: 1000 + 2000 + 3000 },
+    'квота не освободилась, и раздел обязан показывать это тем же числом',
+  );
+
+  // Записи живы — значит, сработает и повтор, и удаление по сроку.
+  box.refuseDeletes = false;
+  assert.equal((await svc.purgeNow(box.client, 'test@mail.local', 'all')).purged, 3);
+});
+
+/*
+ * Тот же отказ у работника: срок вышел, а сервер удалить не смог.
+ * Запись обязана остаться живой — иначе письмо не удалит уже ничто.
+ */
+void test('несостоявшееся удаление по сроку остаётся в очереди на следующий проход', async () => {
+  const store = new MemoryStore();
+  const box = new FakeMailbox();
+  box.seedTrash(1);
+  const svc = service(store, box);
+  await svc.sweep(box.client, 'test@mail.local', TRASH, [1], 7);
+  store.rows[0]!.purgeAt = new Date('2026-08-01T00:00:00Z').toISOString();
+
+  box.refuseDeletes = true;
+  assert.equal(await svc.tick(new Date('2026-08-06T00:00:00Z')), 0);
+  assert.equal(store.rows[0]!.state, 'pending', 'закрытую запись работник больше не возьмёт');
+  assert.equal(store.rows[0]!.attempts, 1);
+  assert.equal(box.folders.get('Recovery')!.length, 1);
+
+  box.refuseDeletes = false;
+  assert.equal(await svc.tick(new Date('2026-08-06T00:00:00Z')), 1);
+  assert.equal(store.rows[0]!.state, 'purged');
 });
 
 test('работник удаляет только то, чему вышел срок', async () => {

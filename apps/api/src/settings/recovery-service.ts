@@ -33,7 +33,7 @@ import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
 import type { AppConfig } from '../config.js';
 import { ApiError, UpstreamUnavailableError } from '../errors.js';
-import { existingUids } from '../imap/service.js';
+import { deleteUids, existingUids, moveUids } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { masterLogin } from '../mail/snooze-service.js';
 import type { SettingsConfig } from './config.js';
@@ -343,42 +343,84 @@ export class RecoveryService {
    * Ровно в корзину, а не в исходную папку письма: человек нажал
    * «восстановить» на том, что сам же выбросил, — он ждёт письмо там,
    * откуда оно исчезло, и уже оттуда решает, куда его положить.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Перенос делался голым `client.messageMove`, а его ответ выбрасывался.
+   * imapflow при отказе MOVE исключения не бросает — он возвращает
+   * `false` (та же ловушка, ради которой заведены moveUids, deleteUids и
+   * storeFlags), и отказать он может буднично: ящик у квоты
+   * (`NO [OVERQUOTA]`), корзину удалили из соседней вкладки.
+   *
+   * ПОЧЕМУ ЭТО БЫЛА ПОТЕРЯ ПИСЬМА. Сразу за переносом стояло
+   * `closeRecovery(row.id, 'restored')` — запись выводилась из состояния
+   * 'pending', а по 'pending' работают ВСЕ выборки: и список раздела, и
+   * поиск по номерам, и работник удаления по сроку. Письмо при этом
+   * оставалось в служебной папке «Recovery», спрятанной из дерева папок.
+   * Итог: ответ «Восстановлено писем: N», строка в журнале — а письма
+   * нет ни в корзине, ни в разделе восстановления, ни в дереве. Его уже
+   * не найдёт и не удалит никто, включая работника по сроку: оно ест
+   * квоту вечно.
+   *
+   * Теперь перенос идёт через moveUids (он читает `false` и бросает), а
+   * запись закрывается ТОЛЬКО после подтверждённого переноса. Отказ по
+   * одному письму не останавливает остальные — запись остаётся живой,
+   * причина ложится в last_error, повторить можно той же кнопкой.
    */
   async restore(
     client: ImapFlow,
     accountEmail: string,
     ids: number[],
-  ): Promise<{ restored: number; missing: number }> {
+  ): Promise<{ restored: number; missing: number; failed: number }> {
     const store = this.#requireStore();
     const rows = await store.findRecovery(accountEmail, ids);
-    if (rows.length === 0) return { restored: 0, missing: ids.length };
+    let restored = 0;
+    /*
+     * Письма, которого человек просил, в списке возвращаемых уже нет:
+     * его вернули из соседней вкладки, удалили или вышел срок. Считаем
+     * это здесь, а не только при пустом ответе базы, — иначе «выбрал 40,
+     * вернулось 12» ничем бы не объяснялось.
+     */
+    let missing = Math.max(ids.length - rows.length, 0);
+    let failed = 0;
+    if (rows.length === 0) return { restored, missing, failed };
 
     const folder = await ensureRecoveryFolder(client);
-    let restored = 0;
-    let missing = 0;
 
     const lock = await client.getMailboxLock(folder.path);
     try {
       for (const row of rows) {
-        const uid = await locateRecovered(client, folder, row);
-        if (uid === null) {
-          // Письма в служебной папке больше нет: человек убрал его
-          // почтовой программой. Закрываем запись молча — падать из-за
-          // письма, которое он сам и убрал, значит остановить возврат
-          // всех остальных.
-          await store.closeRecovery(row.id, 'gone');
-          missing += 1;
-          continue;
+        try {
+          const uid = await locateRecovered(client, folder, row);
+          if (uid === null) {
+            // Письма в служебной папке больше нет: человек убрал его
+            // почтовой программой. Закрываем запись молча — падать из-за
+            // письма, которое он сам и убрал, значит остановить возврат
+            // всех остальных.
+            await store.closeRecovery(row.id, 'gone');
+            missing += 1;
+            continue;
+          }
+          const target = await resolveRestorePath(client, row.originPath);
+          await moveUids(client, [uid], target);
+          await store.closeRecovery(row.id, 'restored');
+          restored += 1;
+        } catch (err) {
+          /*
+           * Письмо осталось в служебной папке, и запись о нём обязана
+           * остаться живой: пока она 'pending', письмо видно в разделе,
+           * его можно вернуть повторно, и работник удаления по сроку его
+           * найдёт. Закрыть её здесь значило бы потерять письмо навсегда.
+           */
+          await store.markRecoveryAttempt(row.id, err instanceof Error ? err.message : String(err));
+          failed += 1;
         }
-        const target = await resolveRestorePath(client, row.originPath);
-        await client.messageMove([uid], target, { uid: true });
-        await store.closeRecovery(row.id, 'restored');
-        restored += 1;
       }
     } finally {
       lock.release();
     }
-    return { restored, missing };
+    return { restored, missing, failed };
   }
 
   /**
@@ -392,26 +434,45 @@ export class RecoveryService {
     client: ImapFlow,
     accountEmail: string,
     ids: number[] | 'all',
-  ): Promise<{ purged: number }> {
+  ): Promise<{ purged: number; failed: number }> {
     const store = this.#requireStore();
     const rows =
       ids === 'all'
         ? await store.listRecovery(accountEmail, 100_000)
         : await store.findRecovery(accountEmail, ids);
-    if (rows.length === 0) return { purged: 0 };
+    if (rows.length === 0) return { purged: 0, failed: 0 };
     const folder = await ensureRecoveryFolder(client);
-    const purged = await this.#purgeRows(client, folder, store, rows);
-    return { purged };
+    return this.#purgeRows(client, folder, store, rows);
   }
 
-  /** Общая часть немедленного удаления и удаления по сроку. */
+  /**
+   * Общая часть немедленного удаления и удаления по сроку.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Удаление делалось голым `client.messageDelete`, а его ответ никто не
+   * читал. imapflow при неудаче EXPUNGE не бросает — он возвращает
+   * `false`, и try/catch вокруг ловил только исключения. Запись после
+   * этого закрывалась как 'purged', число росло, и человек получал
+   * «Удалено окончательно: N» — при том что письма остались на месте, а
+   * место в ящике не освободилось. Тем же путём идёт и удаление по
+   * сроку, поэтому такие письма не удалялись уже никогда: их запись
+   * закрыта, и следующий проход работника их не выберет.
+   *
+   * Теперь удаление идёт через deleteUids (он читает `false` и бросает),
+   * а запись закрывается только после подтверждённого удаления. Отказ по
+   * одному письму не останавливает остальные: запись остаётся живой,
+   * причина ложится в last_error, и следующий проход попробует снова.
+   */
   async #purgeRows(
     client: ImapFlow,
     folder: Folder,
     store: OwnerStore,
     rows: readonly RecoveryRow[],
-  ): Promise<number> {
+  ): Promise<{ purged: number; failed: number }> {
     let purged = 0;
+    let failed = 0;
     const lock = await client.getMailboxLock(folder.path);
     try {
       for (const row of rows) {
@@ -421,19 +482,20 @@ export class RecoveryService {
             await store.closeRecovery(row.id, 'gone');
             continue;
           }
-          await client.messageDelete([uid], { uid: true });
+          await deleteUids(client, [uid]);
           await store.closeRecovery(row.id, 'purged');
           purged += 1;
         } catch (err) {
           // Одно неудавшееся письмо не должно останавливать остальные:
           // запись остаётся живой и попадёт в следующий проход.
           await store.markRecoveryAttempt(row.id, err instanceof Error ? err.message : String(err));
+          failed += 1;
         }
       }
     } finally {
       lock.release();
     }
-    return purged;
+    return { purged, failed };
   }
 
   /* ---------------------------------------------------------------- */
@@ -510,7 +572,7 @@ export class RecoveryService {
         try {
           client = await this.#connect(email);
           const folder = await ensureRecoveryFolder(client);
-          purged += await this.#purgeRows(client, folder, store, rows);
+          purged += (await this.#purgeRows(client, folder, store, rows)).purged;
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           for (const row of rows) {

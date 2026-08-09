@@ -443,10 +443,18 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
     const result = await pool.withClient(session.email, session.password, (client) =>
       ctx.recovery.restore(client, session.email, ids),
     );
+    /*
+     * В журнал идут и потери, а не только успех.
+     *
+     * Раньше писалось одно `restored`, и запись «Восстановлено писем: 12»
+     * после выбора сорока выглядела нормальной строкой — по ней нельзя
+     * было понять, что двадцать восемь писем не вернулись. Журнал доступа
+     * человек читает именно тогда, когда разбирается, куда что делось.
+     */
     app.deps.accessLog?.record({
       accountEmail: session.email,
       kind: 'trash',
-      detail: `Восстановлено писем: ${result.restored}`,
+      detail: describeRestore(ids.length, result),
       ...originOf(request),
     });
     return result;
@@ -465,15 +473,30 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
     app.deps.accessLog?.record({
       accountEmail: session.email,
       kind: 'trash',
-      detail: `Удалено окончательно: ${result.purged}`,
+      detail:
+        result.failed > 0
+          ? `Удалено окончательно: ${result.purged}; не удалось удалить: ${result.failed}`
+          : `Удалено окончательно: ${result.purged}`,
       ...originOf(request),
     });
     logger.info(
-      { account: session.email, purged: result.purged },
+      { account: session.email, purged: result.purged, failed: result.failed },
       'Очищенные письма удалены по просьбе человека',
     );
     return result;
   });
+}
+
+/** Строка журнала о возврате: сколько просили, сколько вернулось и что нет. */
+function describeRestore(
+  asked: number,
+  result: { restored: number; missing: number; failed: number },
+): string {
+  const tail: string[] = [];
+  if (result.missing > 0) tail.push(`уже не было в ящике: ${result.missing}`);
+  if (result.failed > 0) tail.push(`не удалось вернуть: ${result.failed}`);
+  const head = `Восстановлено писем: ${result.restored} из ${asked}`;
+  return tail.length === 0 ? head : `${head} (${tail.join(', ')})`;
 }
 
 /** Событие в том виде, в каком его читает интерфейс. */

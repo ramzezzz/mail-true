@@ -205,10 +205,22 @@ export const ownerApi = {
   setRecoveryDays: (days: number): Promise<{ ok: boolean; days: number }> =>
     apiFetch('/api/settings/recovery', { method: 'PUT', body: JSON.stringify({ days }) }),
 
-  restoreMessages: (ids: number[]): Promise<{ restored: number; missing: number }> =>
+  /**
+   * Вернуть выбранные письма в корзину.
+   *
+   * Ответ читается целиком, а не ради одного `restored`: вернуться может
+   * не всё. `missing` — писем уже нет в ящике (унесли почтовой программой,
+   * вернули из соседней вкладки), `failed` — почтовый сервер отказал
+   * (кончилось место, папка исчезла). Раньше результат мутации не читался
+   * вовсе, и «выбрал 40, вернулось 12» выглядело на экране как полный
+   * успех: список просто становился короче.
+   */
+  restoreMessages: (
+    ids: number[],
+  ): Promise<{ restored: number; missing: number; failed: number }> =>
     apiFetch('/api/settings/recovery/restore', { method: 'POST', body: JSON.stringify({ ids }) }),
 
-  purgeMessages: (ids: number[] | 'all'): Promise<{ purged: number }> =>
+  purgeMessages: (ids: number[] | 'all'): Promise<{ purged: number; failed: number }> =>
     apiFetch('/api/settings/recovery/purge', {
       method: 'POST',
       body: JSON.stringify(ids === 'all' ? { all: true } : { ids }),

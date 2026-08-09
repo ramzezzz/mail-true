@@ -38,7 +38,7 @@ import * as ownerQueries from '../src/settings/ownerQueries';
 import { SettingsLayout } from '../src/settings/SettingsLayout';
 import { AccessLogPage } from '../src/pages/settings/AccessLogPage';
 import { ExportPage } from '../src/pages/settings/ExportPage';
-import { RecoveryPage } from '../src/pages/settings/RecoveryPage';
+import { RecoveryPage, restoreNote } from '../src/pages/settings/RecoveryPage';
 
 /* ------------------------------------------------------------------ */
 /* Заготовки состояний                                                  */
@@ -304,6 +304,35 @@ describe('выгрузка ящика', () => {
     expect(host.textContent).toContain('Отменить');
   });
 
+  /*
+   * Готовый архив, в который вошла НЕ вся почта.
+   *
+   * Сервер теперь кладёт в задание оговорку: какие папки прочитать не
+   * удалось и остановился ли архив на потолке размера. Показывать её
+   * обязательно — «Готово» и полная полоска читаются как «вся почта у
+   * вас», и без этой строки человек уносит неполный архив, не зная об
+   * этом. Раньше поле `error` показывалось только у сорвавшегося задания.
+   */
+  it('о неполном архиве сказано рядом с кнопкой «Скачать»', () => {
+    stubSections({
+      exports: {
+        jobs: [
+          job({
+            state: 'ready',
+            totalMessages: 10,
+            doneMessages: 8,
+            fileBytes: 2048,
+            error: 'Не удалось прочитать 1 папку (Договоры) — их писем в архиве нет.',
+          }),
+        ],
+      },
+    });
+    render(<ExportPage />);
+    expect(host.textContent).toContain('Договоры');
+    // И архив при этом остаётся скачиваемым: он собран и он лучшее, что есть.
+    expect(host.querySelector('a[download]')).not.toBeNull();
+  });
+
   it('живым считается только незаконченное задание', () => {
     expect(isExportLive(job({ state: 'queued' }))).toBe(true);
     expect(isExportLive(job({ state: 'running' }))).toBe(true);
@@ -330,6 +359,27 @@ describe('восстановление писем', () => {
     stubSections({ recovery: { scheduledPurge: false } });
     render(<RecoveryPage />);
     expect(host.textContent).toContain('не может удалять письма по сроку');
+  });
+
+  /*
+   * Возврат может вернуть не всё, и об этом надо сказать числом.
+   *
+   * Сервер считает потери с самого начала (`missing` — письма уже нет в
+   * ящике, `failed` — почтовый сервер отказал), а экран результат мутации
+   * не читал вовсе: список просто становился короче. Выбрал сорок,
+   * вернулось двенадцать — ни числа, ни предупреждения.
+   */
+  it('о письмах, которые не вернулись, сказано числом', () => {
+    expect(restoreNote(40, { restored: 12, missing: 27, failed: 1 })).toBe(
+      'Вернулось в корзину 12 писем из 40: 27 писем уже нет в ящике; ' +
+        '1 письмо не отдал почтовый сервер — попробуйте ещё раз.',
+    );
+  });
+
+  it('когда вернулось всё, лишних слов нет', () => {
+    // Короткий список и есть подтверждение: сообщение «всё хорошо»
+    // после каждого действия человек перестаёт читать через день.
+    expect(restoreNote(3, { restored: 3, missing: 0, failed: 0 })).toBeNull();
   });
 
   it('потолок сервера ограничивает выбор сроков, а не только запрос', () => {

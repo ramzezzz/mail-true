@@ -72,6 +72,40 @@ function dayTitle(days: number): string {
   return `${days} ${plural(days, 'день', 'дня', 'дней')}`;
 }
 
+/**
+ * Что сказать после возврата, если вернулось не всё.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Сервер считает потери и честно их отдаёт (`missing` — письма уже нет в
+ * ящике, `failed` — почтовый сервер отказал), а экран результат мутации
+ * не читал вовсе: список просто становился короче. Выбрал сорок, вернулось
+ * двенадцать — ни числа, ни предупреждения; человек уходил уверенный, что
+ * письма в корзине, и обнаруживал пропажу, когда искать было уже негде.
+ *
+ * `null` означает «вернулось всё» — тогда молчим: короткий список и есть
+ * подтверждение.
+ */
+export function restoreNote(
+  asked: number,
+  result: { restored: number; missing: number; failed: number },
+): string | null {
+  if (result.missing === 0 && result.failed === 0) return null;
+  const why: string[] = [];
+  if (result.missing > 0) {
+    why.push(
+      `${result.missing} ${plural(result.missing, 'письма', 'писем', 'писем')} уже нет в ящике`,
+    );
+  }
+  if (result.failed > 0) {
+    why.push(
+      `${result.failed} ${plural(result.failed, 'письмо', 'письма', 'писем')} не отдал почтовый сервер — попробуйте ещё раз`,
+    );
+  }
+  return `Вернулось в корзину ${result.restored} ${plural(result.restored, 'письмо', 'письма', 'писем')} из ${asked}: ${why.join('; ')}.`;
+}
+
 export function RecoveryPage() {
   const state = useRecovery();
   const setDays = useSetRecoveryDays();
@@ -108,6 +142,14 @@ export function RecoveryPage() {
 
   const chosen = [...selected];
   const choices = DAY_CHOICES.filter((value) => value <= maxDays);
+  /*
+   * Итог последнего возврата: показываем ровно тогда, когда вернулось не
+   * всё. `variables` — это тот самый список, который человек выбрал, то
+   * есть «из скольких» берётся из его же нажатия, а не из догадки.
+   */
+  const restoreOutcome = restore.data
+    ? restoreNote(restore.variables?.length ?? 0, restore.data)
+    : null;
 
   return (
     <>
@@ -133,6 +175,20 @@ export function RecoveryPage() {
       {available && !loading && (
         <>
           {error && <SettingsError>{actionErrorText('Не получилось', error)}</SettingsError>}
+
+          {restoreOutcome && <SettingsError>{restoreOutcome}</SettingsError>}
+
+          {/*
+            Удаление, которого не произошло, обязано быть видно.
+            Почтовый сервер отказывает молча (imapflow возвращает `false`,
+            а не бросает), и раньше человек получал «удалено» на письмах,
+            которые остались в ящике и продолжали есть его квоту.
+          */}
+          {purge.data && purge.data.failed > 0 && (
+            <SettingsError>
+              {`Не удалось удалить ${String(purge.data.failed)} ${plural(purge.data.failed, 'письмо', 'письма', 'писем')}: почтовый сервер отказал. Они остались в ящике и ждут своего срока — попробуйте ещё раз.`}
+            </SettingsError>
+          )}
 
           <div className={styles.summary}>
             <div>
