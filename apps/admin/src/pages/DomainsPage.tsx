@@ -270,11 +270,18 @@ export function DomainsPage() {
         <DeleteDomainModal
           domain={removing}
           onClose={() => setRemoving(null)}
-          onDeleted={(name, aliasesRemoved) => {
+          onDeleted={(name, aliasesRemoved, aliasesLogged) => {
             setFlash(
               aliasesRemoved > 0
                 ? `Домен ${name} удалён вместе с ${String(aliasesRemoved)} алиас(ами). ` +
-                    'Список удалённых алиасов остался в журнале аудита.'
+                    // Обещание «список остался в журнале» даётся, только
+                    // если он там ЦЕЛИКОМ. Обрезанный список — это повод
+                    // сказать, сколько имён в него не поместилось, а не
+                    // повторить обещание, которое перестало быть правдой.
+                    (aliasesLogged >= aliasesRemoved
+                      ? 'Список удалённых алиасов остался в журнале аудита.'
+                      : `В журнал аудита попали ${String(aliasesLogged)} из них — ` +
+                        'остальные имена восстановить неоткуда.')
                 : `Домен ${name} удалён.`,
             );
             setRemoving(null);
@@ -314,7 +321,7 @@ function DeleteDomainModal({
 }: {
   domain: Domain;
   onClose: () => void;
-  onDeleted: (name: string, aliasesRemoved: number) => void;
+  onDeleted: (name: string, aliasesRemoved: number, aliasesLogged: number) => void;
 }) {
   const [withAliases, setWithAliases] = useState(false);
   const hasBoxes = domain.userCount > 0;
@@ -322,7 +329,7 @@ function DeleteDomainModal({
 
   const remove = useMutation({
     mutationFn: () => api.deleteDomain(domain.id, withAliases),
-    onSuccess: (data) => onDeleted(domain.name, data.aliasesRemoved),
+    onSuccess: (data) => onDeleted(domain.name, data.aliasesRemoved, data.aliasesLogged),
   });
 
   return (

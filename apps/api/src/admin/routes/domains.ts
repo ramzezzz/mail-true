@@ -303,15 +303,40 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
-      // Список забираем ДО удаления: после каскада восстановить его неоткуда.
-      const doomed =
-        aliasCount > 0
-          ? (await ctx.db.listAliases({ domainId: id, limit: 500, offset: 0 })).rows.map((a) => ({
-              source: a.source,
-              destination: a.destination,
-              active: a.active,
-            }))
-          : [];
+      /*
+       * Список забираем ДО удаления: после каскада восстановить его
+       * неоткуда. Порциями, а не первыми пятьюстами.
+       *
+       * Отказ выше обещает: «повторите с force=true — тогда ПОЛНЫЙ список
+       * удалённых алиасов попадёт в журнал аудита». Раньше бралось ровно
+       * 500 строк, поэтому у домена с 1200 алиасами 700 маршрутов
+       * исчезали без следа, а ответ сообщал «удалено 500» — просто
+       * неверное число. Восстановить их нечем: строк уже нет.
+       *
+       * Предел всё же есть, но на два порядка выше и назван вслух ниже:
+       * журнал аудита — не место для мегабайтного списка, и если домен
+       * действительно такого размера, в записи будет сказано, сколько
+       * имён в неё не поместилось.
+       */
+      const AUDIT_ALIAS_LIMIT = 20_000;
+      const doomed: Array<{ source: string; destination: string; active: boolean }> = [];
+      if (aliasCount > 0) {
+        const page = 500;
+        for (let offset = 0; offset < Math.min(aliasCount, AUDIT_ALIAS_LIMIT); offset += page) {
+          const chunk = await ctx.db.listAliases({ domainId: id, limit: page, offset });
+          if (chunk.rows.length === 0) break;
+          for (const alias of chunk.rows) {
+            doomed.push({
+              source: alias.source,
+              destination: alias.destination,
+              active: alias.active,
+            });
+          }
+        }
+      }
+      // Сколько имён не попало в журнал. Ноль — обычный случай; всё, что
+      // больше, обязано быть видно, иначе список снова начнёт врать.
+      const notLogged = Math.max(0, aliasCount - doomed.length);
 
       await ctx.db.deleteDomain(id);
       await audit(ctx, request, {
@@ -326,10 +351,21 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
           alias_count: aliasCount,
           // Уничтоженные каскадом алиасы — единственный их след после удаления.
           aliases_removed: doomed,
+          // Если список пришлось обрезать, это сказано числом, а не
+          // умолчано: иначе запись в аудите выглядит полной, не будучи ею.
+          aliases_not_logged: notLogged,
         },
-        after: { name: null, alias_count: 0, aliases_removed: [], forced: force },
+        after: {
+          name: null,
+          alias_count: 0,
+          aliases_removed: [],
+          aliases_not_logged: 0,
+          forced: force,
+        },
       });
-      return { ok: true, aliasesRemoved: doomed.length };
+      // Отвечаем настоящим числом удалённого, а не длиной списка: они
+      // расходятся ровно тогда, когда список обрезан.
+      return { ok: true, aliasesRemoved: aliasCount, aliasesLogged: doomed.length };
     },
   );
 

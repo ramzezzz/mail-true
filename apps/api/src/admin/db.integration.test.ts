@@ -97,6 +97,53 @@ void test('новый домен сразу настраивается для п
   });
 });
 
+void test('ключ DKIM можно стереть, а не только заменить', { skip }, async () => {
+  /*
+   * Стереть скомпрометированный или устаревший ключ из панели было
+   * нельзя вообще: все поля писались как `coalesce($n, прежнее)`, то есть
+   * null означал «оставь как было». А null приходит и от того, кто просит
+   * СТЕРЕТЬ — схема маршрута объявляет это поле nullable именно для
+   * такого случая. Ответ при этом 200, в аудите before равно after,
+   * значение на месте.
+   *
+   * Проверяется на настоящей базе, потому что дефект был в SQL: подделка
+   * хранилища его бы не показала.
+   */
+  await withDb(async (admin) => {
+    const domain = await admin.resolveDomain(DOMAIN, true);
+    assert.ok(domain);
+
+    await admin.saveDomainSettings(domain.id, {
+      dkimPublicKey: 'MIIBIjANBgkq-старый-ключ',
+      dkimDnsRecord: 'mail._domainkey IN TXT "v=DKIM1; p=MIIBIjANBgkq-старый-ключ"',
+    });
+    const filled = await admin.findDomainById(domain.id);
+    assert.equal(filled?.dkim_public_key, 'MIIBIjANBgkq-старый-ключ');
+
+    // Поля, которых в patch нет, трогать нельзя — это «не присылали».
+    await admin.saveDomainSettings(domain.id, { notes: 'заметка' });
+    const kept = await admin.findDomainById(domain.id);
+    assert.equal(kept?.dkim_public_key, 'MIIBIjANBgkq-старый-ключ', 'ключ пропал сам собой');
+
+    // А присланный null — это «сотри».
+    await admin.saveDomainSettings(domain.id, { dkimPublicKey: null, dkimDnsRecord: null });
+    const cleared = await admin.findDomainById(domain.id);
+    assert.equal(cleared?.dkim_public_key, null, 'ключ DKIM не стёрся');
+    assert.equal(
+      cleared?.dkim_dns_record,
+      null,
+      'готовая запись осталась с прежним ключом — её же и предложат опубликовать',
+    );
+    // Заметка в DomainRow не выводится (её показывает другой раздел),
+    // поэтому спрашиваем базу напрямую: важно, что чужое поле уцелело.
+    const notes = await admin.query<{ notes: string | null }>(
+      'SELECT notes FROM domain_settings WHERE domain_id = $1',
+      [domain.id],
+    );
+    assert.equal(notes[0]?.notes, 'заметка', 'заодно стёрлось то, чего не просили');
+  });
+});
+
 void test('удаление ящика убирает его строки из служебных таблиц', { skip }, async () => {
   await withDb(async (admin) => {
     const domain = await admin.resolveDomain(DOMAIN, true);

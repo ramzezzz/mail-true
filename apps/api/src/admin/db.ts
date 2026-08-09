@@ -987,10 +987,11 @@ export class AdminDb {
       `INSERT INTO domain_settings (domain_id, dkim_selector, dkim_public_key, dkim_dns_record, notes)
        VALUES ($1, coalesce($2, 'mail'), $3, $4, $5)
        ON CONFLICT (domain_id) DO UPDATE
-          SET dkim_selector   = coalesce($2, domain_settings.dkim_selector),
-              dkim_public_key = coalesce($3, domain_settings.dkim_public_key),
-              dkim_dns_record = coalesce($4, domain_settings.dkim_dns_record),
-              notes           = coalesce($5, domain_settings.notes),
+          SET dkim_selector   = CASE WHEN $6 THEN coalesce($2, domain_settings.dkim_selector)
+                                     ELSE domain_settings.dkim_selector END,
+              dkim_public_key = CASE WHEN $7 THEN $3 ELSE domain_settings.dkim_public_key END,
+              dkim_dns_record = CASE WHEN $8 THEN $4 ELSE domain_settings.dkim_dns_record END,
+              notes           = CASE WHEN $9 THEN $5 ELSE domain_settings.notes END,
               updated_at = now()`,
       [
         domainId,
@@ -998,6 +999,23 @@ export class AdminDb {
         patch.dkimPublicKey ?? null,
         patch.dkimDnsRecord ?? null,
         patch.notes ?? null,
+        /*
+         * «Не трогать» и «стереть» — разные вещи, и coalesce их путал.
+         *
+         * Раньше все четыре поля писались как `coalesce($n, прежнее)`, то
+         * есть null означал «оставь как было». Но null приходит и от того,
+         * кто просит СТЕРЕТЬ: схема маршрута объявляет `dkimPublicKey` и
+         * `notes` nullable именно для этого. Убрать скомпрометированный
+         * или устаревший ключ DKIM из панели было нельзя вообще — ответ
+         * 200, в аудите before равно after, значение на месте.
+         *
+         * Теперь «не трогать» выражается ОТСУТСТВИЕМ поля (undefined), а
+         * null пишется как null.
+         */
+        patch.dkimSelector !== undefined,
+        patch.dkimPublicKey !== undefined,
+        patch.dkimDnsRecord !== undefined,
+        patch.notes !== undefined,
       ],
     );
   }

@@ -425,13 +425,73 @@ export function spfAllowsHost(
   publicIpv4?: string,
 ): 'yes' | 'no' | 'unclear' {
   const target = fqdn(host);
-  for (const m of record.mechanisms) {
-    if (m === 'mx' || m === `mx:${target}`) return 'yes';
+  const domain = target.slice(target.indexOf('.') + 1);
+  for (const raw of record.mechanisms) {
+    /*
+     * Квалификатор перед механизмом законен и распространён.
+     *
+     * «+mx» — то же самое «mx», просто с явно написанным плюсом (он и так
+     * подразумевается). Сравнение шло посимвольно, поэтому запись
+     * `v=spf1 +mx ~all` объявлялась ошибочной с текстом «в записи нет ни
+     * mx, ни a:host» — при том что mx в ней стоит.
+     *
+     * «-», «~» и «?» перед механизмом означают обратное — «этому НЕ
+     * разрешено» или «сомнительно», — поэтому такие механизмы разрешением
+     * не считаются и пропускаются.
+     */
+    const qualifier = /^[-~?+]/.test(raw) ? raw[0] : '+';
+    const m = /^[-~?+]/.test(raw) ? raw.slice(1) : raw;
+    if (qualifier !== '+') continue;
+
+    if (m === 'mx') return 'yes';
+    /*
+     * У «mx:» аргумент — ДОМЕН, чьи записи MX берутся, а не имя сервера.
+     * Сравнение с именем сервера (`mx:mail.example.ru`) не совпадало с
+     * правильной формой `mx:example.ru`, и корректная запись считалась
+     * ошибочной. Принимаем оба: и домен, и само имя сервера — второе
+     * встречается, когда MX домена указывает прямо на него.
+     */
+    if (m === `mx:${target}` || m === `mx:${domain}`) return 'yes';
     if (m === `a:${target}`) return 'yes';
-    if (publicIpv4 && (m === `ip4:${publicIpv4}` || m.startsWith(`ip4:${publicIpv4}/`)))
-      return 'yes';
+    if (publicIpv4 && ip4MechanismCovers(m, publicIpv4)) return 'yes';
   }
   return record.delegates ? 'unclear' : 'no';
+}
+
+/**
+ * Покрывает ли механизм `ip4:` наш адрес — с учётом маски.
+ *
+ * Раньше сеть сравнивалась строкой, поэтому `ip4:203.0.113.0/24` при
+ * адресе 203.0.113.10 не совпадало ни с чем: запись, разрешающая целую
+ * сеть вместе с нашим сервером, объявлялась ошибочной. Так пишут все, у
+ * кого сервер не один.
+ */
+function ip4MechanismCovers(mechanism: string, ip: string): boolean {
+  if (!mechanism.startsWith('ip4:')) return false;
+  const value = mechanism.slice(4);
+  const [network = '', maskText] = value.split('/');
+  if (maskText === undefined) return network === ip;
+
+  const bits = Number(maskText);
+  if (!Number.isInteger(bits) || bits < 0 || bits > 32) return false;
+  const asNumber = (text: string): number | null => {
+    const parts = text.split('.');
+    if (parts.length !== 4) return null;
+    let result = 0;
+    for (const part of parts) {
+      if (!/^\d{1,3}$/.test(part)) return null;
+      const byte = Number(part);
+      if (byte > 255) return null;
+      result = result * 256 + byte;
+    }
+    return result >>> 0;
+  };
+  const left = asNumber(network);
+  const right = asNumber(ip);
+  if (left === null || right === null) return false;
+  // Маска /0 — «весь интернет»: сдвиг на 32 в JS не работает, считаем явно.
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  return (left & mask) === (right & mask);
 }
 
 /** Разбор TXT-записи DMARC на теги. */

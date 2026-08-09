@@ -161,6 +161,50 @@ test('SPF: наш сервер разрешён через mx, через a: и 
   );
 });
 
+test('SPF: правильные записи не объявляются ошибочными', () => {
+  /*
+   * Три законные и распространённые формы, каждая из которых считалась
+   * ошибкой. Цена — красная строка «в записи нет ни mx, ни a:host» на
+   * записи, где mx стоит, и поход администратора править то, что верно.
+   */
+  const host = 'mail.example.ru';
+  // Плюс перед механизмом подразумевается и часто пишется явно.
+  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 +mx ~all'), host), 'yes');
+  // У «mx:» аргумент — домен, чьи MX берутся, а не имя сервера.
+  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 mx:example.ru ~all'), host), 'yes');
+  // Сеть, содержащая наш адрес: так пишут все, у кого сервер не один.
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 ip4:203.0.113.0/24 -all'), host, '203.0.113.10'),
+    'yes',
+  );
+});
+
+test('SPF: отрицающий квалификатор не считается разрешением', () => {
+  // «-mx» означает «этому НЕ разрешено». Принять его за разрешение было бы
+  // хуже прежнего дефекта: панель сказала бы «всё хорошо» там, где
+  // отправка с нашего сервера запрещена самой записью.
+  const host = 'mail.example.ru';
+  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 -mx ~all'), host), 'no');
+  assert.equal(spfAllowsHost(parseSpfRecord('v=spf1 ~a:mail.example.ru -all'), host), 'no');
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 ?ip4:203.0.113.0/24 -all'), host, '203.0.113.10'),
+    'no',
+  );
+});
+
+test('SPF: чужая сеть не считается нашей', () => {
+  const host = 'mail.example.ru';
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 ip4:198.51.100.0/24 -all'), host, '203.0.113.10'),
+    'no',
+  );
+  // Маска шире адреса, но сеть другая — совпадать не должно.
+  assert.equal(
+    spfAllowsHost(parseSpfRecord('v=spf1 ip4:203.0.112.0/24 -all'), host, '203.0.113.10'),
+    'no',
+  );
+});
+
 test('SPF: чужая запись через include — «убедиться нельзя», а не «разрешено»', () => {
   // Молчаливое «всё хорошо» здесь опаснее прямой ошибки: отправка идёт
   // с нашего сервера, а разрешение выдано чужому.

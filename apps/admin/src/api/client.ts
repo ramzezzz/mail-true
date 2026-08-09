@@ -365,7 +365,7 @@ export const api = {
    * попадает в журнал аудита.
    */
   deleteDomain: (id: number, force = false) =>
-    del<{ ok: true; aliasesRemoved: number }>(
+    del<{ ok: true; aliasesRemoved: number; aliasesLogged: number }>(
       `/domains/${id}${query({ force: force || undefined })}`,
     ),
   dnsCheck: (id: number) => post<DnsReport>(`/domains/${id}/dns-check`),
