@@ -166,7 +166,18 @@ export function SearchPage() {
 
         {!search.isPending && (
           <span className={styles.total} aria-live="polite">
-            Найдено: {visible.length}
+            {/*
+              Показываем НАСТОЯЩЕЕ число и честно говорим, что видно не всё.
+              Раньше здесь стояла длина загруженного куска, и «Найдено: 100»
+              на папке с тысячей подходящих писем читалось как итог поиска.
+            */}
+            Найдено: {search.total > visible.length ? search.total : visible.length}
+            {search.truncated && (
+              <span className={styles.totalNote}>
+                {' '}
+                · показаны первые {visible.length}, уточните запрос
+              </span>
+            )}
           </span>
         )}
       </div>

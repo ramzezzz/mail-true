@@ -39,8 +39,14 @@ export interface LabelStore {
   create(accountEmail: string, draft: LabelDraft): Promise<UserLabel>;
   /** Правит имя и цвет. Ключ не трогается — он лежит в письмах. */
   update(accountEmail: string, key: string, patch: LabelPatch): Promise<UserLabel | null>;
-  /** Убирает метку из справочника. Ключевые слова в письмах не трогает. */
-  remove(accountEmail: string, key: string): Promise<UserLabel | null>;
+  /**
+   * Убирает метку из справочника. Ключевые слова в письмах не трогает.
+   *
+   * `purged` — сняли ли ключевое слово с писем. Если нет, ключ обязан
+   * остаться занятым: иначе следующая метка с тем же именем получит его
+   * и окажется на письмах, которых человек ею не помечал.
+   */
+  remove(accountEmail: string, key: string, purged?: boolean): Promise<UserLabel | null>;
 }
 
 interface LabelRow extends QueryResultRow {
@@ -106,7 +112,7 @@ export class LabelsDb implements LabelStore {
   async list(accountEmail: string): Promise<UserLabel[]> {
     const rows = await this.#query<LabelRow>(
       `SELECT label_key, name, color, position FROM mail_labels
-        WHERE lower(account_email) = lower($1)
+        WHERE lower(account_email) = lower($1) AND deleted_at IS NULL
         ORDER BY position, id`,
       [accountEmail],
     );
@@ -114,13 +120,18 @@ export class LabelsDb implements LabelStore {
   }
 
   async create(accountEmail: string, draft: LabelDraft): Promise<UserLabel> {
-    // Ключ подбирается по УЖЕ занятым: две метки «Счета» получат
-    // `mt-scheta` и `mt-scheta-2`, а не откажут человеку в имени.
-    const existing = await this.list(accountEmail);
-    const key = buildLabelKey(
-      draft.name,
-      existing.map((l) => l.key),
-    );
+    /*
+     * Ключ подбирается по УЖЕ занятым: две метки «Счета» получат
+     * `mt-scheta` и `mt-scheta-2`, а не откажут человеку в имени.
+     *
+     * Занятыми считаются и ключи УДАЛЁННЫХ меток. Удаление без снятия с
+     * писем (purge=0) оставляет ключевое слово на письмах — обещание
+     * ровно такое, — и выдать этот ключ заново значит нацепить новую
+     * метку на чужие письма: человек их так не помечал. Ловится это не
+     * только на точном совпадении имени: «Счета» и «Счёта» дают один
+     * ключ (ё → e в транслитерации).
+     */
+    const key = buildLabelKey(draft.name, await this.#takenKeys(accountEmail));
     const rows = await this.#query<LabelRow>(
       `INSERT INTO mail_labels (account_email, label_key, name, color, position)
        VALUES (lower($1), $2, $3, $4,
@@ -162,13 +173,39 @@ export class LabelsDb implements LabelStore {
     return rows[0] ? toLabel(rows[0]) : null;
   }
 
-  async remove(accountEmail: string, key: string): Promise<UserLabel | null> {
-    const rows = await this.#query<LabelRow>(
-      `DELETE FROM mail_labels
-        WHERE lower(account_email) = lower($1) AND label_key = $2
-       RETURNING label_key, name, color, position`,
-      [accountEmail, key],
+  /** Все ключи ящика, включая удалённые метки: их слова ещё на письмах. */
+  async #takenKeys(accountEmail: string): Promise<string[]> {
+    const rows = await this.#query<{ label_key: string }>(
+      `SELECT label_key FROM mail_labels WHERE lower(account_email) = lower($1)`,
+      [accountEmail],
     );
+    return rows.map((row) => row.label_key);
+  }
+
+  /**
+   * Убирает метку из справочника.
+   *
+   * `purged` — сняли ли ключевое слово с самих писем. От этого зависит
+   * судьба строки: если слова на письмах остались, строка помечается
+   * удалённой и ключ остаётся занятым навсегда (иначе следующая метка с
+   * тем же именем получила бы его и оказалась на чужих письмах). Если
+   * снятие прошло полностью, слова нет нигде — строку можно стереть, а
+   * ключ выдавать заново.
+   */
+  async remove(accountEmail: string, key: string, purged = false): Promise<UserLabel | null> {
+    const rows = purged
+      ? await this.#query<LabelRow>(
+          `DELETE FROM mail_labels
+            WHERE lower(account_email) = lower($1) AND label_key = $2
+           RETURNING label_key, name, color, position`,
+          [accountEmail, key],
+        )
+      : await this.#query<LabelRow>(
+          `UPDATE mail_labels SET deleted_at = now()
+            WHERE lower(account_email) = lower($1) AND label_key = $2 AND deleted_at IS NULL
+           RETURNING label_key, name, color, position`,
+          [accountEmail, key],
+        );
     return rows[0] ? toLabel(rows[0]) : null;
   }
 }
@@ -207,7 +244,8 @@ export class MemoryLabelStore implements LabelStore {
     const bucket = this.#bucket(accountEmail);
     const key = buildLabelKey(
       draft.name,
-      bucket.map((l) => l.key),
+      // Ключи удалённых меток тоже заняты: их слова ещё на письмах.
+      [...bucket.map((l) => l.key), ...(this.#retired.get(accountEmail.toLowerCase()) ?? [])],
     );
     const position = bucket.reduce((max, l) => Math.max(max, l.position + 1), 0);
     const label: UserLabel = { key, name: draft.name, color: draft.color, position };
@@ -229,12 +267,20 @@ export class MemoryLabelStore implements LabelStore {
     return next;
   }
 
-  async remove(accountEmail: string, key: string): Promise<UserLabel | null> {
+  /** Ключи удалённых меток: в памяти держим отдельным списком. */
+  readonly #retired = new Map<string, string[]>();
+
+  async remove(accountEmail: string, key: string, purged = false): Promise<UserLabel | null> {
     const bucket = this.#bucket(accountEmail);
     const index = bucket.findIndex((l) => l.key === key);
     const removed = bucket[index];
     if (!removed) return null;
     bucket.splice(index, 1);
+    if (!purged) {
+      // Слово осталось на письмах — ключ занят навсегда.
+      const email = accountEmail.toLowerCase();
+      this.#retired.set(email, [...(this.#retired.get(email) ?? []), key]);
+    }
     return removed;
   }
 }

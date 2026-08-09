@@ -53,6 +53,18 @@ import { buildMutedSieveScript, MUTED_FOLDER_ID, MUTED_MAX_IDS } from '../settin
 interface MuteSource extends ThreadHeaderSource {
   subject: string;
   fromAddress: string;
+  /**
+   * Составной идентификатор письма `${folderId}:${uid}`.
+   *
+   * Нужен затем, чтобы переносить в «Заглушённые» ТОЛЬКО письма тех
+   * переписок, которые в самом деле заглушены. Раньше в перенос уходил
+   * исходный список выделенного, и письмо, которое заглушить нельзя (нет
+   * Message-ID — обычное дело у кривых рассыльщиков) и которое служба
+   * честно пропустила, всё равно уезжало из «Входящих» и помечалось
+   * прочитанным. Вернуть его было нечем: в подборке «Заглушённые» его
+   * нет — она строится по базе, — а ключа переписки не существует.
+   */
+  id: string;
 }
 
 /** Модуль выключен: нет базы или не применена миграция. */
@@ -202,6 +214,8 @@ export class MuteService {
      */
     const groups = groupThreads(sources);
     const written: string[] = [];
+    /** Письма заглушённых переписок — только их и уносим из «Входящих». */
+    const mutedIds: string[] = [];
     for (const group of groups) {
       const identity = threadIdentity(group);
       if (identity.threadKey === '' || identity.messageIds.length === 0) {
@@ -223,6 +237,8 @@ export class MuteService {
         fromAddress: newest?.fromAddress ?? '',
       });
       written.push(row.threadKey);
+      // Переносим потом ровно эти письма — и только их (см. MuteSource.id).
+      for (const item of group) mutedIds.push(item.id);
     }
 
     if (written.length === 0) {
@@ -245,7 +261,7 @@ export class MuteService {
       );
     }
 
-    const moved = await this.#moveToMuted(client, ids).catch((err: unknown) => {
+    const moved = await this.#moveToMuted(client, mutedIds).catch((err: unknown) => {
       // Перенос уже пришедших писем — не часть обещания: обещано, что
       // дальше письма не будут приходить во «Входящие», и это уже сделано.
       this.#opts.logger.warn(
@@ -259,6 +275,38 @@ export class MuteService {
   }
 
   /** Снимает заглушку. Уже пришедшее остаётся в «Заглушённых». */
+  /**
+   * Снять заглушку с переписок ВЫДЕЛЕННЫХ ПИСЕМ.
+   *
+   * Ровно то, что обещает кнопка «Вернуть переписку». Раньше её нажатие
+   * снимало заглушку со ВСЕХ записей ящика: браузер брал ключи из всей
+   * подборки, независимо от выделения. Человек выделял одну переписку,
+   * нажимал кнопку в единственном числе — и разом возвращал во «Входящие»
+   * всё, от чего прятался неделями. Подтверждения при этом не было.
+   *
+   * Вторая половина той же беды: список ключей уходил одним запросом, а
+   * схема тела ограничивает его сотней. Как только заглушённых переписок
+   * становилось больше ста, снять заглушку было НЕЧЕМ — единственный путь
+   * в продукте всегда отвечал 400.
+   *
+   * Ключ переписки в самом письме не лежит, поэтому он вычисляется здесь
+   * из заголовков — тем же разбором, что и при заглушении.
+   */
+  async unmuteByMessages(
+    client: ImapFlow,
+    accountEmail: string,
+    ids: string[],
+  ): Promise<{ lifted: number }> {
+    const sources = await this.#readHeaders(client, ids);
+    const keys = new Set<string>();
+    for (const group of groupThreads(sources)) {
+      const identity = threadIdentity(group);
+      if (identity.threadKey !== '') keys.add(identity.threadKey);
+    }
+    if (keys.size === 0) return { lifted: 0 };
+    return this.unmute(accountEmail, [...keys]);
+  }
+
   async unmute(accountEmail: string, keys: string[]): Promise<{ lifted: number }> {
     const store = this.#requireStore();
     const lifted: string[] = [];
@@ -379,6 +427,7 @@ export class MuteService {
         for (const msg of fetched ?? []) {
           const block = msg.headers;
           out.push({
+            id: `${folderId}:${String(msg.uid)}`,
             messageId: msg.envelope?.messageId ?? null,
             references: headerText(block, 'references'),
             // In-Reply-To берётся и из конверта, и из заголовков: конверт

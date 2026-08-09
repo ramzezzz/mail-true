@@ -36,6 +36,12 @@
   }
 }
 
+/* Приписка «показаны первые N»: голое число без неё читалось как итог
+   поиска, хотя загружена лишь первая страница каждой папки. */
+.totalNote {
+  color: var(--mt-color-text-secondary);
+}
+
 .total {
   font-size: var(--mt-font-subhead-size, 14px);
   color: var(--mt-color-text-secondary);

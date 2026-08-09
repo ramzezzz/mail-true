@@ -84,7 +84,13 @@ export function useUnmuteThreads() {
   const invalidate = useInvalidate();
   const showNotice = useUiStore((s) => s.showNotice);
   return useMutation({
-    mutationFn: (keys: string[]) => muteApi.unmute(keys),
+    /*
+     * Принимаем ПИСЬМА, а не ключи: кнопка обещает «снять заглушку с
+     * переписок выделенных писем», и снимать надо ровно их. Ключи всей
+     * подборки, которые браузер подставлял раньше, возвращали во
+     * «Входящие» всё сразу.
+     */
+    mutationFn: (ids: string[]) => muteApi.unmuteByMessages(ids),
     onSuccess: (result) => {
       invalidate();
       // Про уже пришедшее сказано прямо: оно остаётся в «Заглушённых»,

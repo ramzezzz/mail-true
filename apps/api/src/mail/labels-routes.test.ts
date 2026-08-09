@@ -496,3 +496,62 @@ test('нечистое снятие не стирает метку из спра
     await app.close();
   }
 });
+
+/*
+ * Удаление БЕЗ снятия с писем оставляет ключевое слово в письмах — это
+ * обещано человеку прямо в вопросе. Но ключ при этом освобождался, и
+ * следующая метка с тем же именем получала его снова: новая метка
+ * мгновенно оказывалась на всех письмах, помеченных прежней. Человек их
+ * так не помечал и убрать её оттуда не просил.
+ *
+ * Вернее всего это срабатывало на созвучных именах: «Счета» и «Счёта»
+ * дают один и тот же ключ (ё → e в транслитерации).
+ */
+test('ключ удалённой метки не выдаётся заново, пока слово на письмах', async () => {
+  const { app, client } = await buildHarness();
+  try {
+    const key = await createLabel(app, 'Счета');
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:1'], add: [key] },
+    });
+
+    // Удаляем ИЗ СПРАВОЧНИКА, слово на письме остаётся — так и обещано.
+    const res = await app.inject({ method: 'DELETE', url: `/api/labels/${key}` });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.ok(client.flagsOf('INBOX', 1).has(key), 'слово должно было остаться на письме');
+
+    // Заводим метку с созвучным именем — ключ обязан быть другим.
+    const again = await createLabel(app, 'Счёта');
+    assert.notEqual(again, key, 'новая метка получила ключ прежней и села на чужие письма');
+    assert.equal(
+      client.flagsOf('INBOX', 1).has(again),
+      false,
+      'новая метка не должна оказаться на письме, которое ею не помечали',
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('после полного снятия ключ можно выдавать заново', async () => {
+  // Слова нет ни на одном письме — занимать ключ больше нечем, и
+  // держать его вечно значило бы плодить «mt-scheta-2», «-3», «-4».
+  const { app, client } = await buildHarness();
+  try {
+    const key = await createLabel(app, 'Счета');
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:1'], add: [key] },
+    });
+    const res = await app.inject({ method: 'DELETE', url: `/api/labels/${key}?purge=1` });
+    assert.equal(res.statusCode, 200, res.body);
+    assert.equal(client.flagsOf('INBOX', 1).has(key), false);
+
+    assert.equal(await createLabel(app, 'Счета'), key);
+  } finally {
+    await app.close();
+  }
+});

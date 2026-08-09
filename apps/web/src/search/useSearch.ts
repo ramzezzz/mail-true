@@ -48,6 +48,15 @@ export interface SearchResult {
   serverQuery: string;
   /** Разобранный запрос: чипы над выдачей и папка из оператора `папка:`. */
   plan: SearchPlan;
+  /**
+   * Сколько писем отвечает запросу по данным сервера.
+   *
+   * Может быть больше длины items: каждая папка спрашивается одной
+   * страницей, а подгрузки следующих у поиска пока нет.
+   */
+  total: number;
+  /** Показана только часть найденного. */
+  truncated: boolean;
   isPending: boolean;
   isError: boolean;
   /** Есть ли что искать: пустая строка запроса поиском не считается. */
@@ -112,12 +121,38 @@ export function useSearch(state: SearchState, folders: readonly Folder[]): Searc
 
   const aggregates = useMemo(() => computeAggregates(items, folders), [items, folders]);
 
+  /**
+   * Сколько писем отвечает запросу НА САМОМ ДЕЛЕ.
+   *
+   * Каждая папка спрашивается одной страницей (100 писем), и подгрузки
+   * следующих у поиска пока нет. Число же сервер присылает настоящее — по
+   * всей папке, — и раньше оно просто отбрасывалось: страница печатала
+   * длину загруженного куска и называла её «Найдено».
+   *
+   * На папке, где условию отвечает 1200 писем, человек читал «Найдено:
+   * 100» и считал это итогом поиска: нужное письмо годичной давности было
+   * недостижимо ничем — ни прокруткой, ни кнопкой, — и повода искать
+   * дальше у него не было. Отказ, который читается как правда, — худший
+   * вид отказа, поэтому теперь показывается и настоящее число, и то, что
+   * показана лишь его часть.
+   */
+  const total = useMemo(
+    () => results.reduce((sum, result) => sum + (result.data?.total ?? 0), 0),
+    // Та же причина, что и у items: объекты запросов пересоздаются.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [results.map((r) => r.dataUpdatedAt).join(',')],
+  );
+
   return {
     items,
     aggregates,
     stems,
     serverQuery,
     plan,
+    /** Всего подходит писем (по данным сервера) — может быть больше, чем items. */
+    total,
+    /** Показана только часть найденного: подгрузки у поиска пока нет. */
+    truncated: total > items.length,
     isPending: !isEmptyQuery && results.some((r) => r.isPending),
     isError: results.some((r) => r.isError),
     isEmptyQuery,

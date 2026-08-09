@@ -627,12 +627,19 @@ export function FolderPage() {
    * ПЕРЕПИСКА, а не письмо, и по одному письму сервер не смог бы понять,
    * какую именно запись снимать. Пока подборка не загрузилась, кнопки нет.
    */
-  const unmuteAll = useCallback(() => {
-    const keys = mutedState.items.map((item) => item.key);
-    if (keys.length === 0) return;
-    unmuteThreads.mutate(keys);
+  const unmuteSelected = useCallback(() => {
+    /*
+     * Снимаем заглушку с переписок ВЫДЕЛЕННЫХ писем — ровно то, что
+     * написано на кнопке. Раньше сюда подставлялись ключи всей подборки,
+     * и одно нажатие возвращало во «Входящие» всё заглушённое разом; а
+     * когда переписок становилось больше сотни, запрос упирался в предел
+     * схемы и не работал вовсе.
+     */
+    const ids = targetIds();
+    if (ids.length === 0) return;
+    unmuteThreads.mutate(ids);
     clearSelection();
-  }, [mutedState.items, unmuteThreads, clearSelection]);
+  }, [targetIds, unmuteThreads, clearSelection]);
 
   /* --- Напомнить, если не ответили -------------------------------------
    *
@@ -755,7 +762,7 @@ export function FolderPage() {
             ? () => muteRows(targetIds())
             : undefined
         }
-        onUnmute={mutedFolder && mutedState.items.length > 0 ? unmuteAll : undefined}
+        onUnmute={mutedFolder && mutedState.items.length > 0 ? unmuteSelected : undefined}
         /* «Ждать ответа» — только в «Отправленных» и только когда сервер
            обещает проверить срок сам. */
         onAwaitReply={

@@ -32,9 +32,24 @@ const muteBodySchema = z.object({
   ids: z.array(messageIdSchema).min(1).max(500),
 });
 
-const unmuteBodySchema = z.object({
-  keys: z.array(z.string().min(1).max(250)).min(1).max(100),
-});
+/**
+ * Снятие принимает ЛИБО письма, либо ключи записей.
+ *
+ * Письма — обычный путь из интерфейса: человек выделил строки в
+ * «Заглушённых» и нажал «Вернуть переписку». Ключ переписки в письме не
+ * лежит, поэтому его вычисляет сервер по заголовкам — тем же разбором,
+ * что и при заглушении.
+ *
+ * Ключи остаются для точечного снятия по строке подборки.
+ */
+const unmuteBodySchema = z
+  .object({
+    keys: z.array(z.string().min(1).max(250)).max(100).optional(),
+    ids: z.array(messageIdSchema).max(500).optional(),
+  })
+  .refine((body) => (body.keys?.length ?? 0) > 0 || (body.ids?.length ?? 0) > 0, {
+    message: 'Не указано, с чего снимать заглушку',
+  });
 
 function requireMailSession(session: MailSession | null): MailSession {
   if (!session) throw new UnauthorizedError();
@@ -106,6 +121,11 @@ export async function muteRoutes(app: FastifyInstance, mute: MuteService): Promi
   app.delete('/threads/mute', { preHandler: app.requireSession }, async (request) => {
     const session = requireMailSession(request.mailSession);
     const body = unmuteBodySchema.parse(request.body);
-    return mute.unmute(session.email, body.keys);
+    if (body.ids && body.ids.length > 0) {
+      return app.deps.pool.withClient(session.email, session.password, (client) =>
+        mute.unmuteByMessages(client, session.email, body.ids ?? []),
+      );
+    }
+    return mute.unmute(session.email, body.keys ?? []);
   });
 }

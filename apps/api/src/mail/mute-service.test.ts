@@ -423,3 +423,84 @@ test('повторное снятие после отката работает �
   assert.equal(lifted, 1, 'после отката ключ снова живой, и снятие проходит');
   assert.equal((await store.listMuted()).length, 1);
 });
+
+/*
+ * Смешанное выделение: одно письмо нормальной переписки и одно от
+ * кривого рассыльщика — без Message-ID и без ссылок.
+ *
+ * Второе заглушить нечем, и служба честно его пропускает: узнать его
+ * продолжение при доставке не по чему. Но в перенос уходил ИСХОДНЫЙ
+ * список выделенного — и это письмо всё равно уезжало из «Входящих» в
+ * «Заглушённые» и помечалось прочитанным. Вернуть его было нечем: в
+ * подборке «Заглушённые» его нет (она строится по базе), ключа переписки
+ * не существует. Ответ при этом бодро сообщал «заглушено 1, перенесено 2».
+ */
+test('письмо, которое заглушить нельзя, остаётся во «Входящих»', async () => {
+  const includes = new FakeIncludes();
+  const { service, store } = makeService(includes);
+  const box = new FakeMailbox();
+  box.add('INBOX', {
+    uid: 1,
+    subject: 'Переезд офиса',
+    messageId: '<root@x>',
+    references: '',
+    flags: new Set(),
+  });
+  box.add('INBOX', {
+    uid: 2,
+    subject: 'Скидки только сегодня',
+    messageId: '',
+    references: '',
+    flags: new Set(),
+  });
+
+  const result = await service.mute(box.client, 'ivan@mail.local', ['inbox:1', 'inbox:2']);
+
+  assert.equal(result.muted, 1, 'заглушить можно только одну переписку');
+  assert.equal(result.moved, 1, 'перенести можно только её письма');
+  assert.equal(store.rows.length, 1);
+
+  const inbox = box.boxes.get('INBOX') ?? [];
+  assert.deepEqual(
+    inbox.map((m) => m.uid),
+    [2],
+    'письмо без Message-ID унесли в «Заглушённые», откуда его не вернуть',
+  );
+  const muted = box.boxes.get('Muted') ?? [];
+  assert.deepEqual(muted.map((m) => m.uid).length, 1);
+  // И прочитанным его тоже не помечали: человек его не читал.
+  assert.equal(inbox[0]?.flags.has('\\Seen'), false);
+});
+
+/*
+ * «Вернуть переписку» обещает снять заглушку с переписок ВЫДЕЛЕННЫХ
+ * писем. Браузер вместо этого слал ключи всей подборки, и одно нажатие
+ * возвращало во «Входящие» всё, от чего человек прятался неделями. А как
+ * только заглушённых становилось больше сотни, запрос упирался в предел
+ * схемы и не работал вовсе — снять заглушку было нечем.
+ */
+test('снятие по письмам трогает только их переписки', async () => {
+  const includes = new FakeIncludes();
+  const { service, store } = makeService(includes);
+  const box = inboxWith();
+  box.add('INBOX', {
+    uid: 3,
+    subject: 'Совсем другой разговор',
+    messageId: '<other@x>',
+    references: '',
+    flags: new Set(),
+  });
+
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:1']);
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:3']);
+  assert.equal(store.rows.length, 2);
+
+  // Письма уехали в «Заглушённые» — снимаем по ним же.
+  const mutedIds = (box.boxes.get('Muted') ?? []).map((m) => `muted:${String(m.uid)}`);
+  assert.equal(mutedIds.length, 2);
+
+  const result = await service.unmuteByMessages(box.client, 'ivan@mail.local', [mutedIds[0]!]);
+  assert.equal(result.lifted, 1, 'снялась не одна переписка');
+  const stillMuted = store.rows.filter((r) => r.state === 'muted');
+  assert.equal(stillMuted.length, 1, 'вторая переписка обязана остаться заглушённой');
+});
