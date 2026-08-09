@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { MailAssistant, disabledAssistant } from '../assistant.js';
 import { InMemoryAuditLog } from '../audit.js';
 import { MemoryAiCache } from '../cache.js';
+import type { OutboundDisclosure } from '../types.js';
 import {
   SSE_DONE,
   completion,
@@ -641,6 +642,35 @@ describe('остальные возможности', () => {
 });
 
 describe('потоковый черновик ответа', () => {
+  it('пожелание к ответу входит в опись: наружу не должно уйти больше показанного', async () => {
+    /*
+     * Опись отправляется человеку ПЕРВЫМ событием потока, а пожелание
+     * дописывалось в текст запроса ПОСЛЕ неё — то есть показывалось
+     * меньше, чем уходило к сервису ИИ, и в журнале тоже. Обещание
+     * модуля «опись не может разойтись с содержимым» этим и нарушалось.
+     */
+    const r = await rig([{ sse: [sseDelta('Хорошо.'), SSE_DONE] }]);
+    try {
+      const instruction = 'Ответь коротко и предложи созвон';
+      let disclosure: OutboundDisclosure | null = null;
+
+      for await (const event of r.assistant.streamReply(sampleMessage(), ctx, { instruction })) {
+        if (event.type === 'disclosure') disclosure = event.disclosure;
+      }
+
+      assert.ok(disclosure, 'опись не пришла');
+      const field = disclosure.fields.find((f) => f.field === 'instruction');
+      assert.ok(field, 'пожелание к ответу не названо в описи, а уходит наружу');
+      assert.equal(field.value, instruction);
+
+      // И в журнале объём совпадает с показанным.
+      const entries = await r.assistant.auditList();
+      assert.equal(entries[0]?.outboundChars, disclosure.totalChars);
+    } finally {
+      await r.close();
+    }
+  });
+
   it('первым идёт опись, затем текст по частям', async () => {
     const r = await rig([
       { sse: [sseDelta('Добрый день! '), sseDelta('Счёт получен.'), SSE_DONE] },

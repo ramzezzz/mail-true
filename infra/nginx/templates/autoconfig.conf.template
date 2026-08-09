@@ -27,10 +27,53 @@
 server {
     listen 80;
     listen 443 ssl;
-    server_name autoconfig.${MAIL_DOMAIN};
+    #
+    # ЛЮБОЙ ДОМЕН, А НЕ ТОЛЬКО ОСНОВНОЙ.
+    #
+    # Панель требует и подтверждает запись `autoconfig.<домен>` для
+    # КАЖДОГО почтового домена (см. admin/dns.ts), а обслуживалось только
+    # имя основного: запросы остальных падали в default_server, где
+    # `/mail/config-v1.1.xml` уходит в веб-интерфейс почты — Thunderbird
+    # получал HTML вместо XML. Администратор при этом видел в проверке DNS
+    # зелёную отметку.
+    #
+    # Маска безопасна: служба автонастройки выбирает домен по адресу из
+    # запроса (`?emailaddress=…`), а не по имени узла, и для чужого домена
+    # просто отдаст настройки этого сервера. Точное имя у nginx сильнее
+    # маски, поэтому основной домен по-прежнему обслуживается этим же
+    # блоком без изменений.
+    server_name autoconfig.${MAIL_DOMAIN} autoconfig.*;
 
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
+
+    # --- Подтверждение владения доменом для Let's Encrypt -----------
+    #
+    # БЕЗ ЭТОГО БЛОКА ВЫПУСК СЕРТИФИКАТА НЕ ПРОХОДИТ ВООБЩЕ.
+    #
+    # В обязательные имена сертификата входит `autoconfig.<домен>` (см.
+    # expectedCertificateNames в packages/shared/src/tls-certificate.ts), а
+    # Let's Encrypt проверяет КАЖДОЕ имя отдельно: стучится по HTTP на
+    # `http://autoconfig.<домен>/.well-known/acme-challenge/<токен>`. Имя
+    # точно совпадает с `server_name` этого блока, поэтому запрос попадал
+    # сюда — и уходил в `location /`, то есть в службу автонастройки. У неё
+    # такого маршрута нет: 404, провал одного имени рушит запрос целиком, и
+    # сертификат не выпускался НИ ДЛЯ ОДНОГО имени.
+    #
+    # Из панели это выглядело так: и пробный выпуск, и настоящий отказывают
+    # всегда, сервер остаётся на самоподписанном сертификате, почтовые
+    # программы ругаются на недоверенный узел. Консольный путь при этом
+    # работал — install.sh выпускает через `--standalone` с остановкой
+    # nginx, — и расхождение проявлялось только в панели.
+    #
+    # Тот же блок с тем же обоснованием уже стоит в app.conf.template; сюда
+    # его забыли перенести.
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+        # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
+        add_header Cache-Control "no-store" always;
+    }
 
     location / {
         set $autoconfig_upstream http://autoconfig:8080;
@@ -49,10 +92,41 @@ server {
 server {
     listen 80;
     listen 443 ssl;
-    server_name autodiscover.${MAIL_DOMAIN};
+    # Та же причина, что и у autoconfig выше: Outlook ходит на
+    # `autodiscover.<свой домен>`, и таких доменов на сервере может быть
+    # много. Запасной путь через default_server остаётся на месте.
+    server_name autodiscover.${MAIL_DOMAIN} autodiscover.*;
 
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
+
+    # --- Подтверждение владения доменом для Let's Encrypt -----------
+    #
+    # БЕЗ ЭТОГО БЛОКА ВЫПУСК СЕРТИФИКАТА НЕ ПРОХОДИТ ВООБЩЕ.
+    #
+    # В обязательные имена сертификата входит `autoconfig.<домен>` (см.
+    # expectedCertificateNames в packages/shared/src/tls-certificate.ts), а
+    # Let's Encrypt проверяет КАЖДОЕ имя отдельно: стучится по HTTP на
+    # `http://autoconfig.<домен>/.well-known/acme-challenge/<токен>`. Имя
+    # точно совпадает с `server_name` этого блока, поэтому запрос попадал
+    # сюда — и уходил в `location /`, то есть в службу автонастройки. У неё
+    # такого маршрута нет: 404, провал одного имени рушит запрос целиком, и
+    # сертификат не выпускался НИ ДЛЯ ОДНОГО имени.
+    #
+    # Из панели это выглядело так: и пробный выпуск, и настоящий отказывают
+    # всегда, сервер остаётся на самоподписанном сертификате, почтовые
+    # программы ругаются на недоверенный узел. Консольный путь при этом
+    # работал — install.sh выпускает через `--standalone` с остановкой
+    # nginx, — и расхождение проявлялось только в панели.
+    #
+    # Тот же блок с тем же обоснованием уже стоит в app.conf.template; сюда
+    # его забыли перенести.
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+        # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
+        add_header Cache-Control "no-store" always;
+    }
 
     location / {
         set $autoconfig_upstream http://autoconfig:8080;

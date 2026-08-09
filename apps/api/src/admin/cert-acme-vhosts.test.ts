@@ -36,10 +36,23 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { expectedCertificateNames } from '@mail-true/shared/tls-certificate';
 
-const TEMPLATE = readFileSync(
-  fileURLToPath(new URL('../../../../infra/nginx/templates/app.conf.template', import.meta.url)),
-  'utf8',
-);
+/**
+ * ВСЕ шаблоны с блоками на 80-м порту, а не один.
+ *
+ * Раньше читался только `app.conf.template`, и проверка молча уходила в
+ * ветку «умолчание `_`»: имя `autoconfig.<домен>` обслуживает СВОЙ блок в
+ * соседнем файле, где ACME-локации не было вовсе. Тест зеленел, а выпуск
+ * сертификата из панели не проходил никогда — провал одного имени рушит
+ * весь запрос certbot.
+ */
+const TEMPLATE = ['app.conf.template', 'autoconfig.conf.template']
+  .map((name) =>
+    readFileSync(
+      fileURLToPath(new URL(`../../../../infra/nginx/templates/${name}`, import.meta.url)),
+      'utf8',
+    ),
+  )
+  .join('\n');
 
 interface VirtualHost {
   serverName: string;
@@ -122,6 +135,9 @@ test('ACME-проверка не уводится редиректом на HTTP
    */
   for (const host of virtualHosts(TEMPLATE).filter((h) => h.listens80)) {
     if (!ACME_LOCATION.test(host.body)) continue;
+    // Обход нужен только там, где редирект вообще есть: блоки
+    // автонастройки отвечают и по HTTP, и по HTTPS, никого не перекидывая.
+    if (!/return\s+301\s+https:/.test(host.body)) continue;
     assert.match(
       host.body,
       /if\s*\(\$uri\s*~\s*\^\/\\\.well-known\/acme-challenge\/\)/,

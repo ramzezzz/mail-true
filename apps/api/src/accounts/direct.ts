@@ -60,6 +60,21 @@ export class ExternalImapPool {
       host: account.imap.host,
       port: account.imap.port,
       secure: account.imap.secure,
+      /*
+       * ШИФРОВАНИЕ ОБЯЗАТЕЛЬНО, даже когда `secure: false`.
+       *
+       * `secure: false` у imapflow значит «не начинать с TLS», а не «без
+       * шифрования»: дальше идёт STARTTLS. Но без этого требования оно
+       * оставалось НЕОБЯЗАТЕЛЬНЫМ — сервер, который STARTTLS не
+       * объявляет, получал пароль от чужого ящика и все письма открытым
+       * текстом. Различить это человеку было нечем: и STARTTLS, и «без
+       * шифрования» выглядят в мастере одинаково — снятым флажком.
+       *
+       * Исключение — «разрешить недоверенный сертификат»: этот флажок
+       * человек ставит сам и осознанно, и означает он именно «я знаю, что
+       * с TLS у того сервера не всё гладко».
+       */
+      ...(account.imap.secure || account.allowInsecureTls ? {} : { requireTLS: true }),
       auth: { user: account.imap.user, pass: password },
       logger: false,
       disableAutoIdle: true,
@@ -267,6 +282,9 @@ export async function sendAsExternal(options: SendAsOptions): Promise<void> {
     host: smtp.host,
     port: smtp.port,
     secure: smtp.secure,
+    // Та же причина, что и у чтения выше: без requireTLS пароль и письмо
+    // ушли бы открытым текстом на сервере, не объявившем STARTTLS.
+    ...(smtp.secure || account.allowInsecureTls ? {} : { requireTLS: true }),
     auth: { user: smtp.user, pass: password },
     tls: { rejectUnauthorized: account.allowInsecureTls ? false : rejectUnauthorized },
   });

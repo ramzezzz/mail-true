@@ -630,7 +630,28 @@ export class MailAssistant {
     const language = this.#language(ctx);
     const tone = options?.tone ?? 'short';
     const instruction = options?.instruction?.trim() ?? '';
+    /*
+     * Опись СТРОИТСЯ ДО ОТПРАВКИ И ВКЛЮЧАЕТ ВСЁ, что уйдёт наружу.
+     *
+     * Пожелание к ответу дописывается в текст запроса ниже, а опись
+     * отдавалась клиенту до этого — то есть человеку и администратору
+     * показывалось меньше, чем ушло к сервису ИИ, и `outboundChars` в
+     * журнале тоже считался без него. Обещание модуля («опись строится из
+     * тех же полей, из которых собирается запрос, поэтому не может
+     * разойтись с содержимым») здесь нарушалось. В соседнем, не потоковом
+     * пути это поле в опись добавляют явно — значит был пропуск, а не
+     * решение.
+     */
     const disclosure = describeOutbound(prepared, this.#disclosureContext());
+    if (instruction.length > 0) {
+      disclosure.fields.push({
+        field: 'instruction',
+        label: 'Пожелание к ответу',
+        value: instruction,
+        chars: instruction.length,
+      });
+      disclosure.totalChars += instruction.length;
+    }
     yield { type: 'disclosure', disclosure };
 
     const system = [

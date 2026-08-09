@@ -352,9 +352,18 @@ export async function detectMailSettings(
     return {
       source: 'srv',
       providerLabel: domain,
-      imap: { host: imapSrv.name, port: imapSrv.port, secure: imapSrv.port === 993 },
+      /*
+       * `_imaps` по RFC 6186 значит «TLS сразу» — НЕЗАВИСИМО от номера
+       * порта. Раньше здесь стояло `port === 993`, и сервер, опубликовавший
+       * `_imaps` на нестандартном порту, получал попытку открытого
+       * подключения к TLS-порту: ящик не подключался, а настройки при этом
+       * помечались «определены точно».
+       */
+      imap: { host: imapSrv.name, port: imapSrv.port, secure: true },
       smtp: smtpSrv
-        ? { host: smtpSrv.name, port: smtpSrv.port, secure: smtpSrv.port === 465 }
+        ? // `_submission` — это STARTTLS-порт (587) по той же RFC; TLS
+          // сразу бывает на 465, и его мы узнаём по номеру порта.
+          { host: smtpSrv.name, port: smtpSrv.port, secure: smtpSrv.port === 465 }
         : { host: `smtp.${domain}`, port: 587, secure: false },
       username: email,
       confident: true,
