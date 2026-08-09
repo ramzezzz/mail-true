@@ -18,3 +18,28 @@ ALTER TABLE mail_labels ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS mail_labels_live_idx
     ON mail_labels (lower(account_email), position)
     WHERE deleted_at IS NULL;
+
+/*
+ * Самозапись в журнал миграций.
+ *
+ * Каталог миграций примонтирован в /docker-entrypoint-initdb.d, поэтому на
+ * ПУСТОЙ базе этот файл выполняет сам Postgres при первичной инициализации.
+ * Журнал об этом не знал: строку о себе писала только базовая схема, и
+ * установщик, читая журнал, применял такие миграции ВТОРОЙ раз. Пока они
+ * идемпотентны, это сходит с рук, но 0039 — уже DELETE по пользовательским
+ * данным, а следующая такая миграция отработает дважды на каждом новом
+ * сервере. Ровно от этого журнал и заведён (см. 0000_schema_migrations.sql).
+ *
+ * Контрольная сумма ставится 'initdb': настоящую сумму файла внутри SQL не
+ * вычислить. Установщик такую строку узнаёт, повторно файл не применяет и
+ * заменяет сумму на настоящую.
+ */
+DO $mt_journal$
+BEGIN
+    IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+        INSERT INTO schema_migrations (filename, version, name, checksum, applied_by)
+        VALUES ('0040_labels_keep_key.sql', '0040', 'labels_keep_key', 'initdb', 'initdb')
+        ON CONFLICT (filename) DO NOTHING;
+    END IF;
+END
+$mt_journal$;

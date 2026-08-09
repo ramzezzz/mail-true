@@ -48,3 +48,28 @@ CREATE TABLE IF NOT EXISTS server_settings_env_debt (
 COMMENT ON TABLE server_settings_env_debt IS
     'Строки infra/.env, которые панель сбросила в базе, но не смогла убрать из файла. '
     'Гасятся при ближайшем пересоздании службы. Пустая таблица — обычное состояние.';
+
+/*
+ * Самозапись в журнал миграций.
+ *
+ * Каталог миграций примонтирован в /docker-entrypoint-initdb.d, поэтому на
+ * ПУСТОЙ базе этот файл выполняет сам Postgres при первичной инициализации.
+ * Журнал об этом не знал: строку о себе писала только базовая схема, и
+ * установщик, читая журнал, применял такие миграции ВТОРОЙ раз. Пока они
+ * идемпотентны, это сходит с рук, но 0039 — уже DELETE по пользовательским
+ * данным, а следующая такая миграция отработает дважды на каждом новом
+ * сервере. Ровно от этого журнал и заведён (см. 0000_schema_migrations.sql).
+ *
+ * Контрольная сумма ставится 'initdb': настоящую сумму файла внутри SQL не
+ * вычислить. Установщик такую строку узнаёт, повторно файл не применяет и
+ * заменяет сумму на настоящую.
+ */
+DO $mt_journal$
+BEGIN
+    IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+        INSERT INTO schema_migrations (filename, version, name, checksum, applied_by)
+        VALUES ('0038_env_unset_debt.sql', '0038', 'env_unset_debt', 'initdb', 'initdb')
+        ON CONFLICT (filename) DO NOTHING;
+    END IF;
+END
+$mt_journal$;

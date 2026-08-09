@@ -294,6 +294,14 @@ services:
       # то есть по умолчанию раздел «Очередь» просто не работает.
       QUEUE_AGENT_TOKEN: ${QUEUE_AGENT_TOKEN:-}
       QUEUE_AGENT_PORT: ${QUEUE_AGENT_PORT:-11345}
+      # Предел размера письма — ТОТ ЖЕ, что у веб-интерфейса.
+      #
+      # MESSAGE_MAX_BYTES правится в панели («Настройки сервера»), а здесь
+      # раньше стояло число прямо в main.cf.template. Подняв предел в
+      # панели, человек получал письмо, принятое нашим же интерфейсом и
+      # отвергнутое нашим же Postfix с ответом 552 — то есть письмо,
+      # которое «отправлено» и не дошло.
+      MESSAGE_MAX_BYTES: ${MESSAGE_MAX_BYTES:-26214400}
     volumes:
       - ./postfix/conf:/etc/postfix-repo:ro
       - ./data/certs:/certs:ro
@@ -928,9 +936,22 @@ services:
       # этой сети, и без неё запрет отрезал бы администратора от панели
       # на его же сервере.
       DOCKER_SUBNET: ${DOCKER_SUBNET:-172.28.0.0/16}
+      # Пределы размера — те же, что у приложения. Из них считается
+      # client_max_body_size (см. nginx/upload-limit.envsh): раньше в
+      # шаблоне стояло число, и поднятый в панели предел упирался в nginx,
+      # который отвечал 413 своей HTML-страницей вместо {error,message}.
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-26214400}
+      MESSAGE_MAX_BYTES: ${MESSAGE_MAX_BYTES:-26214400}
+      # Объявление-страховка: envsubst оставляет незнакомую переменную
+      # текстом, и «${CLIENT_MAX_BODY_SIZE}» в конфигурации уронил бы
+      # nginx с «unknown directive» — ровно так же, как ADMIN_ACCESS_RULES.
+      CLIENT_MAX_BODY_SIZE: '31457280'
     volumes:
       # Шаблоны обрабатываются entrypoint-ом образа (envsubst -> conf.d)
       - ./nginx/templates:/etc/nginx/templates:ro
+      # Считает client_max_body_size из пределов приложения.
+      # Номер 16 — раньше 20-envsubst-on-templates.sh, который подставит.
+      - ./nginx/upload-limit.envsh:/docker-entrypoint.d/16-mailtrue-upload-limit.envsh:ro
       - ./data/certs:/certs:ro
       # Слежение за файлом сертификата: раздел «Сертификат» в панели меняет
       # файл, а перезапускать контейнеры серверу приложения нечем (сокета

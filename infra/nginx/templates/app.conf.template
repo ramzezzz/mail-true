@@ -107,8 +107,12 @@ server {
     ssl_session_timeout 1h;
 
     server_tokens off;
-    # Вложение до 25 МБ (UPLOAD_MAX_BYTES) плюс накладные расходы multipart
-    client_max_body_size 30m;
+    # Предел приходит из настроек сервера: UPLOAD_MAX_BYTES и
+    # MESSAGE_MAX_BYTES правятся в панели, и число в шаблоне с ними
+    # расходилось — nginx отвечал 413 своей HTML-страницей на предел,
+    # который панель показывала поднятым. Считает запас
+    # nginx/upload-limit.envsh (base64 плюс обвязка multipart).
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
 
     # Сжатие ответов API. Статика приходит уже сжатой от сервиса web —
     # nginx повторно её не жмёт.

@@ -33,7 +33,30 @@ INFRA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # прибитый к infra/.env, перенастроил бы не тот.
 ENV_FILE="${MT_ENV_FILE:-$INFRA_DIR/.env}"
 CERT_DIR="${MT_CERT_DIR:-$INFRA_DIR/data/certs}"
-COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml" --env-file "$ENV_FILE")
+#
+# БОЕВОЕ ПЕРЕОПРЕДЕЛЕНИЕ ОБЯЗАТЕЛЬНО.
+#
+# Публикация почтовых и веб-портов наружу живёт ТОЛЬКО в
+# install/compose.prod.yml (`${BIND_ADDRESS:-0.0.0.0}:…`). В базовом файле
+# те же порты слушают 127.0.0.1 — так задумано, чтобы разработка на своей
+# машине не выставляла почтовый сервер в сеть.
+#
+# Скрипт пересоздаёт службы (`up -d --force-recreate` ниже). Без этого
+# файла пересоздание перевешивало 25/587/465/143/993/110/995/80/443 на
+# loopback: чужие почтовые серверы перестают доставлять письма, клиенты не
+# подключаются, и ни одна из служб об этом не сообщает — они здоровы.
+# Заодно терялись COOKIE_SECURE, FORCE_HTTPS, боевой CORS_ORIGIN, скрытие
+# порта 3000 у api и ограничения размера журналов. Всё это — после смены
+# домена, то есть ровно тогда, когда за сервером и так следят с тревогой.
+#
+# Тот же набор собирает compose_args() в install/lib/common.sh; здесь он
+# повторён потому, что скрипт запускают отдельно от установщика.
+COMPOSE_PROD="${MT_COMPOSE_PROD:-$INFRA_DIR/../install/compose.prod.yml}"
+COMPOSE=(docker compose -f "$INFRA_DIR/docker-compose.yml")
+if [ -f "$COMPOSE_PROD" ] && [ "${MT_USE_PROD_OVERRIDE:-1}" = "1" ]; then
+    COMPOSE+=(-f "$COMPOSE_PROD")
+fi
+COMPOSE+=(--env-file "$ENV_FILE")
 [ -n "${MT_PROJECT:-}" ] && COMPOSE+=(-p "$MT_PROJECT")
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
@@ -115,11 +138,27 @@ fi
 # ------------------------------------------------------------------
 # 3. Новый домен в списке своих
 # ------------------------------------------------------------------
-MAPS="$INFRA_DIR/rspamd/maps.d/local_domains.map"
-if [ -f "$MAPS" ] && ! grep -qx "$DC_NEW_DOMAIN" "$MAPS" 2>/dev/null; then
-    say "== Добавляю $DC_NEW_DOMAIN в local_domains.map =="
-    printf '%s\n' "$DC_NEW_DOMAIN" >> "$MAPS"
-fi
+#
+# Дописываем в ЖИВУЮ карту внутри контейнера, а не в заготовку из дерева.
+#
+# infra/rspamd/maps.d — это семя, примонтированное только для чтения
+# (/etc/rspamd/maps.seed). Рабочие списки лежат в томе rspamd-maps, и
+# точка входа копирует туда семя ТОЛЬКО когда файла ещё нет. На сервере,
+# который хоть раз запускался, дописанная в семя строка не доезжала до
+# rspamd никогда: новый домен оставался чужим, и своя же почта с него
+# оценивалась как внешняя.
+#
+# Вторая половина той же беды: файл семени отслеживается git, и правка
+# рабочего дерева ломала обновление через `git pull` — «Your local changes
+# would be overwritten». Ради этого карты и уехали в том.
+say "== Добавляю $DC_NEW_DOMAIN в local_domains.map =="
+"${COMPOSE[@]}" exec -T rspamd sh -c "
+    MAP=/etc/rspamd/maps.d/local_domains.map
+    [ -f \"\$MAP\" ] || exit 0
+    grep -qx '$DC_NEW_DOMAIN' \"\$MAP\" && exit 0
+    echo '$DC_NEW_DOMAIN' >> \"\$MAP\"
+    chown _rspamd:_rspamd \"\$MAP\" 2>/dev/null || true
+" || say '  ПРЕДУПРЕЖДЕНИЕ: не удалось дописать домен — проверьте раздел «Спам» в панели'
 
 # ------------------------------------------------------------------
 # 4. infra/.env

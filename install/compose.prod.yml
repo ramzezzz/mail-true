@@ -125,3 +125,13 @@ services:
     logging: *prod-logging
   autoconfig:
     logging: *prod-logging
+  # Эти трое оставались с журналом без предела: докер по умолчанию пишет
+  # json-file без ротации, а freshclam у clamav обновляет базы несколько
+  # раз в сутки и говорит об этом в журнал. На долгоживущей установке это
+  # единственное место, где место на диске уходит незаметно.
+  service-agent:
+    logging: *prod-logging
+  clamav:
+    logging: *prod-logging
+  installer:
+    logging: *prod-logging

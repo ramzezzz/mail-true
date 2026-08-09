@@ -9,9 +9,15 @@ set -e
 # Постоянный адрес Dovecot: он попадает в mynetworks, чтобы правила
 # «переслать» и «автоответчик» могли отправлять почту наружу.
 : "${DOVECOT_IP:=172.28.0.54}"
+# Предел размера письма приходит из настроек сервера (панель правит
+# MESSAGE_MAX_BYTES). Раньше в main.cf.template стояло число, и поднятый в
+# панели предел приводил к 552 от нашего же Postfix: интерфейс письмо
+# принимал, а отправить его было нельзя.
+: "${MESSAGE_MAX_BYTES:=26214400}"
 export MAIL_DOMAIN MAIL_HOSTNAME POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DOVECOT_IP
+export MESSAGE_MAX_BYTES
 
-VARS='${MAIL_DOMAIN} ${MAIL_HOSTNAME} ${POSTGRES_DB} ${POSTGRES_USER} ${POSTGRES_PASSWORD} ${DOVECOT_IP}'
+VARS='${MAIL_DOMAIN} ${MAIL_HOSTNAME} ${POSTGRES_DB} ${POSTGRES_USER} ${POSTGRES_PASSWORD} ${DOVECOT_IP} ${MESSAGE_MAX_BYTES}'
 
 envsubst "$VARS" < /etc/postfix-repo/main.cf.template > /etc/postfix/main.cf
 cp /etc/postfix-repo/master.cf /etc/postfix/master.cf
