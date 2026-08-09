@@ -43,6 +43,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError } from '../../errors.js';
 import { audit, requireAdmin } from '../guard.js';
+import { withMapLock } from '../map-edit.js';
 import {
   addMapEntry,
   parseMapEntries,
@@ -531,17 +532,37 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       const check = checkEntry(spec.value, body.value);
       if (!check.ok) throw new BadRequestError(check.problem);
 
-      const mapId = await mapIdOf(spec.file);
-      const before = await rspamd.getMap(mapId);
-      const beforeEntries = parseMapEntries(before);
-      if (beforeEntries.some((line) => line.toLowerCase() === check.value)) {
-        // Не ошибка: повторное добавление того же адреса — обычное дело
-        // при разборе обращения в четыре руки. Ответ честно говорит, что
-        // ничего не изменилось, и запись в аудит не делается.
-        return { ok: true, changed: false, entries: beforeEntries };
-      }
-      const after = addMapEntry(before, check.value);
-      await writeMap(mapId, after, spec.file);
+      /*
+       * Чтение, изменение и запись — под очередью по этой карте.
+       *
+       * Копии в базе нет намеренно: источник истины — файл, который
+       * переписывает сам rspamd, и правка означает «прочитать целиком,
+       * дописать строку, записать целиком». Две такие правки внахлёст
+       * (а раздел используют вдвоём — см. ниже про четыре руки) молча
+       * теряют одну из записей: панель отвечает «готово», в журнале
+       * аудита стоит добавление, а письма от адреса продолжают идти.
+       */
+      const outcome = await withMapLock(spec.file, async () => {
+        const mapId = await mapIdOf(spec.file);
+        const before = await rspamd.getMap(mapId);
+        const beforeEntries = parseMapEntries(before);
+        if (beforeEntries.some((line) => line.toLowerCase() === check.value)) {
+          // Не ошибка: повторное добавление того же адреса — обычное дело
+          // при разборе обращения в четыре руки. Ответ честно говорит, что
+          // ничего не изменилось, и запись в аудит не делается.
+          return { changed: false, entries: beforeEntries };
+        }
+        await writeMap(mapId, addMapEntry(before, check.value), spec.file);
+        /*
+         * Список в ответе — ПЕРЕЧИТАННЫЙ, а не своя версия текста.
+         * Своя версия говорит лишь «что мы намеревались записать», и на
+         * ней ответ выглядел бы одинаково и при удавшейся записи, и при
+         * записи, которую rspamd принял и отбросил.
+         */
+        return { changed: true, entries: parseMapEntries(await rspamd.getMap(mapId)) };
+      });
+
+      if (!outcome.changed) return { ok: true, changed: false, entries: outcome.entries };
 
       await audit(ctx, request, {
         action: 'antispam.list.add',
@@ -555,7 +576,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
           ...(body.note ? { note: body.note } : {}),
         },
       });
-      return { ok: true, changed: true, entries: parseMapEntries(after) };
+      return { ok: true, changed: true, entries: outcome.entries };
     },
   );
 
@@ -578,15 +599,21 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
         throw new BadRequestError(`Список «${spec.title}» правится не из панели: ${spec.hint}`);
       }
 
-      const mapId = await mapIdOf(spec.file);
-      const before = await rspamd.getMap(mapId);
-      const beforeEntries = parseMapEntries(before);
       const target = value.toLowerCase();
-      if (!beforeEntries.some((line) => line.toLowerCase() === target)) {
-        return { ok: true, changed: false, entries: beforeEntries };
-      }
-      const after = removeMapEntry(before, target);
-      await writeMap(mapId, after, spec.file);
+      // Под той же очередью, что и добавление: удаление внахлёст с
+      // добавлением воскресило бы убранный адрес или потеряло новый.
+      const outcome = await withMapLock(spec.file, async () => {
+        const mapId = await mapIdOf(spec.file);
+        const before = await rspamd.getMap(mapId);
+        const beforeEntries = parseMapEntries(before);
+        if (!beforeEntries.some((line) => line.toLowerCase() === target)) {
+          return { changed: false, entries: beforeEntries };
+        }
+        await writeMap(mapId, removeMapEntry(before, target), spec.file);
+        return { changed: true, entries: parseMapEntries(await rspamd.getMap(mapId)) };
+      });
+
+      if (!outcome.changed) return { ok: true, changed: false, entries: outcome.entries };
 
       await audit(ctx, request, {
         action: 'antispam.list.remove',
@@ -595,7 +622,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
         before: { list: spec.id, value: target, symbol: spec.symbol },
         after: null,
       });
-      return { ok: true, changed: true, entries: parseMapEntries(after) };
+      return { ok: true, changed: true, entries: outcome.entries };
     },
   );
 
