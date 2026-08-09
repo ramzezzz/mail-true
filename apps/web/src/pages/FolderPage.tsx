@@ -1021,10 +1021,7 @@ export function FolderPage() {
                 </ContextMenuItem>
               )}
               {snoozedFolder && (
-                <ContextMenuItem
-                  before={<IconClock />}
-                  onClick={() => returnNow([contextMenu.message.id])}
-                >
+                <ContextMenuItem before={<IconClock />} onClick={() => returnNow(contextTargets())}>
                   Вернуть сейчас
                 </ContextMenuItem>
               )}
@@ -1032,10 +1029,7 @@ export function FolderPage() {
                   «Отложить»: все три про «убрать с глаз», и человек ищет
                   их рядом. Пункта нет, пока заглушка не доедет до доставки. */}
               {mutedState.available && mutedState.delivery && !mutedFolder && (
-                <ContextMenuItem
-                  before={<IconMuted />}
-                  onClick={() => muteRows([contextMenu.message.id])}
-                >
+                <ContextMenuItem before={<IconMuted />} onClick={() => muteRows(contextTargets())}>
                   Заглушить переписку
                 </ContextMenuItem>
               )}
@@ -1051,7 +1045,7 @@ export function FolderPage() {
               <ContextMenuItem
                 before={<IconFlag />}
                 hint="I"
-                onClick={() => toggleFlagOn([contextMenu.message.id])}
+                onClick={() => toggleFlagOn(contextTargets())}
               >
                 Пометить флажком
               </ContextMenuItem>
@@ -1059,8 +1053,8 @@ export function FolderPage() {
                   только флажок один на всё, а меток сколько угодно.
                   Правится вся переписка (см. пояснение у labelTargetsOf). */}
               <ContextMenuLabels
-                messages={labelTargetsOf([contextMenu.message.id])}
-                targetIds={expand([contextMenu.message.id])}
+                messages={labelTargetsOf(contextTargets())}
+                targetIds={expand(contextTargets())}
               />
               <ContextMenuSeparator />
               {/* Группа 4 */}
@@ -1097,7 +1091,7 @@ export function FolderPage() {
                   <ContextMenuItem
                     key={preset}
                     before={<IconClock />}
-                    onClick={() => snoozeTo([contextMenu.message.id], { preset })}
+                    onClick={() => snoozeTo(contextTargets(), { preset })}
                   >
                     {PRESET_TITLES[preset]}
                   </ContextMenuItem>
@@ -1117,7 +1111,7 @@ export function FolderPage() {
                 <ContextMenuItem
                   key={f.id}
                   before={<IconFolder />}
-                  onClick={() => moveTo([contextMenu.message.id], f.id)}
+                  onClick={() => moveTo(contextTargets(), f.id)}
                 >
                   {f.depth > 0 ? `  ${folderTitle(f)}` : folderTitle(f)}
                 </ContextMenuItem>
