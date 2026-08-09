@@ -749,14 +749,41 @@ export function ComposeWindow({
     ? 'Не запрашивать уведомление о прочтении'
     : 'Уведомить о прочтении';
 
+  /*
+   * Сколько файлов ЕЩЁ ЕДЕТ на сервер.
+   *
+   * Отправка ждёт этого счётчика, и вот почему. Письмо собирается из
+   * идентификаторов уже загруженных вложений: пока файл не доехал, его в
+   * черновике просто нет. Кнопка «Отправить» при этом была доступна
+   * всегда — единственным условием было «идёт ли сама отправка».
+   *
+   * Отсюда потеря, которую человек замечает у получателя. Прикрепил файл
+   * на двадцать мегабайт, дописал «см. вложение», нажал «Отправить» через
+   * пять секунд — письмо ушло БЕЗ файла и без единого предупреждения.
+   * Загрузка потом дописывала вложение в уже закрытое окно, то есть в
+   * никуда.
+   *
+   * То же самое с пересылкой: там вложения исходного письма скачиваются и
+   * заливаются обратно фоном, и окно открывается сразу.
+   */
+  const [uploading, setUploading] = useState(0);
+  /*
+   * Ждём ли мы файлы: свои (прикрепили в этом окне) или чужие
+   * (переносятся из пересылаемого письма — их считает сам черновик).
+   */
+  const waitingForAttachments = uploading > 0 || draft.pendingAttachments > 0;
+
   const attachFile = async (file: File | undefined) => {
     if (!file) return;
+    setUploading((n) => n + 1);
     try {
       const uploaded = await api.uploadAttachment(file);
       patch((current) => ({ attachments: [...current.attachments, uploaded] }));
     } catch (err) {
       // Раньше это был необработанный промис: файл не загружался молча
       setError(actionErrorText(`Не удалось загрузить «${file.name}»`, err));
+    } finally {
+      setUploading((n) => Math.max(0, n - 1));
     }
   };
 
@@ -860,7 +887,10 @@ export function ComposeWindow({
           if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             e.stopPropagation();
-            if (!sendMessage.isPending && !sendAsExternal.isPending) send();
+            // Ctrl+Enter — тот же путь, что и кнопка: письмо без ещё не
+            // доехавшего вложения уходит одинаково молча.
+            if (!sendMessage.isPending && !sendAsExternal.isPending && !waitingForAttachments)
+              send();
           }
         }}
       >
@@ -1387,13 +1417,15 @@ export function ComposeWindow({
             mode="primary"
             className={styles.sendButton}
             onClick={send}
-            disabled={sendMessage.isPending || sendAsExternal.isPending}
+            disabled={sendMessage.isPending || sendAsExternal.isPending || waitingForAttachments}
           >
-            {sendMessage.isPending || sendAsExternal.isPending
-              ? 'Отправка…'
-              : draft.sendAt
-                ? 'Отправить позже'
-                : 'Отправить'}
+            {waitingForAttachments
+              ? 'Ждём вложения…'
+              : sendMessage.isPending || sendAsExternal.isPending
+                ? 'Отправка…'
+                : draft.sendAt
+                  ? 'Отправить позже'
+                  : 'Отправить'}
           </Button>
           <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
             {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}

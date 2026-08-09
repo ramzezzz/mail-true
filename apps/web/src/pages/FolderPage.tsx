@@ -343,16 +343,27 @@ export function FolderPage() {
          * они едут, человек уже набирает текст.
          */
         if (kind === 'forward') {
-          void collectForwardAttachments(message).then(({ attachments, failed }) => {
-            if (attachments.length > 0) {
+          // Пока файлы едут, отправка недоступна: иначе письмо уходит без
+          // них и молча (см. pendingAttachments в app/store.ts).
+          updateComposeDraft(windowId, (draft) => ({
+            pendingAttachments: draft.pendingAttachments + 1,
+          }));
+          void collectForwardAttachments(message)
+            .then(({ attachments, failed }) => {
+              if (attachments.length > 0) {
+                updateComposeDraft(windowId, (draft) => ({
+                  attachments: [...draft.attachments, ...attachments],
+                }));
+              }
+              if (failed.length > 0) {
+                showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
+              }
+            })
+            .finally(() => {
               updateComposeDraft(windowId, (draft) => ({
-                attachments: [...draft.attachments, ...attachments],
+                pendingAttachments: Math.max(0, draft.pendingAttachments - 1),
               }));
-            }
-            if (failed.length > 0) {
-              showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
-            }
-          });
+            });
         }
       } catch (error) {
         showNotice(actionErrorText('Не удалось открыть письмо', error));

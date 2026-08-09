@@ -386,16 +386,28 @@ export function MessagePage() {
    */
   const bringAttachments = async (message: Message, windowId: number): Promise<void> => {
     if ((message.attachments ?? []).every((a) => a.inline)) return;
-    const { attachments, failed } = await collectForwardAttachments(message);
-    if (attachments.length > 0) {
+    // Отметка «вложения ещё едут» ставится ДО первого запроса: между
+    // открытием окна и приездом файлов человек успевает нажать
+    // «Отправить», и письмо уходило без них — молча.
+    updateComposeDraft(windowId, (draft) => ({
+      pendingAttachments: draft.pendingAttachments + 1,
+    }));
+    try {
+      const { attachments, failed } = await collectForwardAttachments(message);
+      if (attachments.length > 0) {
+        updateComposeDraft(windowId, (draft) => ({
+          attachments: [...draft.attachments, ...attachments],
+        }));
+      }
+      if (failed.length > 0) {
+        // Молчать нельзя: человек уверен, что вложения на месте, и пишет
+        // «см. вложение».
+        showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
+      }
+    } finally {
       updateComposeDraft(windowId, (draft) => ({
-        attachments: [...draft.attachments, ...attachments],
+        pendingAttachments: Math.max(0, draft.pendingAttachments - 1),
       }));
-    }
-    if (failed.length > 0) {
-      // Молчать нельзя: человек уверен, что вложения на месте, и пишет
-      // «см. вложение».
-      showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
     }
   };
 
