@@ -94,7 +94,11 @@ class FakeClient {
     return true;
   }
 
+  /** Папка, в которой снятие слова «не удаётся» — как при обрыве связи. */
+  failRemoveIn: string | null = null;
+
   async messageFlagsRemove(uids: number[], flags: string[]): Promise<boolean> {
+    if (this.failRemoveIn === this.selected) throw new Error('связь оборвалась');
     for (const uid of uids) for (const flag of flags) this.flagsOf(this.selected, uid).delete(flag);
     return true;
   }
@@ -444,6 +448,50 @@ test('удалять и править можно только свои метк
       });
       assert.equal(patch.statusCode, 404, `${key}: ${patch.body}`);
     }
+  } finally {
+    await app.close();
+  }
+});
+
+/*
+ * Снятие метки с писем идёт по папкам, и отказ в отдельной папке раньше
+ * только записывался в журнал: маршрут считал дело сделанным и стирал
+ * метку из справочника. На письмах той папки ключевое слово оставалось —
+ * без имени (справочник его больше не знает) и без способа убрать:
+ * повторить снятие нечем, а завести метку заново нельзя, ключ выдаётся
+ * новый. Пометка становилась вечной.
+ */
+test('нечистое снятие не стирает метку из справочника', async () => {
+  const { app, client } = await buildHarness();
+  try {
+    const key = await createLabel(app, 'Оплатить');
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:1', 'archive:10'], add: [key] },
+    });
+    client.failRemoveIn = 'Archive';
+
+    const res = await app.inject({ method: 'DELETE', url: `/api/labels/${key}?purge=1` });
+    assert.equal(res.statusCode, 503, res.body);
+    assert.match(res.json().message, /Archive/, 'в отказе не названа папка, где повторить');
+
+    // Метка на месте — значит снятие можно повторить, когда связь вернётся.
+    const list = await app.inject({ method: 'GET', url: '/api/labels' });
+    assert.deepEqual(
+      list.json().items.map((item: { key: string }) => item.key),
+      [key],
+    );
+    // И слово в недоступной папке тоже на месте: терять его молча нельзя.
+    assert.ok(client.flagsOf('Archive', 10).has(key));
+
+    // Повтор после починки доводит дело до конца.
+    client.failRemoveIn = null;
+    const again = await app.inject({ method: 'DELETE', url: `/api/labels/${key}?purge=1` });
+    assert.equal(again.statusCode, 200, again.body);
+    assert.equal(client.flagsOf('Archive', 10).has(key), false);
+    const after = await app.inject({ method: 'GET', url: '/api/labels' });
+    assert.deepEqual(after.json().items, []);
   } finally {
     await app.close();
   }

@@ -28,7 +28,12 @@
 import type { FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
-import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
+import {
+  BadRequestError,
+  NotFoundError,
+  UnauthorizedError,
+  UpstreamUnavailableError,
+} from '../errors.js';
 import {
   existingUids,
   groupIdsByFolder,
@@ -139,11 +144,24 @@ export function resolveLabelKeys(
  * или это `\Noselect`), пропускается: терять снятие с остальных писем
  * из-за одной папки нельзя.
  */
+export interface PurgeResult {
+  /** Сколько писем лишились ключевого слова. */
+  removed: number;
+  /**
+   * Папки, где снять не удалось. Пустой список — снято везде.
+   *
+   * Возвращается, а не только пишется в журнал, ради удаления метки:
+   * стереть её из справочника, не сняв слово с писем, значит оставить на
+   * письмах пометку, у которой больше нет ни имени, ни способа её убрать.
+   */
+  failedFolders: string[];
+}
+
 export async function purgeKeyword(
   client: ImapFlow,
   keyword: string,
   log?: { warn: (obj: unknown, msg: string) => void },
-): Promise<number> {
+): Promise<PurgeResult> {
   if (!isUserLabelKey(keyword)) {
     // Двойной замок: сюда нельзя попасть со служебным словом даже по ошибке
     // вызывающего. Стереть `$MDNSent` со всего ящика — это необратимо.
@@ -151,6 +169,7 @@ export async function purgeKeyword(
   }
   const folders = await listFolders(client);
   let removed = 0;
+  const failedFolders: string[] = [];
   for (const folder of folders) {
     let lock: { release(): void } | null = null;
     try {
@@ -170,12 +189,13 @@ export async function purgeKeyword(
         removed += uids.length;
       }
     } catch (err) {
+      failedFolders.push(folder.path);
       log?.warn(errorInfo(err, { folder: folder.path, keyword }), 'Не удалось снять метку в папке');
     } finally {
       lock?.release();
     }
   }
-  return removed;
+  return { removed, failedFolders };
 }
 
 export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promise<void> {
@@ -280,6 +300,14 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
    * метка останется в справочнике и снятие можно повторить. В обратном
    * порядке ключ бы потерялся, а слова в письмах остались бы навсегда
    * безымянными.
+   *
+   * По той же причине НЕЧИСТОЕ снятие приравнивается к падению. Отказ в
+   * отдельной папке раньше только записывался в журнал: снятие «удалось»,
+   * метка уходила из справочника, а в той папке ключевое слово оставалось
+   * на письмах — без имени и без способа его убрать. Повторить было
+   * нечего: метки уже нет, а завести её заново нельзя (ключ выдаётся
+   * новый). Теперь при неудаче хотя бы в одной папке справочник не
+   * трогается и ответ говорит, где повторить.
    */
   app.delete('/labels/:key', { preHandler: app.requireSession }, async (request) => {
     const session = requireMailSession(request.mailSession);
@@ -293,9 +321,16 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
 
     let removedFromMessages = 0;
     if (purge === '1') {
-      removedFromMessages = await pool.withClient(session.email, session.password, (client) =>
+      const result = await pool.withClient(session.email, session.password, (client) =>
         purgeKeyword(client, label.key, request.log),
       );
+      removedFromMessages = result.removed;
+      if (result.failedFolders.length > 0) {
+        throw new UpstreamUnavailableError(
+          `Метку не удалось снять в папках: ${result.failedFolders.join(', ')}. Метка оставлена — повторите позже.`,
+          { removedFromMessages, failedFolders: result.failedFolders },
+        );
+      }
     }
     await requireStore().remove(session.email, label.key);
     return { ok: true, key: label.key, purged: purge === '1', removedFromMessages };

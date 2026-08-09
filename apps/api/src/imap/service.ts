@@ -125,6 +125,27 @@ export function splitMessageId(id: string): { folderId: string; uid: number } {
   return { folderId, uid };
 }
 
+/**
+ * Наш `до:` — «включительно», а IMAP BEFORE — «строго раньше этого дня».
+ *
+ * Из-за этой разницы `до:2026-08-01` теряло весь первый день августа:
+ * подсказка и чип обещали «не позже этой даты», а письма названного дня в
+ * ответ не попадали. Замечают это на отборе за месяц — «где письмо, я его
+ * своими глазами вчера видел», — и виноватым выглядит поиск целиком.
+ *
+ * Поэтому серверу называется СЛЕДУЮЩИЙ день: «строго раньше 2 августа» и
+ * есть «не позже 1 августа». Точность IMAP тут дневная в любом случае —
+ * BEFORE сравнивает даты, а не время, — поэтому и `старше:1г` округляется
+ * так же: включает день ровно год назад целиком, а не половину его.
+ */
+function imapBefore(inclusive: Date): Date {
+  const next = new Date(
+    Date.UTC(inclusive.getUTCFullYear(), inclusive.getUTCMonth(), inclusive.getUTCDate()),
+  );
+  next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
 export function buildSearchQuery(
   filter: MessageFilter,
   search: string | undefined,
@@ -162,7 +183,7 @@ export function buildSearchQuery(
   if (parsed.cc) query.cc = parsed.cc;
   if (parsed.subject) query.subject = ftsSafeText(parsed.subject);
   if (parsed.since) query.since = parsed.since;
-  if (parsed.before) query.before = parsed.before;
+  if (parsed.before) query.before = imapBefore(parsed.before);
   if (parsed.seen !== null) query.seen = parsed.seen;
   if (parsed.flagged !== null) query.flagged = parsed.flagged;
   /*

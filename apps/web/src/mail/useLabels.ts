@@ -10,6 +10,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '../app/store';
+import { apiErrorCode } from '../api/http';
 import { actionErrorText } from '../lib/errorText';
 import {
   LABELS_UNAVAILABLE,
@@ -132,7 +133,19 @@ export function useDeleteLabel() {
           : 'Метка удалена из справочника, в письмах она осталась',
       );
     },
-    onError: (error: unknown) => showNotice(actionErrorText('Не удалось удалить метку', error)),
+    /*
+     * Отказ показывается ТЕМИ ЖЕ словами, что прислал сервер, а не общим
+     * «сервер не отвечает». Здесь у 503 есть содержание: снятие удалось
+     * не во всех папках, метка нарочно оставлена в справочнике, и
+     * повторить нужно именно её удаление. Общий текст спрятал бы и
+     * причину, и то, что делать дальше.
+     */
+    onError: (error: unknown) =>
+      showNotice(
+        apiErrorCode(error) === 'UPSTREAM_UNAVAILABLE' && error instanceof Error && error.message
+          ? `Не удалось удалить метку: ${error.message}`
+          : actionErrorText('Не удалось удалить метку', error),
+      ),
   });
 }
 
