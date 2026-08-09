@@ -26,6 +26,7 @@ import {
   MIGRATION_HINT,
   SettingsUnavailableError,
   type SettingsService,
+  type SieveSyncState,
 } from './service.js';
 import type { MailSession } from '../types.js';
 import {
@@ -188,6 +189,34 @@ function numericId(raw: string): number {
 /* Маршруты                                                             */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Приписывает к ответу предупреждение о том, что файл правил не доехал.
+ *
+ * `syncSieve` намеренно не бросает: правило (или автоответчик) уже
+ * сохранено в базе, и отменять сохранение из-за недоступного Dovecot
+ * неправильно — человек потеряет работу на ровном месте. Но и молчать
+ * нельзя: раскладывать почту, отвечать в отпуске и заглушать переписки
+ * умеет ИМЕННО файл правил в ящике. Пока он не записан, настройка есть, а
+ * поведения нет.
+ *
+ * Раньше состояние возвращалось наружу и там же выбрасывалось: маршруты
+ * звали `await service.syncSieve(...)` и не смотрели на результат вовсе.
+ * Человек видел зелёное «Настройки сохранены», уезжал в отпуск — а
+ * отвечать было некому. Причина при этом существовала и была сформирована
+ * (выключенный транспорт, недоступный контейнер Dovecot, ошибка
+ * компиляции, отказ записи файла), но оставалась в журнале сервера.
+ */
+export function withSieveWarning<T extends object>(payload: T, state: SieveSyncState): T {
+  if (state.ok) return payload;
+  const reason = state.error.trim();
+  return {
+    ...payload,
+    sieveWarning: reason
+      ? `Сохранено, но правила пока не применяются на сервере: ${reason}`
+      : 'Сохранено, но правила пока не применяются на сервере',
+  };
+}
+
 export async function settingsUserRoutes(
   app: FastifyInstance,
   service: SettingsService,
@@ -239,8 +268,8 @@ export async function settingsUserRoutes(
     const result = await guard(() => saveGeneralWithSignatures(db, session.email, dto));
 
     // Автоответчик живёт в том же файле Sieve, что и правила.
-    await service.syncSieve(session.email);
-    return result;
+    const sieve = await service.syncSieve(session.email);
+    return withSieveWarning(result as object, sieve);
   });
 
   /* -------------------------------------------------------------- */
@@ -316,9 +345,9 @@ export async function settingsUserRoutes(
     const db = service.requireDb();
     const folders = await foldersOf(session);
     const created = await guard(() => db.createFilter(session.email, fromWebRule(dto, folders)));
-    await service.syncSieve(session.email);
+    const sieve = await service.syncSieve(session.email);
     await applyToExisting(session, created.id, dto, folders);
-    return toWebRule(created, folders);
+    return withSieveWarning(toWebRule(created, folders), sieve);
   });
 
   app.put('/filters/:id', { preHandler: app.requireSession }, async (request) => {
@@ -335,9 +364,9 @@ export async function settingsUserRoutes(
       db.updateFilter(session.email, numericId(id), fromWebRule(dto, folders, previous)),
     );
     if (!updated) throw new NotFoundError('Правило не найдено');
-    await service.syncSieve(session.email);
+    const sieve = await service.syncSieve(session.email);
     await applyToExisting(session, updated.id, dto, folders);
-    return toWebRule(updated, folders);
+    return withSieveWarning(toWebRule(updated, folders), sieve);
   });
 
   app.delete('/filters/:id', { preHandler: app.requireSession }, async (request) => {
@@ -347,8 +376,8 @@ export async function settingsUserRoutes(
       service.requireDb().deleteFilter(session.email, numericId(id)),
     );
     if (!removed) throw new NotFoundError('Правило не найдено');
-    await service.syncSieve(session.email);
-    return { ok: true };
+    const sieve = await service.syncSieve(session.email);
+    return withSieveWarning({ ok: true }, sieve);
   });
 
   /**

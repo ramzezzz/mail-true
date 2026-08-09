@@ -207,3 +207,30 @@ export async function resolveRestorePath(client: ImapFlow, originPath: string): 
   if (trash) return trash.path;
   return folders.find((f) => f.role === 'inbox')?.path ?? 'INBOX';
 }
+
+/**
+ * Возврат писем из «Recovery» туда, откуда их взяли.
+ *
+ * Нужен ровно в одном случае: перенос удался, а записать о нём в базу не
+ * вышло. Без возврата письма остаются в скрытой папке, где их не видит ни
+ * почта, ни раздел «Восстановление писем», ни работник удаления по
+ * сроку, — то есть они лежат вечно и едят квоту, считаясь удалёнными.
+ *
+ * Возврат по номерам в «Recovery», а не по Message-ID: номера мы только
+ * что получили от самого сервера при переносе, и это самый точный
+ * указатель, какой у нас есть.
+ */
+export async function returnFromRecovery(
+  client: ImapFlow,
+  recovery: Folder,
+  originPath: string,
+  recoveryUids: readonly number[],
+): Promise<void> {
+  if (recoveryUids.length === 0) return;
+  const lock = await client.getMailboxLock(recovery.path);
+  try {
+    await client.messageMove([...recoveryUids], originPath, { uid: true });
+  } finally {
+    lock.release();
+  }
+}

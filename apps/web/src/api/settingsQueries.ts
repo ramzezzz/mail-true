@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tan
 import type { Folder } from '@mail-true/shared';
 import { settingsApi } from './index';
 import { queryKeys } from './queries';
+import { useUiStore } from '../app/store';
 import { resetSenderLogos } from '../mail/senderLogos';
 import type { FilterRule } from '../lib/filterRules';
 import type {
@@ -19,6 +20,26 @@ export const settingsKeys = {
   collectors: ['settings', 'collectors'] as const,
 };
 
+/**
+ * Предупреждение сервера о том, что правила сохранены, но не применены.
+ *
+ * Раскладывать почту, отвечать в отпуске и заглушать переписки умеет файл
+ * правил в ящике (Sieve). Сохранение в базе и запись этого файла — разные
+ * действия, и второе может не удаться: выключен транспорт, недоступен
+ * контейнер Dovecot, не скомпилировался скрипт, отказала запись.
+ *
+ * Сервер такую неудачу не считает отказом всего запроса (настройка ведь
+ * сохранена) и присылает её отдельным полем. Раньше поля не было вовсе, и
+ * человек видел зелёное «Настройки сохранены», уезжал в отпуск — а
+ * отвечать было некому.
+ */
+function noticeSieveWarning(result: unknown): void {
+  const warning = (result as { sieveWarning?: unknown } | null)?.sieveWarning;
+  if (typeof warning === 'string' && warning !== '') {
+    useUiStore.getState().showNotice(warning);
+  }
+}
+
 /* --- Общие настройки -------------------------------------------------- */
 
 export function useGeneralSettings(): UseQueryResult<GeneralSettings> {
@@ -33,6 +54,7 @@ export function useSaveGeneralSettings() {
     // правды о том, что реально записалось (сервер мог нормализовать поля).
     onSuccess: (saved) => {
       client.setQueryData(settingsKeys.general, saved);
+      noticeSieveWarning(saved);
       /*
        * Реестр логотипов запоминает ответ сервера «выключено» на весь сеанс,
        * чтобы не спрашивать зря. После сохранения настроек этот ответ мог
@@ -59,7 +81,10 @@ export function useSaveFilterRule() {
   const invalidate = useInvalidateFilters();
   return useMutation({
     mutationFn: (rule: FilterRule) => settingsApi.saveFilterRule(rule),
-    onSuccess: invalidate,
+    onSuccess: (saved) => {
+      invalidate();
+      noticeSieveWarning(saved);
+    },
   });
 }
 
@@ -67,7 +92,10 @@ export function useDeleteFilterRule() {
   const invalidate = useInvalidateFilters();
   return useMutation({
     mutationFn: (id: string) => settingsApi.deleteFilterRule(id),
-    onSuccess: invalidate,
+    onSuccess: (result) => {
+      invalidate();
+      noticeSieveWarning(result);
+    },
   });
 }
 

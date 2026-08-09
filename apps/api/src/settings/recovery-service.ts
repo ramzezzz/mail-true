@@ -44,6 +44,7 @@ import {
   moveToRecovery,
   readRecoverySource,
   resolveRestorePath,
+  returnFromRecovery,
 } from './recovery-mailbox.js';
 
 /** Сколько записей удаляет один проход работника. */
@@ -215,21 +216,50 @@ export class RecoveryService {
       return { kept: 0, removed: present.length, restoreUntil: null };
     }
 
-    /* Шаг 2: запись сроков. */
-    for (const placement of placements) {
-      await store.addRecovery({
-        accountEmail,
-        recoveryPath: target.path,
-        recoveryUid: placement.recoveryUid,
-        recoveryUidValidity: placement.recoveryUidValidity,
-        originPath: source.path,
-        messageId: placement.info.messageId,
-        subject: placement.info.subject,
-        fromAddress: placement.info.fromAddress,
-        sentAt: placement.info.sentAt,
-        sizeBytes: placement.info.sizeBytes,
-        purgeAt,
-      });
+    /*
+     * Шаг 2: запись сроков. И ОТКАТ ПЕРЕНОСА, ЕСЛИ ЗАПИСАТЬ НЕ ВЫШЛО.
+     *
+     * Письма к этому моменту уже в служебной папке «Recovery», а она
+     * скрыта из дерева папок. Пока о письме нет записи в базе, оно не
+     * видно НИГДЕ: ни в почте, ни в разделе «Восстановление писем» (тот
+     * строится по базе), и работник удаления по сроку его тоже не найдёт
+     * — он читает ту же базу. То есть письмо остаётся на диске навсегда,
+     * ест квоту и при этом считается удалённым.
+     *
+     * Достижимо это было буднично: записи создавались по одной в цикле,
+     * на корзине в тысячи писем — тысячи запросов подряд. Любой сбой или
+     * таймаут посреди цикла (пул на три соединения) оставлял остаток
+     * перенесённым и незаписанным, а маршрут отвечал 500.
+     *
+     * Поэтому: пишем всё одним запросом, а если он не удался — возвращаем
+     * письма обратно в ту папку, откуда взяли. Тогда «очистить» либо
+     * сработало целиком, либо не изменило ничего, и человеку есть что
+     * повторить.
+     */
+    try {
+      await store.addRecoveryBatch(
+        placements.map((placement) => ({
+          accountEmail,
+          recoveryPath: target.path,
+          recoveryUid: placement.recoveryUid,
+          recoveryUidValidity: placement.recoveryUidValidity,
+          originPath: source.path,
+          messageId: placement.info.messageId,
+          subject: placement.info.subject,
+          fromAddress: placement.info.fromAddress,
+          sentAt: placement.info.sentAt,
+          sizeBytes: placement.info.sizeBytes,
+          purgeAt,
+        })),
+      );
+    } catch (err) {
+      await returnFromRecovery(
+        client,
+        target,
+        source.path,
+        placements.map((p) => p.recoveryUid),
+      ).catch(() => undefined);
+      throw err;
     }
 
     return {

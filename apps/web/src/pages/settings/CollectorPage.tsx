@@ -17,7 +17,7 @@ import {
   useUpdateCollector,
 } from '../../api/settingsQueries';
 import { useFolders } from '../../api/queries';
-import type { CollectorDraft, CollectorProtocol } from '../../api/settingsTypes';
+import type { CollectorAccount, CollectorDraft, CollectorProtocol } from '../../api/settingsTypes';
 import {
   Button,
   Checkbox,
@@ -27,6 +27,7 @@ import {
   Switch,
   TextField,
 } from '../../components';
+import { ConfirmDialog } from '../../settings/ConfirmDialog';
 import { cx } from '../../lib/cx';
 import { folderTitle } from '../../lib/folderNames';
 import { formatMessageDate } from '../../lib/listDates';
@@ -56,6 +57,15 @@ export function CollectorPage() {
   const sync = useSyncCollector();
 
   const [wizard, setWizard] = useState<CollectorProvider | null>(null);
+  /**
+   * Подключение, которое собрались удалить.
+   *
+   * Раньше корзина удаляла сразу, а стоит она вплотную к кнопке
+   * «Проверить». Пропадают при этом адрес сервера, порт, логин и пароль —
+   * то, что человек вводил тремя шагами мастера, и часто это отдельный
+   * «пароль приложения», который надо идти выпускать заново. Отмены нет.
+   */
+  const [removing, setRemoving] = useState<CollectorAccount | null>(null);
 
   return (
     <>
@@ -143,7 +153,11 @@ export function CollectorPage() {
                 <IconButton
                   label="Удалить ящик"
                   disabled={remove.isPending}
-                  onClick={() => remove.mutate(collector.id)}
+                  onClick={() => {
+                    // Отказ прошлого удаления не должен висеть в новом окне.
+                    remove.reset();
+                    setRemoving(collector);
+                  }}
                 >
                   <IconTrash />
                 </IconButton>
@@ -152,6 +166,20 @@ export function CollectorPage() {
           );
         })}
       </div>
+
+      {removing && (
+        <ConfirmDialog
+          title="Удалить подключение?"
+          text={`Сбор писем с «${removing.email}» прекратится, а настройки подключения — сервер, порт, логин и пароль — будут удалены. Уже собранные письма останутся в ящике. Чтобы подключить ящик заново, все данные придётся ввести снова.`}
+          confirmText="Удалить"
+          busy={remove.isPending}
+          error={remove.isError ? 'Не удалось удалить подключение. Попробуйте ещё раз.' : null}
+          onClose={() => setRemoving(null)}
+          onConfirm={() => {
+            remove.mutate(removing.id, { onSuccess: () => setRemoving(null) });
+          }}
+        />
+      )}
 
       {wizard && (
         <CollectorWizard
@@ -191,8 +219,23 @@ function CollectorWizard({ provider, folders, saving, error, onClose, onSubmit }
   const [secure, setSecure] = useState(provider.secure);
   const [login, setLogin] = useState('');
   const [targetFolderId, setTargetFolderId] = useState('inbox');
-  const [leaveOnServer, setLeaveOnServer] = useState(true);
-  const [applyFilters, setApplyFilters] = useState(true);
+  /*
+   * Двух переключателей здесь БОЛЬШЕ НЕТ, и это решение.
+   *
+   * «Оставлять письма на сервере-источнике» и «Применять к собранным
+   * письмам правила фильтрации» сохранялись и показывались как настоящие
+   * настройки, а не делали ничего: письма на источнике не удаляются ни
+   * при каком значении, а собранные письма кладутся IMAP-командой
+   * APPEND, при которой правила Sieve не срабатывают вовсе — они
+   * работают на доставке.
+   *
+   * Человек снимал первую галку, чтобы освободить место в старом ящике,
+   * и узнавал об обратном, упершись в квоту у прежнего провайдера.
+   * Оставлял вторую и ждал, что письма разложатся по папкам, — они все
+   * ложились в одну. Правило продукта здесь простое: кнопка появляется
+   * вместе с поведением. Поведения нет — нет и кнопки; вместо неё сказано,
+   * как оно есть на самом деле.
+   */
 
   /**
    * Шаг «адрес и пароль» закончен: если служба выбрана как «Другая почта»,
@@ -232,8 +275,10 @@ function CollectorWizard({ provider, folders, saving, error, onClose, onSubmit }
       secure,
       login: login.trim() || email.trim(),
       targetFolderId,
-      leaveOnServer,
-      applyFilters,
+      // Значения соответствуют тому, что происходит на деле: письма на
+      // источнике остаются, правила фильтрации к собранным не применяются.
+      leaveOnServer: true,
+      applyFilters: false,
     });
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email.trim());
@@ -355,16 +400,11 @@ function CollectorWizard({ provider, folders, saving, error, onClose, onSubmit }
               </option>
             ))}
           </SelectField>
-          <Checkbox
-            label="Оставлять письма на сервере-источнике"
-            checked={leaveOnServer}
-            onChange={(e) => setLeaveOnServer(e.target.checked)}
-          />
-          <Checkbox
-            label="Применять к собранным письмам правила фильтрации"
-            checked={applyFilters}
-            onChange={(e) => setApplyFilters(e.target.checked)}
-          />
+          <p className={styles.hint}>
+            Письма остаются на сервере-источнике — сбор их не удаляет. Все собранные письма попадают
+            в выбранную папку: правила фильтрации к ним не применяются, потому что срабатывают они
+            только на доставке.
+          </p>
         </>
       )}
 

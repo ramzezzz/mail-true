@@ -134,6 +134,17 @@
   flex: 0 0 100px;
 }
 
+/* Пояснение о том, как сбор ведёт себя на самом деле: письма остаются на
+   источнике, правила фильтрации к собранным не применяются. Стоит на месте
+   двух прежних переключателей, которые обещали и то и другое, ничего не
+   делая. */
+.hint {
+  margin: 4px 0 0;
+  font-size: var(--mt-font-subhead-size, 14px);
+  line-height: 20px;
+  color: var(--mt-color-text-secondary);
+}
+
 .error {
   margin: 16px 0 0;
   font-size: var(--mt-font-subhead-size, 14px);

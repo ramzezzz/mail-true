@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react';
 import { useGeneralSettings, useSaveGeneralSettings } from '../../api/settingsQueries';
 import { UNDO_SEND_CHOICES, type GeneralSettings, type Signature } from '../../api/settingsTypes';
 import { Button, SelectField, Switch, TextAreaField, TextField } from '../../components';
+import { useUiStore } from '../../app/store';
 import { dateInputValue } from '../../settings/generalSettings';
 import { IconPlus, IconTrash } from '../../mail/icons';
 import {
@@ -85,8 +86,27 @@ export function GeneralSettingsPage() {
    * (31 → 32 → 33). Заодно так подхватываются любые нормализации сервера:
    * например, срок автоответчика он возвращает полной датой ISO.
    */
-  const saveDraft = () =>
+  /**
+   * Автоответчик, включённый с пустым текстом, не отвечает — и об этом
+   * надо сказать ЗДЕСЬ, а не оставлять человека с горящим переключателем.
+   *
+   * Сборка файла правил первой же строкой пропускает автоответ без
+   * текста (`sieve.ts`): ни одного письма никто не получит. При этом
+   * «включён» сохранялось, переживало перезагрузку страницы и ничем не
+   * отличалось на экране от рабочего состояния. Человек уезжал в отпуск,
+   * а отвечать было некому.
+   */
+  const autoReplyEmpty = draft.autoReply.enabled && draft.autoReply.text.trim() === '';
+
+  const showNotice = useUiStore.getState().showNotice;
+
+  const saveDraft = () => {
+    if (autoReplyEmpty) {
+      showNotice('Автоответчик не включён: без текста отвечать нечем');
+      return;
+    }
     save.mutate(draft, { onSuccess: (saved) => setDraft(structuredClone(saved)) });
+  };
 
   const removeSignature = (id: string) =>
     patch({
@@ -169,6 +189,7 @@ export function GeneralSettingsPage() {
           label="Текст автоответа"
           value={draft.autoReply.text}
           disabled={!draft.autoReply.enabled}
+          error={autoReplyEmpty ? 'Без текста автоответчик не отвечает' : null}
           onChange={(e) => patch({ autoReply: { ...draft.autoReply, text: e.target.value } })}
         />
         <SettingsRow>

@@ -269,6 +269,14 @@ export interface OwnerStore {
   setRecoveryDays(accountEmail: string, days: number): Promise<void>;
 
   addRecovery(entry: RecoveryInsert): Promise<void>;
+  /**
+   * Записать сразу все перенесённые письма.
+   *
+   * Одним запросом, а не циклом: письма к этому моменту уже лежат в
+   * служебной папке, и сбой посреди цикла оставлял часть из них без
+   * записи — то есть невидимыми и вечными (см. recovery-service.ts).
+   */
+  addRecoveryBatch(entries: readonly RecoveryInsert[]): Promise<void>;
   listRecovery(accountEmail: string, limit: number): Promise<RecoveryRow[]>;
   /** Сводка: сколько писем и байт лежит в ожидании удаления. */
   recoveryTotals(accountEmail: string): Promise<{ count: number; bytes: number }>;
@@ -616,6 +624,40 @@ export class OwnerDb implements OwnerStore {
         entry.sizeBytes,
         entry.purgeAt.toISOString(),
       ],
+    );
+  }
+
+  async addRecoveryBatch(entries: readonly RecoveryInsert[]): Promise<void> {
+    if (entries.length === 0) return;
+    const values: unknown[] = [];
+    const rows: string[] = [];
+    for (const entry of entries) {
+      const base = values.length;
+      rows.push(
+        `(lower($${base + 1}), $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, ` +
+          `$${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, $${base + 10}, $${base + 11})`,
+      );
+      values.push(
+        entry.accountEmail,
+        entry.recoveryPath,
+        entry.recoveryUid,
+        entry.recoveryUidValidity,
+        entry.originPath,
+        entry.messageId,
+        entry.subject,
+        entry.fromAddress,
+        entry.sentAt?.toISOString() ?? null,
+        entry.sizeBytes,
+        entry.purgeAt.toISOString(),
+      );
+    }
+    await this.#query(
+      `INSERT INTO trash_recovery_items
+         (account_email, recovery_path, recovery_uid, recovery_uidvalidity, origin_path,
+          message_id, subject, from_address, sent_at, size_bytes, purge_at)
+       VALUES ${rows.join(', ')}
+       ON CONFLICT DO NOTHING`,
+      values,
     );
   }
 

@@ -16,6 +16,7 @@
  */
 
 import { useState } from 'react';
+import { ConfirmDialog } from '../../settings/ConfirmDialog';
 import { Button, Checkbox, SelectField, Spinner } from '../../components';
 import { actionErrorText } from '../../lib/errorText';
 import {
@@ -58,6 +59,8 @@ export function RecoveryPage() {
   const restore = useRestoreMessages();
   const purge = usePurgeMessages();
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  /** Открыто окно «удалить всё сейчас»: действие необратимо. */
+  const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
 
   const { available, reason, items, totals, days, maxDays, scheduledPurge, loading } = state;
   const error = setDays.error ?? restore.error ?? purge.error;
@@ -119,8 +122,13 @@ export function RecoveryPage() {
               <Button
                 mode="secondary"
                 onClick={() => {
-                  purge.mutate('all');
-                  setSelected(new Set());
+                  // Спрашиваем ОБЯЗАТЕЛЬНО: кнопка стоит вплотную к строке
+                  // с занятым объёмом — там же, где человек читает, сколько
+                  // места едят письма, — и один промах мышью безвозвратно
+                  // стирал всё, что ещё можно было вернуть. Восстановления
+                  // после этого нет никакого.
+                  purge.reset();
+                  setConfirmPurgeAll(true);
                 }}
                 disabled={busy}
               >
@@ -211,6 +219,25 @@ export function RecoveryPage() {
             Thunderbird она видна под именем «Recovery», и это не поломка.
           </SettingsHint>
         </>
+      )}
+
+      {confirmPurgeAll && (
+        <ConfirmDialog
+          title="Удалить всё сейчас?"
+          text={`Из ящика будут окончательно удалены письма, ждущие удаления, — их ${String(totals.count)}. Это последнее место, откуда их ещё можно было вернуть: после удаления восстановить их нельзя ничем.`}
+          confirmText="Удалить"
+          busy={purge.isPending}
+          error={purge.isError ? 'Не удалось удалить письма. Попробуйте ещё раз.' : null}
+          onClose={() => setConfirmPurgeAll(false)}
+          onConfirm={() => {
+            purge.mutate('all', {
+              onSuccess: () => {
+                setConfirmPurgeAll(false);
+                setSelected(new Set());
+              },
+            });
+          }}
+        />
       )}
     </>
   );

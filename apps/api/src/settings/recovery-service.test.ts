@@ -114,6 +114,14 @@ class MemoryStore implements OwnerStore {
     });
     return Promise.resolve();
   }
+  /** Отказ записи — им проверяется откат переноса. */
+  failWrites = false;
+
+  async addRecoveryBatch(entries: readonly RecoveryInsert[]): Promise<void> {
+    if (this.failWrites) throw new Error('база недоступна');
+    for (const entry of entries) await this.addRecovery(entry);
+  }
+
   listRecovery(email: string): Promise<RecoveryRow[]> {
     return Promise.resolve(
       this.rows.filter((r) => r.state === 'pending' && r.accountEmail === email),
@@ -335,6 +343,40 @@ test('очистка корзины переносит письма, а не у�
   // Порядок: сперва перенос, потом запись. Иначе появилась бы запись
   // о письме, которого в служебной папке нет.
   assert.ok(box.calls.some((c) => c.startsWith('move:Trash->Recovery')));
+});
+
+/*
+ * Письма к моменту записи УЖЕ в служебной папке «Recovery», а она скрыта
+ * из дерева папок. Пока о письме нет строки в базе, его не видно нигде:
+ * ни в почте, ни в разделе «Восстановление писем» (он строится по базе),
+ * и работник удаления по сроку его тоже не найдёт — он читает ту же базу.
+ * То есть письмо лежит на диске вечно, ест квоту и считается удалённым.
+ *
+ * Раньше записи создавались по одной в цикле: на корзине в тысячи писем
+ * — тысячи запросов подряд, и любой сбой посреди цикла оставлял остаток
+ * перенесённым и незаписанным.
+ */
+test('не удалось записать сроки — письма возвращаются в корзину', async () => {
+  const store = new MemoryStore();
+  const box = new FakeMailbox();
+  box.seedTrash(3);
+  store.failWrites = true;
+
+  await assert.rejects(
+    service(store).sweep(box.client, 'test@mail.local', TRASH, [1, 2, 3], 7),
+    /база недоступна/,
+  );
+
+  assert.equal(store.rows.length, 0, 'записей нет — значит и писем в «Recovery» быть не должно');
+  assert.equal(
+    box.folders.get('Recovery')!.length,
+    0,
+    'письма остались в скрытой папке: их не видно нигде и они не удалятся никогда',
+  );
+  assert.equal(box.folders.get('Trash')!.length, 3, 'письма обязаны вернуться в корзину');
+  // Возврат — это перенос обратно, а не удаление.
+  assert.ok(box.calls.some((c) => c.startsWith('move:Recovery->Trash')));
+  assert.ok(!box.calls.some((c) => c.startsWith('delete:')));
 });
 
 test('срок хранения ноль — служба не сохраняет ничего', async () => {
