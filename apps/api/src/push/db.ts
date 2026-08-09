@@ -302,6 +302,38 @@ export class PushDb {
     await this.#query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [endpoint]);
   }
 
+  /**
+   * Уборка подписок, которые давно не работают.
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ
+   * ------------------------------------------------------------------
+   * Подписка удалялась ровно в двух случаях: человек отписался сам или
+   * служба доставки ответила 404/410. Всё остальное — таймауты, 5xx,
+   * браузер, который снесли вместе с ноутбуком, — копилось навсегда:
+   * `recordFailure` отмечает отказ, но не удаляет.
+   *
+   * Мусор здесь не только занимает место. Рассылка идёт по всем
+   * подпискам ящика ПО ОДНОЙ, с таймаутом в десять секунд на каждую, —
+   * то есть десяток мёртвых строк растягивает уведомление о письме на
+   * минуты.
+   *
+   * Убираем ту, что подряд отказывает дольше срока и с тех пор ни разу
+   * не отозвалась. Живой подписке уборка не грозит: любой успешный
+   * заход обнуляет отметку об отказе (touchSubscription).
+   */
+  async purgeDeadSubscriptions(olderThan: Date): Promise<number> {
+    const rows = await this.#query<{ id: string }>(
+      `DELETE FROM push_subscriptions
+        WHERE last_error_at IS NOT NULL
+          AND last_error_at < $1
+          AND (last_seen_at IS NULL OR last_seen_at < last_error_at)
+        RETURNING id`,
+      [olderThan],
+    );
+    return rows.length;
+  }
+
   /** Запоминает отказ, не удаляя подписку: временная ошибка — не приговор. */
   async recordFailure(endpoint: string, error: string): Promise<void> {
     await this.#query(

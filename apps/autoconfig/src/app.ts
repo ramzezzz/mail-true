@@ -40,6 +40,34 @@ const domainSchema = z
     'некорректный домен',
   );
 
+/**
+ * Насколько живёт готовый ответ проверки DNS.
+ *
+ * Записи домена не меняются чаще, а маршрут открыт в интернет: без
+ * кэша каждый запрос снаружи превращается в десяток обращений к
+ * резольверу.
+ */
+const DNS_CHECK_TTL_MS = 30_000;
+
+/** Готовые ответы проверки: домен здесь ровно один, поэтому и записи одна. */
+const dnsCheckCache = new Map<string, { at: number; body: unknown }>();
+
+/**
+ * По какому домену к нам обратились.
+ *
+ * Почтовые программы приходят на `autoconfig.<домен>` или
+ * `autodiscover.<домен>` — имя узла в запросе и есть тот домен, чей
+ * владелец направил сюда запись в DNS. Только его и можно подтверждать
+ * как обслуживаемый: всё остальное было бы утверждением о чужом домене.
+ */
+function domainAskedVia(host: string | undefined): string | undefined {
+  if (!host) return undefined;
+  const name = host.split(':')[0]?.toLowerCase().trim();
+  if (!name) return undefined;
+  const stripped = /^(?:autoconfig|autodiscover)\.(.+)$/u.exec(name);
+  return stripped?.[1] ?? name;
+}
+
 export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<FastifyInstance> {
   const settings: MailSettings = settingsFromEnv(config);
 
@@ -69,7 +97,13 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
       const email = emailSchema.safeParse(q['emailaddress']);
       return reply
         .type(XML_TYPE)
-        .send(buildClientConfigXml(settings, email.success ? email.data : undefined));
+        .send(
+          buildClientConfigXml(
+            settings,
+            email.success ? email.data : undefined,
+            domainAskedVia(request.headers.host),
+          ),
+        );
     });
   }
 
@@ -100,9 +134,42 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
   // ------------------------------------------------------------------
   // 3. DNS-записи и их проверка
   // ------------------------------------------------------------------
+  /**
+   * Проверка домена в запросе.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * `?domain=` принимался любой, а маршруты `/api/dns-records` и
+   * `/api/dns-check` открыты в интернет: они живут на
+   * `autoconfig.<домен>`, куда nginx отдаёт всё без всякого входа
+   * (иначе почтовые программы не смогли бы забрать настройки).
+   *
+   * То есть кто угодно снаружи мог заставить наш резольвер обойти до
+   * десятка записей произвольного домена, сколько угодно раз. Плюс
+   * ответ `/api/dns-records` для чужого домена выглядит как «вот
+   * записи, которые надо опубликовать, чтобы этот домен обслуживал наш
+   * сервер», — то есть утверждает то, о чём сервер ничего не знает.
+   *
+   * Проверять чужие домены незачем: раздел существует ради того, чтобы
+   * администратор проверил СВОЙ. Полноценная проверка с правами и без
+   * ограничений живёт в панели (раздел «Домены»).
+   */
+  const ownDomain = (value: string | undefined): string | null => {
+    const asked = (value ?? settings.domain).toLowerCase().trim();
+    const own = settings.domain.toLowerCase();
+    return asked === own ? own : null;
+  };
+
   app.get('/api/dns-records', async (request, reply) => {
     const q = (request.query ?? {}) as Record<string, string | undefined>;
-    const domain = domainSchema.safeParse((q['domain'] ?? settings.domain).toLowerCase());
+    const own = ownDomain(q['domain']);
+    if (own === null) {
+      return reply
+        .code(403)
+        .send({ error: 'FOREIGN_DOMAIN', message: 'Этот сервер обслуживает другой домен' });
+    }
+    const domain = domainSchema.safeParse(own);
     if (!domain.success) {
       return reply.code(400).send({ error: 'BAD_DOMAIN', message: 'Некорректный домен' });
     }
@@ -118,10 +185,25 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
 
   app.get('/api/dns-check', async (request, reply) => {
     const q = (request.query ?? {}) as Record<string, string | undefined>;
-    const domain = domainSchema.safeParse((q['domain'] ?? settings.domain).toLowerCase());
+    const own = ownDomain(q['domain']);
+    if (own === null) {
+      return reply
+        .code(403)
+        .send({ error: 'FOREIGN_DOMAIN', message: 'Этот сервер обслуживает другой домен' });
+    }
+    const domain = domainSchema.safeParse(own);
     if (!domain.success) {
       return reply.code(400).send({ error: 'BAD_DOMAIN', message: 'Некорректный домен' });
     }
+    /*
+     * Проверка ходит в DNS — до десятка резолвов на запрос. Держим
+     * недолгий кэш ответа: без него открытый в интернет маршрут работает
+     * усилителем запросов к резольверу, а обновлять его чаще, чем раз в
+     * полминуты, всё равно бессмысленно — записи так быстро не меняются.
+     */
+    const cached = dnsCheckCache.get(domain.data);
+    if (cached && Date.now() - cached.at < DNS_CHECK_TTL_MS) return cached.body;
+
     const dkim = await readDkimRecord(settings, domain.data);
     const records = buildDnsRecords(settings, domain.data, dkim);
     const results = await checkDns(settings, domain.data, records);
@@ -129,7 +211,9 @@ export async function buildApp(config: AutoconfigEnv, logger: Logger): Promise<F
       ok: results.filter((r) => r.status === 'ok').length,
       problems: results.filter((r) => r.status !== 'ok').length,
     };
-    return { domain: domain.data, summary, results };
+    const body = { domain: domain.data, summary, results };
+    dnsCheckCache.set(domain.data, { at: Date.now(), body });
+    return body;
   });
 
   // ------------------------------------------------------------------

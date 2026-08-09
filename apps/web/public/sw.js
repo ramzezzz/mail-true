@@ -186,6 +186,24 @@ async function fetchView(key) {
 }
 
 /**
+ * Отпечаток ящика, открытого в этом браузере.
+ *
+ * Тот же маршрут, что и за содержимым, но без списка писем: нам нужен
+ * только ответ на вопрос «чей это браузер». Ответ 401 (сессии нет)
+ * означает «ничей» — и тогда содержимое из push показывать нельзя.
+ */
+async function ownKey() {
+  const response = await fetch(API.notifications + '?ids=', {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+    cache: 'no-store',
+  });
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data && typeof data === 'object' && typeof data.key === 'string' ? data.key : null;
+}
+
+/**
  * Проверочное уведомление.
  *
  * Оно не притворяется письмом — и это важнее, чем кажется: человек,
@@ -219,7 +237,26 @@ self.addEventListener('push', (event) => {
       const raw = event.data ? event.data.text() : '';
       const incoming = parsePush(raw);
 
+      /*
+       * Отпечаток ящика сверяем ДО показа, а не только на пути «забрать
+       * содержимое с сервера».
+       *
+       * Когда включено «класть содержимое в push», `incoming.view` не
+       * пуст, и раньше окно рисовалось как есть — сверка не работала
+       * вовсе. Общий компьютер, сессия первого истекла (именно истекла:
+       * выход подписку снимает), вошёл второй — и на письмо первому
+       * второй видел отправителя и тему.
+       *
+       * Сверяем с тем ящиком, который в этом браузере сейчас: спрашиваем
+       * у своего же сервера. Не совпало — показываем безымянное окно.
+       * Не смогли спросить (нет сети) — тоже: обещание «чужого не
+       * покажем» дороже удобства.
+       */
       let view = incoming.view;
+      if (view && incoming.key) {
+        const mine = await ownKey().catch(() => null);
+        if (mine !== incoming.key) view = null;
+      }
       if (!view) {
         try {
           view = await fetchView(incoming.key);

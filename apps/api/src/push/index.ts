@@ -210,6 +210,7 @@ export async function pushNotificationRoutes(app: FastifyInstance): Promise<void
   }
 
   app.addHook('onClose', async () => {
+    service.stop();
     if (db) await db.close().catch(() => undefined);
   });
 

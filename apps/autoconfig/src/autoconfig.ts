@@ -31,15 +31,37 @@ function serverXml(s: ServerBlock): string {
 }
 
 /**
- * Формирует XML clientConfig. Если домен из запрошенного адреса отличается
- * от основного (алиасный домен, обслуживаемый этим же сервером), он
- * добавляется вторым элементом <domain>.
+ * Формирует XML clientConfig.
+ *
+ * ------------------------------------------------------------------
+ * ПРО ВТОРОЙ <domain>
+ * ------------------------------------------------------------------
+ * Домен из запрошенного адреса добавлялся вторым элементом БЕЗ ВСЯКОЙ
+ * проверки — то есть на вопрос «а ты обслуживаешь example.org?» сервер
+ * отвечал «да», ничего об этом домене не зная. Выдача утверждала то,
+ * чего не знает, и почтовая программа настраивалась на наш сервер для
+ * чужого домена.
+ *
+ * Подтверждаем только то, что подтверждено владельцем домена: к нам
+ * обратились ПО ЭТОМУ ДОМЕНУ (autoconfig.его-домен ведёт сюда, значит
+ * запись в DNS сделал он сам). Это и есть законный случай алиасного
+ * домена, ради которого второй элемент и появился.
  */
-export function buildClientConfigXml(settings: MailSettings, emailAddress?: string): string {
+export function buildClientConfigXml(
+  settings: MailSettings,
+  emailAddress?: string,
+  /** Домен, по которому к нам пришли: из имени узла в запросе. */
+  askedVia?: string,
+): string {
   const host = settings.hostname;
   const domains = [settings.domain];
   const requestedDomain = emailAddress?.split('@')[1]?.trim().toLowerCase();
-  if (requestedDomain && requestedDomain !== settings.domain.toLowerCase()) {
+  const confirmed = askedVia?.trim().toLowerCase();
+  if (
+    requestedDomain &&
+    requestedDomain !== settings.domain.toLowerCase() &&
+    requestedDomain === confirmed
+  ) {
     domains.push(requestedDomain);
   }
 

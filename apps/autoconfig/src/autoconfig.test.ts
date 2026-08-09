@@ -54,10 +54,32 @@ test('clientConfig: валидный XML со строгой структуро�
   assert.equal(outgoing[1]!.getElementsByTagName('socketType')[0]?.textContent, 'SSL');
 });
 
-test('clientConfig: алиасный домен добавляется вторым <domain>', () => {
-  const doc = parseXml(buildClientConfigXml(testSettings, 'user@alias.example'));
+test('clientConfig: алиасный домен добавляется вторым <domain>, если по нему и пришли', () => {
+  /*
+   * Подтверждаем только то, что подтвердил владелец домена: запрос
+   * пришёл на autoconfig.alias.example, то есть запись в DNS сделал он
+   * сам. Третий аргумент — домен обращения (см. domainAskedVia).
+   */
+  const doc = parseXml(buildClientConfigXml(testSettings, 'user@alias.example', 'alias.example'));
   const domains = [...doc.getElementsByTagName('domain')].map((d) => d.textContent);
   assert.deepEqual(domains, ['mail.local', 'alias.example']);
+});
+
+test('clientConfig: чужой домен НЕ объявляется обслуживаемым', () => {
+  /*
+   * Раньше домен из адреса добавлялся без всякой проверки: на вопрос
+   * «а ты обслуживаешь example.org?» сервер отвечал «да», ничего об
+   * этом домене не зная, и почтовая программа настраивалась сюда.
+   */
+  const doc = parseXml(buildClientConfigXml(testSettings, 'user@example.org', 'mail.local'));
+  const domains = [...doc.getElementsByTagName('domain')].map((d) => d.textContent);
+  assert.deepEqual(domains, ['mail.local']);
+});
+
+test('clientConfig: без домена обращения чужой домен тоже не подтверждается', () => {
+  const doc = parseXml(buildClientConfigXml(testSettings, 'user@example.org'));
+  const domains = [...doc.getElementsByTagName('domain')].map((d) => d.textContent);
+  assert.deepEqual(domains, ['mail.local']);
 });
 
 test('clientConfig: без адреса — один домен, XML валиден', () => {

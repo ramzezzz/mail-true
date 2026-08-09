@@ -176,6 +176,8 @@ export class PushService {
   readonly #pending = new Map<string, PendingEntry[]>();
   #keys: VapidKeys | null = null;
   #keysReason: string | null = null;
+  /** Уборщик мёртвых подписок. Запускается раз в сутки, см. #sweep. */
+  #janitor: NodeJS.Timeout | null = null;
 
   constructor(init: {
     config: PushConfig;
@@ -248,6 +250,46 @@ export class PushService {
     } catch (err) {
       this.#keysReason = 'Не удалось прочитать ключи уведомлений из базы (миграция 0012?)';
       this.#logger.warn(errorInfo(err), this.#keysReason);
+    }
+    this.#startJanitor();
+  }
+
+  /**
+   * Уборка мёртвых подписок.
+   *
+   * Раз в сутки, и первый проход — сразу: сервер перезапускают чаще, чем
+   * раз в сутки, и уборщик, который просыпается только через двадцать
+   * четыре часа, на живом сервере не сработает никогда.
+   *
+   * Ошибка уборки ничего не отменяет: она пишется в журнал и ждёт
+   * следующего прохода.
+   */
+  #startJanitor(): void {
+    if (!this.#db || this.#janitor) return;
+    const sweep = async (): Promise<void> => {
+      const edge = new Date(Date.now() - this.#config.PUSH_DEAD_AFTER_DAYS * 24 * 3600_000);
+      try {
+        const removed = await this.#db?.purgeDeadSubscriptions(edge);
+        if (removed !== undefined && removed > 0) {
+          this.#logger.info(
+            { removed },
+            'Убраны подписки на уведомления, давно отвечающие отказом',
+          );
+        }
+      } catch (err) {
+        this.#logger.warn(errorInfo(err), 'Уборка подписок на уведомления не удалась');
+      }
+    };
+    void sweep();
+    this.#janitor = setInterval(() => void sweep(), 24 * 3600_000);
+    this.#janitor.unref();
+  }
+
+  /** Останавливает уборщик: нужно при закрытии сервера и в тестах. */
+  stop(): void {
+    if (this.#janitor) {
+      clearInterval(this.#janitor);
+      this.#janitor = null;
     }
   }
 

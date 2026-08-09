@@ -212,8 +212,9 @@ export async function pushRoutes(app: FastifyInstance, service: PushService): Pr
        * не писали. Отвечаем пустотой, и работник покажет безымянное
        * «Новое письмо» — честный минимум.
        */
-      if (query.k && query.k !== accountKey(session.email)) {
-        return { view: null, pending: 0 };
+      const key = accountKey(session.email);
+      if (query.k && query.k !== key) {
+        return { view: null, pending: 0, key };
       }
       const ids = query.ids
         ?.split(',')
@@ -224,7 +225,15 @@ export async function pushRoutes(app: FastifyInstance, service: PushService): Pr
         undefined,
         ids && ids.length > 0 ? { ids } : {},
       );
-      return { view, pending: service.pending(session.email).length };
+      /*
+       * Отпечаток открытого ящика отдаём всегда.
+       *
+       * По нему работник сверяет содержимое, приехавшее ВНУТРИ push (при
+       * включённом «класть содержимое в push» за содержимым он сюда не
+       * ходит вовсе, и сверить было нечем). Тайны здесь нет: это хеш
+       * собственного адреса, отданный собственной же сессии.
+       */
+      return { view, pending: service.pending(session.email).length, key };
     },
   );
 
