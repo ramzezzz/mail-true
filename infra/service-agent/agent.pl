@@ -952,6 +952,29 @@ sub git_read {
 # ищется идущее обновление после перезапуска посредника.
 sub updater_name { return "$PROJECT-updater"; }
 
+#
+# Аргументы compose ДЛЯ ЧУЖОГО КОНТЕЙНЕРА.
+#
+# compose_argv() отдаёт пути, по которым файлы лежат ЗДЕСЬ, у посредника:
+# /repo/infra/docker-compose.yml и /env/.env — это точки монтирования, а
+# не места на диске. В контейнере обновления таких путей нет, и compose
+# честно отвечал «Couldn't find env file: /env/.env» — найдено живой
+# проверкой на сервере.
+#
+# Здесь те же файлы названы по своим настоящим путям на хосте: корень
+# репозитория смонтирован в контейнер обновления сам в себя, поэтому
+# хостовой путь внутри означает ровно то же самое.
+#
+sub compose_argv_host {
+    my ($root) = @_;
+    my @argv = ('docker', 'compose', '-p', $PROJECT, '--project-directory', $PROJECT_DIR,
+                '-f', "$root/infra/docker-compose.yml");
+    push @argv, '-f', "$root/install/compose.prod.yml" if $USE_PROD;
+    # Наличие проверяем по своей точке монтирования: это тот же файл.
+    push @argv, '--env-file', "$PROJECT_DIR/.env" if -f $ENV_FILE;
+    return @argv;
+}
+
 # Строка для `sh -c`. Одинарные кавычки закрывают всё, кроме самой
 # одинарной кавычки, — её вставляем известным приёмом '\''.
 sub sh_quote {
@@ -1045,7 +1068,7 @@ sub do_update {
     run('docker', 'rm', '-f', $name);
 
     my $git     = 'git -c ' . sh_quote("safe.directory=$root") . ' -C ' . sh_quote($root);
-    my $compose = join ' ', map { sh_quote($_) } compose_argv();
+    my $compose = join ' ', map { sh_quote($_) } compose_argv_host($root);
 
     my $script;
     if ($mode eq 'code') {
