@@ -17,9 +17,16 @@ import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
-import { AuthFailedError, BadRequestError, UpstreamUnavailableError } from '../errors.js';
+import {
+  AuthFailedError,
+  BadRequestError,
+  MessageTooLargeError,
+  SendRejectedError,
+  UpstreamUnavailableError,
+} from '../errors.js';
 import { listFolders, listMessages } from '../imap/service.js';
 import { findFolderById } from '../mail/folders.js';
+import { classifySmtpError, readSendOutcome, type SendOutcome } from '../mail/send-result.js';
 import type { ExternalAccount } from './types.js';
 import { errorInfo } from '../log.js';
 
@@ -269,8 +276,31 @@ export interface SendAsOptions {
  * подписи DKIM у нас для чужого домена нет, SPF укажет на наш сервер,
  * и письмо уедет в спам — или будет отвергнуто. Поэтому «от имени»
  * означает буквально: через тот же сервис, которому принадлежит адрес.
+ *
+ * Возвращает разбор ответа: кого приняли и кого отвергли.
+ *
+ * ------------------------------------------------------------------
+ * ДВЕ ВЕЩИ, КОТОРЫЕ ЗДЕСЬ НЕ ДЕЛАЛИСЬ ВОВСЕ
+ * ------------------------------------------------------------------
+ * ПЕРВАЯ — результат `sendMail` выбрасывался, даже не посмотрев. Нижняя
+ * библиотека отклоняет обещание, только когда отвергнуты ВСЕ получатели;
+ * при отказе части адресов обещание разрешается успешно, а отказ лежит
+ * внутри ответа (`rejected`, `rejectedErrors`). Письмо на трёх адресатов,
+ * один из которых не существует, отвечало `{"ok":true}`, окно писало
+ * «Письмо отправлено с адреса …» — и третий не получал ничего. Узнать об
+ * этом человеку было неоткуда.
+ *
+ * ВТОРАЯ — любой отказ выдавался за недоступность сервера (503). Постоянный
+ * отказ (550 «нет такого ящика», 552 «письмо слишком велико») — это не
+ * «сервер недоступен»: сервер доступен и ответил, а повтор не поможет
+ * никогда. Человеку предлагали «попробовать ещё раз» ровно там, где
+ * пробовать нечего.
+ *
+ * Разбор ответа и ошибки — общий со своим путём отправки (mail/send-result.ts).
+ * Своего разбора здесь нет намеренно: два разбора однажды разъедутся, и
+ * разъедутся молча.
  */
-export async function sendAsExternal(options: SendAsOptions): Promise<void> {
+export async function sendAsExternal(options: SendAsOptions): Promise<SendOutcome> {
   const { account, password, raw, recipients, rejectUnauthorized, logger } = options;
   const smtp = account.smtp;
   if (!smtp) {
@@ -289,12 +319,36 @@ export async function sendAsExternal(options: SendAsOptions): Promise<void> {
     tls: { rejectUnauthorized: account.allowInsecureTls ? false : rejectUnauthorized },
   });
   try {
-    await transport.sendMail({
+    const info = await transport.sendMail({
       envelope: { from: account.address, to: recipients },
       raw,
     });
+    const outcome = readSendOutcome(info);
+    if (outcome.rejected.length > 0) {
+      logger.warn(
+        { host: smtp.host, rejected: outcome.rejected.map((r) => r.address) },
+        'Чужой SMTP принял письмо не для всех получателей',
+      );
+    }
+    return outcome;
   } catch (err) {
-    logger.warn(errorInfo(err, { host: smtp.host }), 'Отправка через чужой SMTP не удалась');
+    const failure = classifySmtpError(err);
+    logger.warn(
+      errorInfo(err, { host: smtp.host, smtpCode: failure.code }),
+      'Отправка через чужой SMTP не удалась',
+    );
+    if (failure.tooLarge) {
+      throw new MessageTooLargeError(`${failure.message} (${smtp.host}).`, {
+        smtpCode: failure.code,
+        rejected: failure.rejected,
+      });
+    }
+    if (failure.permanent) {
+      throw new SendRejectedError(`${failure.message} (${smtp.host}).`, {
+        smtpCode: failure.code,
+        rejected: failure.rejected,
+      });
+    }
     throw new UpstreamUnavailableError(
       `Не удалось отправить письмо через ${smtp.host}: ${err instanceof Error ? err.message : String(err)}`,
     );

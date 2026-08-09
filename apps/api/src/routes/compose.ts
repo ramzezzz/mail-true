@@ -51,7 +51,8 @@ import { classifySmtpError, readSendOutcome, type RejectedRecipient } from '../m
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import { ENCODING_OVERHEAD } from '../config.js';
-import type { MailSession } from '../types.js';
+import type { ImapPool } from '../imap/pool.js';
+import type { AppDeps, MailSession } from '../types.js';
 import { UploadQuotaError, type UploadStore } from '../uploads.js';
 import { errorInfo } from '../log.js';
 
@@ -292,11 +293,85 @@ async function requireDraftsFolder(client: ImapFlow): Promise<Folder> {
   return drafts;
 }
 
+/**
+ * Очередь сохранений черновика — ОДНА на приложение, а не на набор маршрутов.
+ *
+ * Сохранения одного окна написания обязаны идти строго по одному: иначе
+ * автосохранение вместе с явным «сохранить» плодит копии письма. Но окно
+ * написания ходит не только сюда: письмо с подключённого чужого адреса
+ * уходит совсем другим маршрутом (accounts/routes.ts), а черновик у него
+ * тот же самый и лежит в НАШЕЙ папке «Черновики». Со своей очередью на
+ * каждый набор маршрутов уборка черновика после отправки «от имени»
+ * разошлась бы с автосохранением: таймер успел бы положить новую копию
+ * уже отправленного письма.
+ *
+ * Привязка к `deps`, а не просто к модулю: `deps` — один объект на
+ * приложение (см. app.ts), и в проверках каждый поднятый экземпляр
+ * получает свой. Иначе состояние окон текло бы из одной проверки в
+ * другую, а по-настоящему это значит — из одного приложения в другое.
+ */
+const draftSequencers = new WeakMap<AppDeps, DraftSequencer>();
+
+export function draftSequencerFor(deps: AppDeps): DraftSequencer {
+  const existing = draftSequencers.get(deps);
+  if (existing) return existing;
+  const created = new DraftSequencer();
+  draftSequencers.set(deps, created);
+  return created;
+}
+
+/** Черновик, из которого письмо отправляют: UID в ящике и/или ключ окна. */
+export interface DraftRef {
+  draftUid?: number | undefined;
+  draftKey?: string | undefined;
+}
+
+/**
+ * Убирает черновик письма, которое уже принято к отправке.
+ *
+ * Через ту же очередь, что и автосохранение: иначе таймер успеет положить
+ * новую копию уже отправленного письма. Неудача сюда не поднимается —
+ * письмо-то ушло.
+ *
+ * Отдельной функцией, а не замыканием маршрута: ровно то же самое обязана
+ * делать отправка с подключённого чужого адреса. Она этого не делала, и
+ * черновик оставался лежать: человек открывал сохранённое письмо,
+ * переключал отправителя на внешний адрес, отправлял — а через неделю
+ * находил черновик в папке и отправлял его второй раз. У получателя дубль.
+ */
+export async function dropDraftAfterSend(
+  drafts: DraftSequencer,
+  pool: ImapPool,
+  session: MailSession,
+  ref: DraftRef,
+  log: { warn: (obj: unknown, msg: string) => void },
+): Promise<void> {
+  if (!ref.draftUid && !ref.draftKey) return;
+  const key = ref.draftKey ? `${session.email}:${ref.draftKey}` : session.email;
+  await drafts
+    .save(key, ref.draftUid, Boolean(ref.draftKey), async (previousUid) => {
+      if (previousUid === undefined) return { uid: null, result: null };
+      await pool.withClient(session.email, session.password, async (client) => {
+        const folders = await listFolders(client);
+        const draftsFolder = findFolderById(folders, 'drafts');
+        if (!draftsFolder) return;
+        const lock = await client.getMailboxLock(draftsFolder.path);
+        try {
+          await client.messageDelete([previousUid], { uid: true });
+        } finally {
+          lock.release();
+        }
+      });
+      return { uid: null, result: null };
+    })
+    .catch((err: unknown) => {
+      log.warn(errorInfo(err), 'Не удалось удалить черновик отправленного письма');
+    });
+}
+
 export async function composeRoutes(app: FastifyInstance): Promise<void> {
   const { config, pool, secretBox, uploads } = app.deps;
-  // Сохранения черновика одного окна написания идут строго по очереди —
-  // иначе автосохранение вместе с явным «сохранить» плодит копии письма
-  const drafts = new DraftSequencer();
+  const drafts = draftSequencerFor(app.deps);
 
   /**
    * Вложения черновиков, уже выложенные во временное хранилище.
@@ -461,10 +536,19 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     forwarded: readonly ForwardedMessage[],
     log: { warn: (obj: unknown, msg: string) => void },
   ): Promise<{ draftUid: number | null; draftId: string | null }> {
-    if (payload.draftUid) {
-      // Исходный черновик не трогали — он на месте
-      return { draftUid: payload.draftUid, draftId: `drafts:${payload.draftUid}` };
-    }
+    /*
+     * ПИСЬМО СОХРАНЯЕТСЯ ВСЕГДА — В ТОМ ЧИСЛЕ ПОВЕРХ ОТКРЫТОГО ЧЕРНОВИКА.
+     *
+     * Раньше здесь первой же строкой стоял выход: «черновик прислан, значит
+     * он на месте». На месте он и правда был — только СТАРЫЙ. Человек
+     * открывал сохранённое письмо, дописывал две страницы, получал отказ
+     * 550 — и читал в ответе «Письмо сохранено в черновиках», хотя в
+     * черновиках лежала версия недельной давности. Написанное за эту
+     * сессию пропадало целиком, а сообщение утверждало обратное.
+     *
+     * Теперь новая версия кладётся поверх прежней (saveDraftVersion сам
+     * удалит заменённую), поэтому копий не прибавляется — а текст цел.
+     */
     try {
       const raw = await composeRaw(
         payload,
@@ -476,48 +560,27 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           keepBcc: true,
         },
       );
-      const uid = await saveDraftVersion(session, raw, undefined, payload.draftKey);
+      const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
       return { draftUid: uid, draftId: uid ? `drafts:${uid}` : null };
     } catch (err) {
       log.warn(errorInfo(err), 'Не удалось сохранить черновик после отказа отправки');
+      /*
+       * Сохранить не вышло. Про открытый черновик здесь НЕ говорим, хотя
+       * он и остался лежать: он несёт прежний текст, а человеку нужен
+       * нынешний. Ответ на этом пути так и написан — «сохранить не
+       * удалось, не закрывайте окно», и это единственный честный совет:
+       * текст сейчас есть только в самом окне.
+       */
       return { draftUid: null, draftId: null };
     }
   }
 
-  /**
-   * Убирает черновик письма, которое уже принято к отправке.
-   *
-   * Через ту же очередь, что и автосохранение: иначе таймер успеет положить
-   * новую копию уже отправленного письма. Неудача сюда не поднимается —
-   * письмо-то ушло.
-   */
-  async function dropDraftAfterSend(
+  /** Убирает черновик письма, которое уже принято к отправке. */
+  const dropSentDraft = (
     session: MailSession,
     payload: DraftBody,
     log: { warn: (obj: unknown, msg: string) => void },
-  ): Promise<void> {
-    if (!payload.draftUid && !payload.draftKey) return;
-    const key = payload.draftKey ? `${session.email}:${payload.draftKey}` : session.email;
-    await drafts
-      .save(key, payload.draftUid, Boolean(payload.draftKey), async (previousUid) => {
-        if (previousUid === undefined) return { uid: null, result: null };
-        await pool.withClient(session.email, session.password, async (client) => {
-          const folders = await listFolders(client);
-          const draftsFolder = findFolderById(folders, 'drafts');
-          if (!draftsFolder) return;
-          const lock = await client.getMailboxLock(draftsFolder.path);
-          try {
-            await client.messageDelete([previousUid], { uid: true });
-          } finally {
-            lock.release();
-          }
-        });
-        return { uid: null, result: null };
-      })
-      .catch((err: unknown) => {
-        log.warn(errorInfo(err), 'Не удалось удалить черновик отправленного письма');
-      });
-  }
+  ): Promise<void> => dropDraftAfterSend(drafts, pool, session, payload, log);
 
   /** Соединение с Postfix submission от имени ящика. */
   function openTransport(email: string, password: string) {
@@ -781,7 +844,6 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
        * прилетал человеку прямо в ответ на «Отправить», и обменять это
        * на молчание было бы плохой сделкой.
        */
-      const password = secretBox.decrypt(entry.passwordEnc);
       const reason: SendFailureReason = lastFailure.get(entry.id) ?? {
         // Причины нет только если сервер перезапустился между попытками.
         // Общая формулировка честнее молчания: письмо действительно
@@ -800,6 +862,21 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
        */
       let keepFailure: Error | null = null;
       try {
+        /*
+         * РАСШИФРОВКА ПАРОЛЯ — ВНУТРИ try, И ЭТО НЕ КОСМЕТИКА.
+         *
+         * Она стояла первой строкой обработчика, ВНЕ его. После смены
+         * SESSION_SECRET (плановая ротация, перенос установки,
+         * восстановление тома) расшифровка бросает — и бросала ДО того,
+         * как человеку выпишут извещение. Работник очереди понимал
+         * исключение правильно (письмо остаётся в очереди, чтобы не
+         * пропасть), но человек не узнавал ни-че-го: ни черновика, ни
+         * записи, ни строки в почте. Письмо молча крутилось в очереди,
+         * а он ждал ответа от адресата.
+         *
+         * Извещение ниже пишется в любом случае — оно пароля не требует.
+         */
+        const password = secretBox.decrypt(entry.passwordEnc);
         draftUid = await pool.withClient(entry.owner, password, async (client) => {
           const folder = await requireDraftsFolder(client);
           // Черновик несёт причину заголовком — окно написания покажет её
@@ -983,7 +1060,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         },
         raw,
       );
-      await dropDraftAfterSend(session, payload, request.log);
+      await dropSentDraft(session, payload, request.log);
       await Promise.all(payload.attachmentIds.map((id) => uploads.delete(id)));
       request.log.info(
         { deferredId: entry.id, sendAt: entry.sendAt },
@@ -1030,7 +1107,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         },
         raw,
       );
-      await dropDraftAfterSend(session, payload, request.log);
+      await dropSentDraft(session, payload, request.log);
       // Будильник ровно на срок: постоянный обход очереди ходит раз
       // в полминуты и «через пять секунд» превратил бы в «когда-нибудь»
       deferred.wakeAt(sendAt);
@@ -1159,7 +1236,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    await dropDraftAfterSend(session, payload, request.log);
+    await dropSentDraft(session, payload, request.log);
 
     // Загруженные вложения больше не нужны
     await Promise.all(payload.attachmentIds.map((id) => uploads.delete(id)));
@@ -1432,17 +1509,52 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    // Ставится и после отправки, и после отказа — см. комментарий выше
-    await pool.withClient(session.email, session.password, async (client) => {
-      const lock = await client.getMailboxLock(found.path);
-      try {
-        await client.messageFlagsAdd([uid], ['$MDNSent'], { uid: true });
-      } finally {
-        lock.release();
+    /*
+     * Ставится и после отправки, и после отказа — см. комментарий выше.
+     *
+     * НЕУДАЧА ЭТОЙ ОТМЕТКИ НЕ ОТМЕНЯЕТ УЖЕ ОТПРАВЛЕННОГО УВЕДОМЛЕНИЯ.
+     * Раньше отказ IMAP здесь ронял маршрут пятисоткой, хотя уведомление
+     * к этому моменту было у отправителя. Человек читал «Не удалось
+     * отправить уведомление», нажимал ещё раз — и отправителю уходило
+     * второе. Причины отказа житейские: ящик упёрся в квоту, соединение
+     * оборвалось, сервер не даёт ставить ключевые слова.
+     *
+     * Поэтому: уведомление ушло — говорим правду об обоих действиях
+     * отдельно. Уведомления не было (человек отказался) — отметка и есть
+     * всё содержание запроса, и промолчать о её неудаче нельзя: вопрос
+     * «уведомить отправителя?» вернётся при следующем открытии письма.
+     */
+    let flagged = true;
+    try {
+      await pool.withClient(session.email, session.password, async (client) => {
+        const lock = await client.getMailboxLock(found.path);
+        try {
+          await client.messageFlagsAdd([uid], ['$MDNSent'], { uid: true });
+        } finally {
+          lock.release();
+        }
+      });
+    } catch (err) {
+      flagged = false;
+      request.log.warn(errorInfo(err), 'Не удалось пометить письмо как отвеченное ($MDNSent)');
+      if (!sent) {
+        throw new UpstreamUnavailableError(
+          'Не удалось запомнить отказ — вопрос об уведомлении появится снова.',
+        );
       }
-    });
+    }
 
-    return { ok: true, sent, alreadyAnswered: false };
+    return {
+      ok: true,
+      sent,
+      alreadyAnswered: false,
+      /** Отметка $MDNSent на месте: без неё вопрос вернётся при открытии. */
+      flagged,
+      warning: flagged
+        ? null
+        : 'Уведомление отправлено, но пометить письмо не удалось — ' +
+          'вопрос может появиться снова. Второй раз подтверждать не нужно.',
+    };
   });
 }
 
