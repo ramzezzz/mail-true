@@ -61,6 +61,11 @@ fi
 for svc in unbound postgres redis dovecot rspamd postfix autoconfig api web admin nginx; do
     state="$(service_state "$svc")"
     case "$state" in
+        # «unhealthy» содержит «healthy» — больные состояния проверяем ПЕРВЫМИ,
+        # иначе сломанная служба засчитывается как здоровая (ловилось живьём).
+        *unhealthy*) fail "$svc — работает, но проба здоровья не проходит"
+                     hint "смотреть журнал: docker compose -f infra/docker-compose.yml logs --tail=100 $svc" ;;
+        *starting*)  warn "$svc — ещё поднимается (проба здоровья не завершилась)" ;;
         *healthy*)   ok "$svc — работает и здоров" ;;
         running*)    ok "$svc — работает" ;;
         '')          fail "$svc — контейнера нет"
@@ -73,6 +78,8 @@ done
 if [ "${CLAMAV_ENABLED:-false}" = "true" ]; then
     state="$(service_state clamav)"
     case "$state" in
+        *unhealthy*) fail "clamav — работает, но проба здоровья не проходит"
+           hint "смотреть журнал: docker compose -f infra/docker-compose.yml logs --tail=100 clamav" ;;
         *healthy*) ok "clamav — работает (антивирус включён)" ;;
         *starting*) warn "clamav ещё качает базы сигнатур — это 5–10 минут после запуска" ;;
         *) fail "clamav включён в .env, но контейнер не здоров: ${state:-нет контейнера}"

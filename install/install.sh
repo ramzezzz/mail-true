@@ -697,6 +697,9 @@ else
     for svc in "${CORE_SERVICES[@]}"; do
         state="$(service_state "$svc")"
         case "$state" in
+            # «unhealthy» содержит «healthy»: без этой ветки журнал
+            # пропускался ровно у той службы, ради которой его и показывают.
+            *unhealthy*) : ;;
             *healthy*) continue ;;
         esac
         printf '\n--- журнал %s (последние строки) ---\n' "$svc"

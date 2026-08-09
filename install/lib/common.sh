@@ -413,11 +413,22 @@ wait_healthy() {
         waiting=()
         for svc in "${services[@]}"; do
             state="$(service_state "$svc")"
+            # ВНИМАНИЕ: «unhealthy» содержит в себе «healthy».
+            #
+            # Раньше первой стояла ветка `*healthy*`, и она совпадала со
+            # строкой «running unhealthy» — то есть больная служба
+            # засчитывалась как готовая, а ветка `*unhealthy*` ниже была
+            # недостижима. Цена: установщик писал «все сервисы здоровы»
+            # при мёртвом Dovecot и шёл дальше, а самопроверка отвечала
+            # «работает и здоров» на сломанном стеке.
+            #
+            # Поэтому «плохие» состояния проверяются ПЕРВЫМИ, и только
+            # потом — «здоров».
             case "$state" in
-                *healthy*)  : ;;
-                running*)   # сервис без healthcheck считаем готовым
-                            case "$state" in *starting*|*unhealthy*) waiting+=("$svc") ;; esac ;;
-                *)          waiting+=("$svc") ;;
+                *unhealthy*|*starting*)  waiting+=("$svc") ;;
+                *healthy*)               : ;;
+                running*)                : ;;  # без пробы — считаем готовым
+                *)                       waiting+=("$svc") ;;
             esac
         done
         if [ "${#waiting[@]}" -eq 0 ]; then return 0; fi
