@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -42,6 +43,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const queryClient = useQueryClient();
+  /*
+   * Чей это был сеанс. Переживает обрыв сессии — в отличие от session,
+   * который обнуляется на первом же 401. Нужен, чтобы при следующем входе
+   * отличить «тот же человек вернулся» от «сел другой».
+   */
+  const lastAccount = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -102,6 +109,32 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setSession(info);
       // Данные прошлого ящика новому владельцу сессии не показываем
       queryClient.clear();
+      /*
+       * ОКНА НАПИСАНИЯ ОТ ПРЕЖНЕГО ЯЩИКА ЗАКРЫВАЕМ ЗДЕСЬ.
+       *
+       * Выход и смена ящика это уже делали, а третий путь — «сессия
+       * отвалилась сама» — оставался открытым. Отваливается она обычно:
+       * истёк срок, перезапустили сервер, администратор закрыл сессии.
+       * Любой 401 просто уводит на страницу входа, а окна написания живут
+       * ВНЕ кэша запросов, в хранилище на уровне модуля, и размонтирование
+       * страницы их не трогает.
+       *
+       * Дальше на общем компьютере вошедший следующим видел чужое
+       * недописанное письмо — с адресатами, темой и телом, — и «Отправить»
+       * ушло бы уже от ЕГО адреса, а «Сохранить» — в его черновики.
+       *
+       * Закрываем именно при входе ПОД ДРУГИМ адресом, а не в обработчике
+       * 401: тот же человек, у которого просто истёк срок, войдёт заново и
+       * допишет своё письмо. Закрыть окна там значило бы чинить утечку
+       * ценой потери работы — а это тот же дефект, только с другой
+       * стороны.
+       */
+      const previous = lastAccount.current;
+      lastAccount.current = info.email;
+      if (previous !== null && previous !== info.email) {
+        useUiStore.getState().closeAllCompose();
+        forgetAppearance();
+      }
       await refresh();
     },
     [refresh, queryClient],

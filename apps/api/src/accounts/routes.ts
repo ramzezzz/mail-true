@@ -178,9 +178,25 @@ export async function accountsUserRoutes(
     await pool.verify(email, password);
 
     return guard(async () => {
+      /*
+       * Связь заводится ТОЛЬКО В ОДНУ СТОРОНУ.
+       *
+       * Здесь стояла ещё и обратная — «чтобы переключиться назад тоже без
+       * пароля», — и она отдавала владельцу чужого ящика ключ от нашего.
+       * Проверка выше доказывает ровно одно: вызывающий знает пароль B.
+       * Из этого никак не следует право B ходить в A, а именно оно и
+       * записывалось: строка owner=B, linked=A с зашифрованным паролем A.
+       *
+       * Цена была высокой и незаметной. Администратор, который сам выдал
+       * сотруднику пароль и связал его ящик со своим, чтобы посмотреть
+       * жалобу, тем самым дарил сотруднику вход в СВОЮ почту: тот видел
+       * ящик администратора в списке связанных и входил одним нажатием,
+       * ничего не зная и ничего не подтверждая.
+       *
+       * Вернуться назад по-прежнему можно и без пароля — правом на это
+       * распоряжается сессия, а не общая таблица (см. returnTo в /switch).
+       */
       const linked = await db.linkAccount(session.email, email, label, box.encrypt(password));
-      // Обратная связь: чтобы переключиться назад тоже без пароля.
-      await db.linkAccount(email, session.email, null, box.encrypt(session.password));
       return { linked };
     });
   });
@@ -210,7 +226,20 @@ export async function accountsUserRoutes(
 
     const db = service.requireDb();
     const box = service.requireSecretBox();
-    const enc = await guard(() => db.findLinkedSecret(session.email, email));
+    /*
+     * Два законных пути попасть в ящик без пароля:
+     *
+     *   1. связь, заведённая ЭТИМ ящиком (он доказывал пароль цели);
+     *   2. возврат туда, откуда сюда же и переключились в этом сеансе.
+     *
+     * Второй и заменил прежнюю обратную связь в таблице: право вернуться
+     * принадлежит человеку за этим сеансом, а не учётной записи вообще.
+     */
+    const back = session.returnTo;
+    const enc =
+      back && back.email === email
+        ? back.passwordEnc
+        : await guard(() => db.findLinkedSecret(session.email, email));
     if (!enc) {
       throw new BadRequestError(
         'Этот ящик не связан с текущим. Сначала добавьте его с вводом пароля.',
@@ -223,7 +252,14 @@ export async function accountsUserRoutes(
     const sessionId = newSessionId();
     await sessions.set(
       sessionId,
-      { email, passwordEnc: secretBox.encrypt(password), createdAt: Date.now() },
+      {
+        email,
+        passwordEnc: secretBox.encrypt(password),
+        createdAt: Date.now(),
+        // Чем вернуться обратно. Только в этом сеансе и только тому, кто
+        // переключился: чужая учётная запись прав не получает.
+        returnTo: { email: session.email, passwordEnc: secretBox.encrypt(session.password) },
+      },
       config.SESSION_TTL_SECONDS,
     );
     await sessions.delete(session.id);

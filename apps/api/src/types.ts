@@ -19,6 +19,12 @@ export interface MailSession {
   email: string;
   /** Пароль в открытом виде (расшифрован из сессии) — только в памяти запроса. */
   password: string;
+  /**
+   * Ящик, из которого сюда переключились, и чем вернуться (зашифрованно).
+   * Право вернуться принадлежит СЕАНСУ, а не учётной записи — разбор в
+   * SessionData.returnTo (session.ts).
+   */
+  returnTo?: { email: string; passwordEnc: string };
 }
 
 /** Общие зависимости приложения. */

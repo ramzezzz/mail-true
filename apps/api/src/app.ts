@@ -187,7 +187,12 @@ export async function buildApp(deps: AppDeps): Promise<BuiltApp> {
       throw new UnauthorizedError('Сессия повреждена');
     }
 
-    request.mailSession = { id: sessionId, email: data.email, password };
+    request.mailSession = {
+      id: sessionId,
+      email: data.email,
+      password,
+      ...(data.returnTo ? { returnTo: data.returnTo } : {}),
+    };
     // Скользящее продление сессии
     void deps.sessions.touch(sessionId, config.SESSION_TTL_SECONDS).catch(() => undefined);
   });
