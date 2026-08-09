@@ -16,7 +16,11 @@
 # и уже используется в продукте, так что второго языка в стеке не заводит.
 FROM docker:27-cli
 
-RUN apk add --no-cache perl
+# git нужен странице «Обновления»: по нему видно, на каком коммите
+# работает сервер и что уже скачано, но не применено. В docker:cli он
+# есть и сейчас, но полагаться на содержимое чужого базового образа
+# нельзя — оно меняется между версиями молча.
+RUN apk add --no-cache perl git
 
 COPY agent.pl /usr/local/bin/service-agent.pl
 RUN chmod 755 /usr/local/bin/service-agent.pl
