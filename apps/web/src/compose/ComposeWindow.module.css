@@ -41,6 +41,12 @@
   border-radius: 12px;
 }
 
+/* Окно, которое перетащили: нижние углы больше не упираются в край экрана,
+   и срезать их незачем — иначе низ окна выглядит обрубленным. */
+.floating {
+  border-radius: 12px;
+}
+
 /* Шапка окна */
 .header {
   display: flex;
@@ -48,6 +54,52 @@
   height: 44px;
   flex-shrink: 0;
   padding: 0 8px 0 16px;
+  /* За шапку окно перетаскивают — курсор об этом и говорит.
+     На кнопках управления курсор свой, они его перебивают. */
+  cursor: grab;
+  /* Иначе браузер на планшете примет протяжку по шапке за прокрутку
+     страницы и утащит вместо окна её. */
+  touch-action: none;
+}
+
+.header:active {
+  cursor: grabbing;
+}
+
+/* --- Уголки для изменения размера ------------------------------------- */
+
+.resizeCorner {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  /* Поверх содержимого окна: у правого нижнего угла лежит кнопка удаления
+     черновика, и без этого уголок перекрывался бы ею. */
+  z-index: 1;
+  touch-action: none;
+}
+
+.corner_nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.corner_ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.corner_sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.corner_se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
 }
 
 .headerTitle {
@@ -579,6 +631,18 @@
   .maximized {
     inset: 0;
     border-radius: 0;
+  }
+
+  /* Окно и так во весь экран: двигать и растягивать нечего, а уголок под
+     пальцем на краю экрана мешал бы прокрутке письма. */
+  .resizeCorner {
+    display: none;
+  }
+
+  .header,
+  .header:active {
+    cursor: default;
+    touch-action: auto;
   }
 
   /* Свёрнутая плашка занимает всю ширину: рядом им всё равно не встать */

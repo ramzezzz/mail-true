@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { readCachedTheme, writeCachedTheme } from '../appearance/cache';
 import { persistAppearance } from '../appearance/persist';
 import type { ThemeName, ThemeSetting } from '../appearance/themes';
+import type { ComposeGeometry } from '../compose/windowGeometry';
 
 export type { ThemeName, ThemeSetting };
 
@@ -193,6 +194,19 @@ export interface ComposeWindowState {
   minimized: boolean;
   init: ComposeInit;
   draft: ComposeDraft;
+  /**
+   * Куда человек перетащил окно и до какого размера растянул.
+   *
+   * `null` — окно стоит там, где его поставила раскладка: у правого нижнего
+   * края, каскадом. Как только окно двигают или тянут за уголок, оно
+   * «отрывается», и дальше положение задаётся отсюда.
+   *
+   * Хранится здесь, а не внутри самого окна, ровно по той же причине, что и
+   * черновик: свёрнутое окно React размонтирует, и всё, что жило в его
+   * состоянии, пропадает. Развернув плашку, человек нашёл бы окно
+   * перепрыгнувшим обратно в угол и снова маленьким.
+   */
+  geometry: ComposeGeometry | null;
 }
 
 /**
@@ -291,6 +305,11 @@ interface UiState {
     id: number,
     patch: Partial<ComposeDraft> | ((draft: ComposeDraft) => Partial<ComposeDraft>),
   ): void;
+  /**
+   * Запомнить, куда окно перетащили и до какого размера растянули.
+   * `null` возвращает окно в раскладку по умолчанию.
+   */
+  setComposeGeometry(id: number, geometry: ComposeGeometry | null): void;
 
   /* --- Возврат из письма в список ------------------------------------
    * Оба поля живут здесь, а не в странице папки: страница при уходе в
@@ -372,7 +391,7 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => ({
       composeWindows: [
         ...s.composeWindows,
-        { id, minimized: false, init, draft: emptyDraft(init) },
+        { id, minimized: false, init, draft: emptyDraft(init), geometry: null },
       ],
     }));
     return id;
@@ -385,6 +404,10 @@ export const useUiStore = create<UiState>((set) => ({
       composeWindows: s.composeWindows.map((w) =>
         w.id === id ? { ...w, minimized: !w.minimized } : w,
       ),
+    })),
+  setComposeGeometry: (id, geometry) =>
+    set((s) => ({
+      composeWindows: s.composeWindows.map((w) => (w.id === id ? { ...w, geometry } : w)),
     })),
   updateComposeDraft: (id, patch) =>
     set((s) => ({

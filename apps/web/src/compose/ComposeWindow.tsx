@@ -58,6 +58,7 @@ import { MailAttachmentPicker } from './MailAttachmentPicker';
 import { SaveTemplateDialog, TemplateMenu } from './TemplateMenu';
 import { failureSummary } from './SendFailureBanner';
 import { UndoSendBar } from './UndoSendBar';
+import { useComposeGeometry } from './useComposeGeometry';
 import styles from './ComposeWindow.module.css';
 
 /**
@@ -281,6 +282,16 @@ export function ComposeWindow({
     : (account?.email ?? '…');
 
   const [maximized, setMaximized] = useState(false);
+  /*
+   * Перетаскивание за шапку и растягивание за уголки. Развёрнутому на весь
+   * экран окну двигаться некуда, поэтому там жесты выключены: иначе оно
+   * съезжало бы, оставаясь размером с экран.
+   */
+  const {
+    ref: windowRef,
+    startGesture,
+    style: geometryStyle,
+  } = useComposeGeometry(win.id, win.geometry, !maximized);
   const [error, setError] = useState<string | null>(null);
   /** Открыт ли выбор вложения из уже пришедших писем («Из Почты»). */
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -934,12 +945,25 @@ export function ComposeWindow({
   return (
     <>
       <section
-        className={cx(styles.window, maximized && styles.maximized)}
+        ref={windowRef as React.RefObject<HTMLElement>}
+        className={cx(
+          styles.window,
+          maximized && styles.maximized,
+          !maximized && geometryStyle && styles.floating,
+        )}
         /* Каскад задаётся переменной, а не свойством right: на узком экране
            окно раскрывается во весь экран правилом из CSS, а встроенный стиль
-           перебил бы его и оставил окно у правого края. */
+           перебил бы его и оставил окно у правого края.
+
+           Как только окно перетащили, каскад уступает место запомненному
+           положению: два окна человек расставляет сам, и подвинутое второе
+           не должно прыгать обратно под первое. */
         style={
-          maximized ? undefined : ({ '--mt-compose-offset': `${offset * 32}px` } as CSSProperties)
+          maximized
+            ? undefined
+            : ((geometryStyle ?? {
+                '--mt-compose-offset': `${offset * 32}px`,
+              }) as CSSProperties)
         }
         aria-label="Новое письмо"
         onKeyDown={(e) => {
@@ -973,8 +997,22 @@ export function ComposeWindow({
           }
         }}
       >
-        {/* Шапка окна: получатель + управление окном */}
-        <div className={styles.header}>
+        {/* Шапка окна: получатель + управление окном.
+            За неё же окно и перетаскивают — как любое окно на рабочем столе.
+            Двойной щелчок разворачивает и возвращает обратно: привычка та же. */}
+        <div
+          className={styles.header}
+          onPointerDown={(e) => {
+            // Кнопки управления окном щёлкают, а не тянут: начни жест с них —
+            // и «Закрыть» переставало бы закрывать с первого раза.
+            if ((e.target as HTMLElement).closest('button')) return;
+            startGesture(e, null);
+          }}
+          onDoubleClick={(e) => {
+            if ((e.target as HTMLElement).closest('button')) return;
+            setMaximized((v) => !v);
+          }}
+        >
           <span className={styles.headerTitle}>{subject || 'Новое письмо'}</span>
           <div className={styles.windowControls}>
             <Tooltip text="Свернуть">
@@ -1568,6 +1606,23 @@ export function ComposeWindow({
             />
           </Dropdown>
         </div>
+
+        {/*
+          Уголки для размера. Их четыре, а не один: окно по умолчанию стоит в
+          правом нижнем углу экрана, и растягивать его оттуда можно только
+          вверх и влево; после перетаскивания в середину экрана удобнее уже
+          нижний правый. На развёрнутом во весь экран окне уголков нет —
+          тянуть его некуда.
+        */}
+        {!maximized &&
+          (['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+            <span
+              key={corner}
+              className={cx(styles.resizeCorner, styles[`corner_${corner}`])}
+              aria-hidden="true"
+              onPointerDown={(e) => startGesture(e, corner)}
+            />
+          ))}
       </section>
 
       {/* «Сохранить как шаблон». Окно стоит РЯДОМ с окном написания, а не
