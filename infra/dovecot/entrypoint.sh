@@ -31,10 +31,9 @@ case "$(printf '%s' "$DOVECOT_DISABLE_PLAINTEXT_AUTH" | tr 'A-Z' 'a-z')" in
     *)              DOVECOT_DISABLE_PLAINTEXT_AUTH=yes ;;
 esac
 # Внутренняя сеть стека — должна совпадать с подсетью из docker-compose.yml
-: "${DOCKER_SUBNET:=172.28.0.0/16}"
-export MAIL_DOMAIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DOVECOT_DISABLE_PLAINTEXT_AUTH DOCKER_SUBNET
+export MAIL_DOMAIN POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DOVECOT_DISABLE_PLAINTEXT_AUTH
 
-envsubst '${MAIL_DOMAIN} ${DOVECOT_DISABLE_PLAINTEXT_AUTH} ${DOCKER_SUBNET}' \
+envsubst '${MAIL_DOMAIN} ${DOVECOT_DISABLE_PLAINTEXT_AUTH}' \
     < /etc/dovecot-repo/dovecot.conf.template > /etc/dovecot/dovecot.conf
 
 envsubst '${POSTGRES_DB} ${POSTGRES_USER} ${POSTGRES_PASSWORD}' \
@@ -85,6 +84,23 @@ tail -n 0 -F "$DOVELOG" &
         if [ "$SIZE" -gt "$DOVELOG_MAX_BYTES" ]; then
             mv -f "$DOVELOG" "$DOVELOG.1"
             doveadm log reopen >/dev/null 2>&1 || true
+            # ------------------------------------------------------------------
+            # ПРАВА НА НОВЫЙ ФАЙЛ — ОБЯЗАТЕЛЬНО, И ИМЕННО ЗДЕСЬ
+            # ------------------------------------------------------------------
+            # Первый файл создаёт entrypoint и сразу ставит 644 (выше). А
+            # после проворота файл заводит сам Dovecot — от root и с маской
+            # 077, то есть 0600 root:root. Проверено на нашем же образе.
+            #
+            # Читает этот файл сервер приложения, работающий под uid 5000:
+            # раздел «Журналы почты» в панели и история входов владельца
+            # ящика по IMAP/POP3. После первого же проворота оба молча
+            # пустели — и пустели снова после каждого следующего.
+            #
+            # У Postfix этот шаг уже есть и написан по тому же поводу
+            # (fix_maillog_permissions в queue-agent.pl); в цикле Dovecot
+            # его просто забыли.
+            touch "$DOVELOG" 2>/dev/null || true
+            chmod 644 "$DOVELOG" 2>/dev/null || true
         fi
     done
 ) &
