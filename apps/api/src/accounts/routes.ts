@@ -541,6 +541,7 @@ export async function accountsUserRoutes(
       draft,
       { name: draft.fromName, address: found.account.address },
       uploads,
+      session.email,
     );
     await sendAsExternal({
       account: found.account,

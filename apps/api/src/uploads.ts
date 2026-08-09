@@ -12,10 +12,26 @@ import { FileTooLargeError } from './errors.js';
 
 export interface UploadMeta {
   id: string;
+  /**
+   * Ящик, который эту загрузку сделал.
+   *
+   * Раньше владельца не было вовсе: файл лежал под случайным именем, и
+   * любой вошедший, назвав чужой идентификатор, прикладывал чужое
+   * вложение к своему письму. Идентификатор — не секрет: он уходит в
+   * ответ, живёт в черновике и в журналах.
+   */
+  owner: string;
   filename: string;
   mimeType: string;
   size: number;
   createdAt: number;
+}
+
+/** Загрузки этого ящика больше не помещаются в отведённое место. */
+export class UploadQuotaError extends FileTooLargeError {
+  constructor(message: string) {
+    super(message);
+  }
 }
 
 const ID_RE = /^[0-9a-f-]{36}$/i;
@@ -45,7 +61,12 @@ export class UploadStore {
    * не бывает. Три отклонённых запроса по 27 МБ добавляли 78 МБ мусора; при
    * 300 запросах в минуту это простой способ забить диск.
    */
-  async save(filename: string, mimeType: string, content: Readable): Promise<UploadMeta> {
+  async save(
+    owner: string,
+    filename: string,
+    mimeType: string,
+    content: Readable,
+  ): Promise<UploadMeta> {
     const id = randomUUID();
     const path = this.binPath(id);
     try {
@@ -62,6 +83,7 @@ export class UploadStore {
     const { size } = await stat(path);
     const meta: UploadMeta = {
       id,
+      owner,
       filename: filename || 'attachment',
       mimeType: mimeType || 'application/octet-stream',
       size,
@@ -71,8 +93,28 @@ export class UploadStore {
     return meta;
   }
 
-  /** Метаданные и путь к файлу по id (null, если нет). */
-  async get(id: string): Promise<{ meta: UploadMeta; path: string } | null> {
+  /**
+   * Метаданные и путь к файлу по id (null, если нет).
+   *
+   * `owner` обязателен: чужая загрузка для этого ящика — то же самое, что
+   * несуществующая. Отвечать «не найдено», а не «нельзя», здесь правильно:
+   * иначе по разнице ответов можно перебором узнавать чужие
+   * идентификаторы.
+   *
+   * Загрузки, сделанные до появления владельца (в метаданных его нет),
+   * достаются любому вошедшему — как и раньше. Ломать письмо, которое
+   * человек пишет прямо сейчас, ради суточных файлов не стоит: уборщик
+   * унесёт их сам.
+   */
+  async get(id: string, owner: string): Promise<{ meta: UploadMeta; path: string } | null> {
+    const found = await this.read(id);
+    if (!found) return null;
+    if (found.meta.owner !== undefined && found.meta.owner !== owner) return null;
+    return found;
+  }
+
+  /** Метаданные без сверки владельца — для своих же нужд (уборка). */
+  private async read(id: string): Promise<{ meta: UploadMeta; path: string } | null> {
     if (!ID_RE.test(id)) return null;
     try {
       const raw = await readFile(this.metaPath(id), 'utf8');
@@ -81,6 +123,33 @@ export class UploadStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Сколько байт этот ящик уже занял незавершёнными загрузками.
+   *
+   * Считается по метаданным, а не по диску: файл без `.json` — это
+   * оборванная загрузка, её унесёт уборщик, и держать из-за неё место
+   * занятым нельзя.
+   */
+  async usedBy(owner: string): Promise<number> {
+    let names: string[] = [];
+    try {
+      names = await readdir(this.dir);
+    } catch {
+      return 0;
+    }
+    let used = 0;
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      try {
+        const meta = JSON.parse(await readFile(join(this.dir, name), 'utf8')) as UploadMeta;
+        if (meta.owner === owner) used += meta.size;
+      } catch {
+        /* битые метаданные считать нечем */
+      }
+    }
+    return used;
   }
 
   async delete(id: string): Promise<void> {
@@ -109,7 +178,7 @@ export class UploadStore {
       if (!name.endsWith('.json')) continue;
       const id = name.slice(0, -5);
       withMeta.add(id);
-      const found = await this.get(id);
+      const found = await this.read(id);
       if (found && now - found.meta.createdAt > maxAgeMs) {
         await this.delete(id);
         removed += 1;

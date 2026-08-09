@@ -159,10 +159,13 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
    * означает «убрать вложения из письма»). Уборщик хранилища заберёт их
    * сам, когда придёт срок.
    */
-  const takeUploads = async (ids: readonly string[]): Promise<StoredAttachment[]> => {
+  const takeUploads = async (
+    owner: string,
+    ids: readonly string[],
+  ): Promise<StoredAttachment[]> => {
     const files: StoredAttachment[] = [];
     for (const id of ids) {
-      const found = await uploads.get(id);
+      const found = await uploads.get(id, owner);
       if (!found) {
         /*
          * Молчаливый пропуск был бы худшим исходом: шаблон сохранился бы
@@ -216,7 +219,7 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
     if (name === '') throw new BadRequestError('У шаблона должно быть название');
 
     const bodyHtml = sanitizeTemplateHtml(body.bodyHtml);
-    const files = await takeUploads(body.attachmentIds ?? []);
+    const files = await takeUploads(session.email, body.attachmentIds ?? []);
 
     /*
      * Пустой шаблон отклоняется: заготовка без темы, текста и вложений —
@@ -255,7 +258,10 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
      * вторая — «убери все вложения». Слей мы их в одно, переименование
      * шаблона стирало бы приложенный прайс — молча и необратимо.
      */
-    const files = patch.attachmentIds === undefined ? null : await takeUploads(patch.attachmentIds);
+    const files =
+      patch.attachmentIds === undefined
+        ? null
+        : await takeUploads(session.email, patch.attachmentIds);
 
     const updated = await guard(() =>
       store.update(
@@ -310,7 +316,14 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
 
     const created: UploadMeta[] = [];
     for (const file of files) {
-      created.push(await uploads.save(file.filename, file.mimeType, Readable.from(file.content)));
+      created.push(
+        await uploads.save(
+          session.email,
+          file.filename,
+          file.mimeType,
+          Readable.from(file.content),
+        ),
+      );
     }
     return { attachments: created };
   });

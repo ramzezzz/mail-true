@@ -3,6 +3,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { UnauthorizedError, BadRequestError, FileTooLargeError } from '../errors.js';
+import { UploadQuotaError } from '../uploads.js';
 import type { UploadMeta } from '../uploads.js';
 
 /**
@@ -32,6 +33,14 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       throw new BadRequestError('Ожидается multipart/form-data');
     }
 
+    const owner = request.mailSession.email;
+    /*
+     * Сколько ящик уже занял до этого запроса. Считается один раз: файлы
+     * этого же запроса прибавляются по мере сохранения, и пересчитывать
+     * каталог на каждое вложение незачем.
+     */
+    let used = await uploads.usedBy(owner);
+
     const saved: Array<Pick<UploadMeta, 'id' | 'filename' | 'mimeType' | 'size'>> = [];
     // Имя файла, на котором сорвалось, — иначе при пяти вложениях сразу
     // непонятно, какое именно ужимать.
@@ -40,7 +49,20 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       for await (const part of request.parts()) {
         if (part.type !== 'file') continue;
         current = part.filename;
-        const meta = await uploads.save(part.filename, part.mimetype, part.file);
+        const meta = await uploads.save(owner, part.filename, part.mimetype, part.file);
+        used += meta.size;
+        if (used > config.UPLOAD_MAILBOX_MAX_BYTES) {
+          /*
+           * Файл уже на диске — иначе размер и не узнать: он приходит
+           * потоком. Убирает его общий разбор ошибок ниже, вместе с
+           * остальными файлами этого запроса.
+           */
+          await uploads.delete(meta.id);
+          throw new UploadQuotaError(
+            `Незавершённых вложений слишком много: предел на ящик — ${megabytes(config.UPLOAD_MAILBOX_MAX_BYTES)}.` +
+              ' Отправьте или удалите начатые письма и повторите.',
+          );
+        }
         saved.push({
           id: meta.id,
           filename: meta.filename,
@@ -56,6 +78,9 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       // «Файл слишком большой» не отвечает на единственный вопрос, который
       // человек в этот момент задаёт: до какого размера ужимать. Предел
       // называем прямо, вместе с именем файла, на котором сорвалось.
+      // Про предел на ящик сказано своими словами — общий текст про
+      // «предел одного вложения» тут только сбивал бы с толку.
+      if (err instanceof UploadQuotaError) throw err;
       if (isTooLarge(err)) {
         const what = current ? `Файл «${current}»` : 'Файл';
         throw new FileTooLargeError(

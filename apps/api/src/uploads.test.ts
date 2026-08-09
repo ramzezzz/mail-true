@@ -49,7 +49,12 @@ test('отклонённая загрузка не оставляет файл �
       code: 'FST_REQ_FILE_TOO_LARGE',
     });
     await assert.rejects(
-      store.save('big.bin', 'application/octet-stream', failingStream(Buffer.alloc(4096), err)),
+      store.save(
+        'test@mail.local',
+        'big.bin',
+        'application/octet-stream',
+        failingStream(Buffer.alloc(4096), err),
+      ),
       /too large/i,
     );
     assert.deepEqual(await readdir(dir), [], 'каталог загрузок должен остаться пустым');
@@ -62,7 +67,12 @@ test('обрезанная по лимиту загрузка отклоняет
   const { store, dir } = await tempStore();
   try {
     await assert.rejects(
-      store.save('big.bin', 'application/octet-stream', truncatedStream(Buffer.alloc(4096))),
+      store.save(
+        'test@mail.local',
+        'big.bin',
+        'application/octet-stream',
+        truncatedStream(Buffer.alloc(4096)),
+      ),
       (err: unknown) => {
         const e = err as { statusCode: number; code: string };
         assert.equal(e.statusCode, 413);
@@ -79,13 +89,18 @@ test('обрезанная по лимиту загрузка отклоняет
 test('обычная загрузка сохраняется и читается', async () => {
   const { store, dir } = await tempStore();
   try {
-    const meta = await store.save('файл.txt', 'text/plain', Readable.from([Buffer.from('привет')]));
+    const meta = await store.save(
+      'test@mail.local',
+      'файл.txt',
+      'text/plain',
+      Readable.from([Buffer.from('привет')]),
+    );
     assert.equal(meta.filename, 'файл.txt');
     assert.equal(meta.size, Buffer.from('привет').length);
-    const found = await store.get(meta.id);
+    const found = await store.get(meta.id, 'test@mail.local');
     assert.ok(found);
     await store.delete(meta.id);
-    assert.equal(await store.get(meta.id), null);
+    assert.equal(await store.get(meta.id, 'test@mail.local'), null);
     assert.deepEqual(await readdir(dir), []);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -123,11 +138,70 @@ test('уборщик не трогает загрузку, которая пря
 test('уборщик удаляет просроченные загрузки вместе с метаданными', async () => {
   const { store, dir } = await tempStore();
   try {
-    const meta = await store.save('a.txt', 'text/plain', Readable.from([Buffer.from('x')]));
+    const meta = await store.save(
+      'test@mail.local',
+      'a.txt',
+      'text/plain',
+      Readable.from([Buffer.from('x')]),
+    );
     assert.equal(await store.sweep(24 * 3600 * 1000), 0, 'свежую загрузку трогать нельзя');
     assert.equal(await store.sweep(-1), 1);
-    assert.equal(await store.get(meta.id), null);
+    assert.equal(await store.get(meta.id, 'test@mail.local'), null);
     assert.deepEqual(await readdir(dir), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/*
+ * Владельца у загрузки не было вовсе: файл лежал под случайным именем, и
+ * любой вошедший, назвав чужой идентификатор, прикладывал чужое вложение
+ * к своему письму. Идентификатор секретом не является — он уходит в
+ * ответ, живёт в черновике и в журналах.
+ */
+test('чужая загрузка для другого ящика не существует', async () => {
+  const { store, dir } = await tempStore();
+  try {
+    const meta = await store.save(
+      'anna@mail.local',
+      'зарплата.pdf',
+      'application/pdf',
+      Readable.from([Buffer.from('тайна')]),
+    );
+    assert.ok(await store.get(meta.id, 'anna@mail.local'), 'свой файл должен быть виден');
+    // Именно null, а не отказ: по разнице ответов чужие идентификаторы
+    // можно было бы перебирать.
+    assert.equal(await store.get(meta.id, 'petr@mail.local'), null);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('занятое место считается по ящику, а не по всему каталогу', async () => {
+  const { store, dir } = await tempStore();
+  try {
+    await store.save(
+      'anna@mail.local',
+      'a.bin',
+      'application/octet-stream',
+      Readable.from([Buffer.alloc(1000)]),
+    );
+    await store.save(
+      'anna@mail.local',
+      'b.bin',
+      'application/octet-stream',
+      Readable.from([Buffer.alloc(500)]),
+    );
+    await store.save(
+      'petr@mail.local',
+      'c.bin',
+      'application/octet-stream',
+      Readable.from([Buffer.alloc(9000)]),
+    );
+    assert.equal(await store.usedBy('anna@mail.local'), 1500);
+    assert.equal(await store.usedBy('petr@mail.local'), 9000);
+    // Ящик без загрузок не должен ничего наследовать от соседей.
+    assert.equal(await store.usedBy('nikto@mail.local'), 0);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

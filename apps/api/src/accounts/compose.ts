@@ -48,10 +48,16 @@ export async function composeExternalRaw(
   draft: ExternalDraft,
   from: { name: string | null; address: string },
   uploads: UploadStore,
+  /**
+   * Ящик веб-почты, который эти вложения загрузил. НЕ адрес отправителя:
+   * письмо уходит с внешнего адреса, а файлы лежат под учёткой того, кто
+   * вошёл, — по ней хранилище и проверяет владельца.
+   */
+  owner: string,
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
   for (const id of draft.attachmentIds) {
-    const found = await uploads.get(id);
+    const found = await uploads.get(id, owner);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
     attachments.push({
       filename: found.meta.filename,

@@ -23,19 +23,24 @@ import type { UploadStore } from '../uploads.js';
 
 const ATTACHMENT_LIMIT = 18_724_571; // ровно то, что даёт 25 МБ / 1.4
 
-async function buildApp(): Promise<FastifyInstance> {
+const MAILBOX_LIMIT = 250 * 1024 * 1024;
+
+async function buildApp(store?: Partial<UploadStore>): Promise<FastifyInstance> {
   const app = Fastify({ logger: false }) as unknown as FastifyInstance;
   const config = {
     ATTACHMENT_MAX_BYTES: ATTACHMENT_LIMIT,
     MESSAGE_MAX_BYTES: 25 * 1024 * 1024,
+    UPLOAD_MAILBOX_MAX_BYTES: MAILBOX_LIMIT,
   } as unknown as AppConfig;
   const uploads = {
+    usedBy: async () => 0,
     save: async () => {
       throw Object.assign(new Error('request file too large'), {
         code: 'FST_REQ_FILE_TOO_LARGE',
       });
     },
     delete: async () => undefined,
+    ...store,
   } as unknown as UploadStore;
   app.decorate('deps', { uploads, config } as unknown as AppDeps);
   app.decorateRequest('mailSession', null);
@@ -142,6 +147,48 @@ test('названный предел округляется ВНИЗ — обе
       namedBytes <= ATTACHMENT_LIMIT,
       `названо ${named[0]}, а предел ${String(ATTACHMENT_LIMIT)} байт — файл такого размера не пройдёт`,
     );
+  } finally {
+    await app.close();
+  }
+});
+
+/*
+ * Предел на файл был, а на ящик — нет: один вошедший заливал вложения
+ * подряд, ничего не отправляя. Том общий — на нём же очередь отложенной
+ * отправки и выгрузки ящиков, — поэтому заполнивший его ломает отправку
+ * СОСЕДЯМ. Уборщик не спасает: он ходит по возрасту, сутки спустя.
+ */
+test('переполнение места под незавершённые вложения отклоняется с внятным текстом', async () => {
+  const deleted: string[] = [];
+  const app = await buildApp({
+    // Ящик уже занял почти всё отведённое.
+    usedBy: async () => MAILBOX_LIMIT - 1024,
+    save: async (_owner: string, filename: string) => ({
+      id: 'up-1',
+      owner: 'test@mail.local',
+      filename,
+      mimeType: 'application/octet-stream',
+      size: 4096,
+      createdAt: Date.now(),
+    }),
+    delete: async (id: string) => {
+      deleted.push(id);
+    },
+  } as unknown as Partial<UploadStore>);
+  try {
+    const { body, contentType } = multipartBody('smeta.pdf', 4096);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/uploads',
+      payload: body,
+      headers: { 'content-type': contentType },
+    });
+    assert.equal(res.statusCode, 413, res.body);
+    assert.match(res.json().message, /предел на ящик/i);
+    // И сказано, что делать: отправить или удалить начатое.
+    assert.match(res.json().message, /Отправьте или удалите/);
+    // Файл, из-за которого переполнилось, на диске не остаётся.
+    assert.deepEqual(deleted, ['up-1']);
   } finally {
     await app.close();
   }

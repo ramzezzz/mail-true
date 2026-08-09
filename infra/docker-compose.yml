@@ -693,6 +693,12 @@ services:
       RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-300}
       RATE_LIMIT_WINDOW_MS: ${RATE_LIMIT_WINDOW_MS:-60000}
       UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-26214400}
+      # Сколько места один ящик может занять НЕОТПРАВЛЕННЫМИ вложениями.
+      # Том api-uploads общий: на нём же очередь отложенной отправки и
+      # выгрузки ящиков, — то есть заливший его ломает отправку соседям,
+      # а не себе. Уборщик тут не спасает: он ходит по возрасту, сутки
+      # спустя. По умолчанию — десять писем предельного размера.
+      UPLOAD_MAILBOX_MAX_BYTES: ${UPLOAD_MAILBOX_MAX_BYTES:-262144000}
       # Должен совпадать с message_size_limit в
       # infra/postfix/conf/main.cf.template — иначе письмо, принятое
       # веб-интерфейсом, отобьёт собственный же Postfix.

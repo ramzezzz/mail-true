@@ -197,7 +197,9 @@ async function composeRaw(
    */
   let attachedBytes = 0;
   for (const id of payload.attachmentIds) {
-    const found = await uploads.get(id);
+    // Владелец — тот же ящик, от чьего имени письмо: чужая загрузка для
+    // него не существует, и в письмо попасть не может.
+    const found = await uploads.get(id, from);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
     attachedBytes += found.meta.size;
     attachments.push({
@@ -1219,7 +1221,12 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     const sendFailure = readFailureFromRaw(source);
     const attachments: DraftContent['attachments'] = [];
     for (const part of parsed.attachments) {
-      const meta = await uploads.save(part.filename, part.mimeType, Readable.from(part.content));
+      const meta = await uploads.save(
+        session.email,
+        part.filename,
+        part.mimeType,
+        Readable.from(part.content),
+      );
       attachments.push({ id: meta.id, filename: meta.filename, size: meta.size });
     }
 

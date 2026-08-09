@@ -64,7 +64,12 @@ async function buildHarness(
 
 /** Кладёт файл во временное хранилище загрузок и отдаёт его идентификатор. */
 async function upload(uploads: UploadStore, name: string, content: string): Promise<string> {
-  const meta = await uploads.save(name, 'application/pdf', Readable.from(Buffer.from(content)));
+  const meta = await uploads.save(
+    'test@mail.local',
+    name,
+    'application/pdf',
+    Readable.from(Buffer.from(content)),
+  );
   return meta.id;
 }
 
@@ -221,7 +226,7 @@ test('вложение шаблона переживает уборку врем
      */
     const swept = await h.uploads.sweep(0);
     assert.ok(swept >= 1, `уборка ничего не удалила: ${String(swept)}`);
-    assert.equal(await h.uploads.get(uploadId), null);
+    assert.equal(await h.uploads.get(uploadId, 'test@mail.local'), null);
 
     const materialized = await h.app.inject({
       method: 'POST',
@@ -239,7 +244,7 @@ test('вложение шаблона переживает уборку врем
     assert.notEqual(files[0]?.id, uploadId);
 
     // И содержимое то самое, а не пустышка с правильным именем
-    const found = await h.uploads.get(files[0]?.id ?? '');
+    const found = await h.uploads.get(files[0]?.id ?? '', 'test@mail.local');
     assert.ok(found);
     assert.equal(found.meta.size, Buffer.from('СОДЕРЖИМОЕ ПРАЙСА').length);
   } finally {

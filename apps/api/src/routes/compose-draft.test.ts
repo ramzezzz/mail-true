@@ -261,6 +261,7 @@ test('вложение черновика возвращается ровно о
   const h = await buildHarness();
   try {
     const upload = await h.uploads.save(
+      'test@mail.local',
       'договор.pdf',
       'application/pdf',
       Readable.from(Buffer.from('%PDF-1.4 текст договора')),
