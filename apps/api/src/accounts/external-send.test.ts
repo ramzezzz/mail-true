@@ -46,6 +46,8 @@ interface SmtpOptions {
   reject?: string[];
   /** Код отказа (550 — нет такого ящика, 552 — письмо слишком велико). */
   rejectCode?: number;
+  /** Сервер не принимает логин и пароль — как при протухшем пароле. */
+  authFail?: boolean;
 }
 
 interface FakeSmtp {
@@ -81,7 +83,17 @@ async function startFakeSmtp(options: SmtpOptions = {}): Promise<FakeSmtp> {
         if (command === 'EHLO' || command === 'HELO') {
           socket.write('250-fake\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n');
         } else if (command === 'AUTH') {
-          socket.write('235 2.7.0 Accepted\r\n');
+          // Ровно так отвечает почтовая служба на протухший пароль: код из
+          // той же пятисотой сотни, что и «нет такого получателя», и адрес
+          // страницы, на которой пароль выдают заново.
+          if (options.authFail) {
+            socket.write(
+              '535-5.7.8 Username and Password not accepted. For more information, go to\r\n' +
+                '535 5.7.8  https://support.example/mail/?p=BadCredentials\r\n',
+            );
+          } else {
+            socket.write('235 2.7.0 Accepted\r\n');
+          }
         } else if (command === 'RCPT') {
           // Postfix отвечает на КАЖДОГО получателя отдельно — в этом весь
           // разбираемый случай: часть адресов принята, часть отвергнута
@@ -398,6 +410,39 @@ test('постоянный отказ — это не «сервер недос�
       assert.match(body.message, /one@mail\.local/);
     },
   );
+});
+
+test('неверный пароль чужого ящика зовёт чинить подключение, а не письмо', async () => {
+  /*
+   * Отказ при входе приходит с кодом 535 — из той же пятисотой сотни, что
+   * и «нет такого получателя». Разбора для него не было, и окно написания
+   * говорило «Почтовый сервер отклонил письмо (код 535)»: человек шёл
+   * проверять адреса и текст письма, хотя поправить надо было ровно одно —
+   * пароль подключения. У почтовых служб он к тому же протухает сам, стоит
+   * включить двухшаговый вход, так что случай этот — обычный, а не редкий.
+   *
+   * Слова сервера при этом затирались нашими. А в них и написано, что
+   * делать: адрес страницы, где выдают новый пароль.
+   */
+  await withApp({ authFail: true }, async ({ app, smtp }) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/accounts/external/7/send',
+      payload: sendBody(),
+    });
+
+    assert.equal(res.statusCode, 401, res.body);
+    const body = res.json() as { error: string; message: string };
+    assert.equal(body.error, 'AUTH_FAILED');
+    assert.doesNotMatch(body.message, /отклонил письмо/u, 'письмо и получатели тут ни при чём');
+    assert.match(body.message, /подключ/iu, 'сказать надо, что чинить: подключение ящика');
+    assert.match(
+      body.message,
+      /Username and Password not accepted/u,
+      'слова сервера затёрты — вместе с адресом страницы, где выдают новый пароль',
+    );
+    assert.equal(smtp.messages.length, 0, 'письмо не ушло никому');
+  });
 });
 
 test('«письмо слишком большое» называется своими словами, а не отказом сервера', async () => {

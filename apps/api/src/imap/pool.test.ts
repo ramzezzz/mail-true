@@ -242,37 +242,50 @@ test('closeUser закрывает соединение пользователя
 });
 
 /*
- * Закрытие дорожки не отменяет её очередь — и раньше это стоило вечного
- * соединения.
+ * Закрытие дорожки не отменяет её очередь — и это стоило вечного соединения.
  *
- * `closeUser` вынимал дорожку из карты, не глядя на задачи в очереди. Та,
- * что стояла следующей, доходила до `acquire` уже после этого, видела
- * `client === null` и открывала НОВОЕ соединение — в дорожку, которой в
- * карте больше нет. Закрыть его потом было нечем: сторож простоя первой
- * же строкой выходил (`lanes.get(email) !== lane`), повторный `closeUser`
+ * `closeUser` вынимает дорожку из карты, не глядя на задачи в очереди. Та,
+ * что стояла следующей, доходит до `acquire` уже после этого, видит
+ * `client === null` и открывает НОВОЕ соединение — в дорожку, которой в
+ * карте больше нет. Закрыть его было нечем: сторож простоя первой же
+ * строкой выходил (`lanes.get(email) !== lane`), повторный `closeUser`
  * этой дорожки не находил, `closeAll` при остановке сервера — тоже.
  * Соединение висело до собственного таймаута Dovecot, а у ящика на это
  * время оказывалось два живых соединения вместо одного — то есть команды
- * двух запросов переставали выстраиваться в общую очередь.
+ * двух запросов переставали выстраиваться в общую очередь. При пределе
+ * `mail_max_userip_connections` каждое такое соединение — отобранное место.
  *
- * Ждущая задача теперь получает отказ: закрытие означает, что сессии
- * больше нет — человек вышел, либо ему сменили пароль, либо ящик
- * заблокировали.
+ * Задача при этом ДОВОДИТСЯ ДО КОНЦА, а не отваливается: дорожка одна на
+ * адрес, а не на сессию, и выход в одном браузере не должен ронять работу
+ * второй вкладки или телефона.
  */
-test('задача, дождавшаяся закрытия дорожки, не открывает новое соединение', async () => {
-  const { pool } = makePool();
-  let releaseFirst = (): void => undefined;
-  const firstStarted = new Promise<void>((resolve) => {
-    const first = pool.withClient('test@mail.local', 'p', async () => {
-      resolve();
-      await new Promise<void>((done) => {
-        releaseFirst = done;
-      });
-      return 1;
-    });
-    void first.catch(() => undefined);
+
+/** Запускает задачу, которая застревает внутри, и отдаёт способ её отпустить. */
+async function stuckTask(
+  pool: ImapPool,
+  email: string,
+): Promise<{ release: () => void; done: Promise<string> }> {
+  let release = (): void => undefined;
+  let started = (): void => undefined;
+  const startedPromise = new Promise<void>((resolve) => {
+    started = resolve;
   });
-  await firstStarted;
+  const done = pool
+    .withClient(email, 'p', async () => {
+      started();
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return 'выполнилась';
+    })
+    .catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
+  await startedPromise;
+  return { release: () => release(), done };
+}
+
+test('соединение осиротевшей дорожки закрывается, а не висит до таймаута Dovecot', async () => {
+  const { pool, created } = makePool();
+  const first = await stuckTask(pool, 'test@mail.local');
 
   // Вторая задача встаёт в очередь за первой и ждёт своей ветки.
   const second = pool.withClient('test@mail.local', 'p', async () => 2);
@@ -282,22 +295,39 @@ test('задача, дождавшаяся закрытия дорожки, не
   );
 
   await pool.closeUser('test@mail.local');
-  releaseFirst();
+  first.release();
 
-  /*
-   * Задача ДОВОДИТСЯ ДО КОНЦА, а не отваливается.
-   *
-   * Здесь сначала стоял отказ 401, и он бил не по тому: дорожка одна на
-   * адрес, а не на сессию. Выход в одном браузере ронял задачи живых
-   * сессий того же ящика — второй вкладки, телефона, — а браузер такой
-   * 401 считает концом сессии и уводит на экран входа. Закрытую сессию
-   * отсеивает проверка сессии; сюда доходит только тот, чья сессия жива.
-   *
-   * Проверяем главное: соединение, открытое в осиротевшей дорожке, не
-   * остаётся висеть. Раньше его не закрывал никто — ни сторож простоя,
-   * ни повторный closeUser, ни остановка сервера.
-   */
   assert.equal(await secondSettled, 'выполнилась');
+  assert.equal(await first.done, 'выполнилась');
+  // Второе соединение открыто уже в дорожке, которой в карте нет, — именно
+  // его и не закрывал никто.
+  assert.equal(created.length, 2, 'ждущая задача открывает себе новое соединение');
+  assert.equal(created[1]?.closed, true, 'соединение осиротевшей дорожки осталось висеть');
+  assert.equal(pool.openConnections, 0);
+});
+
+test('остановка сервера закрывает и соединение осиротевшей дорожки', async () => {
+  // Тот же случай, застигнутый посреди работы: человек вышел, его задача
+  // ещё идёт, и в этот момент гасят процесс. Таймер простоя здесь не
+  // помощник — он unref-нут и при выходе процесса не срабатывает вовсе.
+  const { pool, created } = makePool();
+  const first = await stuckTask(pool, 'test@mail.local');
+  const secondStarted = stuckTask(pool, 'test@mail.local');
+
+  await pool.closeUser('test@mail.local');
+  first.release();
+  const second = await secondStarted;
+
+  assert.equal(created.length, 2);
+  assert.equal(
+    pool.openConnections,
+    1,
+    'соединение осиротевшей дорожки — такое же соединение к Dovecot',
+  );
+
   await pool.closeAll();
-  assert.equal(pool.openConnections, 0, 'соединение осиротевшей дорожки осталось висеть');
+  assert.equal(created[1]?.closed, true, 'остановка сервера бросила соединение открытым');
+  assert.equal(pool.openConnections, 0);
+  second.release();
+  await second.done;
 });

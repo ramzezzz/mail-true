@@ -146,13 +146,17 @@ class FakeDb {
 
   /** Сколько попыток подряд уже сорвалось — счётчик из базы. */
   attempts = 0;
+  /** Чем ответить на счёт попыток: так изображается недоступная база. */
+  failAttemptCounter: Error | null = null;
 
   async bumpMigrationAttempt(): Promise<number> {
+    if (this.failAttemptCounter) throw this.failAttemptCounter;
     this.attempts += 1;
     return this.attempts;
   }
 
   async resetMigrationAttempts(): Promise<void> {
+    if (this.failAttemptCounter) throw this.failAttemptCounter;
     this.attempts = 0;
   }
 }
@@ -603,16 +607,102 @@ void test('несколько сорванных попыток подряд з�
   assert.match(String(last?.error), /попыток/i, 'человеку не сказано, почему задание закрыто');
 });
 
-void test('удачная подготовка обнуляет счётчик сорванных попыток', async () => {
+void test('переехавший ящик обнуляет счётчик сорванных попыток', async () => {
+  // Обратный ход к проверке выше: задание, которое раз в неделю спотыкается
+  // о перезапуск базы, но между этим честно возит письма, не должно однажды
+  // закрыться «по исчерпании попыток», ни разу не сорвавшись подряд.
   const db = new FakeDb();
   db.failListItems = new Error('база моргнула');
   const box = new SecretBox(SECRET);
-  const runner = runnerWith(db, box);
-  await runner.runJob(jobRow({ secret_enc: packSecrets(box, {}) }));
+  const runner = runnerWith(db, box, { runBatch: batchReporting(['ok']) });
+  const row = () =>
+    jobRow({ total: 1, secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol' } }) });
+
+  await runner.runJob(row());
   assert.equal(db.attempts, 1);
 
-  // База вернулась — задание доходит до работы, счётчик сбрасывается.
+  // База вернулась — ящик переезжает, счётчик сбрасывается.
   db.failListItems = null;
-  await runner.runJob(jobRow({ secret_enc: packSecrets(box, {}) }));
+  db.items = [itemRow(0)];
+  await runner.runJob(row());
   assert.equal(db.attempts, 0, 'редкие срывы копились бы и однажды закрыли исправное задание');
+});
+
+/*
+ * Счёт попыток обнулялся не там, где надо, — и предела не существовало.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Обнуление стояло сразу после подготовки задания, а под тем же перехватом
+ * лежит ВЕСЬ перенос — часы работы. Отказ, который случается ниже подготовки
+ * и сам не пройдёт (чужой сервер отвечает отказом на всё, некуда писать
+ * состояние докачки), давал единицу; задание отпускалось, через десять секунд
+ * бралось снова, подготовка снова проходила — и снова обнуляла счёт. Пяти
+ * попыток не набиралось никогда.
+ *
+ * Для человека это выглядело как вечное «идёт»: числа стоят, остановить
+ * нельзя (повтор для идущего задания запрещён), чужой сервер получает
+ * обращения каждые десять секунд, а пароли сотен исходных ящиков лежат в
+ * базе без срока — они стираются только вместе с завершением задания.
+ */
+void test('срыв ПОСЛЕ подготовки тоже считается — иначе предела попыток нет', async () => {
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  db.items = [itemRow(0)];
+  const runner = runnerWith(db, box, {
+    // Подготовка проходит целиком, а перенос падает всегда одинаково.
+    runBatch: async () => {
+      throw new Error('нет таблицы курсоров');
+    },
+  });
+  const row = () =>
+    jobRow({ total: 1, secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol' } }) });
+
+  for (let i = 0; i < 4; i += 1) {
+    await runner.runJob(row());
+    assert.equal(
+      db.jobPatches.at(-1)?.finished,
+      undefined,
+      `попытка ${String(i + 1)} завершила задание`,
+    );
+  }
+
+  await runner.runJob(row());
+  const last = db.jobPatches.at(-1);
+  assert.equal(last?.finished, true, 'задание крутится вечно: подготовка каждый раз обнуляет счёт');
+  assert.equal(last?.state, 'failed');
+});
+
+void test('недоступная база не отменяет предел попыток', async () => {
+  /*
+   * Счёт попыток вёлся ЗАПРОСОМ В ТУ ЖЕ БАЗУ, причём с .catch(() => 0).
+   * Для целого класса отказов — «Postgres не отвечает» — счётчик не рос
+   * вообще: сорваться задание могло сколько угодно раз, а закрыться не
+   * могло ни разу. Второй счёт, в памяти процесса, переживает как раз этот
+   * случай.
+   */
+  const db = new FakeDb();
+  db.failListItems = new Error('Connection terminated unexpectedly');
+  db.failAttemptCounter = new Error('Connection terminated unexpectedly');
+  const box = new SecretBox(SECRET);
+  const runner = runnerWith(db, box);
+  const row = () => jobRow({ secret_enc: packSecrets(box, {}) });
+
+  for (let i = 0; i < 4; i += 1) {
+    await runner.runJob(row());
+    assert.equal(
+      db.jobPatches.at(-1)?.finished,
+      undefined,
+      `попытка ${String(i + 1)} завершила задание`,
+    );
+  }
+
+  await runner.runJob(row());
+  assert.equal(db.attempts, 0, 'счётчик в базе так и не вырос — считать пришлось в памяти');
+  assert.equal(
+    db.jobPatches.at(-1)?.finished,
+    true,
+    'при лежачей базе задание не закрывается никогда — и пароли лежат бессрочно',
+  );
 });

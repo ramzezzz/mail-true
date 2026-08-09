@@ -138,6 +138,19 @@ export class MigrationRunner {
    * и превратили обновление образа в потерю всей ночи переноса.
    */
   #shuttingDown = false;
+  /**
+   * Сорвавшиеся подряд попытки, посчитанные в памяти процесса: id → счёт.
+   *
+   * Главный счётчик — в базе: он переживает перезапуск контейнера, а без
+   * этого задание, сорвавшееся четыре раза, после обновления образа начало
+   * бы счёт заново. Но растёт он запросом В ТУ ЖЕ БАЗУ, а самый частый повод
+   * сорваться — как раз недоступность базы: для целого класса отказов
+   * счётчик не рос вообще, и безнадёжное задание снова крутилось бы вечно.
+   * Поэтому тот же счёт ведётся рядом, в памяти. Он теряется при перезапуске
+   * — и правильно, перезапуск не улика, — зато работает ровно тогда, когда
+   * база отвечать отказывается. В дело идёт больший из двух.
+   */
+  readonly #localAttempts = new Map<number, number>();
 
   constructor(options: MigrationRunnerOptions) {
     this.#opts = {
@@ -256,6 +269,7 @@ export class MigrationRunner {
             'ящиков нечем, перенос выполнить нельзя.',
           finished: true,
         });
+        this.#localAttempts.delete(id);
         return;
       }
       const secrets = unpackSecrets(box, job.secret_enc);
@@ -271,6 +285,7 @@ export class MigrationRunner {
             'письма повторно не поедут.',
           finished: true,
         });
+        this.#localAttempts.delete(id);
         return;
       }
 
@@ -284,14 +299,6 @@ export class MigrationRunner {
       // Пропускаем то, что уже сделано: после перезапуска контейнера
       // переносить заново ящик, который целиком переехал вчера, — это
       // часы работы и сканирование чужого сервера ни за чем.
-      /*
-       * Подготовка прошла — значит прошлые срывы были случайными.
-       * Обнуляем счётчик, иначе задание, которое раз в неделю спотыкается
-       * о перезапуск базы, однажды закрылось бы «по исчерпании попыток»,
-       * ни разу не сорвавшись подряд.
-       */
-      await db.resetMigrationAttempts(id).catch(() => undefined);
-
       const pending = items.filter((item) => item.state !== 'ok');
       const source: SourceSettings = {
         host: job.source_host,
@@ -485,6 +492,8 @@ export class MigrationRunner {
                   }
                 : {}),
       });
+      // Задание закончено — считать сорвавшиеся попытки больше нечего
+      this.#localAttempts.delete(id);
       logger.info(
         {
           jobId: id,
@@ -550,8 +559,20 @@ export class MigrationRunner {
        *
        * Несколько попыток подряд — это уже не «база моргнула», и задание
        * честно закрывается с ошибкой; пароли стираются осознанно.
+       *
+       * ВАЖНО, ГДЕ ЭТОТ СЧЁТЧИК ОБНУЛЯЕТСЯ. Он обнулялся сразу после
+       * подготовки — а под тем же перехватом лежит весь перенос, то есть
+       * часы работы. Любой отказ НИЖЕ подготовки давал единицу, задание
+       * отпускалось, через десять секунд бралось снова, подготовка снова
+       * проходила — и снова обнуляла счёт. Пяти попыток не набиралось
+       * никогда: вечное «идёт», обращения к чужому серверу каждые десять
+       * секунд и пароли сотен чужих ящиков в базе без срока. Теперь счёт
+       * сбрасывает только настоящее продвижение — переехавшие письма
+       * (см. #noteProgress).
        */
-      const attempts = await db.bumpMigrationAttempt(id).catch(() => 0);
+      const local = (this.#localAttempts.get(id) ?? 0) + 1;
+      this.#localAttempts.set(id, local);
+      const attempts = Math.max(await db.bumpMigrationAttempt(id).catch(() => 0), local);
       const message = 'Попытка сорвалась: ' + (err instanceof Error ? err.message : String(err));
       if (attempts >= MAX_JOB_ATTEMPTS) {
         await db
@@ -563,6 +584,7 @@ export class MigrationRunner {
               'Проверьте настройки и заведите его заново.',
           })
           .catch(() => undefined);
+        this.#localAttempts.delete(id);
         logger.error(
           { jobId: id, attempts },
           'Задание переноса закрыто: попытки исчерпаны, пароли стёрты',
@@ -582,6 +604,23 @@ export class MigrationRunner {
       this.#active.delete(id);
       await state.close().catch(() => undefined);
     }
+  }
+
+  /**
+   * Задание сдвинулось с места: письма поехали.
+   *
+   * Только это и означает «прошлые срывы были случайными». Сама по себе
+   * удавшаяся подготовка не означает ничего: она проходит и у задания,
+   * которое дальше падает каждый раз в одном и том же месте, — а именно
+   * ради таких заданий счёт попыток и ведётся.
+   *
+   * Обратная сторона тоже нужна: задание, которое раз в неделю спотыкается
+   * о перезапуск базы, но между этим честно возит письма, не должно
+   * однажды закрыться «по исчерпании попыток», ни разу не сорвавшись подряд.
+   */
+  #noteProgress(id: number): void {
+    this.#localAttempts.delete(id);
+    void this.#opts.db.resetMigrationAttempts(id).catch(() => undefined);
   }
 
   /**
@@ -670,6 +709,13 @@ export class MigrationRunner {
       { copied: number; skipped: number; failed: number; total: number; folder: string | null }
     >();
     let lastFlush = 0;
+    /** Сдвинулось ли задание с места в этом проходе — сообщаем один раз. */
+    let advanced = false;
+    const advance = (): void => {
+      if (advanced) return;
+      advanced = true;
+      this.#noteProgress(jobId);
+    };
 
     /** Итог по ящику с учётом предыдущих проходов. */
     const withCarried = (
@@ -763,6 +809,8 @@ export class MigrationRunner {
           current.copied = event.copied;
           current.skipped = event.skipped;
           current.failed = event.failed;
+          // Письмо доехало — задание живо, прошлые срывы были случайными
+          advance();
         }
         live.set(position, current);
         void flush(false);
@@ -780,6 +828,10 @@ export class MigrationRunner {
         if (report.status === 'ok') doneMailboxes += 1;
         if (report.status === 'partial') partialMailboxes += 1;
         if (report.status === 'failed') failedMailboxes += 1;
+        // Ящик переехал целиком или хотя бы частью — это тоже продвижение.
+        // Ящик, отказавший целиком (не пустили, не достучались), — нет:
+        // именно из таких и состоит задание, которое не поедет никогда.
+        if (report.status === 'ok' || report.status === 'partial') advance();
         const errors = collectErrors(report.folders);
         // Ошибка уровня ящика (не достучались, нет пароля) в папки не
         // попадает — без неё отчёт показал бы «ошибок 0» у не переехавшего

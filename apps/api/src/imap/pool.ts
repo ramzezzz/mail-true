@@ -53,13 +53,17 @@ interface Lane {
    *
    * Признак нужен потому, что закрытие не отменяет очередь: задачи, уже
    * стоявшие в ней, доходят до `acquire` уже после того, как дорожку
-   * вынули из карты. Раньше такая задача открывала НОВОЕ соединение и
-   * клала его в осиротевшую дорожку, а `scheduleIdleClose` потом выходил
-   * первой же строкой (`lanes.get(email) !== lane`) — соединение не
-   * закрывалось ни по простою, ни повторным `closeUser`, ни `closeAll`
-   * при остановке сервера. Заодно ломался главный смысл дорожек: у ящика
-   * оказывалось два живых соединения вместо одного, и очередь команд
+   * вынули из карты. Такая задача открывает НОВОЕ соединение и кладёт его
+   * в осиротевшую дорожку — а закрыть его потом было нечем: сторож простоя
+   * выходил первой же строкой (`lanes.get(email) !== lane`), повторный
+   * `closeUser` этой дорожки не находил, `closeAll` при остановке сервера
+   * — тоже. Соединение висело до собственного таймаута Dovecot, и у ящика
+   * всё это время было два живых соединения вместо одного: очередь команд
    * переставала быть общей.
+   *
+   * По этому признаку осиротевшая дорожка закрывает своё соединение сразу,
+   * как только доделает задачи (см. scheduleIdleClose): ждать простоя ей
+   * незачем — переиспользовать её уже некому, в карте её нет.
    */
   closed: boolean;
 }
@@ -70,6 +74,14 @@ function noop(): void {
 
 export class ImapPool {
   private readonly lanes = new Map<string, Lane>();
+  /**
+   * Дорожки, вынутые из карты, но ещё доделывающие свои задачи.
+   *
+   * Соединение такая дорожка открывает уже ПОСЛЕ закрытия, и по карте
+   * пользователей её не найти — а закрывать надо: остановка сервера обязана
+   * закрыть все соединения до единого. Их и держим здесь, отдельным списком.
+   */
+  private readonly orphans = new Set<Lane>();
 
   constructor(private readonly opts: ImapPoolOptions) {}
 
@@ -159,8 +171,8 @@ export class ImapPool {
      *
      * Закрытую сессию отсеивает проверка сессии, а не пул: до сюда
      * доходит только тот, чья сессия жива. Задача просто открывает своё
-     * соединение, а сторож простоя закроет его и у осиротевшей дорожки
-     * (см. scheduleIdleClose) — ради этого признак `closed` и остаётся.
+     * соединение — а закрывает его осиротевшая дорожка сама, доделав
+     * задачи (см. scheduleIdleClose и closeAll).
      */
     const existing = lane.client;
     if (existing && existing.usable) return existing;
@@ -189,20 +201,41 @@ export class ImapPool {
     return client;
   }
 
+  /** Закрывает соединение дорожки, не трогая ни карту, ни список сирот. */
+  private closeLane(lane: Lane): Promise<void> {
+    if (lane.idleTimer) clearTimeout(lane.idleTimer);
+    lane.idleTimer = null;
+    const client = lane.client;
+    lane.client = null;
+    if (!client) return Promise.resolve();
+    return client.logout().catch(() => {
+      client.close();
+    });
+  }
+
   private scheduleIdleClose(email: string, lane: Lane): void {
     if (lane.idleTimer) clearTimeout(lane.idleTimer);
     lane.idleTimer = null;
     // Пока в очереди есть задачи, дорожка нужна: закрывать нечего и незачем.
     if (lane.pending > 0) return;
+    /*
+     * Осиротевшая дорожка закрывается СРАЗУ, а не через время простоя.
+     *
+     * Ждать простоя ей незачем: в карте её нет, переиспользовать соединение
+     * некому — оно только занимало бы место в пределе Dovecot на число
+     * соединений ящика. Раньше её не закрывал никто: сторож простоя выходил
+     * первой же строкой (дорожка в карте уже другая), а таймер вдобавок
+     * unref-нут — при остановке процесса он не срабатывает вовсе.
+     */
+    if (lane.closed) {
+      this.orphans.delete(lane);
+      void this.closeLane(lane);
+      return;
+    }
     lane.idleTimer = setTimeout(() => {
       if (lane.pending > 0) return;
-      // Дорожка могла осиротеть (её вынул closeUser, пока задачи ещё шли).
-      // Из карты убираем только свою — но соединение закрываем в любом
-      // случае, иначе оно останется висеть до таймаута самого Dovecot.
       if (this.lanes.get(email) === lane) this.lanes.delete(email);
-      const client = lane.client;
-      lane.client = null;
-      if (client) client.logout().catch(() => client.close());
+      void this.closeLane(lane);
     }, this.opts.idleMs);
     // Не держим процесс живым ради таймера
     lane.idleTimer.unref?.();
@@ -260,22 +293,35 @@ export class ImapPool {
     if (!lane) return;
     this.lanes.delete(email);
     lane.closed = true;
-    if (lane.idleTimer) clearTimeout(lane.idleTimer);
-    const client = lane.client;
-    lane.client = null;
-    if (client) await client.logout().catch(() => client.close());
+    await this.closeLane(lane);
+    // Задачи, уже стоящие в очереди, доделаются и откроют СВОЁ соединение —
+    // значит, дорожку нельзя терять из виду, пока они не кончатся.
+    if (lane.pending > 0) this.orphans.add(lane);
   }
 
   /** Закрывает все соединения (останов сервера). */
   async closeAll(): Promise<void> {
     const all = [...this.lanes.keys()];
-    await Promise.all(all.map((email) => this.closeUser(email)));
+    // Осиротевшие дорожки — тоже соединения, и до Dovecot им дела нет:
+    // без этого они висели бы до его собственного таймаута уже после того,
+    // как наш процесс погас.
+    const orphans = [...this.orphans];
+    this.orphans.clear();
+    await Promise.all([
+      ...all.map((email) => this.closeUser(email)),
+      ...orphans.map((lane) => this.closeLane(lane)),
+    ]);
   }
 
   /** Число открытых соединений — для тестов и диагностики. */
   get openConnections(): number {
     let count = 0;
     for (const lane of this.lanes.values()) if (lane.client) count += 1;
+    // Соединение осиротевшей дорожки — такое же соединение к Dovecot.
+    // Пока их здесь не считали, любая проверка «после закрытия соединений
+    // не осталось» была истинна сама по себе: closeUser первым делом
+    // вынимает дорожку из карты, а считалось только по карте.
+    for (const lane of this.orphans) if (lane.client) count += 1;
     return count;
   }
 }

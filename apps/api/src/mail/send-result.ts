@@ -99,10 +99,35 @@ export interface SmtpFailure {
   permanent: boolean;
   /** Отказ именно из-за размера письма. */
   tooLarge: boolean;
+  /**
+   * Сервер не принял логин или пароль — дело не в письме и не в получателях.
+   *
+   * Отличать это обязательно. Коды отказа при входе (535, 530, 534) лежат в
+   * той же пятисотой сотне, что и «нет такого ящика», и без этого признака
+   * неверный пароль от чужого ящика выглядел как «Почтовый сервер отклонил
+   * письмо (код 535)». Человек шёл проверять адреса получателей и текст
+   * письма, а починить надо было ровно одно — пароль подключения.
+   */
+  authFailed: boolean;
   code: number | null;
   message: string;
+  /**
+   * Что ответил сервер своими словами («535-5.7.8 Username and Password not
+   * accepted»). Нужен там, где наше объяснение общее, а сервер сказал
+   * точнее: адрес страницы с настройкой пароля приложения бывает только там.
+   */
+  serverText: string;
   rejected: RejectedRecipient[];
 }
+
+/**
+ * Коды SMTP, которыми сервер отказывает во входе.
+ *
+ * 535 — логин или пароль не приняты (в том числе «нужен пароль приложения»),
+ * 530 — «сначала представьтесь», 534 — «этот способ входа не годится».
+ * Все три означают одно: письмо не при чём, чинить надо подключение.
+ */
+const AUTH_ERROR_CODES = new Set([530, 534, 535]);
 
 /** Коды ошибок nodemailer, означающие проблему со связью, а не отказ сервера. */
 const TRANSPORT_ERROR_CODES = new Set([
@@ -129,7 +154,14 @@ export function classifySmtpError(err: unknown): SmtpFailure {
   const message = typeof e.message === 'string' ? e.message : '';
   const text = `${response} ${message}`;
   const transport = typeof e.code === 'string' && TRANSPORT_ERROR_CODES.has(e.code);
+  // nodemailer помечает провал входа своим кодом EAUTH; сервер — трёхзначным.
+  // Смотрим на оба: первое надёжнее, второе работает и без nodemailer.
+  const authFailed =
+    !transport && (e.code === 'EAUTH' || (code !== null && AUTH_ERROR_CODES.has(code)));
 
+  // Отказ во входе тоже постоянный: повтор с тем же паролем не поможет.
+  // Разница не в том, повторять ли, а в том, ЧТО чинить, — за это отвечает
+  // authFailed, и разбирающий его обязан смотреть на него первым.
   const permanent = !transport && code !== null && code >= 500 && code < 600;
   const tooLarge =
     permanent &&
@@ -140,7 +172,9 @@ export function classifySmtpError(err: unknown): SmtpFailure {
   const { rejected } = readSendOutcome(err);
 
   let humanMessage: string;
-  if (tooLarge) {
+  if (authFailed) {
+    humanMessage = 'Почтовый сервер не принял логин или пароль';
+  } else if (tooLarge) {
     humanMessage = 'Письмо слишком большое для почтового сервера';
   } else if (rejected.length > 0) {
     humanMessage = `Почтовый сервер отклонил получателей: ${rejected
@@ -152,5 +186,13 @@ export function classifySmtpError(err: unknown): SmtpFailure {
     humanMessage = 'Не удалось отправить письмо';
   }
 
-  return { permanent, tooLarge, code, message: humanMessage, rejected };
+  return {
+    permanent,
+    tooLarge,
+    authFailed,
+    code,
+    message: humanMessage,
+    serverText: (response || message).trim(),
+    rejected,
+  };
 }
