@@ -37,6 +37,7 @@ import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import {
   existingUids,
+  moveUids,
   requireFolder,
   requireOrCreateFolder,
   splitMessageId,
@@ -408,9 +409,11 @@ async function moveScanned(
         const slice = source.uids.slice(i, i + MOVE_CHUNK);
         const present = await existingUids(client, slice);
         if (present.length === 0) continue;
-        const result = await client.messageMove(present, target.path, { uid: true });
-        const mapped = result && typeof result === 'object' ? result.uidMap?.size : undefined;
-        moved += mapped ?? present.length;
+        // moveUids: отказ MOVE imapflow отдаёт возвратом `false`, и он не
+        // проходил проверку `typeof result === 'object'`, молча превращаясь
+        // в «перенесено столько, сколько просили». Уборка рассылок
+        // отчитывалась об убранных письмах, оставляя их на месте.
+        moved += await moveUids(client, present, target.path);
       }
     } finally {
       lock.release();

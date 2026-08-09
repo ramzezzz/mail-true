@@ -11,6 +11,26 @@ import { registerErrorHandling } from '../http-errors.js';
 import type { AppDeps } from '../types.js';
 import { listQuerySchema, messageRoutes } from './messages.js';
 
+/**
+ * Набор номеров в виде списка.
+ *
+ * Настоящий imapflow принимает и массив, и строку `1,4:6` — и наш код шлёт
+ * именно строку: длинный список номеров одной командой Dovecot отвергает
+ * («Too long argument»), поэтому он режется на порции-диапазоны. Заглушка,
+ * умевшая только массив, разбирала такую строку посимвольно.
+ */
+function uidsOf(range: string | number[]): number[] {
+  if (Array.isArray(range)) return range;
+  const out: number[] = [];
+  for (const part of range.split(',')) {
+    const [from, to] = part.split(':');
+    const start = Number(from);
+    const end = to === undefined ? start : Number(to);
+    for (let uid = start; uid <= end; uid += 1) out.push(uid);
+  }
+  return out;
+}
+
 interface FolderSpec {
   path: string;
   specialUse?: string;
@@ -157,20 +177,23 @@ Telo pisma.
     };
   }
 
-  async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
+  async messageFlagsAdd(range: string | number[], flags: string[]): Promise<boolean> {
+    const uids = uidsOf(range);
     this.calls.push(`flagsAdd ${this.selected} ${uids.join(',')} ${flags.join(',')}`);
     return true;
   }
 
-  async messageFlagsRemove(uids: number[], flags: string[]): Promise<boolean> {
+  async messageFlagsRemove(range: string | number[], flags: string[]): Promise<boolean> {
+    const uids = uidsOf(range);
     this.calls.push(`flagsRemove ${this.selected} ${uids.join(',')} ${flags.join(',')}`);
     return true;
   }
 
   async messageMove(
-    uids: number[],
+    range: string | number[],
     destination: string,
   ): Promise<{ path: string; destination: string; uidMap: Map<number, number> }> {
+    const uids = uidsOf(range);
     this.calls.push(`move ${this.selected}->${destination} ${uids.join(',')}`);
     const from = this.boxes.get(this.selected);
     const to = this.boxes.get(destination) ?? new Set<number>();

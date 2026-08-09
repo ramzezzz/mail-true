@@ -38,8 +38,10 @@ import { ApiError, BadRequestError, UpstreamUnavailableError } from '../errors.j
 import {
   existingUids,
   groupIdsByFolder,
+  moveUids,
   requireFolder,
   requireOrCreateFolder,
+  storeFlags,
 } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { rawHeaderValue } from './header-charset.js';
@@ -468,9 +470,16 @@ export class MuteService {
          * сообщает не всегда. Непрочитанное письмо в «Заглушённых» портило
          * бы весь смысл — общий счётчик непрочитанных считает все папки.
          */
-        await client.messageFlagsAdd(present, ['\\Seen'], { uid: true });
-        await client.messageMove(present, target.path, { uid: true });
-        moved += present.length;
+        await storeFlags(client, present, ['\\Seen'], 'add');
+        /*
+         * Отказ MOVE обязан быть виден. imapflow отдаёт его возвратом
+         * `false`, и раньше число «заглушено и перенесено N» считалось
+         * строкой ниже независимо от ответа сервера. Это хуже, чем просто
+         * неверное число: письма оставались во «Входящих», но уже
+         * прочитанными — то есть пропадали из счётчика непрочитанных и из
+         * внимания человека, никуда при этом не уехав.
+         */
+        moved += await moveUids(client, present, target.path);
       } finally {
         lock.release();
       }

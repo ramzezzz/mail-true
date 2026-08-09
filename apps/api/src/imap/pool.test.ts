@@ -240,3 +240,51 @@ test('closeUser закрывает соединение пользователя
   assert.equal(created[0]?.closed, true);
   assert.equal(pool.openConnections, 0);
 });
+
+/*
+ * Закрытие дорожки не отменяет её очередь — и раньше это стоило вечного
+ * соединения.
+ *
+ * `closeUser` вынимал дорожку из карты, не глядя на задачи в очереди. Та,
+ * что стояла следующей, доходила до `acquire` уже после этого, видела
+ * `client === null` и открывала НОВОЕ соединение — в дорожку, которой в
+ * карте больше нет. Закрыть его потом было нечем: сторож простоя первой
+ * же строкой выходил (`lanes.get(email) !== lane`), повторный `closeUser`
+ * этой дорожки не находил, `closeAll` при остановке сервера — тоже.
+ * Соединение висело до собственного таймаута Dovecot, а у ящика на это
+ * время оказывалось два живых соединения вместо одного — то есть команды
+ * двух запросов переставали выстраиваться в общую очередь.
+ *
+ * Ждущая задача теперь получает отказ: закрытие означает, что сессии
+ * больше нет — человек вышел, либо ему сменили пароль, либо ящик
+ * заблокировали.
+ */
+test('задача, дождавшаяся закрытия дорожки, не открывает новое соединение', async () => {
+  const { pool, created } = makePool();
+  let releaseFirst = (): void => undefined;
+  const firstStarted = new Promise<void>((resolve) => {
+    const first = pool.withClient('test@mail.local', 'p', async () => {
+      resolve();
+      await new Promise<void>((done) => {
+        releaseFirst = done;
+      });
+      return 1;
+    });
+    void first.catch(() => undefined);
+  });
+  await firstStarted;
+
+  // Вторая задача встаёт в очередь за первой и ждёт своей ветки.
+  const second = pool.withClient('test@mail.local', 'p', async () => 2);
+  const secondSettled = second.then(
+    () => 'выполнилась',
+    (err: unknown) => (err instanceof Error ? err.message : String(err)),
+  );
+
+  await pool.closeUser('test@mail.local');
+  releaseFirst();
+
+  assert.match(await secondSettled, /Сессия закрыта/);
+  assert.equal(created.length, 1, 'после закрытия дорожки открылось лишнее соединение');
+  assert.equal(pool.openConnections, 0);
+});

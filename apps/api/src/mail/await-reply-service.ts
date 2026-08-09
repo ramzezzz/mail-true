@@ -583,17 +583,40 @@ export class AwaitReplyService {
       lock.release();
     }
 
+    /*
+     * Отказ COPY imapflow отдаёт возвратом `false`, а не исключением, — и
+     * раньше `raise` всё равно возвращала `true`. Вызывающий закрывал
+     * запись как отработанную, и напоминание «вам так и не ответили» не
+     * приходило уже никогда: письмо во «Входящие» не поднялось, а ждать
+     * его больше некому. Отказ обязан быть виден работнику, чтобы он
+     * повторил попытку в следующий обход.
+     */
+    if (copied === false) {
+      throw new UpstreamUnavailableError(
+        'Почтовый сервер не смог поднять письмо во «Входящие». Попробуем позже.',
+      );
+    }
+
     let newUid =
       typeof copied === 'object' && copied ? (copied.uidMap?.get(uid) ?? undefined) : undefined;
     const destLock = await client.getMailboxLock(inboxPath).catch(() => null);
     if (!destLock) return true;
     try {
       if (newUid === undefined) {
-        // Сервер не сказал номер копии. Ищем её по Message-ID: без пометок
-        // и без снятого «прочитано» копия была бы незаметной, а ради
-        // заметности всё и делалось.
+        /*
+         * Сервер не сказал номер копии (нет UIDPLUS). Ищем её по
+         * Message-ID: без пометок и без снятого «прочитано» копия была бы
+         * незаметной, а ради заметности всё и делалось.
+         *
+         * Берём НАИБОЛЬШИЙ номер, а не последний в ответе: письмо с этим
+         * Message-ID уже могло лежать во «Входящих» — так бывает, когда
+         * человек ставит себя в копию, — и пометки «ответа нет» вместе с
+         * закреплением уехали бы на его собственную входящую копию, а
+         * поднятая копия осталась бы незаметной. Наибольший UID — это
+         * всегда то, что положено последним, то есть наша копия.
+         */
         const found = await searchUids(client, { header: { 'message-id': row.messageId } });
-        newUid = found[found.length - 1];
+        newUid = found.length > 0 ? Math.max(...found) : undefined;
       }
       if (newUid === undefined) return true;
       await client.messageFlagsRemove([newUid], ['\\Seen'], { uid: true });

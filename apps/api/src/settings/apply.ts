@@ -18,7 +18,7 @@
  */
 import type { ImapFlow } from 'imapflow';
 import type { Folder } from '@mail-true/shared';
-import { listFolders } from '../imap/service.js';
+import { listFolders, moveUids, storeFlags } from '../imap/service.js';
 import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText } from '../mail/text.js';
 import type { FilterCondition, FilterRule } from './types.js';
@@ -310,7 +310,10 @@ export async function applyRuleToMailbox(
       if (rule.actions.flag) addFlags.push('\\Flagged');
       addFlags.push(...rule.actions.labels);
       if (addFlags.length > 0) {
-        await client.messageFlagsAdd(matchedUids, addFlags, { uid: true });
+        // storeFlags: отказ STORE imapflow возвращает значением `false`,
+        // а не бросает. Отчёт «применено к N письмам» после прогона
+        // правила по старой почте считался независимо от ответа сервера.
+        await storeFlags(client, matchedUids, addFlags, 'add');
         result.flagged += matchedUids.length;
       }
       if (deleteMode === 'purge') {
@@ -320,8 +323,9 @@ export async function applyRuleToMailbox(
         await client.messageDelete(matchedUids, { uid: true });
         result.deleted += matchedUids.length;
       } else if (targetPath) {
-        await client.messageMove(matchedUids, targetPath, { uid: true });
-        result.moved += matchedUids.length;
+        // Тот же разбор ответа, что и у переноса из списка писем: молчаливый
+        // отказ MOVE означал бы «правило применено», хотя письма остались.
+        result.moved += await moveUids(client, matchedUids, targetPath);
         if (deleteMode === 'trash') result.deleted += matchedUids.length;
       }
     } finally {

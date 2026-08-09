@@ -40,6 +40,7 @@ import {
   listFolders,
   requireFolder,
   searchUids,
+  storeFlags,
 } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { MAX_ENTITY_ID_LENGTH } from './folders.js';
@@ -185,7 +186,16 @@ export async function purgeKeyword(
        */
       const uids = await searchUids(client, { keyword });
       if (uids.length > 0) {
-        await client.messageFlagsRemove(uids, [keyword], { uid: true });
+        /*
+         * Через storeFlags, и по двум причинам сразу. Первая: отказ STORE
+         * imapflow отдаёт возвратом `false`, а не исключением — папка
+         * молча оставалась с ключевым словом на письмах, тогда как метку
+         * из справочника уже удаляли, и снять его становилось нечем.
+         * Вторая: здесь `uids` — это ВСЕ письма папки с этой меткой, и
+         * одной строкой такой список Dovecot отвергает как «Too long
+         * argument» примерно с двенадцати тысяч писем.
+         */
+        await storeFlags(client, uids, [keyword], 'remove');
         removed += uids.length;
       }
     } catch (err) {
@@ -388,10 +398,12 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
           // Считаем результат по ящику, а не по длине присланного списка
           const present = await existingUids(client, uids);
           if (present.length === 0) continue;
-          if (toAdd.length > 0) await client.messageFlagsAdd(present, toAdd, { uid: true });
-          if (toRemove.length > 0) {
-            await client.messageFlagsRemove(present, toRemove, { uid: true });
-          }
+          // Через storeFlags: сам STORE тоже может отказать, и тогда
+          // imapflow вернёт `false` вместо исключения. Раньше число
+          // «поставлено меток: N» считалось сразу после вызова, то есть
+          // отвечало о письмах, на которых метка не появилась.
+          if (toAdd.length > 0) await storeFlags(client, present, toAdd, 'add');
+          if (toRemove.length > 0) await storeFlags(client, present, toRemove, 'remove');
           updated += present.length;
         } finally {
           lock.release();

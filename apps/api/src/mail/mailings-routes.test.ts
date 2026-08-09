@@ -19,6 +19,26 @@ import { registerErrorHandling } from '../http-errors.js';
 import type { AppDeps } from '../types.js';
 import { mailingsRoutes } from './mailings-routes.js';
 
+/**
+ * Набор номеров в виде списка.
+ *
+ * Настоящий imapflow принимает и массив, и строку `1,4:6` — и наш код шлёт
+ * именно строку: длинный список номеров одной командой Dovecot отвергает
+ * («Too long argument»), поэтому он режется на порции-диапазоны. Заглушка,
+ * умевшая только массив, разбирала такую строку посимвольно.
+ */
+function uidsOf(range: string | number[]): number[] {
+  if (Array.isArray(range)) return range;
+  const out: number[] = [];
+  for (const part of range.split(',')) {
+    const [from, to] = part.split(':');
+    const start = Number(from);
+    const end = to === undefined ? start : Number(to);
+    for (let uid = start; uid <= end; uid += 1) out.push(uid);
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Подставной ящик                                                     */
 /* ------------------------------------------------------------------ */
@@ -162,7 +182,11 @@ class FakeClient {
     };
   }
 
-  async messageMove(uids: number[], target: string): Promise<{ uidMap: Map<number, number> }> {
+  async messageMove(
+    range: string | number[],
+    target: string,
+  ): Promise<{ uidMap: Map<number, number> }> {
+    const uids = uidsOf(range);
     const source = this.box(this.selected);
     const destination = this.box(target);
     const uidMap = new Map<number, number>();

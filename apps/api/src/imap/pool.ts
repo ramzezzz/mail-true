@@ -23,7 +23,7 @@
  */
 import { ImapFlow } from 'imapflow';
 import type { Logger } from 'pino';
-import { UpstreamUnavailableError } from '../errors.js';
+import { UnauthorizedError, UpstreamUnavailableError } from '../errors.js';
 import { isConnectionLost, toApiError } from './errors.js';
 import { errorInfo } from '../log.js';
 
@@ -48,6 +48,20 @@ interface Lane {
   /** Сколько задач в работе и в очереди — дорожку с задачами закрывать нельзя. */
   pending: number;
   idleTimer: NodeJS.Timeout | null;
+  /**
+   * Дорожку закрыли (выход, смена пароля, блокировка ящика).
+   *
+   * Признак нужен потому, что закрытие не отменяет очередь: задачи, уже
+   * стоявшие в ней, доходят до `acquire` уже после того, как дорожку
+   * вынули из карты. Раньше такая задача открывала НОВОЕ соединение и
+   * клала его в осиротевшую дорожку, а `scheduleIdleClose` потом выходил
+   * первой же строкой (`lanes.get(email) !== lane`) — соединение не
+   * закрывалось ни по простою, ни повторным `closeUser`, ни `closeAll`
+   * при остановке сервера. Заодно ломался главный смысл дорожек: у ящика
+   * оказывалось два живых соединения вместо одного, и очередь команд
+   * переставала быть общей.
+   */
+  closed: boolean;
 }
 
 function noop(): void {
@@ -102,7 +116,13 @@ export class ImapPool {
   private laneFor(email: string): Lane {
     const existing = this.lanes.get(email);
     if (existing) return existing;
-    const lane: Lane = { client: null, queue: Promise.resolve(), pending: 0, idleTimer: null };
+    const lane: Lane = {
+      client: null,
+      queue: Promise.resolve(),
+      pending: 0,
+      idleTimer: null,
+      closed: false,
+    };
     this.lanes.set(email, lane);
     return lane;
   }
@@ -122,6 +142,14 @@ export class ImapPool {
    * Вызывается только из хвоста очереди — второй одновременный вызов невозможен.
    */
   private async acquire(email: string, password: string, lane: Lane): Promise<ImapFlow> {
+    /*
+     * Дорожку закрыли, пока эта задача стояла в очереди. Открывать ради
+     * неё новое соединение нельзя: закрытие означает, что сессии больше
+     * нет — человек вышел, или ему сменили пароль, или ящик заблокировали.
+     */
+    if (lane.closed) {
+      throw new UnauthorizedError('Сессия закрыта. Войдите заново.');
+    }
     const existing = lane.client;
     if (existing && existing.usable) return existing;
     if (existing) this.dropClient(lane, existing);
@@ -155,8 +183,11 @@ export class ImapPool {
     // Пока в очереди есть задачи, дорожка нужна: закрывать нечего и незачем.
     if (lane.pending > 0) return;
     lane.idleTimer = setTimeout(() => {
-      if (this.lanes.get(email) !== lane || lane.pending > 0) return;
-      this.lanes.delete(email);
+      if (lane.pending > 0) return;
+      // Дорожка могла осиротеть (её вынул closeUser, пока задачи ещё шли).
+      // Из карты убираем только свою — но соединение закрываем в любом
+      // случае, иначе оно останется висеть до таймаута самого Dovecot.
+      if (this.lanes.get(email) === lane) this.lanes.delete(email);
       const client = lane.client;
       lane.client = null;
       if (client) client.logout().catch(() => client.close());
@@ -216,6 +247,7 @@ export class ImapPool {
     const lane = this.lanes.get(email);
     if (!lane) return;
     this.lanes.delete(email);
+    lane.closed = true;
     if (lane.idleTimer) clearTimeout(lane.idleTimer);
     const client = lane.client;
     lane.client = null;

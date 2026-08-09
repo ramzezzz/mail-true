@@ -12,9 +12,11 @@ import {
   existingUids,
   groupIdsByFolder,
   listMessages,
+  moveUids,
   requireFolder,
   requireOrCreateFolder,
   splitMessageId,
+  storeFlags,
 } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { parseFullMessage, parseMessageHeaders } from '../mail/parse.js';
@@ -454,9 +456,12 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
           // Считаем результат по ящику, а не по длине присланного списка
           const present = await existingUids(client, uids);
           if (present.length === 0) continue;
-          if (toAdd.length > 0) await client.messageFlagsAdd(present, toAdd, { uid: true });
-          if (toRemove.length > 0)
-            await client.messageFlagsRemove(present, toRemove, { uid: true });
+          // storeFlags, а не messageFlagsAdd напрямую: imapflow при отказе
+          // команды STORE возвращает `false`, а не бросает ошибку. Число
+          // «изменено N» считалось строкой ниже независимо от результата,
+          // то есть отвечало об успехе там, где пометки не изменились.
+          if (toAdd.length > 0) await storeFlags(client, present, toAdd, 'add');
+          if (toRemove.length > 0) await storeFlags(client, present, toRemove, 'remove');
           updated += present.length;
         } finally {
           lock.release();
@@ -486,11 +491,16 @@ export async function messageRoutes(app: FastifyInstance): Promise<void> {
         try {
           const present = await existingUids(client, uids);
           if (present.length === 0) continue;
-          const result = await client.messageMove(present, target.path, { uid: true });
-          // UIDPLUS отдаёт соответствие исходных и новых UID — это и есть
-          // настоящее число перемещённых писем
-          const mapped = result && typeof result === 'object' ? result.uidMap?.size : undefined;
-          moved += mapped ?? present.length;
+          /*
+           * moveUids проверяет ответ сервера. Раньше отказ MOVE — а он
+           * буднично приходит на переполненный ящик (`NO [OVERQUOTA]`) или
+           * на папку, удалённую из соседней вкладки (`NO [TRYCREATE]`), —
+           * возвращался значением `false`, которое не проходило проверку
+           * `typeof result === 'object'` и молча превращалось в
+           * `moved += present.length`. Ответ «перенесено 25» с кодом 200,
+           * браузер убирает строки, письма остаются на месте.
+           */
+          moved += await moveUids(client, present, target.path);
         } finally {
           lock.release();
         }

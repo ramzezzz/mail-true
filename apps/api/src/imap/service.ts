@@ -326,6 +326,91 @@ export async function searchUids(client: ImapFlow, query: SearchObject): Promise
 }
 
 /**
+ * IMAP STORE, который не выдаёт отказ за успех.
+ *
+ * Та же ловушка, что и у SEARCH выше, и ровно тот же исход: imapflow при
+ * неудаче команды STORE ошибку НЕ бросает, а возвращает `false`
+ * (node_modules/imapflow/lib/commands/store.js, `catch { … return false; }`).
+ * Отличие от APPEND, который в том же пакете заканчивается `throw err`, — и
+ * вся разница цены: маршруты массовых действий писали `updated +=
+ * present.length` сразу после вызова и отвечали «сделано N» о письмах, у
+ * которых не изменилось ничего.
+ *
+ * Дороже всего это стоило снятию метки: справочник метку терял, а ключевое
+ * слово `mt-…` оставалось на письмах навсегда — снять его больше нечем
+ * (метки уже нет), а освободившийся ключ достаётся следующей метке с
+ * созвучным именем, и она мгновенно оказывается на чужих письмах.
+ *
+ * Нарезка обязательна по той же причине, что и у поиска с вложениями:
+ * весь список номеров одной строкой Dovecot отвергает как «Too long
+ * argument» примерно с двенадцати тысяч писем — то есть ровно на тех
+ * ящиках, ради которых массовые действия и нужны.
+ */
+export async function storeFlags(
+  client: ImapFlow,
+  uids: number[],
+  flags: string[],
+  action: 'add' | 'remove',
+): Promise<void> {
+  for (const range of chunkUidSets(uids)) {
+    const ok =
+      action === 'add'
+        ? await client.messageFlagsAdd(range, flags, { uid: true })
+        : await client.messageFlagsRemove(range, flags, { uid: true });
+    if (ok === false) {
+      throw new UpstreamUnavailableError(
+        'Почтовый сервер не изменил пометки писем. Повторите попытку позже.',
+      );
+    }
+  }
+}
+
+/**
+ * IMAP MOVE с честным числом перенесённых писем.
+ *
+ * `messageMove` возвращает либо описание переноса, либо `false` — и второе
+ * маршруты принимали за успех: `moved += present.length`. Отказать MOVE
+ * может буднично: ящик у квоты (`NO [OVERQUOTA]`) или папку-получатель
+ * удалили из соседней вкладки между её созданием и переносом
+ * (`NO [TRYCREATE]`). Ответ при этом был «перенесено 25» с кодом 200,
+ * браузер убирал строки из списка, и человек уходил в полной уверенности,
+ * что письма убраны. В журнале не оставалось ничего: свой журнал imapflow
+ * у нас выключен.
+ *
+ * Возвращаем число писем, о которых сервер подтвердил перенос: `uidMap`
+ * есть там, где поддержан UIDPLUS, иначе считаем по размеру порции —
+ * команда выполнена, и это уже не догадка, а ответ сервера.
+ */
+export async function moveUids(client: ImapFlow, uids: number[], path: string): Promise<number> {
+  let moved = 0;
+  for (const range of chunkUidSets(uids)) {
+    const result = await client.messageMove(range, path, { uid: true });
+    if (result === false) {
+      throw new UpstreamUnavailableError(
+        'Почтовый сервер не перенёс письма. Возможно, кончилось место в ящике. ' +
+          'Повторите попытку позже.',
+      );
+    }
+    const mapped = typeof result === 'object' ? result.uidMap?.size : undefined;
+    moved += mapped ?? countUids(range);
+  }
+  return moved;
+}
+
+/** Сколько писем в наборе вида `1,4:6,9` — для честного счёта перенесённых. */
+export function countUids(range: string): number {
+  let total = 0;
+  for (const part of range.split(',')) {
+    const [from, to] = part.split(':');
+    const start = Number(from);
+    const end = to === undefined ? start : Number(to);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    total += Math.abs(end - start) + 1;
+  }
+  return total;
+}
+
+/**
  * Предел длины перечня номеров в ОДНОЙ команде IMAP.
  *
  * Dovecot отвергает слишком длинную строку аргумента («Too long argument»),

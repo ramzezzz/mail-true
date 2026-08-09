@@ -34,6 +34,11 @@ function expandSet(set: string): number[] {
   return out;
 }
 
+/** Набор номеров в виде списка: строку `1,4:6` разворачиваем в числа. */
+function uidsOf(range: string | number[]): number[] {
+  return typeof range === 'string' ? expandSet(range) : range;
+}
+
 /**
  * Подставной IMAP-клиент с настоящими ключевыми словами писем.
  * Ключ хранилища — `<путь папки>:<uid>`, значение — набор слов письма.
@@ -89,17 +94,36 @@ class FakeClient {
     return [...present];
   }
 
-  async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
-    for (const uid of uids) for (const flag of flags) this.flagsOf(this.selected, uid).add(flag);
+  /*
+   * Номера приходят набором вида `1,4:6` — так их шлёт и настоящий
+   * imapflow, и наш storeFlags (он режет длинный список на команды,
+   * иначе Dovecot отвергает слишком длинный аргумент). Заглушка,
+   * принимавшая только массив чисел, разбирала строку посимвольно.
+   */
+  async messageFlagsAdd(range: string | number[], flags: string[]): Promise<boolean> {
+    for (const uid of uidsOf(range)) {
+      for (const flag of flags) this.flagsOf(this.selected, uid).add(flag);
+    }
     return true;
   }
 
   /** Папка, в которой снятие слова «не удаётся» — как при обрыве связи. */
   failRemoveIn: string | null = null;
+  /**
+   * Папка, где сервер отвечает на STORE отказом.
+   *
+   * Отдельно от `failRemoveIn`, потому что ведёт себя иначе: imapflow
+   * такой отказ НЕ бросает, а возвращает `false` (lib/commands/store.js,
+   * `catch { … return false; }`). Именно этот случай и был пропущен.
+   */
+  silentFailRemoveIn: string | null = null;
 
-  async messageFlagsRemove(uids: number[], flags: string[]): Promise<boolean> {
+  async messageFlagsRemove(range: string | number[], flags: string[]): Promise<boolean> {
     if (this.failRemoveIn === this.selected) throw new Error('связь оборвалась');
-    for (const uid of uids) for (const flag of flags) this.flagsOf(this.selected, uid).delete(flag);
+    if (this.silentFailRemoveIn === this.selected) return false;
+    for (const uid of uidsOf(range)) {
+      for (const flag of flags) this.flagsOf(this.selected, uid).delete(flag);
+    }
     return true;
   }
 }
@@ -448,6 +472,43 @@ test('удалять и править можно только свои метк
       });
       assert.equal(patch.statusCode, 404, `${key}: ${patch.body}`);
     }
+  } finally {
+    await app.close();
+  }
+});
+
+/**
+ * То же самое, но отказ приходит МОЛЧА.
+ *
+ * imapflow на неудачную команду STORE исключение не бросает: он пишет её
+ * себе в журнал (а он у нас выключен) и возвращает `false`. Прежний код
+ * результат не читал вовсе и считал «снято» по длине списка найденных
+ * писем. Итог хуже, чем при обрыве связи: ответ 200 и «снято 2», метка
+ * стёрта из справочника физически (purge освобождает ключ), а ключевое
+ * слово осталось на письмах — без имени, без способа снять и с риском
+ * достаться следующей метке с созвучным названием.
+ */
+test('молчаливый отказ STORE не выдаётся за снятую метку', async () => {
+  const { app, client } = await buildHarness();
+  try {
+    const key = await createLabel(app, 'Оплатить');
+    await app.inject({
+      method: 'POST',
+      url: '/api/messages/labels',
+      payload: { ids: ['inbox:1', 'archive:10'], add: [key] },
+    });
+    client.silentFailRemoveIn = 'Archive';
+
+    const res = await app.inject({ method: 'DELETE', url: `/api/labels/${key}?purge=1` });
+    assert.equal(res.statusCode, 503, res.body);
+
+    const list = await app.inject({ method: 'GET', url: '/api/labels' });
+    assert.deepEqual(
+      list.json().items.map((item: { key: string }) => item.key),
+      [key],
+      'метка исчезла из справочника, хотя слово осталось на письмах',
+    );
+    assert.ok(client.flagsOf('Archive', 10).has(key), 'слово должно было остаться на письме');
   } finally {
     await app.close();
   }
