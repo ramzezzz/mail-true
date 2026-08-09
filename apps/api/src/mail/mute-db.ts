@@ -84,6 +84,12 @@ export interface MuteStore {
   listMuted(accountEmail: string): Promise<MutedRow[]>;
   /** Снимает заглушку. Возвращает false, если такой записи не было. */
   lift(accountEmail: string, threadKey: string): Promise<boolean>;
+  /**
+   * Возвращает снятую заглушку обратно — для отката, когда файл правил
+   * записать не удалось. Без него переписка исчезала из подборки, а
+   * правило на диске оставалось, и почта уходила мимо «Входящих».
+   */
+  restore(accountEmail: string, threadKey: string): Promise<boolean>;
 }
 
 export interface MuteDbOptions {
@@ -167,6 +173,27 @@ export class MuteDb implements MuteStore {
       `UPDATE muted_threads
           SET state = 'lifted', lifted_at = now(), updated_at = now()
         WHERE lower(account_email) = lower($1) AND thread_key = $2 AND state = 'muted'
+       RETURNING id`,
+      [accountEmail, threadKey],
+    );
+    return rows.length > 0;
+  }
+
+  /**
+   * Возвращает снятую заглушку обратно.
+   *
+   * Нужна ровно для отката: снятие сперва правит базу, потом переписывает
+   * файл правил, и если файл записать не удалось, база обязана вернуться
+   * к прежнему состоянию. Иначе переписка пропадает из подборки
+   * «Заглушённые» (там только state = 'muted'), а правило на диске
+   * остаётся — и почта продолжает уходить мимо «Входящих», причём
+   * починить это из интерфейса уже нечем: ключ переписки взять неоткуда.
+   */
+  async restore(accountEmail: string, threadKey: string): Promise<boolean> {
+    const rows = await this.#query<{ id: string }>(
+      `UPDATE muted_threads
+          SET state = 'muted', lifted_at = NULL, updated_at = now()
+        WHERE lower(account_email) = lower($1) AND thread_key = $2 AND state = 'lifted'
        RETURNING id`,
       [accountEmail, threadKey],
     );

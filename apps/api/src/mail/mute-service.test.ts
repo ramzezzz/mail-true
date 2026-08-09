@@ -68,6 +68,13 @@ class FakeStore implements MuteStore {
     row.state = 'lifted';
     return Promise.resolve(true);
   }
+
+  restore(_email: string, threadKey: string): Promise<boolean> {
+    const row = this.rows.find((r) => r.threadKey === threadKey && r.state === 'lifted');
+    if (!row) return Promise.resolve(false);
+    row.state = 'muted';
+    return Promise.resolve(true);
+  }
 }
 
 /** Хранилище включаемых файлов: помнит последнюю запись и умеет ломаться. */
@@ -341,4 +348,78 @@ test('без доступа к хранилищу правил возможно�
 test('идентификаторы всех переписок сводятся в один список без повторов', () => {
   const rows = [{ messageIds: ['a@x', 'b@x'] }, { messageIds: ['B@X', 'c@x'] }] as MutedRow[];
   assert.deepEqual(collectIds(rows), ['a@x', 'b@x', 'c@x']);
+});
+
+test('снятие заглушки откатывается, если файл правил не записался', async () => {
+  /*
+   * Порядок действий: сперва база, потом файл правил. Отказ на втором шаге
+   * оставлял состояние, из которого нет выхода:
+   *
+   *   * в базе переписка расглушена — значит ПРОПАЛА из подборки
+   *     «Заглушённые» (там только state = 'muted');
+   *   * на диске лежит прежний файл со всеми правилами, включая снятое.
+   *
+   * Дальше письма этой переписки Sieve продолжает уводить в «Заглушённые»
+   * и помечать прочитанными — во «Входящие» они не приходят, счётчик не
+   * растёт, человек об этом не узнаёт ничем.
+   *
+   * Починить было нельзя даже намеренно: повтор отвечал 200 и «lifted: 0»
+   * (запись уже 'lifted'), а ключ переписки взять неоткуда — из подборки
+   * она исчезла.
+   */
+  const includes = new FakeIncludes();
+  const { service, store } = makeService(includes);
+  const box = inboxWith();
+  box.add('INBOX', {
+    uid: 3,
+    subject: 'Другой разговор',
+    messageId: '<other@y>',
+    references: '',
+    flags: new Set(),
+  });
+
+  // Две заглушки: снимаем одну, значит файл будет переписываться (write),
+  // а не удаляться — иначе отказ негде было бы воспроизвести.
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:1']);
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:3']);
+  const before = (await store.listMuted()).map((r) => r.threadKey).sort();
+  assert.equal(before.length, 2);
+
+  includes.broken = true;
+  await assert.rejects(
+    () => service.unmute('ivan@mail.local', ['root@x']),
+    /заглушка НЕ снята/,
+    'отказ обязан дойти до человека: иначе он уверен, что переписка расглушена',
+  );
+
+  const after = (await store.listMuted()).map((r) => r.threadKey).sort();
+  assert.deepEqual(
+    after,
+    before,
+    'запись обязана вернуться в подборку — иначе снять заглушку станет нечем',
+  );
+});
+
+test('повторное снятие после отката работает как обычно', async () => {
+  const includes = new FakeIncludes();
+  const { service, store } = makeService(includes);
+  const box = inboxWith();
+  box.add('INBOX', {
+    uid: 3,
+    subject: 'Другой разговор',
+    messageId: '<other@y>',
+    references: '',
+    flags: new Set(),
+  });
+
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:1']);
+  await service.mute(box.client, 'ivan@mail.local', ['inbox:3']);
+
+  includes.broken = true;
+  await assert.rejects(() => service.unmute('ivan@mail.local', ['root@x']));
+
+  includes.broken = false;
+  const { lifted } = await service.unmute('ivan@mail.local', ['root@x']);
+  assert.equal(lifted, 1, 'после отката ключ снова живой, и снятие проходит');
+  assert.equal((await store.listMuted()).length, 1);
 });

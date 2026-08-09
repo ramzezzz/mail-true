@@ -124,6 +124,14 @@ class FakeMailbox {
   ]);
   #selected = 'INBOX';
   #nextUid = 100;
+  /**
+   * Папки, у которых ПОИСК отказывает.
+   *
+   * Так ведёт себя Dovecot с повреждённым индексом: «Searching mailbox
+   * INBOX failed», при этом остальные папки ищутся нормально. imapflow
+   * возвращает в этом случае мёртвый false — его и подделываем.
+   */
+  readonly searchBroken = new Set<string>();
 
   add(path: string, msg: FakeMessage): void {
     const box = this.boxes.get(path) ?? [];
@@ -159,6 +167,9 @@ class FakeMailbox {
         return { path: self.#selected, uidValidity: 1n, exists: 0 };
       },
       search: (query: Record<string, unknown>) => {
+        if (self.searchBroken.has(self.#selected)) {
+          return Promise.resolve(false as unknown as number[]);
+        }
         const box = self.boxes.get(self.#selected) ?? [];
         return Promise.resolve(box.filter((m) => matches(m, query)).map((m) => m.uid));
       },
@@ -405,4 +416,49 @@ test('без служебного входа работник не запуск�
   // держал бы будильник, который всё равно ничего не сможет сделать.
   service.start(10);
   service.stop();
+});
+
+test('отказ поиска не выдаётся за «ответа нет»', async () => {
+  /*
+   * Повреждённый индекс Dovecot отказывает ПО ОДНОЙ папке: «Searching
+   * mailbox INBOX failed», а «Отправленные» ищутся нормально. imapflow
+   * возвращает в этом случае мёртвый false — ради него и написан
+   * searchUids, который превращает его в ошибку.
+   *
+   * Эта ошибка тут же гасилась общим catch и читалась как «в этой папке
+   * ответа нет». Дальше человеку клали во «Входящие» закреплённую копию
+   * его же письма с пометкой «вам не ответили» — при том что ответ лежал
+   * в тех же «Входящих», — и запись закрывалась навсегда.
+   *
+   * Ошибаться проверка обязана в сторону «ответ был»: напомнить зря —
+   * значит сказать неправду, а механизму, которому не верят, лучше не
+   * существовать вовсе.
+   */
+  const box = mailboxWithSentLetter();
+  box.add('INBOX', {
+    uid: 11,
+    subject: 'Re: Согласуем смету',
+    from: 'kolya@example.com',
+    messageId: '<reply-1@example.com>',
+    inReplyTo: '<ask-1@mail.local>',
+    references: '<ask-1@mail.local>',
+    date: new Date('2026-08-06T10:00:00Z'),
+    flags: new Set(),
+  });
+  box.searchBroken.add('INBOX');
+  const { service, store } = makeService(() => Promise.resolve(box.client));
+
+  const reminded = await waitFor(box, store, service);
+
+  assert.equal(reminded, 0, 'напоминания быть не должно: мы не знаем, был ли ответ');
+  assert.equal(
+    store.rows[0]?.state,
+    'waiting',
+    'запись обязана дожить до следующего прохода, а не закрыться навсегда',
+  );
+  assert.equal(
+    box.boxes.get('INBOX')?.length,
+    1,
+    'копии «вам не ответили» быть не должно — ответ лежит в этой же папке',
+  );
 });

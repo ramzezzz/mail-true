@@ -261,12 +261,50 @@ export class MuteService {
   /** Снимает заглушку. Уже пришедшее остаётся в «Заглушённых». */
   async unmute(accountEmail: string, keys: string[]): Promise<{ lifted: number }> {
     const store = this.#requireStore();
-    let lifted = 0;
+    const lifted: string[] = [];
     for (const key of keys) {
-      if (await store.lift(accountEmail, key)) lifted += 1;
+      if (await store.lift(accountEmail, key)) lifted.push(key);
     }
-    if (lifted > 0) await this.refreshScript(accountEmail);
-    return { lifted };
+    if (lifted.length === 0) return { lifted: 0 };
+
+    try {
+      await this.refreshScript(accountEmail);
+    } catch (err) {
+      /*
+       * ОТКАТ — такой же, как у заглушения выше, и здесь он важнее.
+       *
+       * Порядок действий один: сперва база, потом файл правил. Если файл
+       * не записался (sievec не собрал, docker exec вернул не ноль,
+       * транспорт Sieve выключен), у заглушения записи снимались обратно —
+       * а у снятия не возвращались, и получалось состояние, из которого
+       * нет выхода:
+       *
+       *   * в базе переписка расглушена, значит ПРОПАЛА из подборки
+       *     «Заглушённые» — там только state = 'muted';
+       *   * на диске у Dovecot лежит прежний файл со всеми правилами,
+       *     включая только что снятое.
+       *
+       * Дальше каждое новое письмо этой переписки Sieve кладёт в
+       * «Заглушённые», помечает прочитанным и обрывает остальные правила.
+       * Человек об этом не узнаёт ничем: во «Входящие» не приходит,
+       * счётчик не растёт.
+       *
+       * Починить было нельзя даже намеренно. Повтор снятия возвращал 200
+       * и «lifted: 0» — запись уже 'lifted', второй раз lift() отвечает
+       * false, а пересборка файла при нуле не запускается. Ключ переписки
+       * при этом взять неоткуда: из подборки она исчезла.
+       *
+       * Вранье здесь дороже, чем у заглушения: там письма шли во
+       * «Входящие» вопреки обещанию — это видно; здесь они перестают
+       * приходить вопреки обещанию — а этого не видно.
+       */
+      for (const key of lifted) await store.restore(accountEmail, key).catch(() => false);
+      throw new UpstreamUnavailableError(
+        'Не удалось переписать правило доставки — заглушка НЕ снята: ' +
+          (err instanceof Error ? err.message : String(err)),
+      );
+    }
+    return { lifted: lifted.length };
   }
 
   /* ---------------------------------------------------------------- */
