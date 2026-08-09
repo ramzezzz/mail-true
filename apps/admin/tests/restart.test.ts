@@ -23,12 +23,14 @@ import {
   applyHint,
   applyWarning,
   DEFAULT_WATCH_LIMITS,
+  runRestarts,
   startWatch,
   watching,
   watchStep,
+  type RestartRunIo,
   type WatchState,
 } from '../src/lib/restart';
-import type { RestartJobState, RestartTarget } from '../src/api/types';
+import type { RestartJobState, RestartTarget, SettingApply } from '../src/api/types';
 
 function target(patch: Partial<RestartTarget> = {}): RestartTarget {
   return {
@@ -228,5 +230,140 @@ describe('ожидание возвращения сервера', () => {
       null,
     );
     expect(state.status).toBe('ok');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Перезапуск списка служб после сохранения настроек                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * «ПЕРЕЗАПУЩЕНЫ СЛУЖБЫ: POSTFIX, DOVECOT» — ЗЕЛЁНЫМ, ПРИ ЛЕЖАЩЕМ СЕРВЕРЕ.
+ *
+ * Заявка на перезапуск возвращается 202 СРАЗУ: маршрут отвечает и уходит
+ * работать в фоне. Раздел настроек считал возврат запроса успехом, и из
+ * этого следовало сразу три беды:
+ *
+ *   1. не поднявшийся контейнер (самый частый исход после правки
+ *      настроек) показывался зелёным;
+ *   2. службы перезапускались ОДНОВРЕМЕННО, хотя комментарий рядом
+ *      обещал «по одной» — Postfix спрашивает пароли у Dovecot, и
+ *      одновременная остановка обоих даёт отказ аутентификации;
+ *   3. список настроек перечитывался через доли секунды, и над зелёной
+ *      плашкой оставалась красная «перезапуск нужен прямо сейчас».
+ */
+
+/** Стенд: помнит порядок событий и отвечает заранее заданными итогами. */
+function runner(outcomes: Record<string, RestartJobState[]>): {
+  io: RestartRunIo;
+  log: string[];
+} {
+  const log: string[] = [];
+  const queues = new Map(Object.entries(outcomes).map(([k, v]) => [k, [...v]]));
+  let current = '';
+  return {
+    log,
+    io: {
+      request: async (targetId) => {
+        log.push(`заявка:${targetId}`);
+        current = targetId;
+        return { id: targetId, self: false, bootId: null };
+      },
+      fetchJob: async (id) => {
+        log.push(`опрос:${id}`);
+        const queue = queues.get(id) ?? [];
+        return queue.length > 1
+          ? (queue.shift() as RestartJobState)
+          : (queue[0] as RestartJobState);
+      },
+      // Время не идёт: проверка не должна занимать секунды.
+      wait: async () => {
+        void current;
+      },
+    },
+  };
+}
+
+const STEPS: SettingApply[] = [
+  { target: 'postfix', action: 'restart' },
+  { target: 'dovecot', action: 'restart' },
+];
+
+describe('перезапуск списка служб', () => {
+  it('вторую службу не трогает, пока не поднялась первая', async () => {
+    const { io, log } = runner({
+      postfix: [job({ status: 'pending' }), job({ status: 'ok', detail: 'Служба поднялась' })],
+      dovecot: [job({ status: 'ok', detail: 'Служба поднялась' })],
+    });
+    const result = await runRestarts(STEPS, io, () => target({ id: 'postfix' }));
+
+    expect(result.failed).toBeNull();
+    expect(result.done).toEqual(['postfix', 'dovecot']);
+    // Заявка на dovecot — только после того, как postfix отчитался.
+    expect(log).toEqual([
+      'заявка:postfix',
+      'опрос:postfix',
+      'опрос:postfix',
+      'заявка:dovecot',
+      'опрос:dovecot',
+    ]);
+  });
+
+  it('не поднявшуюся службу не записывает в перезапущенные', async () => {
+    const { io, log } = runner({
+      postfix: [job({ status: 'failed', detail: 'Контейнер не стартовал: bad config' })],
+      dovecot: [job({ status: 'ok' })],
+    });
+    const result = await runRestarts(STEPS, io, () => target({ id: 'postfix' }));
+
+    expect(result.done, 'лежащая служба посчитана перезапущенной').toEqual([]);
+    expect(result.failed?.target).toBe('postfix');
+    expect(result.failed?.detail).toContain('bad config');
+    // И вторую службу не трогаем: первая лежит, чинить надо её.
+    expect(log).not.toContain('заявка:dovecot');
+  });
+
+  it('обрыв связи во время перезапуска не считается поломкой', async () => {
+    let asked = 0;
+    const io: RestartRunIo = {
+      request: async () => ({ id: '1', self: true, bootId: 'старый' }),
+      fetchJob: async () => {
+        asked += 1;
+        // Первые два опроса — сервер молчит (он перезапускается),
+        // третий — отвечает уже новый процесс.
+        if (asked < 3) throw new Error('fetch failed');
+        return job({ bootId: 'новый' });
+      },
+      wait: async () => undefined,
+      isServerRefusal: () => false,
+    };
+    const result = await runRestarts([STEPS[0] as SettingApply], io, () => target());
+    expect(result.failed).toBeNull();
+    expect(result.done).toEqual(['postfix']);
+  });
+
+  it('осмысленный отказ сервера — это отказ, а не молчание', async () => {
+    const io: RestartRunIo = {
+      request: async () => ({ id: '1', self: false, bootId: null }),
+      fetchJob: () => Promise.reject(new Error('Заявка не найдена')),
+      wait: async () => undefined,
+      isServerRefusal: () => true,
+    };
+    const result = await runRestarts([STEPS[0] as SettingApply], io, () => target());
+    expect(result.done).toEqual([]);
+    expect(result.failed?.message).toBe('Не удалось узнать результат');
+  });
+
+  it('служба, которая молчит слишком долго, не висит вечно', async () => {
+    const io: RestartRunIo = {
+      request: async () => ({ id: '1', self: false, bootId: null }),
+      fetchJob: async () => job({ status: 'pending' }),
+      wait: async () => undefined,
+    };
+    const result = await runRestarts([STEPS[0] as SettingApply], io, () => target(), {
+      maxAttempts: 5,
+    });
+    expect(result.done).toEqual([]);
+    expect(result.failed?.target).toBe('postfix');
   });
 });

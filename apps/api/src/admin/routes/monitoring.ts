@@ -28,6 +28,7 @@ import { loadAccountsConfig } from '../../accounts/config.js';
 import { ApiError } from '../../errors.js';
 import { audit, requireAdmin } from '../guard.js';
 import { runRoundtrip } from '../mail-roundtrip.js';
+import { diskUsedPercent } from '../metrics-disk.js';
 import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
 import { RspamdClient } from '../rspamd.js';
 import { checkAntispam, checkResolver } from '../services.js';
@@ -284,8 +285,11 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
       });
     } else {
       for (const volume of snapshot.volumes) {
-        const usedPercent =
-          volume.totalBytes > 0 ? (volume.usedBytes / volume.totalBytes) * 100 : 0;
+        // Формула общая с графиком истории на дашборде (см. diskUsedPercent):
+        // раньше их было две, и один и тот же диск показывал здесь 86 %, а
+        // там 91 % — разницу в резерв root, из-за которой один раздел
+        // панели предупреждал, а другой уже отказывал.
+        const usedPercent = diskUsedPercent(volume.totalBytes, volume.freeBytes) ?? 0;
         const state = gradeDisk(usedPercent);
         checks.push({
           id: `disk:${volume.path}`,

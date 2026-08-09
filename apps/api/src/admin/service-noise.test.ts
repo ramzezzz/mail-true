@@ -12,6 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isServiceNoise } from './mail-log.js';
+import { querySchema, tailSchema } from './routes/logs.js';
 
 const NOISE = [
   // Dovecot: проверка портов — соединение без единой попытки входа.
@@ -55,4 +56,35 @@ test('настоящие события не прячутся', () => {
 test('пустая строка служебной не считается', () => {
   assert.equal(isServiceNoise(''), false);
   assert.equal(isServiceNoise('   '), false);
+});
+
+/*
+ * ФЛАЖОК «ПОКАЗЫВАТЬ СЛУЖЕБНЫЕ СТРОКИ» НЕ РАБОТАЛ ВООБЩЕ.
+ *
+ * В строке запроса всё — строки, и признак приходил как «false». В схеме
+ * стояло `z.coerce.boolean()`, то есть `Boolean('false')`, а непустая
+ * строка — истина. Отсев в log-files.ts не срабатывал ни разу: раздел
+ * «Журналы» был завален отчётами проверок живости при любом положении
+ * флажка, а весь разбор выше — про то, какие строки этот отсев прячет, —
+ * держался ни на чём.
+ *
+ * Панель шлёт признак ВСЕГДА (query() в api/client.ts делает String(false)),
+ * поэтому «просто не слать false» дефект не лечит.
+ */
+test('«false» из строки запроса означает НЕТ, а не «непустая строка»', () => {
+  assert.equal(querySchema.parse({ serviceNoise: 'false' }).serviceNoise, false);
+  assert.equal(tailSchema.parse({ serviceNoise: 'false', after: '0' }).serviceNoise, false);
+  // И прочие написания «нет», которые может прислать кто угодно.
+  assert.equal(querySchema.parse({ serviceNoise: '0' }).serviceNoise, false);
+  assert.equal(querySchema.parse({ serviceNoise: '' }).serviceNoise, false);
+});
+
+test('«true» и «1» по-прежнему означают ДА', () => {
+  assert.equal(querySchema.parse({ serviceNoise: 'true' }).serviceNoise, true);
+  assert.equal(querySchema.parse({ serviceNoise: '1' }).serviceNoise, true);
+  assert.equal(tailSchema.parse({ serviceNoise: 'true', after: '0' }).serviceNoise, true);
+});
+
+test('без признака служебные строки спрятаны', () => {
+  assert.equal(querySchema.parse({}).serviceNoise, false);
 });

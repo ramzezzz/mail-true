@@ -41,6 +41,7 @@
  * каждом автообновлении.
  */
 import type { AdminDb } from './db.js';
+import { diskUsedPercent } from './metrics-disk.js';
 
 /** Одна строка снимка — то, что кладёт сборщик. */
 export interface MetricSampleInput {
@@ -291,10 +292,11 @@ export class MetricsStore {
         memUsedPercent:
           memTotal && memUsed !== null && memTotal > 0 ? round2((memUsed / memTotal) * 100) : null,
         memApiBytes: roundInt(num(row.mem_api)),
-        diskUsedPercent:
-          diskTotal && diskFree !== null && diskTotal > 0
-            ? round2(((diskTotal - diskFree) / diskTotal) * 100)
-            : null,
+        // Формула общая с разделом «Наблюдение» (см. diskUsedPercent в
+        // metrics-disk.ts): считать занятость двумя способами значило
+        // показывать один и тот же диск на 5 % полнее в одном месте, чем
+        // в другом, — ровно на резерв root.
+        diskUsedPercent: round2(diskUsedPercent(diskTotal, diskFree)),
         vmailBytes: roundInt(num(row.vmail)),
         dbBytes: roundInt(num(row.db_bytes)),
         queueTotal: roundInt(num(row.queue_total)),
@@ -666,7 +668,7 @@ export class MetricsStore {
     sort: UserTrafficSort,
     limit: number,
     offset = 0,
-  ): Promise<{ rows: UserTrafficRow[]; total: number }> {
+  ): Promise<{ rows: UserTrafficRow[]; total: number; silent: number }> {
     const order = SORT_SQL[sort];
     const rows = await this.db.query<{
       id: number;
@@ -678,6 +680,7 @@ export class MetricsStore {
       recv_messages: string;
       recv_bytes: string;
       total_count: string;
+      silent_count: string;
     }>(
       `WITH sent AS (
          SELECT addr, count(*)::bigint AS messages, coalesce(sum(size_bytes), 0)::bigint AS bytes
@@ -711,7 +714,16 @@ export class MetricsStore {
        SELECT id, email, active, quota_bytes::text,
               sent_messages::text, sent_bytes::text,
               recv_messages::text, recv_bytes::text,
-              count(*) OVER ()::text AS total_count
+              count(*) OVER ()::text AS total_count,
+              -- Молчавшие считаются ЗДЕСЬ, по всем ящикам, а не по
+              -- отданной странице. Панель считала их сама по 25 строкам,
+              -- отсортированным по трафику убыванию: молчащие стоят в
+              -- хвосте и в первую страницу не попадают никогда, поэтому
+              -- подпись под таблицей на сервере со 143 ящиками честно
+              -- сообщала «Молчали за период: 0».
+              count(*) FILTER (
+                WHERE sent_messages = 0 AND recv_messages = 0
+              ) OVER ()::text AS silent_count
          FROM joined
         ORDER BY ${order} DESC, email ASC
         LIMIT $3 OFFSET $4`,
@@ -729,6 +741,7 @@ export class MetricsStore {
         receivedBytes: Number(r.recv_bytes),
       })),
       total: Number(rows[0]?.total_count ?? 0),
+      silent: Number(rows[0]?.silent_count ?? 0),
     };
   }
 

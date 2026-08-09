@@ -7,7 +7,14 @@
  * всё, что для этого нужно решить до отрисовки, — чтобы это можно было
  * проверить тестом, а не глазами.
  */
-import type { DnsCheck, DnsGroup, DnsReport, DnsResolverInfo, DnsVerdict } from '../api/types';
+import type {
+  DnsCheck,
+  DnsCheckOne,
+  DnsGroup,
+  DnsReport,
+  DnsResolverInfo,
+  DnsVerdict,
+} from '../api/types';
 
 export type BadgeTone = 'ok' | 'warn' | 'fail' | 'muted';
 
@@ -232,4 +239,65 @@ export function buildZoneText(report: DnsReport): string {
     lines.push(`${check.recordName}.\t3600\tIN\t${check.recordType}\t${check.expected}`);
   }
   return lines.join('\n');
+}
+
+/* ------------------------------------------------------------------ */
+/* Куда класть пришедший ответ                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Открытый диалог: домен и последний известный по нему отчёт.
+ *
+ * Домен здесь типом-параметром, а не Domain: проверке нужен только номер,
+ * а тащить в неё всю карточку домена незачем.
+ */
+export interface OpenedDns<D extends { id: number }> {
+  domain: D;
+  report: DnsReport | null;
+}
+
+/*
+ * ОТВЕТ ПО ОДНОМУ ДОМЕНУ ПОКАЗЫВАЛСЯ В ДИАЛОГЕ ДРУГОГО.
+ *
+ * Проверка DNS ходит к внешним резольверам и занимает секунды. За это
+ * время диалог успевают закрыть и открыть на соседнем домене — а закрытие
+ * запрос не отменяет (и отменить его нечем: ответ всё равно придёт).
+ * Обработчики же вклеивали пришедшее в ТЕКУЩИЙ диалог, не глядя, для
+ * какого домена его спрашивали.
+ *
+ * Итог хуже, чем «показали лишнее»: у записей spf/mx/dmarc одинаковые
+ * опознаватели у всех доменов, поэтому точечная перепроверка подменяла
+ * строку чужого отчёта своей. Администратор видел «SPF настроен верно» в
+ * домене, где SPF нет вовсе, и уходил чинить другое.
+ *
+ * Правило одно и простое: пришедшее принимается, только если диалог до
+ * сих пор открыт и открыт на ТОМ ЖЕ домене.
+ */
+
+/** Полный отчёт — только в диалог того домена, для которого его спрашивали. */
+export function acceptReport<D extends { id: number }>(
+  prev: OpenedDns<D> | null,
+  domainId: number,
+  report: DnsReport,
+): OpenedDns<D> | null {
+  if (prev === null || prev.domain.id !== domainId) return prev;
+  return { domain: prev.domain, report };
+}
+
+/** Одна перепроверенная запись — туда же и по тому же правилу. */
+export function acceptCheck<D extends { id: number }>(
+  prev: OpenedDns<D> | null,
+  domainId: number,
+  data: DnsCheckOne,
+): OpenedDns<D> | null {
+  if (prev === null || prev.report === null || prev.domain.id !== domainId) return prev;
+  return {
+    domain: prev.domain,
+    report: {
+      ...prev.report,
+      overall: data.overall,
+      resolver: data.resolver,
+      checks: prev.report.checks.map((c) => (c.id === data.check.id ? data.check : c)),
+    },
+  };
 }

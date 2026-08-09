@@ -184,6 +184,37 @@ export function UserSettingsPage() {
     },
   });
 
+  /*
+   * КАЖДАЯ КНОПКА СОХРАНЯЕТ ТОЛЬКО СВОЙ БЛОК.
+   *
+   * Обе кнопки отправляли `draft` целиком — весь общий блок: имя
+   * отправителя, подписи и автоответчик разом. На ЧУЖОМ ящике это
+   * означало вот что: администратор начал править подпись, передумал,
+   * ничего не сохранял, прокрутил ниже и выключил автоответчик — и
+   * недописанная подпись уехала в чужой ящик вместе с ним. Заодно
+   * попала в журнал аудита, где выглядит как осознанная правка чужой
+   * подписи.
+   *
+   * Отменить это нечем: прежний текст подписи остался только в журнале.
+   * Поэтому на сервер уходят поля НАЖАТОГО блока, а остальные берутся
+   * из того, что в последний раз пришло с сервера, — то есть из того,
+   * что там и лежит.
+   */
+  const saveSection = (section: 'signatures' | 'autoReply'): void => {
+    if (!draft) return;
+    const base = serverGeneral.current ?? draft;
+    const body: UserGeneralSettings =
+      section === 'signatures'
+        ? {
+            ...base,
+            senderName: draft.senderName,
+            signatures: draft.signatures,
+            defaultSignatureId: draft.defaultSignatureId,
+          }
+        : { ...base, autoReply: draft.autoReply };
+    saveGeneral.mutate(body);
+  };
+
   const saveRule = useMutation({
     mutationFn: (rule: UserFilterRule) =>
       rule.id === ''
@@ -366,8 +397,11 @@ export function UserSettingsPage() {
                   Добавить подпись
                 </Button>
                 <ToolbarSpacer />
-                <Button size="s" disabled={busy} onClick={() => saveGeneral.mutate(draft)}>
-                  {saveGeneral.isPending ? 'Сохраняем…' : 'Сохранить настройки'}
+                {/* Уходят имя отправителя и подписи — и ничего больше:
+                    несохранённый автоответчик соседнего блока не должен
+                    уезжать в чужой ящик вместе с ними. */}
+                <Button size="s" disabled={busy} onClick={() => saveSection('signatures')}>
+                  {saveGeneral.isPending ? 'Сохраняем…' : 'Сохранить имя и подписи'}
                 </Button>
               </Toolbar>
             )}
@@ -434,7 +468,10 @@ export function UserSettingsPage() {
             {editable && (
               <Toolbar>
                 <ToolbarSpacer />
-                <Button size="s" disabled={busy} onClick={() => saveGeneral.mutate(draft)}>
+                {/* Уходит только автоответчик: недописанная подпись из
+                    блока выше остаётся черновиком, а не правкой чужого
+                    ящика с записью в журнале аудита. */}
+                <Button size="s" disabled={busy} onClick={() => saveSection('autoReply')}>
                   Сохранить автоответчик
                 </Button>
               </Toolbar>

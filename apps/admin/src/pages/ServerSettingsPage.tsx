@@ -56,7 +56,7 @@ import { useSession } from '../app/session';
 import { Badge, ErrorNotice, Field, Notice, Panel, Tile, Tiles, Toolbar } from '../components/ui';
 import { formatDateTime, plural, pluralize } from '../lib/format';
 import { ApplyButtons, useRestartState } from '../components/ServiceRestart';
-import { appliesSummary } from '../lib/restart';
+import { appliesSummary, runRestarts as runRestartsIo } from '../lib/restart';
 import {
   FILTER_LABELS,
   filterSections,
@@ -223,32 +223,54 @@ export function ServerSettingsPage() {
   });
 
   /**
-   * Перезапуск затронутых служб — по одной, а не пачкой.
+   * Перезапуск затронутых служб — по одной, ДОЖДАВШИСЬ каждой.
    *
    * Последовательно намеренно: на почтовом сервере службы связаны
    * (Postfix спрашивает пароли у Dovecot), и одновременный перезапуск
    * двух даёт отказ аутентификации у того, кто в этот момент отправляет
    * письмо. Разница в пару секунд — цена, которую никто не заметит.
+   *
+   * Обещание это раньше было пустым, и молчаливо. `requestRestart`
+   * возвращает 202 СРАЗУ — маршрут отвечает и уходит работать в фоне
+   * (см. routes/restart.ts), — поэтому цикл отстреливал заявки за
+   * миллисекунды, то есть перезапускал службы ровно одновременно. Хуже
+   * того: не поднявшийся контейнер, самый частый исход после правки
+   * настроек, показывался зелёным «перезапущены службы: postfix,
+   * dovecot», а перечитывание списка уходило раньше, чем службы успевали
+   * встать, — и над зелёной плашкой оставалась красная «перезапуск нужен
+   * прямо сейчас».
+   *
+   * Теперь итог каждой заявки дожидается тот же механизм, что и в
+   * диалоге одиночного перезапуска (lib/restart.ts): панель опрашивает
+   * сервер, молчание во время перезапуска считает нормой, а зелёное
+   * пишет только про то, что действительно поднялось.
    */
   const runRestarts = async (targets: SettingApply[]): Promise<void> => {
-    const done: string[] = [];
-    for (const apply of targets) {
-      try {
-        await api.requestRestart(apply.target, apply.action);
-        done.push(apply.target);
-      } catch (err) {
-        setFlash(null);
-        setRestartError(
-          `Служба ${apply.target}: ${err instanceof Error ? err.message : 'перезапуск не удался'}` +
-            (done.length > 0 ? `. До неё перезапущены: ${done.join(', ')}` : ''),
-        );
-        break;
-      }
-    }
-    if (done.length > 0) {
+    const { done, failed } = await runRestartsIo(
+      targets,
+      {
+        request: (target, action) => api.requestRestart(target, action),
+        fetchJob: (id) => api.restartJob(id),
+        wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        // Сервер жив и что-то ответил — это отказ, а не обрыв связи.
+        isServerRefusal: (err) => err instanceof ApiError && err.status < 500,
+      },
+      (id) => restart?.targets.find((t) => t.id === id) ?? null,
+    );
+
+    if (failed) {
+      setFlash(null);
+      setRestartError(
+        `Служба ${failed.target}: ${failed.message}` +
+          (failed.detail === null ? '' : `. ${failed.detail}`) +
+          (done.length > 0 ? `. До неё перезапущены: ${done.join(', ')}` : ''),
+      );
+    } else if (done.length > 0) {
       setFlash(`Настройки сохранены, перезапущены службы: ${done.join(', ')}.`);
     }
-    // Список перечитываем: у перезапущенных служб пропадает «ждёт перезапуска».
+    // Список перечитываем ПОСЛЕ ожидания: до него у только что тронутых
+    // служб «ждёт перезапуска» ещё не успевало погаснуть, и панель
+    // показывала красную плашку поверх собственного зелёного отчёта.
     void queryClient.invalidateQueries({ queryKey: ['server-settings'] });
   };
 

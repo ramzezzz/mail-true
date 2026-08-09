@@ -103,7 +103,10 @@ class FakeAdminDb {
     const rows = [...this.users.values()].filter(
       (u) => filters.domainId === undefined || u.domain_id === filters.domainId,
     );
-    return { rows, total: rows.length };
+    // Предел соблюдаем, как настоящая база: без этого проверить, что
+    // выборка «на весь домен» упирается в потолок, было бы нечем — а
+    // именно на этом потолке групповая правка молча теряла ящики.
+    return { rows: rows.slice(filters.offset, filters.offset + filters.limit), total: rows.length };
   }
 
   /** Записи журнала по действию — так проверки читаются глазами. */
@@ -807,5 +810,82 @@ void test('без выбранных ящиков и без домена опе�
     payload: { template: '{{имя}}', mode: 'append' },
   });
   assert.equal(response.statusCode, 400);
+  await h.app.close();
+});
+
+/* ------------------------------------------------------------------ */
+/* 8. Домен больше предела: молчаливого усечения не бывает              */
+/* ------------------------------------------------------------------ */
+
+/*
+ * ПОДПИСЬ «НА ВЕСЬ ДОМЕН» ТИХО ОБРЫВАЛАСЬ НА 2000 ЯЩИКАХ.
+ *
+ * Выборка бралась одной страницей с потолком BULK_MAX, а настоящее число
+ * ящиков (page.total) выбрасывалось. На домене из трёх тысяч предпросмотр
+ * показывал ровно 2000 как ПОЛНОЕ число выборки, применение отчитывалось
+ * «изменено 2000» — и тысяча человек оставалась без подписи. Узнать об
+ * этом было неоткуда: ни в ответе, ни в журнале аудита разницы не видно.
+ *
+ * Групповая правка подписей ничем не откатывается, поэтому здесь честный
+ * отказ, а не «сделаем сколько влезет».
+ */
+function fillDomain(h: Harness, count: number): void {
+  for (let i = 1; i <= count; i += 1) {
+    h.db.users.set(i, user(i, `u${String(i)}@mail.local`, `Сотрудник ${String(i)}`));
+  }
+}
+
+void test('предпросмотр на домене больше предела называет настоящее число и запрещает', async () => {
+  const h = await harness();
+  fillDomain(h, 2001);
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/signatures/bulk/preview',
+    headers: { cookie: h.cookie },
+    payload: { domainId: 1, template: '{{имя}}', mode: 'append' },
+  });
+
+  assert.equal(response.statusCode, 200);
+  const body = response.json<{ problem: string | null; total: number }>();
+  assert.notEqual(body.problem, null, 'предпросмотр молчит об усечении выборки');
+  assert.match(body.problem ?? '', /2001/u, 'настоящее число ящиков обязано быть названо');
+  assert.match(body.problem ?? '', /2000/u, 'предел тоже обязан быть назван');
+  await h.app.close();
+});
+
+void test('применение на домене больше предела не подписывает часть молча', async () => {
+  const h = await harness();
+  fillDomain(h, 2001);
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/signatures/bulk/apply',
+    headers: { cookie: h.cookie },
+    payload: { domainId: 1, template: '{{имя}}', mode: 'append' },
+  });
+
+  assert.equal(response.statusCode, 400, 'усечённая выборка применилась как полная');
+  assert.match(response.json<{ message: string }>().message, /2001/u);
+  // Ни одной записи в базу и ни одной строки в журнал: отказ до работы.
+  assert.equal(h.settingsDb.signatures.size, 0);
+  assert.equal(h.db.auditsOf('usersettings.signature.bulk').length, 0);
+  await h.app.close();
+});
+
+void test('домен в пределах потолка работает как раньше', async () => {
+  const h = await harness();
+  fillDomain(h, 3);
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/signatures/bulk/preview',
+    headers: { cookie: h.cookie },
+    payload: { domainId: 1, template: '{{имя}}', mode: 'append' },
+  });
+  assert.equal(response.statusCode, 200);
+  const body = response.json<{ problem: string | null; total: number }>();
+  assert.equal(body.problem, null, 'выборка влезла — жаловаться не на что');
+  assert.equal(body.total, 3);
   await h.app.close();
 });

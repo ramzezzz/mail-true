@@ -25,7 +25,7 @@ import { loadAdminConfig } from './config.js';
 import type { AdminDb } from './db.js';
 import { MemoryAdminSessionStore } from './session.js';
 import { adminServerSettingsRoutes } from './routes/server-settings.js';
-import { ServerSettings } from './server-settings.js';
+import { applyRowsToEnv, ServerSettings } from './server-settings.js';
 import type { AdminContext } from './types.js';
 
 const SECRET = 'test-secret-0123456789-0123456789';
@@ -88,6 +88,8 @@ interface Harness {
   app: FastifyInstance;
   db: FakeDb;
   cookie: string;
+  /** Окружение этого стенда: в него подмешивает значения старт сервера. */
+  env: NodeJS.ProcessEnv;
 }
 
 async function harness(options?: { role?: string; env?: NodeJS.ProcessEnv }): Promise<Harness> {
@@ -136,6 +138,7 @@ async function harness(options?: { role?: string; env?: NodeJS.ProcessEnv }): Pr
   return {
     app,
     db,
+    env,
     cookie: `${config.ADMIN_SESSION_COOKIE_NAME}=${app.signCookie(sessionId)}`,
   };
 }
@@ -395,4 +398,52 @@ void test('настройка группы live перезапуска не тр
   assert.equal(quota.source, 'db');
   assert.equal(quota.requiresRestart, false);
   assert.equal(quota.pendingRestart, false);
+});
+
+/*
+ * СБРОС НАСТРОЙКИ ГРУППЫ restart НЕ ГАСИТ «ЖДЁТ ПЕРЕЗАПУСКА».
+ *
+ * Значение этой группы прочитано один раз при старте, и сброс не может
+ * отменить прочитанного: до перезапуска контейнера сервер продолжает
+ * работать со сброшенным значением. Признак считался по текущему
+ * окружению, а сброс из этого окружения значение и вынимал, — панель
+ * показывала «умолчание, перезапуск не нужен» о процессе, который живёт
+ * с прежним. Проверяем через маршрут: именно этот ответ читает панель.
+ */
+void test('после сброса настройки группы restart панель всё ещё просит перезапуск', async () => {
+  const h = await harness();
+  await h.app.inject({
+    method: 'PUT',
+    url: '/server-settings/PUSH_TIMEOUT_MS',
+    headers: { cookie: h.cookie },
+    payload: { value: 20000 },
+  });
+  // Перезапуск: сохранённые значения подмешиваются в окружение при старте.
+  applyRowsToEnv([{ key: 'PUSH_TIMEOUT_MS', value: '20000' }], h.env);
+
+  const applied = allSettings(
+    (
+      await h.app.inject({ method: 'GET', url: '/server-settings', headers: { cookie: h.cookie } })
+    ).json<ListDto>(),
+  ).find((i) => i.key === 'PUSH_TIMEOUT_MS')!;
+  assert.equal(applied.pendingRestart, false, 'после перезапуска ждать уже нечего');
+
+  const reset = await h.app.inject({
+    method: 'DELETE',
+    url: '/server-settings/PUSH_TIMEOUT_MS',
+    headers: { cookie: h.cookie },
+  });
+  assert.equal(reset.statusCode, 200);
+  assert.equal(
+    reset.json<SettingDto>().pendingRestart,
+    true,
+    'живой процесс до сих пор со сброшенным значением, а панель молчит',
+  );
+
+  const body = (
+    await h.app.inject({ method: 'GET', url: '/server-settings', headers: { cookie: h.cookie } })
+  ).json<ListDto>();
+  const push = allSettings(body).find((i) => i.key === 'PUSH_TIMEOUT_MS')!;
+  assert.equal(push.pendingRestart, true);
+  assert.equal(body.counts.pendingRestart, 1);
 });

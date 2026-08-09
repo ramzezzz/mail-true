@@ -24,8 +24,11 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   directorySize,
+  diskUsedPercent,
   parseMaildirsize,
   readMailboxDiskUsage,
   volumeUsage,
@@ -40,6 +43,7 @@ import {
   parseMeminfo,
   parseProcStat,
 } from './metrics-host.js';
+import { MetricsCollector } from './metrics-collector.js';
 import { bucketSeconds, isUserTrafficSort, TARGET_POINTS } from './metrics-store.js';
 import { describeCertificate, readCertificate } from './metrics-tls.js';
 
@@ -484,4 +488,108 @@ test('закрытый порт даёт объяснение, а не зави�
   assert.equal(result.available, false);
   assert.ok((result.error ?? '').length > 0);
   assert.equal(result.daysLeft, null);
+});
+
+/* ------------------------------------------------------------------ */
+/* Занятость диска: одна формула на весь продукт                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Исходник модуля без комментариев: в них разбирается сам дефект и
+ * называются обе прежние формулы, а проверять надо код.
+ */
+function sourceOf(relative: string): string {
+  const file = fileURLToPath(new URL(relative, import.meta.url).href.replace('/dist/', '/src/'));
+  return readFileSync(file.replace(/\.js$/u, '.ts'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+/*
+ * ОДИН ДИСК — ДВА РАЗНЫХ ПРОЦЕНТА.
+ *
+ * «Наблюдение» считало занятость как usedBytes/totalBytes, то есть
+ * (blocks − bfree)/blocks, а график истории на дашборде — по доступному
+ * месту, (total − bavail)/total. Разница — резерв root, на ext4 обычно
+ * 5 %. Тот же самый том показывался жёлтым «внимание» в одном разделе и
+ * красным «за порогом» в другом; сверив их, администратор переставал
+ * верить обоим.
+ */
+test('занятость диска считается по ДОСТУПНОМУ месту, а не мимо резерва root', () => {
+  // Том на 100 ГиБ, ext4 с резервом 5 %: занято 86 ГиБ, свободных для
+  // обычного пользователя — 9 ГиБ (bavail), пустых блоков — 14 (bfree).
+  const gib = 1024 ** 3;
+  const percent = diskUsedPercent(100 * gib, 9 * gib);
+  assert.equal(percent, 91, `по доступному месту занято 91 %, а получилось ${String(percent)}`);
+  // Прежняя формула «Наблюдения» дала бы 86 — на резерв root меньше.
+  assert.notEqual(percent, 86);
+});
+
+test('без чисел процента нет — ноль занятости выглядел бы исправным диском', () => {
+  assert.equal(diskUsedPercent(null, 100), null);
+  assert.equal(diskUsedPercent(1024, null), null);
+  assert.equal(diskUsedPercent(0, 0), null);
+});
+
+test('обе стороны панели зовут общую формулу, а не считают свою', () => {
+  const monitoring = sourceOf('./routes/monitoring.js');
+  const store = sourceOf('./metrics-store.js');
+  assert.match(monitoring, /diskUsedPercent\(/u, '«Наблюдение» обязано звать общую формулу');
+  assert.match(store, /diskUsedPercent\(/u, 'график истории обязан звать общую формулу');
+  assert.ok(
+    !/usedBytes\s*\/\s*[\w.]*totalBytes/u.test(monitoring),
+    '«Наблюдение» снова считает занятость своей формулой — резерв root разойдётся с дашбордом',
+  );
+  assert.ok(
+    !/\(\s*diskTotal\s*-\s*diskFree\s*\)\s*\/\s*diskTotal/u.test(store),
+    'график истории снова считает занятость своей формулой',
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Сборщик: два прохода на один момент                                  */
+/* ------------------------------------------------------------------ */
+
+/*
+ * ДВА ОБХОДА ХРАНИЛИЩА И ДВЕ СТРОКИ ИСТОРИИ ПРИ ЗАПУСКЕ.
+ *
+ * Защита от наложения стояла на «занят И есть прошлый снимок». Прошлого
+ * снимка в первые секунды жизни сервера нет, а желающих сразу двое:
+ * сборщик делает свой первый проход при старте, и тут же открытая панель,
+ * увидев пустое latest, зовёт runOnce сама (routes/overview.ts). Итог —
+ * удвоенный обход каталогов ровно на запуске и две записи в истории почти
+ * на один момент, то есть кривая точка на графике.
+ */
+test('одновременные проходы сборщика не превращаются в два обхода', async () => {
+  const inserts: string[] = [];
+  const db = {
+    async query<T>(text: string): Promise<T[]> {
+      if (text.includes('INSERT INTO server_metric_samples')) inserts.push(text);
+      return [] as unknown as T[];
+    },
+    async one<T>(): Promise<T | null> {
+      return null;
+    },
+  };
+  const collector = new MetricsCollector({
+    db: db as never,
+    logger: { warn: () => undefined, info: () => undefined } as never,
+    // Посредника очереди нет — сборщик честно запишет «недоступно».
+    queueAgent: { configured: false } as never,
+    mailRoot: path.join(tmpdir(), 'mail-true-net'),
+    indexRoot: path.join(tmpdir(), 'mail-true-net'),
+    logRoot: path.join(tmpdir(), 'mail-true-net'),
+    intervalSeconds: 0,
+    retentionDays: 1,
+    maxRows: 10,
+  });
+
+  const [first, second] = await Promise.all([collector.runOnce(), collector.runOnce()]);
+
+  assert.equal(
+    inserts.length,
+    1,
+    `строк истории записано: ${String(inserts.length)}, а должна одна`,
+  );
+  assert.equal(first, second, 'второй вызов обязан получить результат идущего прохода, а не свой');
 });

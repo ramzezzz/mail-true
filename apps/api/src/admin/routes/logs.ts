@@ -25,13 +25,34 @@ import {
 } from '../log-files.js';
 import { isServiceNoise, LOG_LEVELS, LOG_SOURCES, type LogSource } from '../mail-log.js';
 
-const querySchema = z.object({
+/**
+ * Признак «да/нет» из СТРОКИ ЗАПРОСА.
+ *
+ * Наружу — ради проверки: `z.coerce.boolean()` здесь врал ровно
+ * наоборот. `coerce.boolean` — это `Boolean(значение)`, а строка «false»
+ * непустая, то есть ИСТИНА. Панель шлёт признак всегда (String(false) в
+ * api/client.ts), поэтому флажок «показывать служебные строки» стоял
+ * включённым при любом положении: отсев в log-files.ts не срабатывал
+ * никогда, и журнал был завален отчётами проверок живости, среди
+ * которых живой доставки не разглядеть.
+ *
+ * Тот же дефект уже разбирали в списке писем (routes/messages.ts,
+ * `threaded`) — разбираем так же: истина только «1» и «true».
+ */
+const queryFlag = z
+  .union([z.boolean(), z.string()])
+  .default(false)
+  .transform((value) => value === true || value === '1' || value === 'true');
+
+/* Схемы наружу — ради проверок: разбор строки запроса здесь уже один раз
+   соврал, и ловить это через поднятое приложение дороже. */
+export const querySchema = z.object({
   /**
    * Показывать ли служебные строки: отчёты проверок живости и
    * внутренние обращения служб друг к другу. По умолчанию скрыты —
    * на одно письмо их приходятся десятки, и живая доставка тонет.
    */
-  serviceNoise: z.coerce.boolean().default(false),
+  serviceNoise: queryFlag,
   source: z.enum(['postfix', 'dovecot', 'api']).default('postfix'),
   /** Порог важности: выбранный уровень и всё, что важнее. */
   level: z.enum(['error', 'warn', 'info', 'debug']).default('debug'),
@@ -50,8 +71,8 @@ const querySchema = z.object({
  * не отличает новое от уже показанного и на быстром журнале теряет
  * строки между опросами. Здесь курсор точный — место в байтах.
  */
-const tailSchema = z.object({
-  serviceNoise: z.coerce.boolean().default(false),
+export const tailSchema = z.object({
+  serviceNoise: queryFlag,
   source: z.enum(['postfix', 'dovecot', 'api']).default('postfix'),
   level: z.enum(['error', 'warn', 'info', 'debug']).default('debug'),
   search: z.string().trim().max(200).optional(),

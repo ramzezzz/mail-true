@@ -115,7 +115,11 @@ export class MetricsCollector {
   readonly #host = new HostMetricsReader();
   readonly #store: MetricsStore;
   #timer: NodeJS.Timeout | null = null;
-  #running = false;
+  /**
+   * Идущий проход. Не «флажок занятости», а сам обещанный результат:
+   * второму вызову его отдают вместо запуска своего обхода.
+   */
+  #inFlight: Promise<ResourceSnapshot> | null = null;
   #last: ResourceSnapshot | null = null;
   /** Каждый сотый проход чистим историю: чаще незачем, реже опасно. */
   #ticks = 0;
@@ -165,46 +169,64 @@ export class MetricsCollector {
 
   /** Один проход: снять всё, что доступно, и записать строку истории. */
   async runOnce(): Promise<ResourceSnapshot> {
-    // Проходы не наезжают друг на друга: обход большого каталога может не
-    // уложиться в интервал, а два обхода разом — это удвоенная нагрузка
-    // на диск ровно в тот момент, когда он и так занят.
-    if (this.#running && this.#last) return this.#last;
-    this.#running = true;
+    /*
+     * Проходы не наезжают друг на друга: обход большого каталога может не
+     * уложиться в интервал, а два обхода разом — это удвоенная нагрузка
+     * на диск ровно в тот момент, когда он и так занят.
+     *
+     * Защита стояла на «занят И есть прошлый снимок», и первые секунды
+     * жизни сервера проходили мимо неё: прошлого снимка ещё нет, а
+     * желающих сразу двое — сборщик стартует своим первым проходом
+     * (start), и тут же открытая панель, увидев пустое latest, зовёт
+     * runOnce сама (routes/overview.ts). Получались два обхода хранилища
+     * и две строки истории почти на один момент — то есть удвоенная
+     * нагрузка и кривая точка на графике ровно при запуске.
+     *
+     * Ждать идущий проход, а не запускать свой: второму нужен результат,
+     * а не собственный обход.
+     */
+    if (this.#inFlight) return this.#inFlight;
+    this.#inFlight = this.#pass();
     try {
-      const snapshot = await this.collect();
-      this.#last = snapshot;
-      await this.persist(snapshot)
-        .then(() => {
-          // О возврате записи сообщаем один раз: без этого по журналу
-          // не понять, когда именно история снова стала полной.
-          noteRecovered(
-            this.#persistFailures,
-            this.#opts.logger,
-            'Снимки показателей снова пишутся в базу',
-          );
-        })
-        .catch((err: unknown) => {
-          // Недоступная база не должна лишать дашборд текущего состояния:
-          // историю потеряем, «прямо сейчас» покажем.
-          warnOnce(
-            this.#persistFailures,
-            this.#opts.logger,
-            err,
-            'Снимок показателей не записан в базу',
-          );
-        });
-      this.#ticks += 1;
-      if (this.#ticks % 100 === 1) {
-        const limits = (await this.#opts.limits?.().catch(() => null)) ?? {
-          retentionDays: this.#opts.retentionDays,
-          maxRows: this.#opts.maxRows,
-        };
-        await this.#store.prune(limits.retentionDays, limits.maxRows).catch(() => undefined);
-      }
-      return snapshot;
+      return await this.#inFlight;
     } finally {
-      this.#running = false;
+      this.#inFlight = null;
     }
+  }
+
+  /** Сам проход. Отдельно от runOnce, чтобы тот занимался только наложением. */
+  async #pass(): Promise<ResourceSnapshot> {
+    const snapshot = await this.collect();
+    this.#last = snapshot;
+    await this.persist(snapshot)
+      .then(() => {
+        // О возврате записи сообщаем один раз: без этого по журналу
+        // не понять, когда именно история снова стала полной.
+        noteRecovered(
+          this.#persistFailures,
+          this.#opts.logger,
+          'Снимки показателей снова пишутся в базу',
+        );
+      })
+      .catch((err: unknown) => {
+        // Недоступная база не должна лишать дашборд текущего состояния:
+        // историю потеряем, «прямо сейчас» покажем.
+        warnOnce(
+          this.#persistFailures,
+          this.#opts.logger,
+          err,
+          'Снимок показателей не записан в базу',
+        );
+      });
+    this.#ticks += 1;
+    if (this.#ticks % 100 === 1) {
+      const limits = (await this.#opts.limits?.().catch(() => null)) ?? {
+        retentionDays: this.#opts.retentionDays,
+        maxRows: this.#opts.maxRows,
+      };
+      await this.#store.prune(limits.retentionDays, limits.maxRows).catch(() => undefined);
+    }
+    return snapshot;
   }
 
   private async collect(): Promise<ResourceSnapshot> {

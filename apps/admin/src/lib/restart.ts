@@ -253,3 +253,127 @@ export function watchStep(
 export function watching(state: WatchState | null): boolean {
   return state !== null && state.status === 'polling';
 }
+
+/* ------------------------------------------------------------------ */
+/* Перезапуск нескольких служб подряд                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Что панель умеет делать с сервером, пока ждёт перезапуска.
+ *
+ * Отдельным набором функций, а не прямыми вызовами api: тогда весь этот
+ * порядок — «дождались первую, только потом вторая» — проверяется без
+ * браузера и без сервера.
+ */
+export interface RestartRunIo {
+  /** Подать заявку. Сервер отвечает 202 СРАЗУ, работа идёт в фоне. */
+  request: (target: string, action: RestartAction) => Promise<RestartAccepted>;
+  /** Спросить, чем кончилась заявка. Отказ — сервер сейчас не отвечает. */
+  fetchJob: (id: string) => Promise<RestartJobState>;
+  /** Подождать шаг опроса. Отдельно — чтобы проверка не шла в реальном времени. */
+  wait: (ms: number) => Promise<void>;
+  /**
+   * Осмысленный отказ сервера (он жив и что-то ответил), а не обрыв
+   * связи. Обрыв во время перезапуска — норма, отказ — нет.
+   */
+  isServerRefusal?: (err: unknown) => boolean;
+}
+
+/** Ответ на заявку: 202 и опознаватель, по которому узнают итог. */
+export interface RestartAccepted {
+  id: string;
+  self: boolean;
+  bootId: string | null;
+}
+
+export interface RestartRunResult {
+  /** Службы, которые ДЕЙСТВИТЕЛЬНО поднялись, в порядке перезапуска. */
+  done: string[];
+  /** На чём остановились. null — прошли весь список. */
+  failed: { target: string; message: string; detail: string | null } | null;
+}
+
+/**
+ * Ждёт одну заявку до итога: поднялась, не поднялась или не дождались.
+ *
+ * Сервер отвечает на заявку 202 и уходит работать в фоне, поэтому
+ * «запрос вернулся» не значит ровным счётом ничего. Итог узнаётся только
+ * опросом — тем же, что и в диалоге одиночного перезапуска.
+ */
+export async function watchRestart(
+  start: WatchState,
+  accepted: RestartAccepted,
+  io: RestartRunIo,
+  limits: WatchLimits = DEFAULT_WATCH_LIMITS,
+): Promise<WatchState> {
+  const expectBootId = accepted.self ? accepted.bootId : null;
+  let state = start;
+  while (watching(state)) {
+    await io.wait(WATCH_INTERVAL_MS);
+    try {
+      const job = await io.fetchJob(accepted.id);
+      state = watchStep(state, { type: 'job', job }, expectBootId, limits);
+    } catch (err) {
+      if (io.isServerRefusal?.(err) === true) {
+        return {
+          ...state,
+          status: 'failed',
+          message: 'Не удалось узнать результат',
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      // Молчание сервера во время перезапуска ожидаемо — это не ошибка.
+      state = watchStep(state, { type: 'offline' }, expectBootId, limits);
+    }
+  }
+  return state;
+}
+
+/**
+ * Перезапуск списка служб — ПО ОДНОЙ, дожидаясь каждой.
+ *
+ * Последовательность здесь не украшение: на почтовом сервере службы
+ * связаны (Postfix спрашивает пароли у Dovecot), и одновременный
+ * перезапуск двух даёт отказ аутентификации тому, кто в этот момент
+ * отправляет письмо.
+ *
+ * Обещание было пустым. Заявка возвращается 202 сразу, поэтому цикл
+ * «await requestRestart» отстреливал их за миллисекунды — то есть ровно
+ * одновременно, — а не поднявшийся контейнер (самый частый исход после
+ * правки настроек) панель показывала зелёным: «перезапущены службы:
+ * postfix, dovecot». Считать перезапуск состоявшимся можно только по
+ * итогу заявки.
+ */
+export async function runRestarts(
+  targets: readonly SettingApply[],
+  io: RestartRunIo,
+  titleOf: (target: string) => RestartTarget | null,
+  limits: WatchLimits = DEFAULT_WATCH_LIMITS,
+): Promise<RestartRunResult> {
+  const done: string[] = [];
+  for (const apply of targets) {
+    const known = titleOf(apply.target);
+    const label: RestartTarget = known ?? ({ title: apply.target } as RestartTarget);
+    try {
+      const accepted = await io.request(apply.target, apply.action);
+      const result = await watchRestart(startWatch(label, apply.action), accepted, io, limits);
+      if (result.status !== 'ok') {
+        return {
+          done,
+          failed: { target: apply.target, message: result.message, detail: result.detail },
+        };
+      }
+      done.push(apply.target);
+    } catch (err) {
+      return {
+        done,
+        failed: {
+          target: apply.target,
+          message: 'перезапуск не удался',
+          detail: err instanceof Error ? err.message : String(err),
+        },
+      };
+    }
+  }
+  return { done, failed: null };
+}

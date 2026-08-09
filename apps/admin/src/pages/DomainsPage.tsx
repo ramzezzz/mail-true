@@ -31,6 +31,7 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from '../components/ui';
+import { acceptCheck, acceptReport } from '../lib/dns';
 import { formatRelative } from '../lib/format';
 import { DnsDialog } from './DnsDialog';
 import styles from './DomainsPage.module.css';
@@ -49,8 +50,16 @@ export function DomainsPage() {
 
   const check = useMutation({
     mutationFn: (domain: Domain) => api.dnsCheck(domain.id),
+    /*
+     * Ответ кладём ТОЛЬКО в диалог того домена, для которого его
+     * спрашивали. Проверка ходит к внешним резольверам и занимает
+     * секунды: за это время диалог успевают закрыть и открыть на
+     * соседнем домене, а закрытие запрос не отменяет. Раньше пришедший
+     * отчёт подменял собой весь открытый диалог — и человек читал
+     * состояние DNS одного домена под именем другого (см. acceptReport).
+     */
     onSuccess: (data, domain) => {
-      setOpened({ domain, report: data });
+      setOpened((prev) => acceptReport(prev, domain.id, data));
       void queryClient.invalidateQueries({ queryKey: ['domains'] });
     },
   });
@@ -71,19 +80,14 @@ export function DomainsPage() {
     onMutate: ({ checkId }) => {
       setCheckingIds((ids) => (ids.includes(checkId) ? ids : [...ids, checkId]));
     },
-    onSuccess: (data) => {
-      setOpened((prev) => {
-        if (!prev?.report) return prev;
-        return {
-          ...prev,
-          report: {
-            ...prev.report,
-            overall: data.overall,
-            resolver: data.resolver,
-            checks: prev.report.checks.map((c) => (c.id === data.check.id ? data.check : c)),
-          },
-        };
-      });
+    /*
+     * И здесь тот же замок, и он важнее: опознаватели записей
+     * (spf, mx, dmarc) у всех доменов ОДИНАКОВЫ, поэтому запоздавший
+     * ответ молча подменял строку в отчёте чужого домена. Выглядело это
+     * как «SPF настроено верно» в домене, где SPF нет вовсе.
+     */
+    onSuccess: (data, { domain }) => {
+      setOpened((prev) => acceptCheck(prev, domain.id, data));
       void queryClient.invalidateQueries({ queryKey: ['domains'] });
     },
     onSettled: (_data, _error, { checkId }) => {
@@ -238,6 +242,10 @@ export function DomainsPage() {
           onClose={() => {
             setOpened(null);
             check.reset();
+            // Идущие перепроверки тоже забываем: reset() запрос не
+            // отменяет, а открытый следом диалог соседнего домена
+            // показывал бы «проверяем» по чужой записи.
+            setCheckingIds([]);
             checkOne.reset();
           }}
         />

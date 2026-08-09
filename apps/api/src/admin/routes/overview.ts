@@ -36,6 +36,21 @@ interface ServiceStatus {
   detail: string;
 }
 
+/**
+ * Предел строк из строки запроса — ЦЕЛЫЙ и в разумных границах.
+ *
+ * Наружу ради проверки. Округления здесь не было (в отличие от смещения
+ * строкой ниже по коду), и дробное число уезжало прямо в LIMIT: Postgres
+ * на «LIMIT 12.5» отвечает ошибкой синтаксиса, то есть случайная запятая
+ * в адресе страницы давала администратору не пустой список, а «Внутренняя
+ * ошибка сервера» на весь дашборд.
+ */
+export function pageLimit(raw: unknown, fallback: number, max = 200): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(1, Math.floor(value)));
+}
+
 export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
   const ctx = app.adminCtx;
   const { config: apiConfig } = app.deps;
@@ -418,12 +433,28 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     const query = req.query as Record<string, unknown>;
     const { from, to, hours } = windowOf(query.hours);
     const sort: UserTrafficSort = isUserTrafficSort(query.sort) ? query.sort : 'totalMessages';
-    const limitRaw = Number(query.limit);
-    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 25;
+    const limit = pageLimit(query.limit, 25);
     const offsetRaw = Number(query.offset);
     const offset = Number.isFinite(offsetRaw) && offsetRaw > 0 ? Math.floor(offsetRaw) : 0;
     const page = await store.userTraffic(from, to, sort, limit, offset);
-    return { hours, sort, limit, offset, total: page.total, items: page.rows };
+    return {
+      hours,
+      sort,
+      limit,
+      offset,
+      total: page.total,
+      /**
+       * Сколько ящиков за окно НЕ отправили и не получили ничего.
+       *
+       * Считает база по всем ящикам, а не панель по отданной странице:
+       * страница отсортирована по трафику по убыванию, молчащие стоят в
+       * хвосте и в первые 25 строк не попадают никогда. Панель считала
+       * их сама и на сервере со 143 ящиками всегда показывала ноль —
+       * выглядя при этом измеренным числом.
+       */
+      silent: page.silent,
+      items: page.rows,
+    };
   });
 
   /* --- Занятость ящиков и близость к квоте --------------------------- */
@@ -431,8 +462,7 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     '/overview/mailboxes',
     { preHandler: requireAdmin(app, 'overview.read') },
     async (req) => {
-      const limitRaw = Number((req.query as Record<string, unknown>).limit);
-      const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 20;
+      const limit = pageLimit((req.query as Record<string, unknown>).limit, 20);
       // Занятость берём из снимка сборщика: обходить хранилище на каждый
       // запрос значит платить обходом за каждое обновление страницы.
       const snapshot = await resourceSnapshot();

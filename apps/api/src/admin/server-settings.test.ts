@@ -662,6 +662,61 @@ void test('значение, прописанное человеком в infra/
   assert.equal(env.ADMIN_SESSION_TTL_SECONDS, '7200');
 });
 
+/*
+ * ВТОРАЯ ЛОВУШКА СБРОСА: СТРОКА В infra/.env ПОД НАШИМ ЗНАЧЕНИЕМ.
+ *
+ * Случай самый обычный на живом сервере: строку в infra/.env написал
+ * установщик, потом её перекрыли в панели, потом нажали «вернуть к
+ * умолчанию». Сброс удалял ключ из окружения целиком — и значение из
+ * ФАЙЛА исчезало вместе с нашим. Панель показывала умолчание продукта и
+ * подписывала его «умолчание», хотя в файле лежало другое; после
+ * ближайшего перезапуска написанное в файле возвращалось, и настройка
+ * молча меняла значение сама по себе.
+ */
+void test('сброс возвращает строку из infra/.env, которую перекрыла панель', async () => {
+  const env: NodeJS.ProcessEnv = { RATE_LIMIT_MAX: '150' };
+  const db = new FakeDb();
+  db.rows = [{ key: 'RATE_LIMIT_MAX', value: '900', updated_by: 'osmotr', updated_at: new Date() }];
+  applyRowsToEnv([{ key: 'RATE_LIMIT_MAX', value: '900' }], env);
+  assert.equal(env.RATE_LIMIT_MAX, '900', 'значение из базы не подмешалось — проверять нечего');
+
+  const settings = new ServerSettings({ db, env, cacheMs: 0 });
+  const { after } = await settings.reset('RATE_LIMIT_MAX');
+
+  assert.equal(env.RATE_LIMIT_MAX, '150', 'значение из infra/.env стёрто вместе с нашим');
+  assert.equal(after.raw, '150', 'сброс вернул не к тому, что в файле');
+  assert.equal(after.source, 'env');
+});
+
+/*
+ * ТРЕТЬЯ ЛОВУШКА: ГРУППА restart ПОСЛЕ СБРОСА.
+ *
+ * Значение этой группы читается ОДИН РАЗ при старте. Сброс не может
+ * отменить того, что уже прочитано: живой процесс продолжает работать со
+ * сброшенным значением до перезапуска. Признак «ждёт перезапуска»
+ * считался по текущему окружению, а сброс это окружение и правил, — и
+ * получалось спокойное «перезапуск не нужен» о процессе, который живёт
+ * с прежним. Настроек в группе 59.
+ */
+void test('после сброса настройки группы restart видно, что процесс живёт со старым', async () => {
+  const env: NodeJS.ProcessEnv = {};
+  const db = new FakeDb();
+  db.rows = [
+    { key: 'SESSION_TTL_SECONDS', value: '86400', updated_by: 'osmotr', updated_at: new Date() },
+  ];
+  applyRowsToEnv([{ key: 'SESSION_TTL_SECONDS', value: '86400' }], env);
+
+  const settings = new ServerSettings({ db, env, cacheMs: 0 });
+  const { after } = await settings.reset('SESSION_TTL_SECONDS');
+
+  // Значение, к которому вернулись, — умолчание продукта.
+  assert.equal(after.raw, '604800');
+  assert.equal(after.source, 'default');
+  // А процесс до перезапуска живёт с прежним, и это должно быть видно.
+  assert.equal(after.envRaw, '86400', 'потеряно то, с чем стартовал живой процесс');
+  assert.notEqual(after.raw, after.envRaw, 'панель скажет «перезапуск не нужен» — и соврёт');
+});
+
 void test('настройку из группы locked записать нельзя', async () => {
   const { settings } = make();
   await assert.rejects(

@@ -461,15 +461,28 @@ export async function adminUserSettingsRoutes(
     }),
   );
 
-  /** Ящики, попавшие в выборку. */
-  const targetsOf = async (body: BulkBody): Promise<MailUserRow[]> => {
+  /**
+   * Ящики, попавшие в выборку, ВМЕСТЕ С ИХ НАСТОЯЩИМ ЧИСЛОМ.
+   *
+   * Число отдельно от списка потому, что «на весь домен» упирается в
+   * предел: берутся первые BULK_MAX ящиков, а сколько их в домене на
+   * самом деле, знает только page.total. Раньше он выбрасывался, и на
+   * домене из трёх тысяч ящиков предпросмотр показывал ровно 2000 как
+   * ПОЛНОЕ число выборки. Администратор нажимал «Применить», получал
+   * отчёт «изменено 2000» и уходил, не зная, что тысяча ящиков осталась
+   * без подписи, — а узнавал об этом от людей, у которых подпись не
+   * появилась.
+   */
+  const targetsOf = async (body: BulkBody): Promise<{ users: MailUserRow[]; total: number }> => {
     if (body.ids.length > 0) {
       const rows: MailUserRow[] = [];
       for (const id of body.ids) {
         const row = await ctx.db.findMailUserById(id);
         if (row) rows.push(row);
       }
-      return rows;
+      // Отмеченные вручную ограничены схемой (max BULK_MAX), обрезать
+      // нечего: сколько отметили, столько и попало.
+      return { users: rows, total: rows.length };
     }
     if (body.domainId !== undefined) {
       const page = await ctx.db.listMailUsers({
@@ -477,10 +490,28 @@ export async function adminUserSettingsRoutes(
         limit: BULK_MAX,
         offset: 0,
       });
-      return page.rows;
+      return { users: page.rows, total: page.total };
     }
     throw new BadRequestError(
       'Не выбрано ни одного ящика: отметьте ящики в списке или выберите домен',
+    );
+  };
+
+  /**
+   * Выборка не влезла в предел — тихо подписать её часть нельзя.
+   *
+   * Отдаётся тем же полем `problem`, что и беда с шаблоном: смысл у него
+   * один — «применять нельзя, вот почему», и панель уже показывает его
+   * красным и запирает кнопку. Молчаливое усечение хуже отказа: групповая
+   * правка подписей ничем не откатывается, и «изменено 2000» вместо
+   * «изменено 2000 из 3000» — это ошибка, которую некому заметить.
+   */
+  const tooManyProblem = (total: number, taken: number): string | null => {
+    if (total <= taken) return null;
+    return (
+      `В выборке ${String(total)} ящиков, а за один раз панель меняет не больше ` +
+      `${String(BULK_MAX)}. Подписать часть молча она не станет: отметьте ящики в списке ` +
+      'по частям — так видно, кому подпись уже поставили, а кому ещё нет.'
     );
   };
 
@@ -543,8 +574,11 @@ export async function adminUserSettingsRoutes(
     { preHandler: requireAdmin(app, 'usersettings.bulk') },
     async (request) => {
       const body = bulkSchema.parse(request.body);
-      const users = await targetsOf(body);
-      const problem = signatureTemplateProblem(body.template);
+      const { users, total } = await targetsOf(body);
+      // Беда с шаблоном важнее: она про то, что напишут людям в подпись,
+      // а размер выборки — про то, скольким. Первой называем первую.
+      const problem =
+        signatureTemplateProblem(body.template) ?? tooManyProblem(total, users.length);
       const plan = await guard(() => planFor(body, users));
 
       const sample =
@@ -588,12 +622,15 @@ export async function adminUserSettingsRoutes(
     { preHandler: requireAdmin(app, 'usersettings.bulk') },
     async (request) => {
       const body = bulkSchema.parse(request.body);
-      const problem = signatureTemplateProblem(body.template);
+      const { users, total } = await targetsOf(body);
       // Отказ до единой записи в базу: применить шаблон с опечаткой в
       // подстановке — значит разослать `{{долность}}` по живым ящикам.
+      // Слишком большая выборка отбивается там же и по той же причине:
+      // подписать 2000 ящиков из 3000 и отчитаться «2000» нельзя.
+      const problem =
+        signatureTemplateProblem(body.template) ?? tooManyProblem(total, users.length);
       if (problem) throw new BadRequestError(problem);
 
-      const users = await targetsOf(body);
       if (users.length === 0) throw new BadRequestError('В выборке нет ни одного ящика');
 
       const db = settings().requireDb();

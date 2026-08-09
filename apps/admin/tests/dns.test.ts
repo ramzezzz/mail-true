@@ -13,6 +13,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  acceptCheck,
+  acceptReport,
   GROUP_ORDER,
   PROPAGATION_NOTE,
   VERDICT_LABEL,
@@ -29,6 +31,7 @@ import {
   verdictTone,
 } from '../src/lib/dns';
 import type { DnsCheck, DnsReport, DnsVerdict } from '../src/api/types';
+import type { OpenedDns } from '../src/lib/dns';
 
 function check(patch: Partial<DnsCheck> & { id: string }): DnsCheck {
   return {
@@ -265,5 +268,82 @@ describe('копирование', () => {
     expect(text).toContain('10 mail.example.ru.');
     expect(text).not.toContain('PTR');
     expect(text).not.toContain('<публичный');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Ответ приходит в диалог СВОЕГО домена                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Проверка DNS ходит к внешним резольверам и занимает секунды. За это
+ * время диалог успевают закрыть и открыть на соседнем домене — закрытие
+ * запрос не отменяет. Обработчики вклеивали пришедшее в текущий диалог,
+ * не глядя, для какого домена его спрашивали.
+ *
+ * У точечной перепроверки это было опаснее всего: опознаватели записей
+ * (spf, mx, dmarc) у ВСЕХ доменов одинаковы, и ответ подменял строку в
+ * отчёте чужого домена. На экране получалось «SPF настроено верно» в
+ * домене, где SPF нет вовсе.
+ */
+describe('запоздавший ответ проверки DNS', () => {
+  const opened = (id: number, checks: DnsCheck[]): OpenedDns<{ id: number }> => ({
+    domain: { id },
+    report: report(checks),
+  });
+
+  it('полный отчёт чужого домена в открытый диалог не попадает', () => {
+    const prev = opened(2, [check({ id: 'spf', verdict: 'missing' })]);
+    const late = report([check({ id: 'spf', verdict: 'ok' })]);
+    // Спрашивали по домену 1, а открыт уже второй.
+    expect(acceptReport(prev, 1, late)).toBe(prev);
+  });
+
+  it('свой отчёт вклеивается', () => {
+    const prev = opened(1, [check({ id: 'spf', verdict: 'missing' })]);
+    const fresh = report([check({ id: 'spf', verdict: 'ok' })]);
+    expect(acceptReport(prev, 1, fresh)?.report).toBe(fresh);
+  });
+
+  it('в закрытый диалог не попадает ничего', () => {
+    expect(acceptReport(null, 1, report([]))).toBeNull();
+    expect(
+      acceptCheck(null, 1, {
+        check: check({ id: 'spf' }),
+        resolver: { servers: [], answeredBy: [], reachable: true },
+        overall: 'ok',
+      }),
+    ).toBeNull();
+  });
+
+  it('одна запись чужого домена не подменяет одноимённую свою', () => {
+    const prev = opened(2, [
+      check({ id: 'spf', verdict: 'missing', title: 'SPF домена 2' }),
+      check({ id: 'mx', verdict: 'ok' }),
+    ]);
+    const late = {
+      check: check({ id: 'spf', verdict: 'ok', title: 'SPF домена 1' }),
+      resolver: { servers: [], answeredBy: [], reachable: true },
+      overall: 'ok' as const,
+    };
+    const next = acceptCheck(prev, 1, late);
+    expect(next, 'ответ по домену 1 подменил строку в отчёте домена 2').toBe(prev);
+    expect(next?.report?.checks[0]?.verdict).toBe('missing');
+  });
+
+  it('своя перепроверенная запись обновляется, соседние — нет', () => {
+    const prev = opened(1, [
+      check({ id: 'spf', verdict: 'missing' }),
+      check({ id: 'mx', verdict: 'missing' }),
+    ]);
+    const fresh = {
+      check: check({ id: 'spf', verdict: 'ok' }),
+      resolver: { servers: ['1.1.1.1'], answeredBy: ['1.1.1.1'], reachable: true },
+      overall: 'warn' as const,
+    };
+    const next = acceptCheck(prev, 1, fresh);
+    expect(next?.report?.checks[0]?.verdict).toBe('ok');
+    expect(next?.report?.checks[1]?.verdict, 'соседняя запись потеряла своё время').toBe('missing');
+    expect(next?.report?.overall).toBe('warn');
   });
 });

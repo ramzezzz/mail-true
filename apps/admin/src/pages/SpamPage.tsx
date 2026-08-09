@@ -503,7 +503,17 @@ function ListsTab({ canEdit }: { canEdit: boolean }) {
 /* Разбор письма и обучение                                             */
 /* ------------------------------------------------------------------ */
 
-function MessageTools({ canLearn }: { canLearn: boolean }) {
+/**
+ * Разбор письма и обучение.
+ *
+ * Показывается только тому, у кого есть users.write: этого права требуют
+ * ОБА действия вкладки — и «Проверить», и «Это спам/Это не спам»
+ * (см. requireAdmin в routes/spam.ts). Раньше вкладка была видна всем, и
+ * дежурный вставлял письмо целиком, нажимал «Проверить» и получал отказ
+ * по правам — при том что подсказка над полем обещала «проверка ничего
+ * не меняет». Обещание было верным по сути и пустым на деле.
+ */
+function MessageTools() {
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
   const [as, setAs] = useState<'outside' | 'own'>('outside');
@@ -567,33 +577,23 @@ function MessageTools({ canLearn }: { canLearn: boolean }) {
           {check.isPending ? 'Проверяем…' : 'Проверить'}
         </Button>
         <ToolbarSpacer />
-        {canLearn && (
-          <>
-            <Button
-              mode="secondary"
-              size="s"
-              disabled={!ready || learn.isPending}
-              onClick={() => learn.mutate('spam')}
-            >
-              Это спам
-            </Button>
-            <Button
-              mode="secondary"
-              size="s"
-              disabled={!ready || learn.isPending}
-              onClick={() => learn.mutate('ham')}
-            >
-              Это не спам
-            </Button>
-          </>
-        )}
+        <Button
+          mode="secondary"
+          size="s"
+          disabled={!ready || learn.isPending}
+          onClick={() => learn.mutate('spam')}
+        >
+          Это спам
+        </Button>
+        <Button
+          mode="secondary"
+          size="s"
+          disabled={!ready || learn.isPending}
+          onClick={() => learn.mutate('ham')}
+        >
+          Это не спам
+        </Button>
       </Toolbar>
-
-      {!canLearn && (
-        <p className={styles.readonly}>
-          Обучение фильтра доступно роли, управляющей пользователями: оно действует на всех.
-        </p>
-      )}
 
       <ErrorNotice error={error} />
       {note && <Notice tone="success">{note}</Notice>}
@@ -889,7 +889,13 @@ export function SpamPage() {
   const { session } = useSession();
   const [tab, setTab] = useState<TabId>('summary');
   const canEditLists = can(session?.permissions, 'domains.write');
-  const canLearn = can(session?.permissions, 'users.write');
+  /*
+   * Вкладка разбора письма целиком требует users.write: его спрашивают
+   * и проверка, и обучение. Вкладки без права просто нет — по той же
+   * причине, что и у истории писем ниже: показать раздел, в котором
+   * ничего нельзя нажать, значит пообещать и отказать.
+   */
+  const canCheck = can(session?.permissions, 'users.write');
   // Темы и адреса писем — то же, что журналы почты: не сводка о переписке,
   // а сама переписка. Вкладки без права просто нет — отключённая вкладка
   // сообщала бы дежурному, что от него что-то прячут.
@@ -899,7 +905,7 @@ export function SpamPage() {
     { id: 'summary', title: 'Сводка' },
     { id: 'thresholds', title: 'Пороги' },
     { id: 'lists', title: 'Списки' },
-    { id: 'check', title: 'Разбор письма' },
+    ...(canCheck ? [{ id: 'check' as const, title: 'Разбор письма' }] : []),
     ...(canReadHistory ? [{ id: 'history' as const, title: 'Последние письма' }] : []),
   ];
 
@@ -915,7 +921,7 @@ export function SpamPage() {
       {tab === 'summary' && <SummaryTab />}
       {tab === 'thresholds' && <ThresholdsTab />}
       {tab === 'lists' && <ListsTab canEdit={canEditLists} />}
-      {tab === 'check' && <MessageTools canLearn={canLearn} />}
+      {tab === 'check' && canCheck && <MessageTools />}
       {tab === 'history' && canReadHistory && <HistoryTab />}
     </>
   );

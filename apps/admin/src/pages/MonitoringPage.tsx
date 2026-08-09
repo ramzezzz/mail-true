@@ -35,6 +35,7 @@ import { cx } from '@web/lib/cx';
 import { api } from '../api/client';
 import type { CheckState, CheckSummary, HealthCheck } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
+import { useSession } from '../app/session';
 import { Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import { formatDateTime, formatRelative } from '../lib/format';
@@ -145,7 +146,18 @@ export function MonitoringPage() {
    * запускается вручную. Она отправляет НАСТОЯЩЕЕ письмо, а раздел
    * открывают вкладками и держат часами: фоновый запуск завалил бы ящик
    * письмами собственного мониторинга.
+   *
+   * И запустить её может только тот, кому доверено перезапускать службы
+   * (см. requireAdmin в routes/monitoring.ts): настоящее письмо через
+   * живой Postfix — это действие, меняющее состояние сервера.
+   *
+   * Сам же раздел открыт по overview.read, и поле с кнопкой показывались
+   * всем. Дежурный вводил адрес, нажимал, ждал до сорока пяти секунд —
+   * и получал отказ по правам. Кнопка, которая не работает у половины
+   * тех, кто её видит, хуже её отсутствия: она обещает.
    */
+  const { can } = useSession();
+  const canRoundtrip = can('services.restart');
   const [roundtripMailbox, setRoundtripMailbox] = useState('');
   const roundtrip = useMutation({
     mutationFn: (mailbox: string) => api.monitoringRoundtrip(mailbox),
@@ -319,30 +331,42 @@ export function MonitoringPage() {
           фильтрации и подпись DKIM. Письмо удаляется сразу после проверки. Пароль владельца ящика
           не нужен.
         </p>
-        <Field
-          label="Ящик для проверки"
-          hint="Существующий ящик на этом сервере, например admin@example.org"
-        >
-          <input
-            className="mt-input"
-            type="email"
-            value={roundtripMailbox}
-            placeholder="admin@example.org"
-            onChange={(e) => {
-              setRoundtripMailbox(e.target.value);
-            }}
-          />
-        </Field>
-        <Toolbar>
-          <Button
-            onClick={() => {
-              roundtrip.mutate(roundtripMailbox.trim());
-            }}
-            disabled={roundtrip.isPending || roundtripMailbox.trim() === ''}
-          >
-            {roundtrip.isPending ? 'Проверяем — до 45 секунд…' : 'Отправить проверочное письмо'}
-          </Button>
-        </Toolbar>
+        {canRoundtrip ? (
+          <>
+            <Field
+              label="Ящик для проверки"
+              hint="Существующий ящик на этом сервере, например admin@example.org"
+            >
+              <input
+                className="mt-input"
+                type="email"
+                value={roundtripMailbox}
+                placeholder="admin@example.org"
+                onChange={(e) => {
+                  setRoundtripMailbox(e.target.value);
+                }}
+              />
+            </Field>
+            <Toolbar>
+              <Button
+                onClick={() => {
+                  roundtrip.mutate(roundtripMailbox.trim());
+                }}
+                disabled={roundtrip.isPending || roundtripMailbox.trim() === ''}
+              >
+                {roundtrip.isPending ? 'Проверяем — до 45 секунд…' : 'Отправить проверочное письмо'}
+              </Button>
+            </Toolbar>
+          </>
+        ) : (
+          /* Не пустое место, а объяснение: чего не хватает и что делать.
+             Отказ после сорока пяти секунд ожидания — худший вариант. */
+          <Notice tone="info">
+            Запустить проверку может только владелец: она отправляет настоящее письмо через живой
+            Postfix, и право на это то же, что на перезапуск служб. Попросите владельца запустить её
+            и показать результат — всё остальное в этом разделе вам видно и так.
+          </Notice>
+        )}
         {roundtrip.error && <ErrorNotice error={roundtrip.error} />}
         {roundtrip.data && (
           <>
