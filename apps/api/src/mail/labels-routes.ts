@@ -212,6 +212,39 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
   const { pool } = app.deps;
 
   /**
+   * Убирает метку из действий всех правил этого ящика.
+   *
+   * Возвращает, сколько правил тронули. Правило, у которого метка была
+   * единственным действием, не удаляется и не выключается: у него могут
+   * быть условия, которые человек настраивал, — пусть он сам решит, что
+   * с ним делать. Зато оно перестаёт клеить то, чего больше нет.
+   */
+  const dropLabelFromFilters = async (
+    email: string,
+    key: string,
+    log: { warn(obj: unknown, msg: string): void },
+  ): Promise<number> => {
+    try {
+      const db = app.settingsService.requireDb();
+      const rules = await db.listFilters(email);
+      let cleaned = 0;
+      for (const rule of rules) {
+        const labels = rule.actions.labels ?? [];
+        if (!labels.includes(key)) continue;
+        await db.updateFilter(email, rule.id, {
+          actions: { ...rule.actions, labels: labels.filter((l) => l !== key) },
+        });
+        cleaned += 1;
+      }
+      if (cleaned > 0) await app.settingsService.syncSieve(email);
+      return cleaned;
+    } catch (err) {
+      log.warn(errorInfo(err), 'Метка удалена, но правила её ещё ставят');
+      return 0;
+    }
+  };
+
+  /**
    * Справочник ящика. Единственная точка, где маршруты его получают:
    * без справочника ни поставить, ни снять метку нельзя (см. шапку).
    */
@@ -353,7 +386,37 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
      * человек ею не помечал. «Счета» и «Счёта» дают один ключ.
      */
     await requireStore().remove(session.email, label.key, purge === '1');
-    return { ok: true, key: label.key, purged: purge === '1', removedFromMessages };
+
+    /*
+     * Правила, которые эту метку ставили, тоже перестают её ставить.
+     *
+     * ------------------------------------------------------------------
+     * ЧТО БЫЛО
+     * ------------------------------------------------------------------
+     * Удаление трогало только справочник меток, а `mail_filters` не
+     * чистил никто. Человек удалял метку вместе со снятием её со всех
+     * писем — а правило продолжало клеить её на КАЖДОЕ новое подходящее
+     * письмо. В списке правил при этом виден сырой ключ вместо имени, и
+     * убрать его нечем: форма правила рисует галочки только по
+     * существующим меткам. Оставалось удалить само правило.
+     *
+     * Для папок ровно это давно сделано (retargetFilterFolders в
+     * settings/folders.ts) — у меток такого не было.
+     *
+     * Отказ здесь не отменяет удаления метки: справочник уже изменён, а
+     * повторить чистку человек может, открыв правило. Поэтому пишем в
+     * журнал и идём дальше.
+     */
+    const cleanedRules = await dropLabelFromFilters(session.email, label.key, request.log);
+
+    return {
+      ok: true,
+      key: label.key,
+      purged: purge === '1',
+      removedFromMessages,
+      /** Сколько правил перестало ставить эту метку. */
+      cleanedRules,
+    };
   });
 
   /**
