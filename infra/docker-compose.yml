@@ -236,6 +236,9 @@ services:
     volumes:
       - rspamd-data:/var/lib/rspamd
       - ./rspamd/local.d:/etc/rspamd/local.d:ro
+      # Свои правила на lua. Подключает их entrypoint — он дописывает
+      # строчки в rspamd.local.lua, который rspamd читает сам.
+      - ./rspamd/lua:/etc/rspamd/lua:ro
       # Списки (белые/чёрные). Каталог репозитория подключается только на
       # ЧТЕНИЕ и служит заготовкой; рабочие карты живут в томе.
       #
