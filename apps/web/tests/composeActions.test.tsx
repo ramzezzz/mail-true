@@ -19,7 +19,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ComposeWindows } from '../src/compose/ComposeWindows';
 import { defaultSendAt, formatSendAt, toLocalInputValue } from '../src/compose/ComposeWindow';
 import { useUiStore } from '../src/app/store';
-import { api } from '../src/api';
+import { accountsApi, api } from '../src/api';
 import type { SendRequest } from '../src/api/types';
 
 let host: HTMLDivElement;
@@ -383,5 +383,83 @@ describe('отправка прошла не целиком', () => {
     await waitFor(() => send.mock.calls.length > 0, 'отправку письма');
     await waitFor(() => useUiStore.getState().composeWindows.length === 0, 'закрытие окна');
     expect(useUiStore.getState().notice).toBeNull();
+  });
+});
+
+/*
+ * Отправка с подключённого чужого адреса идёт другим маршрутом — через
+ * SMTP этого адреса, — и запрос для него собирался вручную. Два поля
+ * при этом терялись молча: письма, вложенные целиком («Переслать как
+ * вложение»), и просьба уведомить о прочтении. Плашки вложенных писем
+ * были видны в окне до самого нажатия «Отправить», кнопка уведомления
+ * оставалась зажжённой, а человеку говорили «Письмо отправлено с адреса
+ * …» — и окно закрывалось. Восстанавливать было нечего.
+ */
+describe('отправка с чужого адреса', () => {
+  it('вложенные письма и просьба о прочтении доезжают до сервера', async () => {
+    const send = vi
+      .spyOn(accountsApi, 'sendAsExternal')
+      .mockResolvedValue({ ok: true, from: 'staraya@yandex.ru' });
+    vi.spyOn(accountsApi, 'getAccounts').mockResolvedValue({
+      current: 'demo@mail.local',
+      linked: [],
+      external: [
+        {
+          id: 7,
+          address: 'staraya@yandex.ru',
+          label: 'Старая почта',
+          mode: 'collector',
+          enabled: true,
+          smtp: { host: 'smtp.yandex.ru', port: 465, secure: true, user: 'staraya@yandex.ru' },
+          state: {
+            lastRunAt: null,
+            lastOkAt: null,
+            status: 'ok',
+            error: null,
+            lastCopied: 0,
+            totalCopied: 0,
+          },
+        },
+      ],
+      secrets: { available: true, reason: null },
+      collector: { scheduler: true, masterConfigured: true },
+    });
+
+    render();
+    act(() =>
+      useUiStore.getState().openCompose({
+        to: 'kolya@mail.local',
+        attachMessages: [{ id: 'inbox:9', label: 'Счёт за июль' }],
+      }),
+    );
+    // Плашка вложенного письма — то самое обещание, которое окно даёт.
+    expect(host.textContent).toContain('Счёт за июль');
+
+    click(buttonByLabel('Уведомить о прочтении'));
+
+    // Список отправителей приходит запросом: пока он не пришёл, выбрать
+    // чужой адрес не из чего, и письмо ушло бы обычным путём. Признак
+    // готовности — появившаяся кнопка выбора «От кого».
+    const senderButton = () =>
+      [...host.querySelectorAll('button')].find((b) =>
+        (b.getAttribute('aria-label') ?? '').startsWith('Отправить с адреса'),
+      );
+    await waitFor(() => Boolean(senderButton()), 'кнопку выбора отправителя');
+
+    const id = useUiStore.getState().composeWindows[0]?.id ?? 0;
+    act(() => useUiStore.getState().updateComposeDraft(id, () => ({ fromExternalId: 7 })));
+    await waitFor(
+      () => (senderButton()?.getAttribute('aria-label') ?? '').includes('staraya@yandex.ru'),
+      'выбранного чужого отправителя',
+    );
+    click(buttonByText('Отправить'));
+
+    await waitFor(() => send.mock.calls.length > 0, 'отправку с чужого адреса');
+    const request = send.mock.calls[0]?.[1] as {
+      attachMessageIds?: string[];
+      requestReadReceipt?: boolean;
+    };
+    expect(request.attachMessageIds, 'вложенные письма потерялись по дороге').toEqual(['inbox:9']);
+    expect(request.requestReadReceipt, 'просьба о прочтении потерялась').toBe(true);
   });
 });

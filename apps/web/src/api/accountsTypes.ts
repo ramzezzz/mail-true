@@ -117,6 +117,15 @@ export interface ExternalSendRequest {
   fromName?: string | null;
   inReplyTo?: string;
   references?: string[];
+  /**
+   * Письма, пересылаемые целиком. Раньше этого поля здесь не было, и
+   * «Переслать как вложение» с чужого адреса молча теряло вложения:
+   * плашки в окне были, письмо уходило без них, а человеку говорили
+   * «Письмо отправлено с адреса …».
+   */
+  attachMessageIds?: string[];
+  /** Просьба уведомить о прочтении — уведомление вернётся на чужой адрес. */
+  requestReadReceipt?: boolean;
 }
 
 /** Ответ POST /api/accounts/external/:id/send. */

@@ -25,7 +25,26 @@ export function quoteHtml(message: Message): string {
  */
 export function replyInit(message: Message, quoteOriginal: boolean): ComposeInit {
   return {
-    to: message.from.address,
+    /*
+     * Отвечаем ТУДА, КУДА ПРОСИЛ ОТПРАВИТЕЛЬ.
+     *
+     * Заголовок `Reply-To` для того и существует: письмо уходит с адреса
+     * вида `noreply@…`, а отвечать надо на `support@…`. Так устроены
+     * рассылки, тикет-системы и корпоративные ящики — то есть почти всё,
+     * на что человек отвечает по работе.
+     *
+     * Раньше в «Кому» безусловно вставлялся `From`, хотя разобранный
+     * `Reply-To` лежал рядом и даже показывался в подробностях письма.
+     * Ответ уходил на адрес, который его не принимает или не читает, и
+     * человек об этом не узнавал: письмо «успешно отправлено».
+     */
+    to:
+      message.replyTo.length > 0
+        ? // Только адреса, без имён: так же, как подставлялся `From` до
+          // этой правки. Вид поля «Кому» менять незачем — речь о том,
+          // КУДА уйдёт ответ, а не о том, как он подписан.
+          message.replyTo.map((a) => a.address).join(', ')
+        : message.from.address,
     subject: message.subject.startsWith('Re:') ? message.subject : `Re: ${message.subject}`,
     bodyHtml: quoteOriginal ? quoteHtml(message) : undefined,
     inReplyTo: message.messageId ?? undefined,

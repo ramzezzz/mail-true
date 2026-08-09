@@ -40,6 +40,12 @@ import {
   type DeliveryOutcome,
   type SendFailureReason,
 } from '../mail/deferred-send.js';
+import {
+  forwardedAttachment,
+  forwardedFilename,
+  loadForwardedMessages as readForwardedMessages,
+  type ForwardedMessage,
+} from '../mail/forwarded.js';
 import { parseMessageHeaders } from '../mail/parse.js';
 import { buildReadReceipt, readReceiptRequest } from '../mail/read-receipt.js';
 import { classifySmtpError, readSendOutcome, type RejectedRecipient } from '../mail/send-result.js';
@@ -110,42 +116,6 @@ type DraftBody = z.infer<typeof draftPayloadSchema>;
 
 function formatAddresses(list: MailAddress[]): Mail.Address[] {
   return list.map((a) => ({ name: a.name ?? '', address: a.address }));
-}
-
-/** Письмо, вложенное в другое письмо целиком (message/rfc822). */
-export interface ForwardedMessage {
-  /** Имя файла вложения — обычно тема исходного письма с «.eml». */
-  filename: string;
-  /** Исходник письма как он лежит в ящике. */
-  raw: Buffer;
-}
-
-/**
- * Вложение-письмо для MailComposer.
- *
- * Кодировать пересылаемое письмо в base64 нельзя: RFC 2046 (§5.2.1)
- * разрешает для `message/rfc822` только 7bit, 8bit и binary. А nodemailer
- * по умолчанию ставит любому вложению именно base64 — проверено на
- * собранном письме: часть уезжала как `Content-Transfer-Encoding: base64`,
- * и заголовки пересланного письма внутри неё становились нечитаемыми для
- * всего, что смотрит на письмо не через полный разбор MIME.
- *
- * `contentTransferEncoding: false` снимает этот умолчательный base64 —
- * тогда nodemailer отдаёт содержимое как есть. Если в исходнике есть
- * восьмибитные байты (кириллица в теле без кодирования), объявлять
- * подразумеваемый 7bit было бы неправдой, поэтому заголовок проставляется
- * явно — своим заголовком вложения, до того как nodemailer решит сам.
- */
-export function forwardedAttachment(item: ForwardedMessage): Mail.Attachment {
-  const eightBit = item.raw.some((byte) => byte > 127);
-  return {
-    filename: item.filename,
-    content: item.raw,
-    contentType: 'message/rfc822',
-    contentDisposition: 'attachment',
-    contentTransferEncoding: false,
-    ...(eightBit ? { headers: { 'Content-Transfer-Encoding': '8bit' } } : {}),
-  };
 }
 
 /**
@@ -261,18 +231,6 @@ async function composeRaw(
    */
   if (settings?.keepBcc) (node as unknown as { keepBcc: boolean }).keepBcc = true;
   return node.build();
-}
-
-/** Имя файла для вложенного письма: тема + «.eml». */
-export function forwardedFilename(subject: string): string {
-  const clean = subject
-    .replace(/[\r\n]+/g, ' ')
-    // В имени файла эти символы означают путь или запрещены в файловых
-    // системах — а тема письма приходит снаружи и содержит что угодно
-    .replace(/[\\/:*?"<>|]+/g, '_')
-    .trim()
-    .slice(0, 100);
-  return `${clean || 'Письмо'}.eml`;
 }
 
 function allRecipients(payload: DraftBody): string[] {
@@ -477,31 +435,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     ids: readonly string[],
   ): Promise<ForwardedMessage[]> {
     if (ids.length === 0) return [];
-    return pool.withClient(session.email, session.password, async (client) => {
-      const found: ForwardedMessage[] = [];
-      for (const id of ids) {
-        const { folderId, uid } = splitMessageId(id);
-        const folder = await requireFolder(client, folderId);
-        const lock = await client.getMailboxLock(folder.path);
-        try {
-          const msg = await client.fetchOne(
-            String(uid),
-            { uid: true, source: true, envelope: true },
-            { uid: true },
-          );
-          if (!msg || !msg.source) {
-            throw new NotFoundError(`Письмо для пересылки не найдено: ${id}`);
-          }
-          found.push({
-            filename: forwardedFilename(msg.envelope?.subject ?? ''),
-            raw: msg.source,
-          });
-        } finally {
-          lock.release();
-        }
-      }
-      return found;
-    });
+    return pool.withClient(session.email, session.password, (client) =>
+      readForwardedMessages(client, ids),
+    );
   }
 
   /**

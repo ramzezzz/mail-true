@@ -21,7 +21,8 @@ import { registerErrorHandling } from '../http-errors.js';
 import { DeferredSpool } from '../mail/deferred-send.js';
 import type { AppDeps } from '../types.js';
 import type { UploadStore } from '../uploads.js';
-import { composeRoutes, forwardedFilename } from './compose.js';
+import { composeRoutes } from './compose.js';
+import { forwardedFilename } from '../mail/forwarded.js';
 
 /* ------------------------------------------------------------------ */
 /* Подставной SMTP: запоминает всё, что через него прошло               */

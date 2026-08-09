@@ -145,4 +145,65 @@ describe('отправка и недоехавшие вложения', () => {
     });
     expect(sendButton()?.disabled).toBe(false);
   });
+
+  /*
+   * Ожидание вложений стояло только на кнопке «Отправить» и на Ctrl+Enter.
+   * А Esc и крестик — это штатное «допишу позже», и они собирали черновик
+   * из УЖЕ загруженных файлов: нажатый через секунду после выбора файла
+   * Esc клал в «Черновики» письмо «см. вложение» с нулём вложений.
+   * Доехавшая загрузка дописывала файл в уже закрытое окно, то есть в
+   * никуда.
+   */
+  it('Esc не закрывает окно, пока файл ещё едет', async () => {
+    let release: ((value: unknown) => void) | undefined;
+    vi.spyOn(api, 'uploadAttachment').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }) as ReturnType<typeof api.uploadAttachment>,
+    );
+    const saveDraft = vi
+      .spyOn(api, 'saveDraft')
+      .mockResolvedValue({ draftUid: 5, savedAt: new Date().toISOString() } as never);
+
+    act(() => {
+      useUiStore.getState().openCompose({ to: 'ivan@mail.local', subject: 'см. вложение' });
+    });
+    render();
+
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement | null;
+    const file = new File(['x'.repeat(1024)], 'schet.pdf', { type: 'application/pdf' });
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    await act(async () => {
+      input?.dispatchEvent(new Event('change', { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    // Крестик окна — тот же путь, что и Esc.
+    const close = [...host.querySelectorAll('button')].find(
+      (b) => (b.getAttribute('aria-label') ?? '') === 'Закрыть',
+    );
+    await act(async () => {
+      close?.click();
+      await Promise.resolve();
+    });
+
+    expect(saveDraft, 'черновик собрали бы без ещё не доехавшего файла').not.toHaveBeenCalled();
+    expect(useUiStore.getState().composeWindows.length, 'окно закрылось раньше вложения').toBe(1);
+    expect(useUiStore.getState().notice ?? '').toContain('Ждём вложения');
+
+    // Файл доехал — закрытие работает как обычно.
+    await act(async () => {
+      release?.({ id: 'up-1', filename: 'schet.pdf', size: 1024 });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      close?.click();
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(saveDraft).toHaveBeenCalled();
+    const payload = saveDraft.mock.calls[0]?.[0] as { attachmentIds: string[] };
+    expect(payload.attachmentIds, 'вложение обязано попасть в черновик').toEqual(['up-1']);
+  });
 });

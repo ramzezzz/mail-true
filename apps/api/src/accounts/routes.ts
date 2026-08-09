@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { newSessionId } from '../crypto.js';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
+import { loadForwardedMessages } from '../mail/forwarded.js';
 import { setSessionCookie } from '../routes/auth.js';
 import { detectMailSettings, type LocalMailSettings } from './autodetect.js';
 import { decodeLabel } from './collectorRoutes.js';
@@ -91,6 +92,12 @@ const sendSchema = z.object({
   fromName: z.string().max(200).nullable().default(null),
   inReplyTo: z.string().max(1000).optional(),
   references: z.array(z.string().max(1000)).max(100).optional(),
+  // «Переслать как вложение» и просьба уведомить о прочтении работают и
+  // здесь. Раньше этих полей в схеме не было: окно показывало плашки
+  // вложенных писем и зажжённую кнопку, а до сервера они не доезжали —
+  // письмо уходило без них, и человеку говорили «отправлено».
+  attachMessageIds: z.array(z.string().min(1).max(200)).max(10).optional(),
+  requestReadReceipt: z.boolean().optional(),
 });
 
 /* ------------------------------------------------------------------ */
@@ -537,11 +544,25 @@ export async function accountsUserRoutes(
     const recipients = externalRecipients(draft);
     if (recipients.length === 0) throw new BadRequestError('Не указан ни один получатель');
 
+    /*
+     * Исходники пересылаемых писем читаются из СВОЕГО ящика: пересылают
+     * то, что человек получил у нас, даже когда письмо уходит с чужого
+     * адреса. Та же функция, что и на своём пути отправки, — иначе два
+     * способа однажды разъедутся, и разъедутся молча.
+     */
+    const forwarded =
+      draft.attachMessageIds && draft.attachMessageIds.length > 0
+        ? await app.deps.pool.withClient(session.email, session.password, (client) =>
+            loadForwardedMessages(client, draft.attachMessageIds ?? []),
+          )
+        : [];
+
     const raw = await composeExternalRaw(
       draft,
       { name: draft.fromName, address: found.account.address },
       uploads,
       session.email,
+      forwarded,
     );
     await sendAsExternal({
       account: found.account,

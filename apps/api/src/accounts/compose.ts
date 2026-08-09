@@ -10,6 +10,7 @@
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type Mail from 'nodemailer/lib/mailer/index.js';
 import { BadRequestError } from '../errors.js';
+import { forwardedAttachment, type ForwardedMessage } from '../mail/forwarded.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import type { UploadStore } from '../uploads.js';
@@ -28,6 +29,17 @@ export interface ExternalDraft {
   attachmentIds: string[];
   inReplyTo?: string | undefined;
   references?: string[] | undefined;
+  /**
+   * Письма, вложенные целиком, — «Переслать как вложение».
+   *
+   * Раньше этой возможности на внешнем пути не было вовсе: плашки
+   * вложенных писем были видны в окне до самого нажатия «Отправить», в
+   * запрос они не попадали, а человеку говорили «Письмо отправлено
+   * с адреса …». Получатель не получал ни одного из них.
+   */
+  attachMessageIds?: string[] | undefined;
+  /** Просьба уведомить о прочтении — тем же заголовком, что и у своих писем. */
+  requestReadReceipt?: boolean | undefined;
 }
 
 function toMailAddresses(list: ExternalAddress[]): Mail.Address[] {
@@ -54,8 +66,11 @@ export async function composeExternalRaw(
    * вошёл, — по ней хранилище и проверяет владельца.
    */
   owner: string,
+  /** Письма, пересылаемые целиком: их исходники читает вызывающий. */
+  forwarded: readonly ForwardedMessage[] = [],
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
+  for (const item of forwarded) attachments.push(forwardedAttachment(item));
   for (const id of draft.attachmentIds) {
     const found = await uploads.get(id, owner);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
@@ -78,6 +93,15 @@ export async function composeExternalRaw(
     attachments,
     date: new Date(),
   };
+  /*
+   * Просьба уведомить о прочтении — на адрес ПОДКЛЮЧЕНИЯ, а не свой:
+   * письмо уходит с чужого адреса, и уведомление должно вернуться туда
+   * же. Раньше кнопка в окне оставалась зажжённой, а заголовок не
+   * ставился вовсе — обещание без исполнения.
+   */
+  if (draft.requestReadReceipt) {
+    options.headers = { 'Disposition-Notification-To': `<${from.address}>` };
+  }
   if (draft.inReplyTo) options.inReplyTo = draft.inReplyTo;
   if (draft.references && draft.references.length > 0) options.references = draft.references;
 
