@@ -13,6 +13,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { assertDeliverableEndpoint, PushEndpointError } from './endpoint-guard.js';
 import { BadRequestError, UnauthorizedError } from '../errors.js';
 import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import type { MailSession } from '../types.js';
@@ -148,6 +149,22 @@ export async function pushRoutes(app: FastifyInstance, service: PushService): Pr
       );
     }
     const body = subscribeSchema.parse(request.body);
+
+    /*
+     * Куда именно нам предлагают ходить.
+     *
+     * Схемы `https` мало: по этому адресу сервер будет стучаться сам, на
+     * каждое новое письмо, и раньше туда годился любой внутренний узел —
+     * достаточно было войти в свою почту и собрать подписку руками.
+     * Проверяем и форму адреса, и то, куда ведёт имя.
+     */
+    try {
+      await assertDeliverableEndpoint(body.endpoint);
+    } catch (err) {
+      if (err instanceof PushEndpointError) throw new BadRequestError(err.message);
+      throw err;
+    }
+
     const db = service.db!;
     await db.saveSubscription({
       accountEmail: session.email,

@@ -154,11 +154,100 @@ export function buildZoneFile(
   return lines.join('\n') + '\n';
 }
 
+/**
+ * Разбор опубликованной TXT по существу.
+ *
+ * Возвращает не «совпало / не совпало», а ответ на вопрос, ради которого
+ * запись и проверяют: работает ли она.
+ */
+function judgeTxt(
+  record: DnsRecord,
+  published: readonly string[],
+): { status: DnsCheckResult['status']; comment: string } {
+  const first = published[0] ?? '';
+  const lower = first.toLowerCase();
+
+  if (record.name === '@') {
+    // SPF. Важны две вещи: разрешены ли наши отправители и что делать с
+    // остальными. Точный вид записи — дело владельца домена.
+    const allowsMx = /(^|\s)([+~-]?)(mx|a)(\s|:|$)/u.test(lower) || lower.includes('include:');
+    const all = /(^|\s)([+~?-])all(\s|$)/u.exec(lower);
+    if (!allowsMx) {
+      return {
+        status: 'mismatch',
+        comment:
+          'SPF опубликован, но не разрешает отправку с этого сервера: нужен механизм mx (или a/include)',
+      };
+    }
+    if (!all) {
+      return {
+        status: 'mismatch',
+        comment: 'В SPF нет завершающего all — получатели не знают, что делать с чужими письмами',
+      };
+    }
+    if (all[2] === '+') {
+      return {
+        status: 'mismatch',
+        comment: '«+all» разрешает отправку от вашего имени кому угодно — так делать нельзя',
+      };
+    }
+    return {
+      status: 'ok',
+      comment: all[2] === '-' ? 'SPF опубликован, политика строгая' : 'SPF опубликован',
+    };
+  }
+
+  if (record.name === '_dmarc') {
+    const policy = /(^|;)\s*p\s*=\s*(none|quarantine|reject)/u.exec(lower);
+    if (!policy) {
+      return {
+        status: 'mismatch',
+        comment: 'В DMARC нет политики p= (none, quarantine или reject)',
+      };
+    }
+    if (policy[2] === 'none') {
+      return {
+        status: 'ok',
+        comment: 'DMARC опубликован, но политика p=none ничего не предписывает получателям',
+      };
+    }
+    return { status: 'ok', comment: 'DMARC опубликован' };
+  }
+
+  // DKIM. Пока ключа нет, ожидаемого значения не существует — и сказать
+  // «совпадает» нельзя ни при какой опубликованной записи.
+  if (!record.ready) {
+    return {
+      status: 'unknown',
+      comment:
+        'Ключ DKIM ещё не выпущен rspamd, поэтому сверять опубликованное не с чем. ' +
+        'Поднимите почтовый стек и проверьте снова',
+    };
+  }
+  const normalize = (value: string): string => value.replace(/[\s;]+/gu, '');
+  const ok = published.some((value) => normalize(value) === normalize(record.value));
+  return {
+    status: ok ? 'ok' : 'mismatch',
+    comment: ok
+      ? 'опубликовано'
+      : 'опубликован другой ключ DKIM — письма будут подписаны не тем ключом',
+  };
+}
+
 export interface DnsCheckResult {
   name: string;
   type: string;
   expected: string;
-  status: 'ok' | 'mismatch' | 'missing' | 'error';
+  /**
+   * `unknown` — проверить нечем, а не «всё хорошо».
+   *
+   * Появилось из-за DKIM: пока rspamd не выпустил ключ, ожидаемого
+   * значения не существует, и сравнивать опубликованное не с чем. Раньше
+   * такой случай считался успехом, и самопроверка печатала зелёное
+   * «опубликована и совпадает» на чужой ключ, оставшийся от прежнего
+   * провайдера.
+   */
+  status: 'ok' | 'mismatch' | 'missing' | 'error' | 'unknown';
   found: string[];
   comment: string;
 }
@@ -225,12 +314,32 @@ export async function checkDns(
         case 'MX': {
           const mx = await withTimeout(resolver.resolveMx(fqdn(r.name)));
           const found = mx.map((m) => `${m.priority} ${m.exchange}`);
-          const ok = mx.some((m) => stripDot(m.exchange) === host);
+          const byName = mx.some((m) => stripDot(m.exchange) === host);
+          if (byName) {
+            /*
+             * Имя совпало — но этого мало. Совпадение имени ничего не
+             * говорит о том, есть ли у него адрес: MX, указывающий на
+             * хост без A-записи, почту не принимает вовсе, а проверка
+             * рапортовала зелёным. Тот же дефект в админской проверке
+             * уже разобран (apps/api/src/admin/dns.ts) — здесь осталась
+             * прежняя версия.
+             */
+            const ips = await ownIps();
+            if (ips.length === 0) {
+              return {
+                ...base,
+                status: 'mismatch',
+                found,
+                comment: `MX указывает на ${host}, но у этого имени нет адреса (A-записи) — почта на домен не придёт`,
+              };
+            }
+            return { ...base, status: 'ok', found, comment: 'MX указывает на наш сервер' };
+          }
           return {
             ...base,
-            status: ok ? 'ok' : 'mismatch',
+            status: 'mismatch',
             found,
-            comment: ok ? 'MX указывает на наш сервер' : 'MX не указывает на наш сервер',
+            comment: 'MX не указывает на наш сервер',
           };
         }
         case 'TXT': {
@@ -245,14 +354,17 @@ export async function checkDns(
               comment: `TXT-запись с ${marker} не найдена`,
             };
           }
-          const normalize = (s: string): string => s.replace(/[\s;]+/g, '');
-          const ok = !r.ready || relevant.some((t) => normalize(t) === normalize(r.value));
-          return {
-            ...base,
-            status: ok ? 'ok' : 'mismatch',
-            found: relevant,
-            comment: ok ? 'опубликовано' : 'опубликованное значение отличается от ожидаемого',
-          };
+          /*
+           * Сверяем ПО СУЩЕСТВУ, а не посимвольно.
+           *
+           * Побуквенное сравнение объявляло ошибкой более строгий
+           * `-all` вместо `~all` и свой адрес для отчётов DMARC — то
+           * есть подталкивало администратора «починить» верную запись,
+           * ослабив её. Проверять надо смысл: разрешает ли SPF наши MX,
+           * задана ли политика DMARC.
+           */
+          const verdict = judgeTxt(r, relevant);
+          return { ...base, status: verdict.status, found: relevant, comment: verdict.comment };
         }
         case 'CNAME': {
           const name = fqdn(r.name);
