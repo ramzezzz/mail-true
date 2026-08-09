@@ -17,7 +17,7 @@ import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
 import { Badge, ErrorNotice, Field, Notice, Panel, Toolbar, ToolbarSpacer } from '../components/ui';
 import { summarizeCsv } from '../lib/csvPreview';
 import { TEMPLATE_FILENAME, templateCsv, templateCsvWithBom } from '@shared/import-template';
-import { formatBytes, pluralize } from '../lib/format';
+import { formatBytes, formatDateTime, pluralize } from '../lib/format';
 import { DEFAULT_QUOTA_UNIT, quotaToBytes, splitQuota, type QuotaUnit } from '../lib/quota';
 import { QuotaInput } from '../components/QuotaInput';
 
@@ -138,6 +138,16 @@ export function ImportPage() {
     refetchInterval: (query) => (query.state.data?.state === 'running' ? 1000 : false),
   });
   const result = job.data ?? null;
+
+  /*
+   * Прошлые задания. Обновляются, пока идёт текущее: человек видит, как
+   * оно попадает в список, и знает, где искать его потом.
+   */
+  const jobs = useQuery({
+    queryKey: ['import-jobs'],
+    queryFn: () => api.importJobs(),
+    refetchInterval: result?.state === 'running' ? 2000 : false,
+  });
 
   async function onFile(file: File): Promise<void> {
     const text = await file.text();
@@ -461,6 +471,69 @@ export function ImportPage() {
           </Panel>
         </div>
       )}
+
+      {/*
+        Прошлые задания импорта.
+
+        ------------------------------------------------------------------
+        ЧТО БЫЛО
+        ------------------------------------------------------------------
+        Номер задания жил только в памяти этой вкладки. Вся конструкция
+        «результат переживает обрыв связи» упиралась в F5: пароли лежат в
+        базе зашифрованными, а достать их нечем — номера-то нет. Список
+        сервер отдавал давно, панель его не спрашивала ни разу.
+      */}
+      <div style={{ marginTop: 12 }}>
+        <Panel title="Прошлые импорты">
+          <p style={{ margin: '0 0 10px', color: 'var(--mt-color-text-secondary)' }}>
+            Пароли хранятся зашифрованными до истечения срока: если вкладку закрыли, не сохранив их,
+            возьмите отсюда.
+          </p>
+          <ErrorNotice error={jobs.error} />
+          <TableWrap>
+            <Table>
+              <thead>
+                <tr>
+                  <th className={tableStyles.numeric}>№</th>
+                  <th>Когда</th>
+                  <th>Кто</th>
+                  <th>Состояние</th>
+                  <th className={tableStyles.numeric}>Создано</th>
+                  <th>Пароли до</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {(jobs.data?.items ?? []).map((job) => (
+                  <tr key={job.id}>
+                    <td className={tableStyles.numeric}>{job.id}</td>
+                    <td>{formatDateTime(job.createdAt)}</td>
+                    <td className="mt-mono">{job.adminLogin}</td>
+                    <td>{JOB_STATE[job.state]}</td>
+                    <td className={tableStyles.numeric}>{job.createdCount}</td>
+                    <td>{new Date(job.expiresAt).toLocaleDateString('ru-RU')}</td>
+                    <td>
+                      <Button mode="secondary" size="s" onClick={() => setJobId(job.id)}>
+                        Открыть
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+                {(jobs.data?.items ?? []).length === 0 && (
+                  <EmptyRow colSpan={7}>Импортов ещё не было</EmptyRow>
+                )}
+              </tbody>
+            </Table>
+          </TableWrap>
+        </Panel>
+      </div>
     </>
   );
 }
+
+/** Состояние задания по-человечески. */
+const JOB_STATE: Record<'running' | 'done' | 'failed', string> = {
+  running: 'идёт',
+  done: 'закончен',
+  failed: 'прерван',
+};

@@ -434,3 +434,46 @@ test('у каждого раздела есть название по-русск
     assert.match(section.title, /[а-яА-Я]/u);
   }
 });
+
+test('план не обещает перенаправления, которые восстановление пропустит', () => {
+  /*
+   * Восстановление отказывается заводить алиас, чей исходный адрес занят
+   * живым ящиком: такой алиас увёл бы всю его входящую почту. План этого
+   * не учитывал и считал раздел по всем алиасам копии подряд — человек
+   * читал «Появится 1», получал ноль и оставался с мыслью, что копия
+   * неполная. Объяснения не было нигде: предупреждение сервера до экрана
+   * тоже не доходило.
+   */
+  const current = emptyCurrent();
+  current.domains = ['staraya.ru'];
+  // Адрес алиаса из копии теперь занят настоящим ящиком.
+  current.mailboxes = ['info@staraya.ru'];
+
+  const plan = buildRestorePlan(sampleBackup(), current, {
+    currentAdminLogin: 'admin',
+    hostname: 'mail.staraya.ru',
+  });
+  const aliases = plan.sections.find((s) => s.id === 'aliases');
+
+  assert.deepEqual(aliases?.create, [], 'план обещает алиас, который не заведётся');
+  assert.deepEqual(aliases?.overwrite, []);
+  assert.ok(
+    (aliases?.warnings ?? []).some((w) => w.includes('info@staraya.ru')),
+    'человеку не сказано, какое перенаправление пропустят и почему',
+  );
+});
+
+test('обычные перенаправления план по-прежнему обещает', () => {
+  // Обратная сторона: отсев не должен съедать нормальные алиасы.
+  const current = emptyCurrent();
+  current.domains = ['staraya.ru'];
+  current.mailboxes = ['ivan@staraya.ru'];
+
+  const plan = buildRestorePlan(sampleBackup(), current, {
+    currentAdminLogin: 'admin',
+    hostname: 'mail.staraya.ru',
+  });
+  const aliases = plan.sections.find((s) => s.id === 'aliases');
+  assert.deepEqual(aliases?.create, ['info@staraya.ru → ivan@staraya.ru']);
+  assert.deepEqual(aliases?.warnings, []);
+});

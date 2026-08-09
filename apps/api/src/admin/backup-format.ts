@@ -494,7 +494,42 @@ export function buildRestorePlan(
     }
   }
 
-  split('aliases', file.data.aliases, aliasKey, lower(current.aliases));
+  /*
+   * Перенаправления, которые восстановление ЗАВЕДОМО пропустит.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * План считал раздел по всем алиасам копии подряд и обещал «Появится
+   * (12)», а применялось девять: восстановление отказывается заводить
+   * алиас, чей исходный адрес занят живым ящиком — такой алиас увёл бы
+   * всю входящую почту этого ящика (backup-store.ts). Список ящиков
+   * здесь есть, а в расчёт не входил.
+   *
+   * Расхождение молчаливое и объясняется нигде: предупреждение сервера
+   * до экрана раньше тоже не доходило. Человек читал «Появится 12»,
+   * получал девять и оставался с мыслью, что копия неполная.
+   */
+  const liveMailboxes = lower(current.mailboxes);
+  const skippedAliases = file.data.aliases.filter((a) => liveMailboxes.has(a.source.toLowerCase()));
+  split(
+    'aliases',
+    file.data.aliases.filter((a) => !liveMailboxes.has(a.source.toLowerCase())),
+    aliasKey,
+    lower(current.aliases),
+    skippedAliases.length > 0
+      ? [
+          `Не будут восстановлены: ${String(skippedAliases.length)}. ` +
+            `Их исходный адрес — существующий ящик (${skippedAliases
+              .slice(0, 10)
+              .map((a) => a.source)
+              .join(', ')}` +
+            (skippedAliases.length > 10 ? ` и ещё ${String(skippedAliases.length - 10)}` : '') +
+            '), а перенаправления Postfix разбирает раньше ящиков: такой алиас увёл бы ' +
+            'всю входящую почту ящика в сторону.',
+        ]
+      : [],
+  );
 
   const adminWarnings: string[] = [];
   const meInBackup = file.data.admins.find(

@@ -24,7 +24,7 @@ import { api } from '../api/client';
 import type { BackupPreviewResponse, BackupRestoreResponse } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
-import { ErrorNotice, Notice, Panel } from '../components/ui';
+import { ErrorNotice, Field, Notice, Panel } from '../components/ui';
 import { formatDateTime } from '../lib/format';
 
 const MUTED = { color: 'var(--mt-admin-muted)' } as const;
@@ -37,6 +37,13 @@ export function BackupPage() {
   const [result, setResult] = useState<BackupRestoreResponse | null>(null);
   const [skipped, setSkipped] = useState<Set<string>>(new Set());
   const [flash, setFlash] = useState<string | null>(null);
+  /**
+   * Набранное слово подтверждения.
+   *
+   * Сбрасывается вместе с выбором файла: подтверждение относится к
+   * КОНКРЕТНОЙ копии, и переносить его на следующую нельзя.
+   */
+  const [confirmWord, setConfirmWord] = useState('');
 
   const info = useQuery({
     queryKey: ['backup', 'sections'],
@@ -82,6 +89,9 @@ export function BackupPage() {
     setPreview(null);
     setResult(null);
     setFlash(null);
+    // Подтверждение относится к КОНКРЕТНОЙ копии: переносить его на
+    // следующий выбранный файл нельзя.
+    setConfirmWord('');
     if (file) previewBackup.mutate(file);
   };
 
@@ -246,9 +256,41 @@ export function BackupPage() {
               );
             })}
 
+            {/*
+              Слово руками — как при смене основного домена.
+
+              Сервер требует подтверждения, но клиент подставлял его сам,
+              и всё восстановление было ОДНИМ нажатием. А оно переписывает
+              хэши паролей всех ящиков и учётные записи администраторов,
+              включая того, кто нажал: отката нет, войти после этого можно
+              только паролем из копии. «Да» в таком месте набирают не
+              читая — поэтому здесь набирают слово.
+            */}
+            <Field
+              label="Подтверждение"
+              hint="Наберите слово «восстановить»: действие переписывает пароли ящиков и администраторов, отменить его нечем."
+            >
+              <input
+                className="mt-input"
+                style={{ maxWidth: 260 }}
+                value={confirmWord}
+                onChange={(e) => setConfirmWord(e.target.value)}
+                placeholder="восстановить"
+              />
+            </Field>
+
             <Button
               size="s"
-              disabled={restore.isPending || selected.length === 0}
+              disabled={
+                restore.isPending ||
+                selected.length === 0 ||
+                confirmWord.trim().toLowerCase() !== 'восстановить'
+              }
+              title={
+                confirmWord.trim().toLowerCase() === 'восстановить'
+                  ? undefined
+                  : 'Наберите слово «восстановить» выше'
+              }
               onClick={() => {
                 setFlash(null);
                 restore.mutate({ file: chosen, sections: selected });
@@ -271,6 +313,15 @@ export function BackupPage() {
                 .join('; ') || 'изменений не потребовалось'}
             </Notice>
             {result.note && <Notice tone="info">{result.note}</Notice>}
+            {/*
+              Предупреждения сервера. Он их формировал давно, а в типе
+              ответа их не было — значит на экран они не попадали вовсе.
+              Молчание тут дороже всего: перенаправления «просто не
+              вернулись» (копия выглядит неполной), а перенос почты встаёт
+              через час, и связать одно с другим уже не с чем.
+            */}
+            {result.aliasWarning && <Notice tone="error">{result.aliasWarning}</Notice>}
+            {result.migrationWarning && <Notice tone="error">{result.migrationWarning}</Notice>}
             {result.brandingError && (
               <Notice tone="error">
                 Всё перечисленное выше восстановлено, а оформление входа — нет:{' '}
