@@ -195,6 +195,79 @@ describe('отказ мутации', () => {
 });
 
 /**
+ * Перетаскивание письма в папку.
+ *
+ * Строка списка представляет ПЕРЕПИСКУ, а не письмо: под ней может лежать
+ * шесть писем. Все действия панели раскрывают её перед отправкой на
+ * сервер — перетаскивание клало в буфер идентификаторы строк как есть.
+ * В папку переезжало одно последнее письмо из шести, а строка исчезала из
+ * списка целиком: человек видел переехавшую переписку, у которой пять
+ * писем остались во «Входящих».
+ */
+describe('перетаскивание в папку', () => {
+  it('в буфер кладутся все письма переписки, а не одна строка', async () => {
+    vi.spyOn(api, 'getMessages').mockImplementation(
+      vi.fn(async () => ({
+        items: [
+          {
+            ...summary(9),
+            thread: {
+              messageIds: ['inbox:1', 'inbox:4', 'inbox:9'],
+              count: 3,
+              unreadCount: 0,
+              flagged: false,
+              hasAttachments: false,
+              labels: [],
+              participants: [{ name: 'Иван', address: 'ivan@example.com' }],
+            },
+          } as MessageSummary,
+        ],
+        total: 1,
+        offset: 0,
+        limit: 100,
+      })),
+    );
+    /*
+     * Виртуализация меряет окно списка через offsetHeight, а в jsdom он
+     * всегда ноль — без этой подпорки не отрисовалось бы ни одной строки
+     * (тот же приём в keyboardAccess.test.tsx).
+     */
+    for (const [prop, value] of [
+      ['offsetHeight', 600],
+      ['offsetWidth', 900],
+    ] as const) {
+      Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, value });
+    }
+
+    render();
+    await waitFor(
+      () => host.querySelectorAll('a[draggable="true"]').length > 0,
+      'строка списка с перепиской',
+    );
+
+    const row = host.querySelector('a[draggable="true"]') as HTMLElement | null;
+    expect(row, 'строка списка должна быть перетаскиваемой').toBeTruthy();
+
+    const stored = new Map<string, string>();
+    const transfer = {
+      setData: (format: string, value: string) => void stored.set(format, value),
+      getData: (format: string) => stored.get(format) ?? '',
+      get types() {
+        return [...stored.keys()];
+      },
+      effectAllowed: 'none',
+    } as unknown as DataTransfer;
+
+    const event = new Event('dragstart', { bubbles: true });
+    Object.defineProperty(event, 'dataTransfer', { value: transfer });
+    act(() => void row!.dispatchEvent(event));
+
+    const payload = JSON.parse(stored.get('application/x-mail-true-ids') ?? '[]') as string[];
+    expect(payload).toEqual(['inbox:1', 'inbox:4', 'inbox:9']);
+  });
+});
+
+/**
  * «Переслать как вложение» в меню над списком.
  *
  * Раньше пункт только писал в консоль браузера: человек нажимал и не

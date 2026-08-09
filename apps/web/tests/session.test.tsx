@@ -17,6 +17,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { api } from '../src/api';
 import { ApiError } from '../src/api/http';
 import { SessionProvider, useSession } from '../src/app/session';
+import { useUiStore } from '../src/app/store';
 import { LoginPage } from '../src/pages/LoginPage';
 
 let host: HTMLDivElement;
@@ -157,6 +158,44 @@ describe('выход', () => {
 
     await waitFor(() => text().includes('Вход в почту'), 'экран входа после выхода');
     expect(logout).toHaveBeenCalled();
+  });
+
+  it('выход закрывает окна написания: чужое письмо не достаётся следующему', async () => {
+    /*
+     * Окна написания живут вне кэша запросов, поэтому `queryClient.clear()`
+     * их не трогал, а сам компонент монтируется заново для любой сессии.
+     * На общем компьютере следующий вошедший видел недописанное письмо
+     * предыдущего — с адресатами и текстом. Тот же путь при переключении
+     * на связанный ящик отправил бы письмо уже от нового адреса.
+     */
+    vi.spyOn(api, 'getSession').mockResolvedValue({
+      authenticated: true,
+      email: 'test@mail.local',
+    });
+    vi.spyOn(api, 'logout').mockResolvedValue(undefined);
+
+    useUiStore.getState().openCompose();
+    useUiStore.getState().updateComposeDraft(useUiStore.getState().composeWindows[0]!.id, {
+      bodyHtml: '<p>черновик прежнего владельца</p>',
+    });
+    expect(useUiStore.getState().composeWindows.length).toBe(1);
+
+    render(
+      <>
+        <Gate />
+        <LogoutButton />
+      </>,
+    );
+    await waitFor(() => text().includes('Список писем'), 'список писем');
+
+    const button = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Выйти');
+    act(() => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await waitFor(() => text().includes('Вход в почту'), 'экран входа после выхода');
+
+    expect(
+      useUiStore.getState().composeWindows,
+      'недописанное письмо осталось открытым после выхода',
+    ).toEqual([]);
   });
 });
 

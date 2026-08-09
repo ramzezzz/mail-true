@@ -24,6 +24,7 @@ import { setUnauthorizedHandler } from '../api/http';
 import type { SessionInfo } from '../api/types';
 import { forgetAppearance, syncAppearance } from '../appearance/sync';
 import { publishMailEvent } from './mailEvents';
+import { useUiStore } from './store';
 
 interface SessionState {
   session: SessionInfo | null;
@@ -110,6 +111,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await api.logout().catch(() => undefined);
     setSession(null);
     queryClient.clear();
+    /*
+     * Окна написания живут ВНЕ кэша запросов, поэтому clear() их не
+     * трогает, а сам компонент монтируется заново для любой сессии. На
+     * общем компьютере следующий вошедший видел недописанное письмо
+     * предыдущего — с адресатами и текстом.
+     */
+    useUiStore.getState().closeAllCompose();
     // Тема и фон — такие же данные ящика, как письма: оставить их
     // следующему нельзя. На общем компьютере вошедший после увидел бы
     // оформление предыдущего (см. appearance/sync.ts).
@@ -129,6 +137,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     async (email: string) => {
       const result = await accountsApi.switchAccount(email);
       queryClient.clear();
+      /*
+       * И окна написания — по той же причине, что кэш. Оставшееся окно
+       * отправило бы письмо уже от НОВОГО адреса, а «Сохранить» ушло бы в
+       * черновики нового ящика по номеру, под которым там лежит совсем
+       * другое письмо.
+       */
+      useUiStore.getState().closeAllCompose();
       setSession({ authenticated: true, email: result.email });
       await refresh();
     },

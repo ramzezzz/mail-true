@@ -14,6 +14,7 @@ import { useUiStore } from '../app/store';
 import { Spinner } from '../components';
 import { cx } from '../lib/cx';
 import { getDragMessages, isMessageDrag } from '../lib/dragMessages';
+import { chunkIds } from '../mail/threadList';
 import { IconCompose, IconFolderRole } from '../mail/icons';
 import { SavedSearches } from '../search/SavedSearches';
 import styles from './Sidebar.module.css';
@@ -33,7 +34,18 @@ export function Sidebar() {
     setDropTarget(null);
     const ids = getDragMessages(transfer);
     if (ids.length === 0) return;
-    moveMessages.mutate({ ids, targetFolderId: folderId });
+    /*
+     * Порциями — как все остальные действия над письмами.
+     *
+     * Сервер отвергает запрос, в котором больше пятисот писем, целиком.
+     * Перетаскивание отправляло список одним куском: выделив тысячу писем
+     * и перетащив их в папку, человек не перемещал НИ ОДНОГО и видел
+     * только общую плашку отказа. Раскрытие переписок делает список ещё
+     * длиннее — под сотней строк легко лежит несколько сотен писем.
+     */
+    for (const chunk of chunkIds(ids)) {
+      moveMessages.mutate({ ids: chunk, targetFolderId: folderId });
+    }
     clearSelection();
   };
 

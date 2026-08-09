@@ -381,6 +381,46 @@ describe('закрытие окна написания', () => {
     ).toBe(1);
   });
 
+  it('крестик СВЁРНУТОГО окна тоже сохраняет написанное', async () => {
+    /*
+     * Ту же беду чинили у развёрнутого окна, а у свёрнутого она осталась.
+     * Причина: проверка «есть ли что терять» смотрела на текст РЕДАКТОРА,
+     * а у свёрнутой плашки редактора в DOM нет вовсе — ref пуст. Если
+     * человек набрал только текст (тему и адресата ещё не заполнил),
+     * окно считалось пустым и закрывалось молча.
+     */
+    const saveDraft = vi
+      .spyOn(api, 'saveDraft')
+      .mockResolvedValue({ savedAt: new Date().toISOString(), draftUid: 11 } as never);
+
+    render();
+    act(() => useUiStore.getState().openCompose());
+
+    const editor = host.querySelector('[aria-label="Текст письма"]') as HTMLElement;
+    act(() => {
+      editor.innerHTML = '<div>Набрано и свёрнуто — терять нельзя.</div>';
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // Сворачиваем: редактор уходит из DOM, остаётся плашка.
+    const [win] = useUiStore.getState().composeWindows;
+    act(() => useUiStore.getState().toggleComposeMinimized(win!.id));
+    expect(
+      host.querySelector('[aria-label="Текст письма"]'),
+      'после сворачивания редактора в DOM быть не должно',
+    ).toBeNull();
+
+    const cross = [...host.querySelectorAll('button')].find(
+      (b) => b.getAttribute('aria-label') === 'Закрыть',
+    );
+    expect(cross, 'крестик на свёрнутой плашке должен быть').toBeTruthy();
+    act(() => cross!.click());
+
+    await waitFor(() => saveDraft.mock.calls.length > 0, 'черновик должен сохраниться');
+    const payload = saveDraft.mock.calls[0]?.[0] as { bodyHtml?: string };
+    expect(payload.bodyHtml).toContain('терять нельзя');
+  });
+
   it('пустое окно закрывается сразу, черновик из ничего не заводится', async () => {
     const saveDraft = vi.spyOn(api, 'saveDraft').mockResolvedValue({} as never);
 

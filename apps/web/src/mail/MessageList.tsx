@@ -60,6 +60,7 @@ import styles from './MessageList.module.css';
 import { SenderAvatar } from './SenderAvatar';
 import {
   correspondentLabel,
+  expandThreadIds,
   displayName,
   isRowFlagged,
   isRowUnread,
@@ -292,6 +293,16 @@ interface RowProps {
   onOpen?: MessageListProps['onOpen'];
   /** Ставится только на строку под курсором — по нему и переносится фокус. */
   rowRef?: ((node: HTMLAnchorElement | null) => void) | undefined;
+  /**
+   * Строки -> письма. Нужно ровно одному месту — началу перетаскивания.
+   *
+   * Строка списка представляет ПЕРЕПИСКУ, а не письмо: под ней может
+   * лежать шесть писем. Все действия панели раскрывают её перед отправкой
+   * на сервер, а перетаскивание клало в буфер обмена идентификаторы строк
+   * как есть — и в папку переезжало одно последнее письмо из шести, тогда
+   * как строка исчезала из списка целиком.
+   */
+  expandIds: (rowIds: readonly string[]) => string[];
 }
 
 /** Ось, по которой пошло касание. `'?'` — ещё не решили. */
@@ -312,6 +323,7 @@ function Row({
   onSwipe,
   onOpen,
   rowRef,
+  expandIds,
 }: RowProps) {
   const toggleSelected = useUiStore((s) => s.toggleSelected);
   const selectedIds = useUiStore((s) => s.selectedIds);
@@ -421,8 +433,10 @@ function Row({
       onDragStart={(e) => {
         // Тащим выделение целиком, если тащат одно из выделенных писем;
         // иначе — только строку под курсором.
-        const ids = selection.selected && selectedIds.size > 0 ? [...selectedIds] : [message.id];
-        setDragMessages(e.dataTransfer, ids);
+        const rowIds = selection.selected && selectedIds.size > 0 ? [...selectedIds] : [message.id];
+        // В буфер кладём ПИСЬМА, а не строки: папка-приёмник о переписках
+        // не знает и знать не должна.
+        setDragMessages(e.dataTransfer, expandIds(rowIds));
       }}
       onClick={(e) => {
         // После смахивания браузер всё равно шлёт клик по строке. Без этой
@@ -658,6 +672,18 @@ export function MessageList({
     for (const m of messages) counts.set(m.threadId, (counts.get(m.threadId) ?? 0) + 1);
     return counts;
   }, [messages]);
+
+  /**
+   * Строки -> письма для перетаскивания.
+   *
+   * То же самое, что делает панель действий перед любым запросом к
+   * серверу (см. expandThreadIds): строка представляет разговор, а
+   * переезжать должны все его письма.
+   */
+  const expandRowIds = useCallback(
+    (rowIds: readonly string[]): string[] => expandThreadIds([...rowIds], messages),
+    [messages],
+  );
 
   const selectionStates = useMemo(
     () =>
@@ -898,6 +924,7 @@ export function MessageList({
                     onContextMenu={onContextMenu}
                     onSwipe={onSwipe}
                     onOpen={onOpen}
+                    expandIds={expandRowIds}
                   />
                 )}
               </div>

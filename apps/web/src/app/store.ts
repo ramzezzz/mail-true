@@ -245,6 +245,18 @@ interface UiState {
   composeWindows: readonly ComposeWindowState[];
   openCompose(init?: ComposeInit): void;
   closeCompose(id: number): void;
+  /**
+   * Закрыть ВСЕ окна написания — при выходе и при смене ящика.
+   *
+   * Окна живут вне кэша запросов, поэтому `queryClient.clear()` их не
+   * трогает, а сам компонент монтируется заново для любой сессии. Из-за
+   * этого недописанное письмо переживало выход: на общем компьютере
+   * следующий вошедший видел чужой текст с чужими адресатами. Хуже того,
+   * после переключения на связанный ящик окно отправило бы письмо уже от
+   * НОВОГО адреса, а «Сохранить» ушло бы в черновики нового ящика — по
+   * номеру, под которым там лежит совсем другое письмо.
+   */
+  closeAllCompose(): void;
   toggleComposeMinimized(id: number): void;
   /**
    * Правка черновика окна — переживает сворачивание и перерисовку.
@@ -325,6 +337,7 @@ export const useUiStore = create<UiState>((set) => ({
     })),
   closeCompose: (id) =>
     set((s) => ({ composeWindows: s.composeWindows.filter((w) => w.id !== id) })),
+  closeAllCompose: () => set({ composeWindows: [] }),
   toggleComposeMinimized: (id) =>
     set((s) => ({
       composeWindows: s.composeWindows.map((w) =>

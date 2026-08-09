@@ -690,7 +690,25 @@ export function ComposeWindow({
     // Смотрим на видимый текст, а не на разметку: у пустого редактора
     // innerHTML не пустой — браузер держит там <br> или неразрывный пробел,
     // и по разметке любое только что открытое окно считалось бы непустым.
-    (editorRef.current?.textContent ?? '').replace(/\u00A0/g, ' ').trim() !== '';
+    (editorRef.current?.textContent ?? '').replace(/\u00A0/g, ' ').trim() !== '' ||
+    /*
+     * У СВЁРНУТОГО окна редактора в DOM нет вовсе.
+     *
+     * Свёрнутая плашка рисуется другой веткой, ref пуст — и проверка выше
+     * давала «пусто» при любом набранном тексте, если человек не успел
+     * заполнить ни тему, ни адресата. Крестик на плашке закрывал окно
+     * молча, без черновика и без вопроса: ровно та беда, от которой уже
+     * чинили крестик развёрнутого окна.
+     *
+     * Поэтому вторым признаком идёт сохранённое тело письма — оно живёт в
+     * состоянии окна и сворачивание переживает. Теги отбрасываем по той же
+     * причине, что и выше: «<p><br></p>» — это пустое письмо.
+     */
+    draft.bodyHtml
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(new RegExp(String.fromCharCode(160), 'g'), ' ')
+      .trim() !== '';
 
   /**
    * Закрытие крестиком.
@@ -1352,13 +1370,27 @@ export function ComposeWindow({
 
         {/* Нижняя панель */}
         <div className={styles.footer}>
+          {/*
+            Оба пути отправки, а не один.
+
+            Письмо от чужого подключённого ящика уходит другой мутацией
+            (sendAsExternal), и её здесь не было: кнопка оставалась
+            доступной и подписанной «Отправить», пока запрос шёл к чужому
+            SMTP — а он медленный. Нетерпеливое второе нажатие отправляло
+            письмо ДВАЖДЫ. Обработчик Ctrl+Enter рядом учитывает обе
+            мутации и объясняет зачем; кнопка про вторую не знала.
+          */}
           <Button
             mode="primary"
             className={styles.sendButton}
             onClick={send}
-            disabled={sendMessage.isPending}
+            disabled={sendMessage.isPending || sendAsExternal.isPending}
           >
-            {sendMessage.isPending ? 'Отправка…' : draft.sendAt ? 'Отправить позже' : 'Отправить'}
+            {sendMessage.isPending || sendAsExternal.isPending
+              ? 'Отправка…'
+              : draft.sendAt
+                ? 'Отправить позже'
+                : 'Отправить'}
           </Button>
           <Button mode="secondary" onClick={() => void save()} disabled={saveDraft.isPending}>
             {saveDraft.isPending ? 'Сохранение…' : 'Сохранить'}
