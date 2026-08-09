@@ -37,6 +37,7 @@ import {
   Tooltip,
 } from '../components';
 import { LabelMenu } from '../mail/LabelMenu';
+import { orderedMessages } from '../mail/MessageList';
 import { LabelPills } from '../mail/LabelPill';
 import { useApplyLabels, useLabelsState } from '../mail/useLabels';
 import { isReliable, messageCategory } from '../lib/categories';
@@ -302,7 +303,17 @@ export function MessagePage() {
    * совпадения не находилось вовсе — обе стрелки гасли намертво.
    */
   const { prevId, nextId } = useMemo(() => {
-    const rows = page?.items ?? [];
+    /*
+     * Соседи берутся в том порядке, в каком строки НАРИСОВАНЫ в списке.
+     *
+     * Раньше это был сырой ответ сервера, а список переставляет строки:
+     * вернувшиеся из «Отложенных» и оставшиеся без ответа поднимаются
+     * группами наверх. Человек открывал первое письмо сверху, жал
+     * «Следующее» — и попадал не во вторую строку экрана, а в письмо из
+     * середины списка; вернувшись «К списку», не находил места, где
+     * остановился.
+     */
+    const rows = orderedMessages(page?.items ?? []);
     const index = rows.findIndex(
       (m) => m.id === id || (m.thread?.messageIds ?? []).some((mid) => mid === id),
     );

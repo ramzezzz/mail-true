@@ -96,14 +96,37 @@ export function Dropdown({
     const onPointerDown = (e: PointerEvent) => {
       if (hostRef.current && !hostRef.current.contains(e.target as Node)) dismiss();
     };
+    /*
+     * Escape меню — только про меню.
+     *
+     * ------------------------------------------------------------------
+     * ЧТО БЫЛО
+     * ------------------------------------------------------------------
+     * Слушали в фазе всплытия и событие никак не гасили. А страница
+     * папки и страница письма держат свои обработчики Escape на том же
+     * `document`: во всплытии оба слушателя равноправны и срабатывают
+     * оба. Отсюда прямые потери работы человека.
+     *
+     * В списке: набрал галочками два десятка писем, открыл «Ещё
+     * действия», передумал, нажал Escape — меню закрылось и весь набор
+     * пропал. В письме: открыл «В папку», нажал Escape — вместо закрытия
+     * меню выбросило на страницу списка.
+     *
+     * Лечится тем же приёмом, что в Modal и ContextMenu: перехват на
+     * `document` идёт ДО того, как событие дойдёт до цели и пойдёт
+     * обратно, поэтому здешний `stopPropagation` до всплытия его и не
+     * допускает.
+     */
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dismiss();
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      dismiss();
     };
     document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [open, dismiss]);
 

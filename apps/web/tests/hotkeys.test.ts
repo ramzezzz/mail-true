@@ -195,6 +195,7 @@ describe('справка по клавишам', () => {
       Delete: () => matchHotkey({ key: 'Delete' }),
       '↑': () => matchHotkey({ key: 'ArrowUp' }),
       '↓': () => matchHotkey({ key: 'ArrowDown' }),
+      Пробел: () => matchHotkey({ key: ' ' }),
     };
     // Сочетания — отдельно от одиночных клавиш: «↑ ↓» в одной строке справки
     // это две клавиши, а «Shift+J» — одна пара, и путать их нельзя.
@@ -217,5 +218,43 @@ describe('справка по клавишам', () => {
         }
       }
     }
+  });
+});
+
+describe('отметить письмо с клавиатуры', () => {
+  it('пробел отмечает письмо под курсором', () => {
+    // Раньше отметить одно письмо можно было ТОЛЬКО мышью: галочка на
+    // рабочем столе показывается по наведению, значит её нет ни в обходе
+    // по Tab, ни в дереве доступности. Вместе с ней для работающего
+    // клавиатурой пропадала вся панель выделения.
+    expect(matchHotkey({ key: ' ' })).toBe('toggle-select');
+  });
+
+  it('с Shift пробел молчит: это уже другое действие, и его у нас нет', () => {
+    expect(matchHotkey({ key: ' ', shiftKey: true })).toBeNull();
+  });
+
+  it('в поле ввода пробел остаётся пробелом', () => {
+    const field = { tagName: 'INPUT' } as unknown as EventTarget;
+    expect(hotkeyFor({ key: ' ' }, field)).toBeNull();
+  });
+
+  it('на кнопке внутри списка пробел не перехватывается: он её нажимает', () => {
+    // Пробел — родная клавиша кнопки и галочки, а внутри строки списка
+    // они есть: выделение и звёздочка. Обычные горячие клавиши внутри
+    // списка работают всегда, но с пробелом это правило не годится.
+    const button = document.createElement('button');
+    const list = document.createElement('div');
+    list.setAttribute('data-hotkeys', 'list');
+    list.appendChild(button);
+    expect(hotkeyFor({ key: ' ' }, button)).toBeNull();
+  });
+
+  it('на самой строке письма пробел отмечает письмо', () => {
+    const row = document.createElement('div');
+    const list = document.createElement('div');
+    list.setAttribute('data-hotkeys', 'list');
+    list.appendChild(row);
+    expect(hotkeyFor({ key: ' ' }, row)).toBe('toggle-select');
   });
 });

@@ -54,7 +54,7 @@ import {
 import { ListToolbar } from '../mail/ListToolbar';
 import { MailboxReview, type ReviewTab } from '../mail/MailboxReview';
 import { useMailboxReviewAvailable } from '../mail/useMailings';
-import { MessageList } from '../mail/MessageList';
+import { MessageList, orderedMessages } from '../mail/MessageList';
 import {
   chunkIds,
   expandThreadIds,
@@ -127,6 +127,7 @@ export function FolderPage() {
   const selectedIds = useUiStore((s) => s.selectedIds);
   const selectMany = useUiStore((s) => s.selectMany);
   const clearSelection = useUiStore((s) => s.clearSelection);
+  const toggleSelected = useUiStore((s) => s.toggleSelected);
   const openCompose = useUiStore((s) => s.openCompose);
   const visitedMessage = useUiStore((s) => s.visitedMessage);
   const clearVisitedMessage = useUiStore((s) => s.clearVisitedMessage);
@@ -532,18 +533,52 @@ export function FolderPage() {
         case 'nav-down':
         case 'nav-up': {
           e.preventDefault();
-          if (messages.length === 0) return;
-          const index = messages.findIndex((m) => m.id === focusedId);
+          /*
+           * Ходим по порядку, КОТОРЫЙ ВИДЕН НА ЭКРАНЕ.
+           *
+           * Раньше курсор двигался по сырому списку писем, а рисуется он
+           * переставленным: вернувшиеся из «Отложенных» и оставшиеся без
+           * ответа поднимаются группами наверх. Стрелка вниз пропускала
+           * поднятую группу целиком, список рвался наверх без причины, а
+           * Enter открывал не то письмо, на котором видна подсветка.
+           */
+          /*
+           * Уезжающие строки курсор пропускает.
+           *
+           * Они остаются в списке до ответа сервера, но нарисованы
+           * прозрачными и помечены `aria-hidden`. Клавиатура о них не
+           * знала и ставила на них курсор: сразу после удаления пачки
+           * стрелка «проваливалась» — подсветка пропадала на пару
+           * нажатий, скринридер молчал, а Enter в этот момент открывал
+           * письмо, которое уже уезжает.
+           */
+          const order = orderedMessages(messages).filter((m) => !leavingIds.includes(m.id));
+          if (order.length === 0) return;
+          const index = order.findIndex((m) => m.id === focusedId);
           const next =
             index === -1
               ? 0
-              : Math.min(
-                  messages.length - 1,
-                  Math.max(0, index + (action === 'nav-down' ? 1 : -1)),
-                );
-          setFocusedId(messages[next]?.id ?? null);
+              : Math.min(order.length - 1, Math.max(0, index + (action === 'nav-down' ? 1 : -1)));
+          setFocusedId(order[next]?.id ?? null);
           return;
         }
+        case 'toggle-select':
+          /*
+           * Отметить письмо под курсором — с клавиатуры.
+           *
+           * До этого отметить одно письмо можно было ТОЛЬКО мышью:
+           * галочка на рабочем столе показывается по наведению, то есть
+           * её нет ни в обходе по Tab, ни в дереве доступности. Человек,
+           * работающий клавиатурой, доходил стрелками до нужного письма
+           * и упирался — а вместе с галочкой для него пропадала вся
+           * панель выделения: «В папку», «Отложить», «Метки», «Переслать
+           * вложением». Оставалось «Выделить все», то есть всё сразу.
+           */
+          if (focusedId) {
+            e.preventDefault();
+            toggleSelected(focusedId);
+          }
+          return;
         case 'open':
           if (focusedId) {
             e.preventDefault();
@@ -587,7 +622,9 @@ export function FolderPage() {
     focusedId,
     contextMenu,
     selectedIds,
+    leavingIds,
     clearSelection,
+    toggleSelected,
     applyFlags,
     moveTo,
     targetIds,

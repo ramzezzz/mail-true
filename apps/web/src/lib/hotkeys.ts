@@ -28,7 +28,22 @@ export type HotkeyAction =
   | 'nav-down'
   | 'nav-up'
   | 'open'
-  | 'close';
+  | 'close'
+  /**
+   * Отметить письмо под курсором — то же, что галочка мышью.
+   *
+   * Клавиши на это не было вовсе, а сама галочка на рабочем столе
+   * показывается только по наведению мыши (`display: none` в остальное
+   * время), то есть в дереве доступности её нет. Работающий клавиатурой
+   * доходил стрелками до нужного письма и не мог его отметить, а вместе
+   * с этим для него пропадала вся панель выделения: «В папку»,
+   * «Отложить», «Заглушить», «Метки», «Переслать вложением». Оставалось
+   * только «Выделить все», то есть всё сразу.
+   *
+   * Пробел — потому что это привычный способ отметить строку списка, и
+   * ровно им пользуются привычные почтовые интерфейсы.
+   */
+  | 'toggle-select';
 
 export interface HotkeyEventLike {
   key: string;
@@ -66,6 +81,8 @@ export function matchHotkey(e: HotkeyEventLike): HotkeyAction | null {
       return shift ? null : 'open';
     case 'Escape':
       return 'close';
+    case ' ':
+      return shift ? null : 'toggle-select';
     // Shift+Delete в привычных почтовых интерфейсах — удаление без корзины; такого действия
     // у нас пока нет, поэтому с Shift клавиша молчит.
     case 'Delete':
@@ -125,6 +142,22 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
 /** Общая проверка перед разбором горячей клавиши. */
 export function ignoreHotkeysFor(target: EventTarget | null): boolean {
   return isEditableTarget(target) || isInteractiveTarget(target);
+}
+
+/**
+ * Фокус стоит на элементе управления — БЕЗ поблажки для списка писем.
+ *
+ * Обычные горячие клавиши внутри списка работают всегда: стрелки и Enter
+ * там и есть его собственное поведение. С пробелом это правило не
+ * годится. Пробел — родная клавиша кнопки и чекбокса, и внутри строки
+ * они есть: галочка выделения, звёздочка. Перехватив его и там, мы бы
+ * сломали их нажатие с клавиатуры ради действия, которое человек может
+ * сделать той же кнопкой.
+ */
+function isFocusableControl(target: EventTarget | null): boolean {
+  const el = target as Element | null;
+  if (!el || typeof el.closest !== 'function') return false;
+  return el.closest(INTERACTIVE_SELECTOR) !== null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -209,6 +242,7 @@ export const HOTKEY_HELP: HotkeyHelpSection[] = [
     items: [
       { keys: ['↑', '↓'], action: 'Переход по списку', combo: false },
       { keys: ['Enter'], action: 'Открыть письмо' },
+      { keys: ['Пробел'], action: 'Отметить письмо' },
     ],
   },
   {
@@ -237,5 +271,8 @@ export function hotkeyFor(e: HotkeyEventLike, target: EventTarget | null): Hotke
   const action = matchHotkey(e);
   if (!action) return null;
   if (action === 'close') return isEditableTarget(target) ? null : action;
+  // Пробел отдаём кнопке или галочке, на которой стоит фокус: он их и
+  // нажимает. Иначе выделение письма отняло бы у них клавиатуру.
+  if (action === 'toggle-select' && isFocusableControl(target)) return null;
   return ignoreHotkeysFor(target) ? null : action;
 }
