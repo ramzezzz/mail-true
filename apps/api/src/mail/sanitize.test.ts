@@ -126,3 +126,76 @@ test('при разрешённых картинках внешний url() со
   );
   assert.ok(html.includes('cdn.example'), 'при разрешении картинок адрес должен остаться');
 });
+
+/*
+ * Письма рассылок приходят полным документом, и стиль почти всегда стоит
+ * в <head>. DOMPurify зовётся с WHOLE_DOCUMENT: false — он возвращает
+ * только тело, а стиль до содержимого тела по правилам разбора HTML
+ * попадает в <head> и терялся целиком.
+ *
+ * На экране это выглядело так: служебный предзаголовок, который
+ * отправитель прячет через display:none, показывался первой строкой
+ * письма, а вёрстка разъезжалась. И вся работа scrubCss над <style> в
+ * самом частом случае не выполнялась вообще.
+ */
+test('стиль из <head> не теряется вместе с обёрткой документа', () => {
+  const { html } = sanitizeEmailHtml(
+    '<!doctype html><html><head><style>.preheader{display:none}</style></head>' +
+      '<body><div class="preheader">СЛУЖЕБНЫЙ ПРЕДЗАГОЛОВОК</div><p>Здравствуйте!</p></body></html>',
+    { allowRemote: false },
+  );
+  assert.match(html, /\.preheader\s*\{\s*display:\s*none\s*\}/, 'стиль письма пропал');
+  assert.match(html, /СЛУЖЕБНЫЙ ПРЕДЗАГОЛОВОК/, 'содержимое тела пропало');
+  // Обёрток документа в результате быть не должно: тело письма встраивается
+  // в страницу почты.
+  assert.doesNotMatch(html, /<html|<head|<body/i);
+});
+
+test('стиль из <head> проходит ту же чистку, что и стиль в теле', () => {
+  const { html, blockedRemote } = sanitizeEmailHtml(
+    '<html><head><style>@import url(http://zloy.example/x.css); ' +
+      'body{background:url(http://zloy.example/fon.png)}</style></head><body>x</body></html>',
+    { allowRemote: false },
+  );
+  assert.doesNotMatch(html, /@import/i, '@import из <head> не вычищен');
+  assert.doesNotMatch(html, /zloy\.example/, 'внешний адрес из <head> остался');
+  assert.ok(blockedRemote > 0, 'блокировки из <head> не посчитаны');
+});
+
+/*
+ * Адрес без схемы («//cdn/a.png») ставят рассылки, которые шлют письмо и
+ * по HTTP, и по HTTPS. Он не проходил список разрешённых схем, поэтому
+ * DOMPurify снимал атрибут ДО нашего хука: счётчик заблокированных не
+ * рос, плашки не было, data-mt-src не ставился — «Показать картинки»
+ * вернуть такую картинку уже не могло.
+ */
+test('картинка без схемы блокируется видимо, а не пропадает молча', () => {
+  const { html, blockedRemote } = sanitizeEmailHtml(
+    '<img src="//cdn.example/a.png" alt="Логотип">',
+    { allowRemote: false },
+  );
+  assert.equal(blockedRemote, 1, 'блокировка не посчитана — плашки не будет');
+  assert.match(html, /data-mt-src="\/\/cdn\.example\/a\.png"/, 'адрес не сохранён для показа');
+  // Именно `src`, а не `data-mt-src`: подстрока «src="//cdn» есть и в нём.
+  assert.match(html, /\ssrc="data:image\//, 'вместо картинки должна стоять заглушка');
+});
+
+test('при разрешённых картинках адрес без схемы возвращается', () => {
+  const { html } = sanitizeEmailHtml('<img src="//cdn.example/a.png" alt="Логотип">', {
+    allowRemote: true,
+  });
+  assert.match(html, /src="\/\/cdn\.example\/a\.png"/);
+});
+
+test('фон без схемы возвращается вместе с остальными картинками', () => {
+  const blocked = sanitizeEmailHtml('<div style="background:url(//cdn.example/f.png)">x</div>', {
+    allowRemote: false,
+  });
+  assert.ok(blocked.blockedRemote > 0);
+  assert.doesNotMatch(blocked.html, /cdn\.example/);
+
+  const allowed = sanitizeEmailHtml('<div style="background:url(//cdn.example/f.png)">x</div>', {
+    allowRemote: true,
+  });
+  assert.match(allowed.html, /cdn\.example\/f\.png/, 'после «Показать» фон так и не вернулся');
+});

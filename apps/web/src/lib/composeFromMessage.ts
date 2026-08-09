@@ -9,14 +9,44 @@
 import type { DraftContent, Message } from '@mail-true/shared';
 import type { ComposeInit } from '../app/store';
 import { formatAddresses } from './addresses';
+import { escapeHtml } from '../mail/templatesApi';
 
-/** Цитата исходного письма для ответа/пересылки. */
+/**
+ * Цитата исходного письма для ответа/пересылки.
+ *
+ * ------------------------------------------------------------------
+ * ЗДЕСЬ ВСЁ ЭКРАНИРУЕТСЯ, И ЭТО НЕ ПЕРЕСТРАХОВКА
+ * ------------------------------------------------------------------
+ * Собранная строка уходит в редактор письма через `dangerouslySetInnerHTML`
+ * (ComposeWindow), то есть становится РАЗМЕТКОЙ приложения. А имя
+ * отправителя приходит из письма как есть: RFC 2047 разрешает в
+ * закодированном слове любые символы, и отображаемым именем бывает
+ * `<img src="http://tracker/px.gif">`.
+ *
+ * Что из этого выходило: тело письма санировано и внешние картинки
+ * заблокированы — маячок молчит; человек нажимает «Ответить», имя
+ * вклеивается в разметку, браузер грузит картинку, и отправитель узнаёт
+ * факт и время прочтения в обход блокировки. Инлайновый обработчик рядом
+ * гасила только политика безопасности страницы — то есть всё держалось на
+ * ней одной.
+ *
+ * Тело письма без HTML — второй случай того же: у текстового письма
+ * `bodyHtml` пуст, и `bodyText` уходил в цитату как разметка. Переводы
+ * строк схлопывались в один абзац, а `<не тег>` браузер съедал молча.
+ */
 export function quoteHtml(message: Message): string {
   const date = new Date(message.date).toLocaleString('ru-RU');
-  const from = message.from.name ?? message.from.address;
-  return `<br><br><p>${date}, ${from} &lt;${message.from.address}&gt;:</p><blockquote>${
-    message.bodyHtml ?? message.bodyText ?? ''
-  }</blockquote>`;
+  const from = escapeHtml(message.from.name ?? message.from.address);
+  const address = escapeHtml(message.from.address);
+  // HTML письма уже прошёл санитайзер на сервере; текстовое тело —
+  // обычный текст, и разметкой оно становиться не должно.
+  const body = message.bodyHtml ?? (message.bodyText ? textToQuoteHtml(message.bodyText) : '');
+  return `<br><br><p>${date}, ${from} &lt;${address}&gt;:</p><blockquote>${body}</blockquote>`;
+}
+
+/** Текстовое тело письма в разметку: экранируем и сохраняем переводы строк. */
+function textToQuoteHtml(text: string): string {
+  return escapeHtml(text).replace(/\r?\n/g, '<br>');
 }
 
 /**

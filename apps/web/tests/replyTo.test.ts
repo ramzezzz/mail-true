@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { Message } from '@mail-true/shared';
-import { replyInit } from '../src/lib/composeFromMessage';
+import { quoteHtml, replyInit } from '../src/lib/composeFromMessage';
 
 function message(patch: Partial<Message> = {}): Message {
   return {
@@ -87,5 +87,43 @@ describe('«Ответить» и заголовок Reply-To', () => {
       false,
     );
     expect(init.to).toBe('ivan@bank.ru');
+  });
+});
+
+/*
+ * Цитата уходит в редактор через dangerouslySetInnerHTML, то есть
+ * становится разметкой приложения. Имя отправителя приходит из письма как
+ * есть: RFC 2047 разрешает в закодированном слове любые символы, и
+ * отображаемым именем бывает <img src="http://tracker/px.gif">.
+ *
+ * Что из этого выходило: тело письма санировано, внешние картинки
+ * заблокированы — маячок молчит; человек нажимает «Ответить», имя
+ * вклеивается в разметку, браузер грузит картинку, и отправитель узнаёт
+ * факт и время прочтения в обход блокировки.
+ */
+describe('цитата исходного письма', () => {
+  it('имя отправителя не становится разметкой', () => {
+    const html = quoteHtml(
+      message({
+        from: { name: '<img src="http://tracker.example/px.gif">', address: 'a@b.c' },
+        bodyHtml: '<p>Текст</p>',
+      }),
+    );
+    expect(/<img/i.test(html), 'картинка из имени отправителя попала в письмо').toBe(false);
+    expect(html).toContain('&lt;img');
+  });
+
+  it('текстовое письмо цитируется текстом, а не разметкой', () => {
+    const html = quoteHtml(
+      message({
+        bodyHtml: null,
+        bodyText: 'Первая строка\nВторая строка\nЕсли a < b, то c > d\n<не тег>',
+      }),
+    );
+    // Переводы строк сохранены: раньше цитата схлопывалась в один абзац.
+    expect(html).toContain('<br>');
+    // Угловые скобки показаны, а не съедены разбором разметки.
+    expect(html).toContain('&lt;не тег&gt;');
+    expect(html).toContain('a &lt; b');
   });
 });
