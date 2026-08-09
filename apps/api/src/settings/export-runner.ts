@@ -164,6 +164,19 @@ export class ExportRunner {
   async #run(job: ExportRow): Promise<void> {
     const { logger, settings, store } = this.#opts;
     const dir = settings.MAILBOX_EXPORT_DIR;
+    /*
+     * Недописанный архив прошлой попытки — удалить.
+     *
+     * Задание подхватывается заново, если процесс перезапустился посреди
+     * работы (протухший heartbeat). Имя нового файла содержит текущее
+     * время, то есть прежний файл под старым именем не перезаписывается —
+     * а удалять его было некому: уборщик по сроку смотрит только на
+     * готовые записи. В томе оставался кусок архива с НАСТОЯЩИМИ письмами
+     * человека, и знать о нём никто не мог.
+     */
+    if (job.filePath) {
+      await rm(job.filePath, { force: true }).catch(() => undefined);
+    }
     const file = join(dir, `${job.id}-${Date.now()}.zip`);
     let zip: ZipWriter | null = null;
     let client: ImapFlow | null = null;

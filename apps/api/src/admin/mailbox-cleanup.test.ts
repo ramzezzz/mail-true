@@ -83,6 +83,7 @@ void test('уборщик удаляет карантин и записывае�
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -140,6 +141,7 @@ void test('карантин не удался — уборщик не смеет
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -184,6 +186,7 @@ void test('карантин не удался и не удаётся снова 
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -221,6 +224,7 @@ void test('уборщик находит осиротевшие каталоги
     updateMailboxDeletion: async () => undefined,
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     listAllMailboxEmails: async () => ['alive@x.local'],
   };
   const janitor = new AdminJanitor({
@@ -263,6 +267,7 @@ void test('про осиротевшие каталоги уборщик соо�
     updateMailboxDeletion: async () => undefined,
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     listAllMailboxEmails: async () => known,
   };
   // Часы под управлением теста: иначе суточное напоминание не проверить.
@@ -362,6 +367,7 @@ void test('повторный карантин не трогает ящик, з�
     listEmailsIn: async () => ['ivan@x.local'],
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
     listAllMailboxEmails: async () => ['ivan@x.local'],
   };
 

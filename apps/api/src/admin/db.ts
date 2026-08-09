@@ -672,6 +672,31 @@ export class AdminDb {
    * Отсутствие таблицы (миграция не применена) пропускается: удаление
    * ящика не должно падать из-за необязательного раздела.
    */
+  /**
+   * Готовые архивы выгрузки ящика — их пути на диске.
+   *
+   * Спрашиваются перед удалением ящика. Строку в базе уносит
+   * `purgeMailboxData`, а файл удаляет только уборщик по сроку, и берёт
+   * он его из той же строки — то есть после удаления ящика архив со ВСЕЙ
+   * его перепиской остаётся в томе навсегда, попадает во все резервные
+   * копии, и найти его больше нечем: обхода каталога выгрузок в продукте
+   * нет.
+   */
+  async listExportFiles(email: string): Promise<string[]> {
+    try {
+      const res = await this.pool.query<{ file_path: string }>(
+        `SELECT file_path FROM mailbox_export_jobs
+          WHERE lower(account_email) = lower($1) AND file_path IS NOT NULL`,
+        [email],
+      );
+      return res.rows.map((row) => row.file_path);
+    } catch (err) {
+      // Раздела выгрузок может не быть вовсе (миграция не применена).
+      if (isUndefinedTable(err)) return [];
+      throw err;
+    }
+  }
+
   async purgeMailboxData(email: string): Promise<number> {
     /*
      * ОДНОРАЗОВЫЙ АДРЕС — ЭТО ДВЕ СТРОКИ, И УДАЛЯТЬ НАДО ОБЕ.

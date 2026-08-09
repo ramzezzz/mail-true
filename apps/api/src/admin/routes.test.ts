@@ -115,6 +115,10 @@ class FakeDb {
     this.#note('deleteMailUser', id);
     this.users.delete(id);
   }
+  async listExportFiles(email: string): Promise<string[]> {
+    this.#note('listExportFiles', email);
+    return [];
+  }
   async purgeMailboxData(email: string): Promise<number> {
     this.#note('purgeMailboxData', email);
     return 7;

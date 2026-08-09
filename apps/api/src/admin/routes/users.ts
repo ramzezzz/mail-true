@@ -7,6 +7,7 @@
  * Поэтому созданный отсюда ящик сразу рабочий: Dovecot пускает по IMAP,
  * Postfix принимает для него почту.
  */
+import { rm } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError } from '../../errors.js';
@@ -371,11 +372,42 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         );
       }
 
-      // 3. Всё, что принадлежит ящику в базе.
+      /*
+       * 3. Архивы выгрузки — С ДИСКА, до того как уйдут строки из базы.
+       *
+       * Владелец мог заказать выгрузку ящика: готовый ZIP лежит в томе и
+       * содержит ВСЮ его переписку в открытом виде. Строку о нём уносит
+       * `purgeMailboxData` ниже, а файл удаляет только уборщик по сроку —
+       * и берёт путь из той же строки. То есть после удаления ящика архив
+       * оставался в томе навсегда, попадал во все резервные копии, и
+       * найти его было нечем: обхода каталога выгрузок в продукте нет.
+       *
+       * Порядок важен: сперва файлы, потом строки. Наоборот — и пути
+       * потеряны безвозвратно.
+       */
+      const exportFiles = await ctx.db.listExportFiles(row.email);
+      let exportsRemoved = 0;
+      for (const path of exportFiles) {
+        try {
+          await rm(path, { force: true });
+          exportsRemoved += 1;
+        } catch (err) {
+          // Не повод отменять удаление ящика: файла может уже не быть.
+          request.log.warn(errorInfo(err, { path }), 'Архив выгрузки удалить не удалось');
+        }
+      }
+      if (exportsRemoved > 0) {
+        request.log.info(
+          { email: row.email, files: exportsRemoved },
+          'Удаление ящика: убраны архивы выгрузки',
+        );
+      }
+
+      // 4. Всё, что принадлежит ящику в базе.
       const dbRowsRemoved = await ctx.db.purgeMailboxData(row.email);
       await ctx.db.deleteMailUser(id);
 
-      // 4. Каталог — в карантин.
+      // 5. Каталог — в карантин.
       const tag = deletionId > 0 ? String(deletionId) : String(Date.now());
       const quarantine = await quarantineMaildir(ctx.config.ADMIN_MAIL_ROOT, row.email, tag);
       if (deletionId > 0) {

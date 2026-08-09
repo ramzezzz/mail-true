@@ -423,6 +423,48 @@ export class SettingsDb {
     return this.listSignatures(email);
   }
 
+  /**
+   * Заменяет ВСЕ подписи ящика одной — целиком или никак.
+   *
+   * Нужна массовой раскладке подписей из панели: там режим «заменить»
+   * сносил прежние подписи по одной и только потом заводил новую, каждый
+   * запрос отдельно. Любой обрыв между ними (перезапуск контейнера из
+   * панели — поддерживаемое действие, а раскладка по сотням ящиков идёт
+   * минуты) оставлял ящик БЕЗ ЕДИНОЙ подписи, а текста стёртых не
+   * оставалось нигде: запись в журнал делается только после успеха.
+   *
+   * Рядом, у переcтановки правил фильтрации, транзакция стоит с тем же
+   * обоснованием — «половина переставленного списка означала бы
+   * непредсказуемое поведение». Здесь цена выше: пропадает написанный
+   * человеком текст.
+   */
+  async replaceSignatures(
+    email: string,
+    input: { name: string; bodyHtml: string; isDefault: boolean },
+  ): Promise<Signature[]> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM mail_signatures WHERE lower(account_email) = lower($1)`, [
+        email,
+      ]);
+      await client.query(
+        `INSERT INTO mail_signatures (account_email, name, body_html, is_default, position)
+         VALUES (lower($1), $2, $3, $4, 0)`,
+        [email, input.name, input.bodyHtml, input.isDefault],
+      );
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      throw err;
+    } finally {
+      client.release();
+    }
+    // Ровно одна подпись — она же и по умолчанию, если так просили.
+    await this.ensureOneDefaultSignature(email);
+    return this.listSignatures(email);
+  }
+
   async updateSignature(
     email: string,
     id: number,

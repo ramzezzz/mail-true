@@ -171,6 +171,24 @@ class FakeSettingsDb {
     }
     return [...list];
   }
+  /** Замена всех подписей одной — как в настоящем хранилище, одной операцией. */
+  async replaceSignatures(
+    email: string,
+    input: { name: string; bodyHtml: string; isDefault: boolean },
+  ): Promise<Signature[]> {
+    const list: Signature[] = [
+      {
+        id: this.#nextId++,
+        name: input.name,
+        bodyHtml: input.bodyHtml,
+        isDefault: input.isDefault,
+        position: 0,
+      },
+    ];
+    this.signatures.set(this.#key(email), list);
+    return [...list];
+  }
+
   async deleteSignature(email: string, id: number): Promise<Signature[]> {
     const list = (this.signatures.get(this.#key(email)) ?? []).filter((s) => s.id !== id);
     this.signatures.set(this.#key(email), list);

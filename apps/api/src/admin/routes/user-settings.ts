@@ -606,13 +606,24 @@ export async function adminUserSettingsRoutes(
         try {
           const before = await db.listSignatures(item.user.email);
           if (item.outcome === 'replace') {
-            for (const old of before) await db.deleteSignature(item.user.email, old.id);
+            /*
+             * Замена — ОДНОЙ транзакцией. Раньше здесь удаляли прежние
+             * подписи по одной и только потом заводили новую: обрыв между
+             * запросами оставлял ящик без единой подписи, а текста
+             * стёртых не оставалось нигде — в журнал пишут после успеха.
+             */
+            await db.replaceSignatures(item.user.email, {
+              name: body.name,
+              bodyHtml: item.text,
+              isDefault: body.makeDefault,
+            });
+          } else {
+            await db.createSignature(item.user.email, {
+              name: body.name,
+              bodyHtml: item.text,
+              isDefault: body.makeDefault,
+            });
           }
-          await db.createSignature(item.user.email, {
-            name: body.name,
-            bodyHtml: item.text,
-            isDefault: body.makeDefault,
-          });
           applied += 1;
 
           // Запись на КАЖДЫЙ ящик: «изменено 137 подписей» не отвечает на

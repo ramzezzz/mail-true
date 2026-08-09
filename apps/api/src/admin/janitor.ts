@@ -48,6 +48,8 @@ export interface JanitorRunResult {
   bytesFreed: number;
   closedSessions: number;
   removedImportJobs: number;
+  /** Сколько строк неудачных входов в панель убрано по сроку. */
+  removedLoginFailures: number;
   orphanMaildirs: number;
   /** Была ли на этом проходе запись в журнал про осиротевшие каталоги. */
   orphanReported: boolean;
@@ -60,6 +62,15 @@ export interface JanitorRunResult {
  * минуту»: администратор, читающий журнал за смену, увидит напоминание
  * ровно один раз, а не полторы тысячи.
  */
+/**
+ * Сколько держим запись о неудачных входах в панель.
+ *
+ * Тридцать суток — тот срок, за который запись ещё может пригодиться при
+ * разборе: «кто и откуда ломился в панель в прошлом месяце». Дальше это
+ * просто вес в базе и в резервных копиях.
+ */
+const LOGIN_FAILURE_KEEP_DAYS = 30;
+
 const ORPHAN_REMINDER_MS = 24 * 60 * 60 * 1000;
 
 export class AdminJanitor {
@@ -107,6 +118,7 @@ export class AdminJanitor {
       bytesFreed: 0,
       closedSessions: 0,
       removedImportJobs: 0,
+      removedLoginFailures: 0,
       orphanMaildirs: 0,
       orphanReported: false,
     };
@@ -234,6 +246,30 @@ export class AdminJanitor {
 
       /* --- 3. просроченные задания импорта --- */
       result.removedImportJobs = await db.deleteExpiredImportJobs();
+
+      /* --- 3б. следы подбора паролей к панели --- */
+      /*
+       * Каждая неудачная попытка входа оставляет строку на пару «логин +
+       * адрес». Удаляет её только удачный вход С ТОГО ЖЕ адреса под тем
+       * же логином — то есть при переборе случайных логинов с ботнета не
+       * удаляет никогда.
+       *
+       * Уборка для этого была написана вместе с таблицей и с индексом по
+       * `updated_at`, но не вызывалась ниоткуда: метод существовал, а
+       * работника у него не было. Таблица росла от каждого перебора и
+       * оставалась расти после него — ровно то, от чего предостерегает
+       * её собственный комментарий.
+       *
+       * Строки с действующей блокировкой метод не трогает: пока замок
+       * держит, его основание должно лежать рядом.
+       */
+      result.removedLoginFailures = await db.sweepAdminLoginFailures(LOGIN_FAILURE_KEEP_DAYS);
+      if (result.removedLoginFailures > 0) {
+        logger.info(
+          { removed: result.removedLoginFailures },
+          'Уборщик: убраны старые записи о неудачных входах в панель',
+        );
+      }
 
       /* --- 4. осиротевшие каталоги: только сообщаем, и не на каждом проходе --- */
       const emails = await db.listAllMailboxEmails();
