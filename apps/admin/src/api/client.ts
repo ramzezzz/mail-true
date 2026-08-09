@@ -7,6 +7,7 @@ import type {
   AiDomain,
   AiDomainPatch,
   AiReference,
+  AiModelList,
   AiTestResult,
   Alias,
   AliasPage,
@@ -401,6 +402,11 @@ export const api = {
   updateAiDomain: (id: number, body: AiDomainPatch) => patch<AiDomain>(`/ai/domains/${id}`, body),
   /** Живая проверка связи: один настоящий вызов сервиса на служебном тексте. */
   aiTest: (id: number) => post<AiTestResult>(`/ai/domains/${id}/test`),
+  /**
+   * Какие модели есть у поставщика. Спрашивается по нажатию: это запрос
+   * наружу, и делать его при открытии раздела незачем.
+   */
+  aiModels: (id: number) => get<AiModelList>(`/ai/domains/${id}/models`),
   aiAudit: (params: {
     accountId?: string | undefined;
     feature?: string | undefined;

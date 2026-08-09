@@ -18,6 +18,7 @@ import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
 import { keyHint } from './secret.js';
+import { modelsEndpoint, parseModelList } from './models.js';
 import { AiUnavailableError } from './errors.js';
 import type { AiDomainSettings, AiDomainSettingsPatch } from './db.js';
 import type { AiService } from './service.js';
@@ -125,6 +126,22 @@ function toDto(row: AiDomainSettings): Record<string, unknown> {
     featuresAllowed: row.featuresAllowed,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Отказ поставщика на списке моделей — словами, а не кодом.
+ *
+ * Код 401 и код 404 здесь означают совершенно разные ошибки настройки, и
+ * человеку у формы нужно знать, какое из полей поправить, а не число.
+ */
+function describeModelsFailure(status: number): string {
+  if (status === 401 || status === 403) {
+    return 'Сервис не принял ключ доступа: проверьте его в поле ниже.';
+  }
+  if (status === 404) {
+    return 'По этому адресу списка моделей нет. Обычно это значит, что в адресе не хватает /v1.';
+  }
+  return `Сервис ответил отказом (${String(status)}).`;
 }
 
 export async function aiAdminRoutes(app: FastifyInstance, service: AiService): Promise<void> {
@@ -255,6 +272,95 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
       });
 
       return after ? toDto(after) : {};
+    },
+  );
+
+  /**
+   * Какие модели есть у поставщика.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Название модели вводилось руками в пустое поле. Опечатка в нём
+   * выяснялась не при сохранении, а потом — отказом сервиса на первом же
+   * письме, и выглядела как «помощник сломался», а не как «в названии
+   * лишний дефис». Узнать правильное написание было негде: список
+   * моделей есть у каждого поставщика, но панель его не спрашивала.
+   *
+   * Проверка НЕ требует включённого помощника: список нужен как раз
+   * тогда, когда его ещё настраивают. Достаточно сохранённого адреса.
+   *
+   * Ключ доступа при этом остаётся на сервере: он расшифровывается
+   * здесь и уходит только поставщику — наружу в ответе его нет ни в
+   * каком виде.
+   */
+  app.get<{ Params: { id: string } }>(
+    '/ai/domains/:id/models',
+    {
+      preHandler: requireAdmin(app, 'domains.write'),
+      config: { rateLimit: { max: 20, timeWindow: 60_000 } },
+    },
+    async (request) => {
+      const db = requireDb();
+      const id = pathId(request.params.id, 'записи');
+      const row = await db.findDomainSettingsById(id);
+      if (!row) throw new NotFoundError('Настройки ИИ для домена не найдены');
+      if (!row.baseUrl) {
+        throw new BadRequestError(
+          'Сначала укажите адрес сервиса и сохраните настройки — список моделей ' +
+            'спрашивается у него самого.',
+        );
+      }
+
+      let apiKey: string | null = null;
+      if (row.apiKeyEnc) {
+        const box = service.keyBox;
+        if (!box) {
+          throw new AiUnavailableError(
+            service.keyBoxReason ?? 'Ключ доступа сохранён, но расшифровать его нечем',
+          );
+        }
+        apiKey = box.decrypt(row.apiKeyEnc);
+      }
+
+      const endpoint = modelsEndpoint(row.baseUrl);
+      try {
+        const response = await fetch(endpoint, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            ...(apiKey === null ? {} : { Authorization: `Bearer ${apiKey}` }),
+          },
+          signal: AbortSignal.timeout(row.timeoutMs),
+        });
+        if (!response.ok) {
+          /*
+           * Отказ поставщика — не наша ошибка, и падать 500 здесь
+           * нельзя: человеку нужен код и текст, по которым понятно, что
+           * не так (401 — ключ, 404 — адрес без /v1).
+           */
+          return {
+            ok: false as const,
+            endpoint,
+            status: response.status,
+            message: describeModelsFailure(response.status),
+            models: [],
+          };
+        }
+        const models = parseModelList(await response.json());
+        return { ok: true as const, endpoint, status: response.status, message: null, models };
+      } catch (err) {
+        return {
+          ok: false as const,
+          endpoint,
+          status: null,
+          message:
+            err instanceof Error && err.name === 'TimeoutError'
+              ? `Сервис не ответил за ${String(row.timeoutMs)} мс`
+              : `Не удалось обратиться к сервису: ${err instanceof Error ? err.message : String(err)}`,
+          models: [],
+        };
+      }
     },
   );
 

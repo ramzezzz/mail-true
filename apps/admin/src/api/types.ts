@@ -478,6 +478,23 @@ export interface AiUsage {
   estimated: boolean;
 }
 
+/**
+ * Список моделей у поставщика.
+ *
+ * Отказ здесь — не ошибка панели, а ответ чужого сервиса, поэтому он
+ * приезжает полем, а не исключением: человеку у формы нужно знать, какое
+ * поле поправить (401 — ключ, 404 — адрес без /v1), а не увидеть красную
+ * плашку «запрос не удался».
+ */
+export interface AiModelList {
+  ok: boolean;
+  /** Адрес, у которого спрашивали, — его видно в подсказке. */
+  endpoint: string;
+  status: number | null;
+  message: string | null;
+  models: string[];
+}
+
 export type AiTestResult =
   | {
       ok: true;

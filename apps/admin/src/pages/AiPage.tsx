@@ -330,12 +330,26 @@ function DomainSettings({
     onSuccess: (result) => setTest(result),
   });
 
+  /*
+   * Список моделей спрашивается у поставщика по нажатию, а не при
+   * открытии страницы. Причина простая: это сетевой запрос наружу, и
+   * делать его при каждом заходе в раздел — значит стучаться к
+   * поставщику без всякой на то просьбы.
+   *
+   * Спрашивается то, что ЗАПИСАНО в базе: ключ доступа живёт на сервере
+   * и в браузер не приезжает, поэтому список по несохранённому адресу
+   * взять неоткуда.
+   */
+  const models = useMutation({
+    mutationFn: () => api.aiModels(domain.domainId),
+  });
+
   const dirty = JSON.stringify(draft) !== JSON.stringify(toDraft(domain));
 
   return (
     <>
       {flash && <Notice tone="success">{flash}</Notice>}
-      <ErrorNotice error={save.error ?? runTest.error} />
+      <ErrorNotice error={save.error ?? runTest.error ?? models.error} />
 
       {/* --- Подключение --- */}
       <div className={styles.panelGap}>
@@ -430,14 +444,46 @@ function DomainSettings({
               />
             </Field>
 
-            <Field label="Название модели">
-              <input
-                className="mt-input mt-mono"
-                placeholder="qwen2.5:7b"
-                value={draft.model}
-                disabled={!canWrite}
-                onChange={(event) => set('model', event.target.value)}
-              />
+            <Field
+              label="Название модели"
+              hint={
+                models.data?.ok === false
+                  ? models.data.message
+                  : models.data?.ok
+                    ? `Поставщик назвал моделей: ${String(models.data.models.length)}`
+                    : 'Можно вписать руками или взять список у самого поставщика.'
+              }
+            >
+              {/*
+                input + datalist, а не select: список у поставщика может
+                оказаться пустым или неполным (обёртки над несколькими
+                сервисами называют не всё, что принимают), и запереть
+                человека в выпадающем списке значило бы отнять
+                работающую настройку ради удобства.
+              */}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="mt-input mt-mono"
+                  style={{ flex: 1, minWidth: 0 }}
+                  placeholder="qwen2.5:7b"
+                  list={`ai-models-${String(domain.domainId)}`}
+                  value={draft.model}
+                  disabled={!canWrite}
+                  onChange={(event) => set('model', event.target.value)}
+                />
+                <Button
+                  mode="secondary"
+                  disabled={!canWrite || models.isPending || domain.baseUrl === null}
+                  onClick={() => models.mutate()}
+                >
+                  {models.isPending ? 'Спрашиваем…' : 'Список'}
+                </Button>
+              </div>
+              <datalist id={`ai-models-${String(domain.domainId)}`}>
+                {(models.data?.models ?? []).map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
             </Field>
 
             <Field
