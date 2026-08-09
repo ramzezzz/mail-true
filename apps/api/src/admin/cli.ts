@@ -9,11 +9,14 @@
  *   node dist/admin/cli.js check           — применена ли миграция 0003
  */
 import 'dotenv/config';
+import { Redis } from 'ioredis';
 import { pino } from 'pino';
+import { changeAdminPassword } from './admin-password.js';
 import { loadAdminConfig } from './config.js';
 import { AdminDb, isUniqueViolation } from './db.js';
 import { hashAdminPassword } from './passwords.js';
 import { ADMIN_ROLES, isAdminRole } from './permissions.js';
+import { RedisAdminSessionStore, type AdminSessionStore } from './session.js';
 
 function usage(): never {
   process.stdout.write(
@@ -34,6 +37,31 @@ function usage(): never {
     ].join('\n'),
   );
   process.exit(1);
+}
+
+/**
+ * Хранилище админских сессий — то же, что у работающего сервера.
+ *
+ * Своей конфигурации у сессий нет: адрес Redis и выбор хранилища живут в
+ * общей схеме сервера (src/config.ts). Читаем окружение напрямую, чтобы
+ * консольная утилита не тянула за собой всю проверку конфигурации почты —
+ * ей для одного действия хватает двух переменных.
+ *
+ * `store: null` означает «сессии нам не видны»: при SESSION_STORE=memory
+ * они лежат в памяти ДРУГОГО процесса, и притворяться, что мы их закрыли,
+ * нельзя.
+ */
+function openSessionStore(): { store: AdminSessionStore | null; close: () => void } {
+  if ((process.env.SESSION_STORE ?? 'redis') !== 'redis') {
+    return { store: null, close: () => undefined };
+  }
+  const redis = new Redis(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379', {
+    // Утилита живёт секунды: молча висеть на недоступном Redis ей нельзя,
+    // а отказ она обязана показать словами (см. set-password).
+    maxRetriesPerRequest: 2,
+  });
+  redis.on('error', () => undefined);
+  return { store: new RedisAdminSessionStore(redis), close: () => redis.disconnect() };
 }
 
 async function main(): Promise<void> {
@@ -89,17 +117,49 @@ async function main(): Promise<void> {
       case 'set-password': {
         const [login, password] = args;
         if (!login || !password) usage();
-        const row = await db.findAdminByLogin(login);
-        if (!row) {
-          process.stderr.write(`Нет администратора «${login}»\n`);
-          process.exit(4);
+        /*
+         * Смена пароля обязана ВЫГНАТЬ тех, кто уже вошёл.
+         *
+         * Эту команду зовёт install/reset-admin-password.sh — штатный
+         * способ «вернуть контроль». Без отзыва сессий контроль не
+         * возвращался: админская сессия живёт в Redis и о пароле не знает
+         * ничего, а срок у неё скользящий (разбор — в admin-password.ts).
+         * Поэтому утилита сама открывает то же хранилище сессий, что и
+         * сервер приложения: она работает внутри его контейнера и видит
+         * тот же Redis.
+         */
+        const session = openSessionStore();
+        try {
+          const done = await changeAdminPassword({ db, sessions: session.store }, login, password);
+          if (!done) {
+            process.stderr.write(`Нет администратора «${login}»\n`);
+            process.exit(4);
+          }
+          process.stdout.write(`Пароль администратора ${login} обновлён\n`);
+          /*
+           * Про сессии говорим ВСЕГДА и прямо. Человек меняет пароль как
+           * раз затем, чтобы выгнать чужого; «пароль обновлён» без единого
+           * слова о сессиях он прочтёт как «выгнал», и ошибётся ровно в
+           * тот момент, когда ошибаться дороже всего.
+           */
+          if (session.store === null) {
+            process.stdout.write(
+              'SESSION_STORE=memory: сессии панели живут в памяти самого сервера, ' +
+                'из консоли их не закрыть. Перезапустите контейнер api — ' +
+                'тогда все открытые сессии панели закроются.\n',
+            );
+          } else if (done.sessionsProblem) {
+            process.stdout.write(
+              `Закрыть открытые сессии панели не удалось: ${done.sessionsProblem}. ` +
+                'Пароль при этом изменён. Перезапустите контейнер api — ' +
+                'тогда все открытые сессии панели закроются.\n',
+            );
+          } else {
+            process.stdout.write(`Открытых сессий в панели закрыто: ${done.closedSessions ?? 0}\n`);
+          }
+        } finally {
+          session.close();
         }
-        await db.query(
-          `UPDATE admin_users SET password_hash = $2, failed_attempts = 0,
-                  locked_until = NULL, updated_at = now() WHERE id = $1`,
-          [row.id, hashAdminPassword(password)],
-        );
-        process.stdout.write(`Пароль администратора ${login} обновлён\n`);
         break;
       }
       case 'list-admins': {

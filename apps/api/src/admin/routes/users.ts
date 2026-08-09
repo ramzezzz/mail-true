@@ -20,6 +20,7 @@ import { dovecotHash, generatePassword } from '../passwords.js';
 import { nulByteProblem, parseUserImport } from '../csv.js';
 import { addressProblem, displayNameLengthProblem } from '@mail-true/shared';
 import { packResult, unpackResult, type ImportJobResult } from '../import-jobs.js';
+import { dropMailboxAccess as closeMailboxAccess } from '../mailbox-access.js';
 import { maildirPathOf, quarantineMaildir } from '../mailbox-cleanup.js';
 import { isUndefinedTable, type ImportJobRow, type MailUserRow } from '../db.js';
 import { pathId } from '../../params.js';
@@ -292,27 +293,15 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
 
   /* --- смена пароля ------------------------------------------------ */
   /**
-   * Выкидывает ящик из веб-почты немедленно.
+   * Закрывает доступ к ящику здесь и сейчас.
    *
-   * Смена пароля — единственное, что есть у владельца против угнанной
-   * сессии, и до этой правки она не делала НИЧЕГО: сессия хранит пароль,
-   * каким он был при входе, продлевается на каждом запросе, а открытое
-   * соединение с ящиком переиспользуется без сверки пароля. Тот, кто увёл
-   * cookie, продолжал читать почту — и его же браузер делал это сам.
-   * Блокировка ящика вела себя так же: Dovecot отсеивает `active` только
-   * при проверке пароля, уже открытую сессию это не трогает.
-   *
-   * Поэтому закрываем всё разом: сессии, соединения пула и наблюдателя
-   * (он держит своё соединение и живёт до суток даже без открытых
-   * вкладок, продолжая слать события о новых письмах).
+   * Сам замок живёт в admin/mailbox-access.ts — там же и разбор, почему
+   * его мало поставить в одном месте: смена пароля и блокировка не
+   * единственные пути, меняющие пароль и признак «включён» (тем же
+   * занимается восстановление копии).
    */
-  async function dropMailboxAccess(email: string, why: string): Promise<void> {
-    const deps = app.deps;
-    const closed = await deps.sessions.revokeByEmail(email).catch(() => 0);
-    await deps.pool.closeUser(email).catch(() => undefined);
-    const watcher = app.mailNotifier?.dropWatcher(email) ?? false;
-    app.log.info({ email, sessions: closed, watcher, why }, 'Доступ к ящику закрыт');
-  }
+  const dropMailboxAccess = (email: string, why: string): Promise<void> =>
+    closeMailboxAccess(app, email, why);
 
   app.post<{ Params: { id: string } }>(
     '/users/:id/password',

@@ -35,6 +35,19 @@ export interface AdminSessionStore {
   set(id: string, data: AdminSessionData, ttlSeconds: number): Promise<void>;
   touch(id: string, ttlSeconds: number): Promise<void>;
   delete(id: string): Promise<void>;
+  /**
+   * Закрывает ВСЕ сессии администратора. Возвращает, сколько закрыла.
+   *
+   * Нужно смене пароля — и до этого способа отозвать админскую сессию не
+   * существовало вовсе. Пароль в проверке сессии не участвует нигде:
+   * `loadAdminSession` перечитывает из базы только роль и активность, а
+   * срок жизни скользящий — каждый запрос продлевает сессию сам. То есть
+   * человек, уведший cookie владельца, сохранял настройки сервера,
+   * перезапуск служб, выгрузку копии с хэшами всех паролей и вход в чужие
+   * ящики ПОСЛЕ того, как пароль сменили. Смена пароля — единственное, что
+   * есть у владельца против угнанной сессии, и она не делала ничего.
+   */
+  revokeByAdminId(adminId: number): Promise<number>;
 
   getMailbox(id: string): Promise<MailboxSessionData | null>;
   setMailbox(id: string, data: MailboxSessionData, ttlSeconds: number): Promise<void>;
@@ -43,6 +56,20 @@ export interface AdminSessionStore {
 
 const ADMIN_PREFIX = 'mt:admin:sess:';
 const MAILBOX_PREFIX = 'mt:admin:mbox:';
+/**
+ * Указатель «администратор → его сессии».
+ *
+ * Без него перечислить сессии администратора нечем: ключи именуются
+ * идентификатором сессии, а поиск по значению в Redis — это перебор всей
+ * базы. Устроен так же, как указатель почтовых сессий (mt:sess:by-email
+ * в src/session.ts): держим множество идентификаторов и подчищаем его на
+ * лету — в нём могут оставаться уже истёкшие, и это нормально.
+ */
+const ADMIN_INDEX = 'mt:admin:sess:by-admin:';
+
+function indexKey(adminId: number): string {
+  return ADMIN_INDEX + String(adminId);
+}
 
 export class RedisAdminSessionStore implements AdminSessionStore {
   constructor(private readonly redis: Redis) {}
@@ -63,14 +90,53 @@ export class RedisAdminSessionStore implements AdminSessionStore {
 
   async set(id: string, data: AdminSessionData, ttlSeconds: number): Promise<void> {
     await this.redis.set(ADMIN_PREFIX + id, JSON.stringify(data), 'EX', ttlSeconds);
+    // Указатель живёт вдвое дольше самой сессии: лишний идентификатор в нём
+    // безвреден (отзыв проверяет каждую сессию), а потерянный означал бы,
+    // что сессию не отозвать.
+    await this.redis.sadd(indexKey(data.adminId), id);
+    await this.redis.expire(indexKey(data.adminId), ttlSeconds * 2);
   }
 
   async touch(id: string, ttlSeconds: number): Promise<void> {
     await this.redis.expire(ADMIN_PREFIX + id, ttlSeconds);
+    /*
+     * Указатель продлевается ВМЕСТЕ с сессией — ловушка та же, что у
+     * почтовых сессий (см. разбор в src/session.ts).
+     *
+     * Срок у сессии скользящий: открытая панель опрашивает сервер сама и
+     * держит сессию сколько угодно долго. Указатель, получивший срок
+     * только при входе, истёк бы у живой сессии — и смена пароля нашла бы
+     * пустое множество и честно отчиталась «закрыто сессий: 0», не закрыв
+     * ту единственную, ради которой пароль и меняли.
+     */
+    const data = await this.get(id);
+    if (!data) return;
+    await this.redis.sadd(indexKey(data.adminId), id);
+    await this.redis.expire(indexKey(data.adminId), ttlSeconds * 2);
   }
 
   async delete(id: string): Promise<void> {
+    const data = await this.get(id);
     await this.redis.del(ADMIN_PREFIX + id);
+    if (data) await this.redis.srem(indexKey(data.adminId), id);
+  }
+
+  async revokeByAdminId(adminId: number): Promise<number> {
+    const key = indexKey(adminId);
+    const ids = await this.redis.smembers(key);
+    let closed = 0;
+    for (const id of ids) {
+      const removed = await this.redis.del(ADMIN_PREFIX + id);
+      if (removed > 0) closed += 1;
+      /*
+       * Убираем ПОИМЁННО прочитанное, а не весь указатель разом: между
+       * чтением множества и удалением администратор мог войти заново — он
+       * это и делает ровно тогда, когда ему меняют пароль, — и такая
+       * сессия выпала бы из указателя навсегда, став неотзываемой.
+       */
+      await this.redis.srem(key, id);
+    }
+    return closed;
   }
 
   getMailbox(id: string): Promise<MailboxSessionData | null> {
@@ -121,6 +187,22 @@ export class MemoryAdminSessionStore implements AdminSessionStore {
 
   async delete(id: string): Promise<void> {
     this.admin.delete(id);
+  }
+
+  async revokeByAdminId(adminId: number): Promise<number> {
+    let closed = 0;
+    for (const [id, entry] of this.admin) {
+      if (entry.data.adminId !== adminId) continue;
+      // Истёкшая сессия никого уже не пускает — считать её закрытой
+      // значило бы отчитаться человеку о работе, которой не было.
+      if (entry.expiresAt <= Date.now()) {
+        this.admin.delete(id);
+        continue;
+      }
+      this.admin.delete(id);
+      closed += 1;
+    }
+    return closed;
   }
 
   async getMailbox(id: string): Promise<MailboxSessionData | null> {

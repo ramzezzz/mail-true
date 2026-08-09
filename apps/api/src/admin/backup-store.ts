@@ -363,6 +363,32 @@ export interface RestoreOutcome {
    * перенаправлений не вернулась» выглядит как потеря данных.
    */
   skippedAliases: string[];
+  /**
+   * Ящики, которым копия переписала пароль и признак «включён»: у них
+   * нужно ЗАКРЫТЬ доступ (делает вызывающий, см. mailbox-access.ts).
+   *
+   * Без этого восстановление копии блокировало ящик, не выгоняя из него:
+   * Dovecot отсеивает `active=false` только при проверке пароля, а у
+   * вошедшего проверять нечего — сессия продлевается каждым запросом,
+   * соединение переиспользуется, наблюдатель живёт до суток. Уволенный
+   * сотрудник, ящик которого отключён восстановлением, продолжал читать
+   * и отправлять почту.
+   *
+   * Только уже существовавшие ящики: у заведённого копией закрывать
+   * нечего, а в отчёте он выглядел бы как выгнанный.
+   */
+  mailboxesToDrop: string[];
+  /**
+   * Администраторы, которым копия переписала пароль и роль: их сессии
+   * нужно отозвать (делает вызывающий).
+   *
+   * План восстановления обещает человеку «вход по нынешнему паролю
+   * перестанет работать» (buildRestorePlan). Обещание было ложным:
+   * админская сессия о пароле не знает ничего и продлевается сама
+   * (разбор — в admin/session.ts). Тот, кто вошёл до восстановления,
+   * оставался внутри с прежними правами.
+   */
+  adminsToRevoke: number[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -488,6 +514,8 @@ export async function applyRestore(
   const applied: RestoreOutcome['applied'] = {};
   const resyncSieve: string[] = [];
   const skippedAliases: string[] = [];
+  const mailboxesToDrop: string[] = [];
+  const adminsToRevoke: number[] = [];
   const note = (id: string, key: 'created' | 'updated'): void => {
     const row = (applied[id] ??= { created: 0, updated: 0 });
     row[key] += 1;
@@ -546,6 +574,9 @@ export async function applyRestore(
               ],
             );
             note('mailboxes', 'updated');
+            // Пароль этого ящика только что стал другим — значит все, кто
+            // вошёл по прежнему, обязаны выйти (см. mailboxesToDrop).
+            mailboxesToDrop.push(box.email);
           } else {
             await client.query(
               `INSERT INTO virtual_users (domain_id, email, password, display_name, quota_bytes, active)
@@ -616,14 +647,19 @@ export async function applyRestore(
         for (const admin of file.data.admins) {
           where.section = 'Администраторы';
           where.label = admin.login;
-          const updated = await client.query(
+          // `RETURNING id` — чтобы было чьи сессии отзывать: пароль этой
+          // учётной записи только что стал другим (см. adminsToRevoke).
+          const updated = await client.query<{ id: number }>(
             `UPDATE admin_users
               SET password_hash = $2, display_name = $3, role = $4, active = $5, updated_at = now()
-            WHERE lower(login) = lower($1)`,
+            WHERE lower(login) = lower($1)
+            RETURNING id`,
             [admin.login, admin.passwordHash, admin.displayName, admin.role, admin.active],
           );
           if ((updated.rowCount ?? 0) > 0) {
             note('admins', 'updated');
+            const id = updated.rows[0]?.id;
+            if (typeof id === 'number') adminsToRevoke.push(id);
           } else {
             await client.query(
               `INSERT INTO admin_users (login, password_hash, display_name, role, active)
@@ -735,7 +771,7 @@ export async function applyRestore(
     }
   }
 
-  return { applied, resyncSieve, brandingError, skippedAliases };
+  return { applied, resyncSieve, brandingError, skippedAliases, mailboxesToDrop, adminsToRevoke };
 }
 
 /** Домен по имени; заводит, если его нет. Возвращает id. */

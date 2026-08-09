@@ -17,6 +17,8 @@ import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
 import { isUserLabelKey } from '../mail/labels.js';
+import { originOf } from './access-record.js';
+import type { AccessKind } from './owner-db.js';
 import { applyRuleToMailbox } from './apply.js';
 import { getAppearance, saveAppearance } from './appearance.js';
 import { isUndefinedColumn, isUndefinedTable } from './db.js';
@@ -241,6 +243,43 @@ export async function settingsUserRoutes(
   const foldersOf = (session: MailSession): Promise<Folder[]> =>
     pool.withClient(session.email, session.password, (client) => listFolders(client));
 
+  /**
+   * Запись в историю ящика — раздел «Вход и действия» у владельца.
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ ЭТО ЗДЕСЬ ПОЯВИЛОСЬ
+   * ------------------------------------------------------------------
+   * Вид события `filters` был объявлен (owner-db.ts) и не писался НИГДЕ,
+   * а маршруты фильтров и общих настроек не писали в историю вовсе.
+   * Выходило наизнанку: безобидная очистка папки след оставляла
+   * (settings/folders.ts), а самый частый способ закрепиться в чужом
+   * ящике — «копию всей почты на свой адрес» — не оставлял ничего.
+   * Пересылка у нас не отдельная настройка, а действие правила
+   * (`forwardTo`, уезжает в Sieve как `redirect`), поэтому и записывается
+   * вместе с правилом — и адрес назван прямо в строке, иначе владельцу
+   * нечего искать.
+   *
+   * Как и всякая запись в историю, ничего не ждёт и никогда не мешает
+   * действию (см. settings/access-record.ts).
+   */
+  const noteAccess = (
+    request: { ip?: string; headers: Record<string, unknown> },
+    session: MailSession,
+    kind: AccessKind,
+    detail: string,
+  ): void => {
+    app.deps.accessLog?.record({
+      accountEmail: session.email,
+      kind,
+      detail,
+      ...originOf(request),
+    });
+  };
+
+  /** Куда правило шлёт копии писем — словами, для строки в истории. */
+  const forwardNote = (rule: WebFilterRule): string =>
+    rule.actions.forwardTo ? `; копии писем уходят на ${rule.actions.forwardTo}` : '';
+
   /* -------------------------------------------------------------- */
   /* Общие настройки                                                  */
   /* -------------------------------------------------------------- */
@@ -266,6 +305,20 @@ export async function settingsUserRoutes(
     const db = service.requireDb();
 
     const result = await guard(() => saveGeneralWithSignatures(db, session.email, dto));
+
+    /*
+     * Автоответчик назван в строке отдельно: он отвечает на письма от
+     * имени владельца и выдаёт всем корреспондентам заданный текст —
+     * включённый чужой рукой, он работает молча и виден только по ответам,
+     * которых владелец не писал.
+     */
+    noteAccess(
+      request,
+      session,
+      'settings',
+      `Изменены общие настройки; автоответчик ${dto.autoReply.enabled ? 'включён' : 'выключен'}` +
+        `, подписей: ${dto.signatures.length}`,
+    );
 
     // Автоответчик живёт в том же файле Sieve, что и правила.
     const sieve = await service.syncSieve(session.email);
@@ -335,6 +388,12 @@ export async function settingsUserRoutes(
       ),
     );
     const sieve = await service.syncSieve(session.email);
+    noteAccess(
+      request,
+      session,
+      'filters',
+      `Изменён порядок правил фильтрации, правил: ${ids.length}`,
+    );
     /*
      * Ответ этого маршрута — массив правил (контракт интерфейса), и
      * приписать к нему предупреждение, как у остальных маршрутов
@@ -359,6 +418,7 @@ export async function settingsUserRoutes(
     const db = service.requireDb();
     const folders = await foldersOf(session);
     const created = await guard(() => db.createFilter(session.email, fromWebRule(dto, folders)));
+    noteAccess(request, session, 'filters', `Создано правило «${created.name}»${forwardNote(dto)}`);
     const sieve = await service.syncSieve(session.email);
     const applyWarning = await applyToExisting(session, created.id, dto, folders);
     return withSieveWarning(
@@ -381,6 +441,12 @@ export async function settingsUserRoutes(
       db.updateFilter(session.email, numericId(id), fromWebRule(dto, folders, previous)),
     );
     if (!updated) throw new NotFoundError('Правило не найдено');
+    noteAccess(
+      request,
+      session,
+      'filters',
+      `Изменено правило «${updated.name}»${forwardNote(dto)}`,
+    );
     const sieve = await service.syncSieve(session.email);
     const applyWarning = await applyToExisting(session, updated.id, dto, folders);
     return withSieveWarning(
@@ -392,10 +458,19 @@ export async function settingsUserRoutes(
   app.delete('/filters/:id', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
+    // Правило читается ДО удаления ради одного: чтобы в истории ящика
+    // стояло его имя. «Удалено правило №7» владельцу не говорит ничего.
+    const doomed = await guard(() => service.requireDb().getFilter(session.email, numericId(id)));
     const removed = await guard(() =>
       service.requireDb().deleteFilter(session.email, numericId(id)),
     );
     if (!removed) throw new NotFoundError('Правило не найдено');
+    noteAccess(
+      request,
+      session,
+      'filters',
+      doomed ? `Удалено правило «${doomed.name}»` : 'Удалено правило фильтрации',
+    );
     const sieve = await service.syncSieve(session.email);
     return withSieveWarning({ ok: true }, sieve);
   });
