@@ -166,6 +166,11 @@ class FakeMailbox {
     return { uidValidity: BigInt(to.uidValidity), uidMap };
   }
 
+  /** Сервер отказывает в переносе (переполненный ящик, пропавшая папка). */
+  moveFails = false;
+  /** Сервер отказывает в окончательном удалении. */
+  deleteFails = false;
+
   async messageCopy(uids: number[], destination: string) {
     this.calls.push(`copy ${this.#selected}->${destination} ${uids.join(',')}`);
     if (this.copyFails) throw new Error('сервер отказал в копировании');
@@ -177,11 +182,18 @@ class FakeMailbox {
 
   async messageMove(uids: number[], destination: string) {
     this.calls.push(`move ${this.#selected}->${destination} ${uids.join(',')}`);
+    // Настоящий imapflow при отказе MOVE НЕ бросает, а возвращает false:
+    // так отвечают переполненный ящик (NO [OVERQUOTA]) и исчезнувшая
+    // папка-получатель (NO [TRYCREATE]). Заглушка обязана уметь так же,
+    // иначе проверка «отказ считается успехом» ничего не проверяет.
+    if (this.moveFails) return false;
     return this.#transfer(uids, destination, true);
   }
 
   async messageDelete(uids: number[]): Promise<boolean> {
     this.calls.push(`delete ${this.#selected} ${uids.join(',')}`);
+    // EXPUNGE отказывает так же молча — возвратом false.
+    if (this.deleteFails) return false;
     const box = this.current;
     box.messages = box.messages.filter((m) => !uids.includes(m.uid));
     return true;
@@ -592,6 +604,67 @@ test('возврат: недоступный Dovecot НЕ стирает сро�
   down = false;
   assert.equal(await svc.tick(new Date('2026-08-05T18:32:00Z')), 1);
   assert.equal(store.rows[0]!.state, 'returned');
+});
+
+test('возврат: отказ сервера в переносе НЕ засчитывается за возврат', async () => {
+  /*
+   * Самый дорогой случай во всём разделе. `messageMove` при отказе не
+   * бросает, а возвращает `false` — так отвечает переполненный ящик
+   * (NO [OVERQUOTA]), а копятся отложенные письма как раз в таком.
+   * Результат читался только ради пометок, поэтому возврат объявлялся
+   * состоявшимся, запись закрывалась как «вернулось», в журнал шёл
+   * успех — и повторять было нечего.
+   *
+   * Человек в понедельник не находил письма нигде: во «Входящие» оно не
+   * приехало, а в списке «Отложенных» его больше нет.
+   */
+  const { box, store } = await withSnoozed('2026-08-05T18:31:00Z');
+  box.moveFails = true;
+
+  const svc = service(store, async () => box.asClient());
+  assert.equal(await svc.tick(new Date('2026-08-05T18:31:30Z')), 0, 'отказ посчитан возвратом');
+
+  const row = store.rows[0]!;
+  assert.equal(row.state, 'pending', 'срок закрыт — повторить возврат уже нечем');
+  assert.equal(row.attempts, 1);
+  const inInbox = (): boolean =>
+    box.box('INBOX').messages.some((m) => m.messageId === 'pismo-1@example.com');
+  assert.equal(inInbox(), false, 'письмо во «Входящие» не приезжало');
+  assert.equal(box.box('Snoozed').messages.length, 1, 'письмо обязано остаться на хранении');
+
+  // Ящик разгребли — следующий проход доводит дело до конца.
+  box.moveFails = false;
+  assert.equal(await svc.tick(new Date('2026-08-05T18:32:00Z')), 1);
+  assert.equal(store.rows[0]!.state, 'returned');
+  assert.equal(inInbox(), true, 'письмо так и не вернулось человеку');
+});
+
+test('откладывание: отказ в удалении оригинала не выдаётся за успех', async () => {
+  /*
+   * Третий шаг откладывания — убрать оригинал из папки. EXPUNGE
+   * отказывает так же молча, возвратом `false`, и результат не читался
+   * вовсе. Письмо, которое человек «убрал с глаз», оставалось во
+   * «Входящих», а в срок рядом с ним появлялась вторая копия — при
+   * ответе `{"snoozed": 1}` и списке, обновлённом как при удаче.
+   */
+  const box = new FakeMailbox([
+    { path: 'INBOX', specialUse: '\\Inbox', messages: [letter(1)] },
+    { path: 'Snoozed', messages: [] },
+  ]);
+  box.deleteFails = true;
+  const store = new MemoryStore();
+  const now = new Date('2026-08-05T18:30:00Z');
+
+  await assert.rejects(
+    () =>
+      service(store).snooze(box.asClient(), ACCOUNT, ['inbox:1'], { until: inAMinute(now) }, now),
+    /убрать/i,
+    'отказ выдан за успешное откладывание',
+  );
+
+  // Письмо в обоих местах — это видно и поправимо; молчание было бы хуже.
+  assert.equal(box.box('INBOX').messages.length, 1, 'оригинал исчез при отказе EXPUNGE');
+  assert.equal(box.box('Snoozed').messages.length, 1);
 });
 
 test('перезапуск сервера: просроченное письмо возвращается первым же проходом', async () => {

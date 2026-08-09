@@ -278,12 +278,32 @@ export class SnoozeService {
         );
       }
 
-      /* Шаг 3: удаление оригиналов. */
+      /*
+       * Шаг 3: удаление оригиналов.
+       *
+       * Результат ПРОВЕРЯЕТСЯ: imapflow при отказе EXPUNGE не бросает, а
+       * возвращает `false`. Раньше он не читался вовсе, и отказ уходил в
+       * ответ как успех — письмо, которое человек «убрал с глаз»,
+       * оставалось во «Входящих», а в срок рядом с ним появлялась его
+       * вторая копия. Ответ при этом был `{"snoozed": N}`, и список
+       * обновлялся как при удачном откладывании.
+       *
+       * Разбор трёх обрывов в шапке snooze-mailbox.ts этот случай не
+       * покрывал: там рассмотрено, что будет, если до шага не дошли, —
+       * а не то, что будет, если сервер на нём отказал.
+       */
       const removeLock = await client.getMailboxLock(folder.path);
+      let removed: unknown;
       try {
-        await client.messageDelete(recorded, { uid: true });
+        removed = await client.messageDelete(recorded, { uid: true });
       } finally {
         removeLock.release();
+      }
+      if (removed === false) {
+        throw new UpstreamUnavailableError(
+          'Письма скопированы в «Отложенные», но убрать их из папки не удалось. ' +
+            'Пока они лежат в обоих местах — повторите позже.',
+        );
       }
       snoozed += recorded.length;
     }

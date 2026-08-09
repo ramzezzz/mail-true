@@ -48,6 +48,7 @@
  */
 import type { ImapFlow } from 'imapflow';
 import type { Folder } from '@mail-true/shared';
+import { UpstreamUnavailableError } from '../errors.js';
 import { existingUids, listFolders, searchUids } from '../imap/service.js';
 import type { SnoozedRow } from './snooze-db.js';
 
@@ -243,15 +244,70 @@ export async function returnSnoozed(client: ImapFlow, row: SnoozedRow): Promise<
    * письма наверх со значком времени. Неудача здесь не отменяет возврата:
    * письмо уже в папке, а пометка — украшение поверх.
    */
-  const newUid = uidMapOf(moved).get(uid);
-  if (newUid !== undefined) {
+  /*
+   * Перенос НЕ УДАЛСЯ — и это надо сказать вслух.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Результат `messageMove` читался только ради пометок, а сама функция
+   * безусловно отдавала `kind: 'returned'`. Дальше работник закрывал
+   * запись как «вернулось» и писал в журнал успех — повторять было уже
+   * нечего, запись закрыта.
+   *
+   * imapflow при отказе MOVE не бросает, а возвращает `false`. Отказ
+   * здесь не экзотика: `NO [OVERQUOTA]` на переполненном ящике — а
+   * копятся отложенные письма как раз в таком — и `NO [TRYCREATE]`,
+   * если папку-получатель убрали из соседней вкладки.
+   *
+   * Человек отложил письмо до понедельника. В понедельник письма нет ни
+   * во «Входящих», ни в списке «Отложенных»: запись закрыта, и в
+   * подборке письмо показывается как «срок не сохранился». Ни он, ни
+   * администратор об этом не узнают — в журнале стоит успешный возврат.
+   * То же по кнопке «Вернуть сейчас»: ответ `{"returned":1}`, строка с
+   * экрана исчезает, письмо остаётся на месте.
+   *
+   * Теперь отказ уходит наверх исключением: запись остаётся живой, и
+   * следующий проход работника попробует снова.
+   */
+  if (moved === false) {
+    throw new UpstreamUnavailableError(
+      'Почтовый сервер не смог вернуть отложенное письмо. Попробуем позже.',
+    );
+  }
+
+  let newUid = uidMapOf(moved).get(uid);
+  {
     const destLock = await client.getMailboxLock(target.path).catch(() => null);
     if (destLock) {
       try {
-        await client.messageFlagsRemove([newUid], ['\\Seen'], { uid: true });
-        await client.messageFlagsAdd([newUid], [SNOOZE_RETURNED_KEYWORD, SNOOZE_PINNED_KEYWORD], {
-          uid: true,
-        });
+        if (newUid === undefined) {
+          /*
+           * Сервер не сказал номер копии (нет UIDPLUS) — ищем её по
+           * Message-ID. Без этого письмо возвращалось прочитанным и без
+           * пометок, то есть садилось в середину ленты по своей старой
+           * дате: человек не увидел бы его вообще никогда, а ради
+           * заметности откладывание и существует.
+           *
+           * Берём НАИБОЛЬШИЙ номер, а не первый найденный: письмо с этим
+           * Message-ID могло уже лежать в папке (человек ставил себя в
+           * копию), и пометки уехали бы на чужую строку. Тот же приём и
+           * с тем же разбором — в await-reply-service.ts.
+           */
+          // Без Message-ID искать нечем: письмо останется без пометок,
+          // но оно уже в нужной папке — это не повод отменять возврат.
+          const needle = normalizeMessageId(row.messageId);
+          if (needle !== null) {
+            const found = await searchUids(client, { header: { 'message-id': needle } });
+            newUid = found.length > 0 ? Math.max(...found) : undefined;
+          }
+        }
+        if (newUid !== undefined) {
+          await client.messageFlagsRemove([newUid], ['\\Seen'], { uid: true });
+          await client.messageFlagsAdd([newUid], [SNOOZE_RETURNED_KEYWORD, SNOOZE_PINNED_KEYWORD], {
+            uid: true,
+          });
+        }
       } catch {
         /* см. пояснение выше */
       } finally {
