@@ -73,6 +73,9 @@ class MemoryStore implements OwnerStore {
   purgeAccess(): Promise<number> {
     return Promise.resolve(0);
   }
+  purgeClosedHistory(): Promise<number> {
+    return Promise.resolve(0);
+  }
   createExport(): Promise<ExportRow> {
     throw new Error('не нужно в этой проверке');
   }

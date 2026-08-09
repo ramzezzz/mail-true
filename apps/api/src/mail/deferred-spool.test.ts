@@ -20,9 +20,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
+import path, { join } from 'node:path';
 import { DeferredSpool } from './deferred-send.js';
 
 /** Очередь во временном каталоге. */
@@ -125,4 +125,75 @@ test('в списке видно, сколько раз отправка сры�
 test('пустая очередь даёт пустой список, а не отказ', async () => {
   const s = await spool();
   assert.deepEqual(await s.scheduledFor('ivan@mail.local'), []);
+});
+
+test('старые извещения убираются, свежие остаются', async () => {
+  /*
+   * Извещение о неотправленном письме исчезало ТОЛЬКО по нажатию
+   * «Понятно». Уволился, ушёл в отпуск, не заметил плашку — файл
+   * оставался навсегда. Каталог очереди один на всех, и список
+   * извещений читается целиком при КАЖДОМ открытии почты любым
+   * человеком: на сотне ящиков за пару лет это тысячи файлов на вход.
+   */
+  const s = await spool();
+  const notice = {
+    owner: 'ivan@mail.local',
+    subject: 'письмо',
+    envelopeTo: ['kto@mail.local'],
+    reason: 'сервер не ответил',
+    rejected: [],
+    attempts: 5,
+    lastAttemptAt: new Date().toISOString(),
+    draftUid: null,
+  };
+  const old = await s.addFailure({ ...notice, subject: 'давнее' });
+  await s.addFailure({ ...notice, subject: 'вчерашнее' });
+
+  // Состарим первое извещение: время ставит сама очередь, поэтому
+  // правим файл — так же, как его состарила бы пара месяцев.
+  const dir = s.directory;
+  const path2 = join(dir, `${old.id}.fail`);
+  const stored = JSON.parse(await readFile(path2, 'utf8')) as { createdAt: string };
+  stored.createdAt = new Date(Date.now() - 60 * 24 * 3600_000).toISOString();
+  await writeFile(path2, JSON.stringify(stored), 'utf8');
+
+  const removed = await s.purgeStale(new Date(Date.now() - 30 * 24 * 3600_000));
+  assert.equal(removed, 1, 'убрано не то количество');
+
+  const left = await s.failures('ivan@mail.local');
+  assert.deepEqual(
+    left.map((n) => n.subject),
+    ['вчерашнее'],
+    'убрано свежее извещение — человек не узнает, что письмо не ушло',
+  );
+});
+
+test('уборка не трогает письмо, которое ещё уйдёт', async () => {
+  // Живое письмо в очереди — это ненаписанная почта человека, и цена
+  // ошибки здесь несоизмерима с местом на диске.
+  const s = await spool();
+  const id = await put(s, 'ivan@mail.local', 'ждёт своего часа');
+
+  await s.purgeStale(new Date(Date.now() + 24 * 3600_000));
+  assert.ok(await s.get(id), 'уборка снесла живое письмо из очереди');
+});
+
+test('брошенное письмо убирается, когда о нём давно сказано', async () => {
+  const s = await spool();
+  const id = await put(s, 'ivan@mail.local', 'не ушло совсем');
+  await s.markGivenUp(id);
+
+  // Крест поставлен только что — рано.
+  await s.purgeStale(new Date(Date.now() - 30 * 24 * 3600_000));
+  assert.ok(await s.get(id), 'свежее брошенное письмо убрано слишком рано');
+
+  // А через месяц — пора.
+  const removed = await s.purgeStale(new Date(Date.now() + 24 * 3600_000));
+  assert.equal(removed, 1);
+  assert.equal(await s.get(id), null);
+});
+
+test('пустой каталог уборку не роняет', async () => {
+  const s = await spool();
+  assert.equal(await s.purgeStale(new Date()), 0);
 });

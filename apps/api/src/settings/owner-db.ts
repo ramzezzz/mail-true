@@ -248,6 +248,34 @@ export interface OwnerStore {
   /** Уборка истории: старше срока — удалить. Возвращает число строк. */
   purgeAccess(olderThan: Date): Promise<number>;
 
+  /**
+   * Убирает ЗАКРЫТЫЕ записи о восстановлении и выгрузках.
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ
+   * ------------------------------------------------------------------
+   * Закрытие записи меняло её состояние и на этом всё: строка оставалась
+   * лежать навсегда. У соседних историй уборка есть у каждой —
+   * mail_flow_events, server_metric_samples, rspamd_stat_samples,
+   * mailbox_access_log, service_restarts, — а у этих не было.
+   *
+   * Самая объёмная — trash_recovery_items: строка появляется на КАЖДОЕ
+   * окончательно удалённое письмо и хранит его тему, отправителя и
+   * размер. Сто человек по полсотни удалений в день — это около
+   * 1,8 миллиона строк в год, и так каждый год.
+   *
+   * Растёт от этого не только база, но и каждая резервная копия
+   * (install/backup.sh снимает pg_dump целиком): восстановление
+   * становится дольше ровно тогда, когда время дорого. И отдельно:
+   * темы и адреса писем, которые человек выбросил три года назад,
+   * продолжают лежать в базе и разъезжаться по копиям — а он считает
+   * их удалёнными.
+   *
+   * Убираются только ЗАКРЫТЫЕ записи и только старше срока: живое
+   * восстановление и готовый архив не трогаются никогда.
+   */
+  purgeClosedHistory(olderThan: Date): Promise<number>;
+
   createExport(
     accountEmail: string,
     includeSpam: boolean,
@@ -322,7 +350,10 @@ export interface OwnerDbOptions {
 export class OwnerDb implements OwnerStore {
   readonly #pool: Pool;
 
+  readonly #logger: OwnerDbOptions['logger'];
+
   constructor(opts: OwnerDbOptions) {
+    this.#logger = opts.logger;
     this.#pool = new Pool({
       connectionString: opts.connectionString,
       max: opts.max ?? 3,
@@ -424,6 +455,42 @@ export class OwnerDb implements OwnerStore {
       olderThan.toISOString(),
     ]);
     return result.rowCount ?? 0;
+  }
+
+  async purgeClosedHistory(olderThan: Date): Promise<number> {
+    const edge = olderThan.toISOString();
+    let removed = 0;
+    /*
+     * Каждая таблица — своим запросом и со своим «когда закрылась».
+     * Общего поля времени у них нет, а брать «когда создана» неверно:
+     * запись о письме, которое ещё можно вернуть, старше срока хранения
+     * не бывает по построению, но запись о ДОЛГОЙ выгрузке — бывает.
+     *
+     * Отсутствие таблицы не считается бедой: миграцию могли не
+     * применить, и уборка не должна валить работу сервера из-за этого.
+     */
+    const steps: Array<[string, string]> = [
+      [
+        'trash_recovery_items',
+        `DELETE FROM trash_recovery_items WHERE state <> 'pending' AND purge_at < $1`,
+      ],
+      [
+        'mailbox_export_jobs',
+        `DELETE FROM mailbox_export_jobs
+          WHERE state IN ('done', 'failed', 'expired', 'cancelled')
+            AND coalesce(finished_at, created_at) < $1`,
+      ],
+    ];
+    for (const [table, sql] of steps) {
+      if (!(await this.#tableExists(table))) continue;
+      try {
+        const result = await this.#pool.query(sql, [edge]);
+        removed += result.rowCount ?? 0;
+      } catch (err) {
+        this.#logger.warn(errorInfo(err), `Уборка таблицы ${table} не удалась`);
+      }
+    }
+    return removed;
   }
 
   /* --- Собственные адреса сервера приложения (миграция 0036) --- */

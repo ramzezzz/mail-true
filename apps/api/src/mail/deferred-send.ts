@@ -285,6 +285,11 @@ export class DeferredSpool {
 
   constructor(private readonly dir: string) {}
 
+  /** Каталог очереди. Нужен проверкам, чтобы состарить файл на диске. */
+  get directory(): string {
+    return this.dir;
+  }
+
   /** Каталог заводится при первой же записи, а не при старте сервера. */
   async init(): Promise<void> {
     if (this.#ready) return;
@@ -431,13 +436,6 @@ export class DeferredSpool {
   }
 
   /**
-   * Ставит на письме крест: отправлять его больше нельзя (см. `gaveUp`).
-   *
-   * Отдельной записью на диск, ДО попытки убрать письмо в «Черновики»:
-   * уборка как раз и может не удаться, а второй раз отдавать письмо
-   * почтовому серверу нельзя ни при каком исходе уборки.
-   */
-  /**
    * Отметить, что SMTP принял письмо. Дальше его не отправляют повторно,
    * даже если процесс умер посреди хвоста (см. DeferredEntry.sentAt).
    */
@@ -447,6 +445,13 @@ export class DeferredSpool {
     await this.writeMeta({ ...entry, sentAt: new Date().toISOString() });
   }
 
+  /**
+   * Ставит на письме крест: отправлять его больше нельзя (см. `gaveUp`).
+   *
+   * Отдельной записью на диск, ДО попытки убрать письмо в «Черновики»:
+   * уборка как раз и может не удаться, а второй раз отдавать письмо
+   * почтовому серверу нельзя ни при каком исходе уборки.
+   */
   async markGivenUp(id: string): Promise<void> {
     const entry = await this.get(id);
     if (!entry || entry.gaveUp) return;
@@ -511,6 +516,66 @@ export class DeferredSpool {
       }
     }
     return found.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /**
+   * Убирает извещения старше срока и брошенные письма.
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ
+   * ------------------------------------------------------------------
+   * Извещение о неотправленном письме исчезало ТОЛЬКО когда человек
+   * нажимал «Понятно». Уволился, ушёл в отпуск, просто не заметил
+   * плашку — файл остаётся навсегда. Там же навсегда оставались
+   * конверты писем с крестом (`gaveUp`), которые не удалось убрать в
+   * «Черновики».
+   *
+   * Каталог очереди ОДИН на всех, и `failures` читает его целиком на
+   * КАЖДОЕ открытие почты любым человеком: на сотне ящиков за пару лет
+   * это тысячи файлов на каждый вход. Плюс в очереди навсегда лежат
+   * тела писем и зашифрованные пароли ящиков в конвертах — и попадают
+   * в каждую резервную копию тома.
+   *
+   * Уборщик загрузок сюда не доходил: он ходит только по своему
+   * каталогу, а очередь лежит рядом.
+   */
+  async purgeStale(olderThan: Date): Promise<number> {
+    let names: string[] = [];
+    try {
+      names = await readdir(this.dir);
+    } catch {
+      return 0;
+    }
+    const edge = olderThan.getTime();
+    let removed = 0;
+
+    for (const name of names) {
+      try {
+        if (name.endsWith('.fail')) {
+          const notice = JSON.parse(
+            await readFile(join(this.dir, name), 'utf8'),
+          ) as SendFailureNotice;
+          if (Date.parse(notice.createdAt) >= edge) continue;
+          await unlink(join(this.dir, name)).catch(() => undefined);
+          removed += 1;
+          continue;
+        }
+        if (!name.endsWith('.json')) continue;
+        const entry = await this.get(name.slice(0, -5));
+        /*
+         * Живое письмо не трогаем ни при каких обстоятельствах: оно ещё
+         * уйдёт. Убираем только те, на которых поставлен крест, — и
+         * только когда о них давно сказано.
+         */
+        if (!entry?.gaveUp) continue;
+        if (Date.parse(entry.createdAt) >= edge) continue;
+        await this.remove(entry.id);
+        removed += 1;
+      } catch {
+        /* испорченный файл на уборке остальных не сказывается */
+      }
+    }
+    return removed;
   }
 
   /**
@@ -596,12 +661,23 @@ export interface DeferredSenderOptions {
 }
 
 /**
+ * Сколько живёт извещение о неотправленном письме и брошенный конверт.
+ *
+ * Месяц — щедро намеренно: человек должен успеть вернуться из отпуска и
+ * увидеть, что его письмо не ушло. Но не вечно: каталог очереди один на
+ * всех, и список извещений читается целиком при каждом открытии почты.
+ */
+const NOTICE_TTL_MS = 30 * 24 * 3600_000;
+
+/**
  * Работник очереди. Просыпается по таймеру, забирает всё, чему пора,
  * и отправляет.
  */
 export class DeferredSender {
   readonly #options: Required<Pick<DeferredSenderOptions, 'maxAttempts'>> & DeferredSenderOptions;
   #timer: NodeJS.Timeout | null = null;
+  /** Уборщик каталога очереди: старые извещения и брошенные письма. */
+  #janitor: NodeJS.Timeout | null = null;
   /** Одноразовый будильник к ближайшему сроку — см. wakeAt. */
   #wake: NodeJS.Timeout | null = null;
   #wakeAt = 0;
@@ -633,11 +709,42 @@ export class DeferredSender {
     this.#timer = setInterval(() => void this.tick(), intervalMs);
     // Таймер очереди не должен сам по себе удерживать процесс живым
     this.#timer.unref();
+
+    /*
+     * Уборка каталога очереди — раз в час.
+     *
+     * Извещение о неотправленном письме исчезало только по нажатию
+     * «Понятно»: уволился, ушёл в отпуск, не заметил плашку — файл
+     * оставался навсегда. Каталог один на всех, и список извещений
+     * читается целиком при КАЖДОМ открытии почты любым человеком.
+     *
+     * Срок берём щедрый — месяц: извещение живёт достаточно, чтобы
+     * человек вернулся из отпуска и увидел его, но не вечно.
+     */
+    this.#janitor = setInterval(() => {
+      const edge = new Date(Date.now() - NOTICE_TTL_MS);
+      void this.#options.spool
+        .purgeStale(edge)
+        .then((removed) => {
+          if (removed > 0) {
+            this.#options.log?.info({ removed }, 'Убраны старые записи очереди отправки');
+          }
+        })
+        .catch((err: unknown) =>
+          this.#options.log?.warn(
+            { err: err instanceof Error ? err.message : String(err) },
+            'Уборка очереди не удалась',
+          ),
+        );
+    }, 60 * 60_000);
+    this.#janitor.unref();
   }
 
   stop(): void {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
+    if (this.#janitor) clearInterval(this.#janitor);
+    this.#janitor = null;
     if (this.#wake) clearTimeout(this.#wake);
     this.#wake = null;
     this.#wakeAt = 0;
