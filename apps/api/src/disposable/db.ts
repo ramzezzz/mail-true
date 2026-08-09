@@ -27,7 +27,21 @@
  */
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import type { Logger } from 'pino';
+import { BadRequestError } from '../errors.js';
 import { errorInfo } from '../log.js';
+
+/**
+ * Адрес, который человек пытается включить, уже занят настоящим ящиком.
+ *
+ * Отдельная ошибка, а не общий отказ: человеку надо объяснить, почему
+ * его собственный адрес вдруг «нельзя», — иначе это выглядит поломкой.
+ */
+export class DisposableAddressTakenError extends BadRequestError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DisposableAddressTakenError';
+  }
+}
 
 /** Строка адреса, как она лежит в базе (обе таблицы разом). */
 export interface DisposableRow {
@@ -235,8 +249,54 @@ export class DisposableDb implements DisposableStore {
    * Отбор по owner_email — не украшение: без него любой владелец ящика
    * выключал бы чужие адреса по номеру.
    */
+  /**
+   * Включение проверяет, не занят ли адрес — как при заведении.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Занятость проверялась ТОЛЬКО при заведении адреса, а включение было
+   * голым переключением поля. При этом поиск занятости смотрит на
+   * действующие записи (`AND active`), то есть выключенной строки не
+   * видит вовсе, а Postfix разбирает карту алиасов раньше карты ящиков.
+   *
+   * Отсюда захват чужой почты в три шага: владелец заранее заводит
+   * ivan@company.ru и выключает его; администратор, не видя препятствий,
+   * создаёт настоящий ящик Ивана; владелец включает адрес обратно — и
+   * вся входящая почта Ивана, включая письма восстановления паролей,
+   * уходит постороннему. Ящик Ивана при этом открывается и выглядит
+   * исправным, так что искать причину он будет где угодно, только не
+   * здесь.
+   *
+   * Проверка идёт ВНУТРИ той же транзакции и с блокировкой строки ящика:
+   * иначе между проверкой и записью успевает вклиниться создание ящика.
+   */
   async setActive(ownerEmail: string, id: number, active: boolean): Promise<DisposableRow | null> {
     return this.tx(async (client) => {
+      if (active) {
+        const { rows: mine } = await client.query<{ source: string }>(
+          `SELECT a.source
+             FROM virtual_aliases a
+             JOIN disposable_aliases d ON d.alias_id = a.id
+            WHERE a.id = $1 AND d.owner_email = $2`,
+          [id, ownerEmail],
+        );
+        const source = mine[0]?.source;
+        if (source === undefined) return null;
+        const { rows: busy } = await client.query<{ n: string }>(
+          `SELECT count(*)::text AS n
+             FROM virtual_users
+            WHERE lower(email) = lower($1)
+              FOR UPDATE`,
+          [source],
+        );
+        if (Number(busy[0]?.n ?? 0) > 0) {
+          throw new DisposableAddressTakenError(
+            `Адрес ${source} теперь занят настоящим почтовым ящиком. ` +
+              'Включить его снова нельзя: письма уходили бы не тому, кому их пишут.',
+          );
+        }
+      }
       const { rowCount } = await client.query(
         `UPDATE virtual_aliases a
             SET active = $3

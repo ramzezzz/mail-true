@@ -21,6 +21,7 @@
  */
 
 /** Предел длины левой части адреса из RFC 5321. */
+import { randomBytes } from 'node:crypto';
 const MAX_LOCAL = 64;
 
 /** Самое короткое имя: три знака. Короче — почти наверняка опечатка. */
@@ -92,6 +93,17 @@ export function checkLocalPart(name: string): NameProblem | null {
 }
 
 /**
+ * Случайное число [0, 1) из криптографического источника.
+ *
+ * Ровно 24 бита — столько же, сколько кладётся в хвост имени: брать
+ * больше незачем, а меньше нельзя.
+ */
+function cryptoRandom(): number {
+  const buf = randomBytes(3);
+  return ((buf[0]! << 16) | (buf[1]! << 8) | buf[2]!) / 0x1000000;
+}
+
+/**
  * Придумывает случайное имя вида `shop-2f4c9a`.
  *
  * ------------------------------------------------------------------
@@ -104,8 +116,19 @@ export function checkLocalPart(name: string): NameProblem | null {
  *
  * Приставку человек задаёт сам («shop», «forum») — она и есть ответ на
  * вопрос «кому я это выдал», который он будет читать через год.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ НЕ Math.random
+ * ------------------------------------------------------------------
+ * Умолчанием стоял он, и неперебираемость, ради которой всё и делалось,
+ * держалась только на нём. А `Math.random` в V8 — это xorshift128+, общий
+ * на весь процесс и не предназначенный для секретов: заведя несколько
+ * адресов подряд, состояние генератора восстанавливают по выданным
+ * значениям, после чего следующие хвосты вычисляются наперёд. Приставка
+ * при этом секретом не является вовсе — она из пометки «кому выдан».
+ * Сама возможность подставить свой генератор оставлена ради тестов.
  */
-export function suggestLocalPart(prefix: string, random: () => number = Math.random): string {
+export function suggestLocalPart(prefix: string, random: () => number = cryptoRandom): string {
   /*
    * Порядок здесь важнее, чем кажется: сначала обрезка, и только потом
    * чистка краёв.
@@ -123,7 +146,7 @@ export function suggestLocalPart(prefix: string, random: () => number = Math.ran
     .replace(/[^a-z0-9]+/g, '-')
     .slice(0, 24)
     .replace(/^-+|-+$/g, '');
-  const tail = Math.floor(random() * 0xffffff)
+  const tail = Math.floor(random() * 0x1000000)
     .toString(16)
     .padStart(6, '0');
   const base = cleaned.length > 0 ? `${cleaned}-${tail}` : `mail-${tail}`;
