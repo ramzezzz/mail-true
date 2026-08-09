@@ -27,7 +27,12 @@ import { useMocks } from '../api/mockFlag';
 import { apiFetch } from '../api/http';
 import { cachedAccount, clearAppearanceCache, writeCachedAccount, writeCachedTheme } from './cache';
 import { setAppearanceSink, type AppearancePatch } from './persist';
-import { adoptWallpaperChoice, applyWallpaper, readWallpaperSelection } from './wallpapers';
+import {
+  adoptWallpaperChoice,
+  applyWallpaper,
+  clearCustomWallpaper,
+  readWallpaperSelection,
+} from './wallpapers';
 import { applyTheme, resolveTheme, useUiStore } from '../app/store';
 
 const ROUTE = '/api/settings/appearance';
@@ -90,6 +95,22 @@ function resetAppearance(): void {
   const theme = resolveTheme('system');
   applyTheme(theme);
   useUiStore.setState({ themeSetting: 'system', theme });
+  /*
+   * Своя картинка стирается ВМЕСТЕ с остальным оформлением.
+   *
+   * Она лежит в хранилище браузера под одним ключом на весь браузер, без
+   * привязки к ящику, а сброс раньше трогал только запомненный выбор. На
+   * общем компьютере это значило вот что: человек поставил фоном личное
+   * фото и вышел; следующий вошедший открывал «Оформление» и видел это
+   * фото в разделе «Своя картинка» — мог рассмотреть и применить. Хуже
+   * того, если у него самого на сервере был записан выбор «своя
+   * картинка» (он ставил её на другом устройстве), чужое фото молча
+   * становилось его фоном.
+   *
+   * Ошибку глушим намеренно: не стёрлась картинка — не повод ломать вход
+   * в почту, а следующий заход попробует снова.
+   */
+  void clearCustomWallpaper().catch(() => undefined);
   void applyWallpaper(readWallpaperSelection());
 }
 
@@ -99,14 +120,34 @@ function resetAppearance(): void {
  * Вызывается из провайдера сессии при каждом её обновлении — то есть при
  * старте, входе, смене ящика. Ошибок наружу не выбрасывает.
  */
+/**
+ * Номер последнего запроса оформления.
+ *
+ * Сверки адреса из ответа мало: она сравнивает ответ с аргументом ТОГО ЖЕ
+ * вызова, а значит пропускает случай, ради которого написана. Человек
+ * переключает ящик, уходит второй запрос, ответы возвращаются в обратном
+ * порядке — ответ по прежнему ящику приходит последним, его адрес
+ * совпадает с адресом своего же вызова, и он спокойно применяет чужую
+ * тему и чужой фон поверх уже открытого ящика.
+ *
+ * Тот же счётчик закрывает вторую беду: выбор, сделанный ПОКА запрос в
+ * пути, откатывался ответом сервера. Человек щёлкал тему в шапке, через
+ * мгновение приезжал ответ со старым значением — и щелчок сам себя
+ * отменял, хотя на сервере уже лежало новое.
+ */
+let syncSeq = 0;
+
 export async function syncAppearance(email: string): Promise<void> {
   adoptAccount(email);
+  const seq = ++syncSeq;
   const remote = await fetchAppearance();
   if (!remote) return;
   // Ответ мог прийти от ПРОШЛОЙ сессии: между запросом и ответом человек
   // успевает выйти и войти другим. Применять такой ответ — значит снова
   // показать чужую тему, поэтому сверяем адрес.
   if (remote.email.toLowerCase() !== email.toLowerCase()) return;
+  // И ответ более раннего запроса, каким бы «своим» он ни выглядел.
+  if (seq !== syncSeq) return;
   writeCachedAccount(email);
 
   const setting = normalizeThemeSetting(remote.theme);

@@ -9,6 +9,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -57,6 +58,23 @@ export function Dropdown({
   const [state, setState] = useState<MenuState>('closed');
   const open = state === 'open';
   const hostRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  /**
+   * Сдвиг, которым меню возвращается на экран.
+   *
+   * Меню позиционировалось чистым CSS — «под кнопкой, слева» или «под
+   * кнопкой, справа» — и про края экрана не знало ничего. На телефоне это
+   * значило вот что: у страницы письма меню «Ещё действия» уходило за
+   * правый край почти на две трети (недоступны «Спам», «Создать фильтр»,
+   * «Переслать как вложение», «Исходный текст», «Сохранить .eml»); у
+   * «Отложить» за краем оказывалась кнопка подтверждения произвольной
+   * даты — то есть дату можно было ввести и нельзя было применить; у
+   * панели выделения меню, наоборот, срезалось слева. Обрезалось молча:
+   * содержимое приложения скрывает переполнение, прокрутки там нет.
+   *
+   * Рядом такая подгонка уже написана — в контекстном меню списка писем.
+   */
+  const [shift, setShift] = useState(0);
   /**
    * Выбранный пункт закрывает меню мгновенно: страница уже меняется, и
    * досматривать нечего. А отказ от выбора (Escape, клик мимо, повторное
@@ -89,13 +107,36 @@ export function Dropdown({
     };
   }, [open, dismiss]);
 
+  /*
+   * Подгонка считается ПОСЛЕ отрисовки, но до кадра: иначе человек успел
+   * бы увидеть меню за краем и его прыжок обратно.
+   */
+  useLayoutEffect(() => {
+    if (state === 'closed') {
+      setShift(0);
+      return;
+    }
+    const el = menuRef.current;
+    if (!el || typeof window === 'undefined') return;
+    const rect = el.getBoundingClientRect();
+    const margin = 8;
+    let dx = 0;
+    if (rect.right > window.innerWidth - margin) dx = window.innerWidth - margin - rect.right;
+    // Левый край важнее правого: подпись пункта начинается слева, и
+    // срезанное начало строки читать невозможно вовсе.
+    if (rect.left + dx < margin) dx = margin - rect.left;
+    setShift((prev) => (prev === dx ? prev : dx));
+  }, [state]);
+
   return (
     <div ref={hostRef} className={cx(styles.host, className)}>
       {trigger({ open, toggle })}
       {state !== 'closed' && (
         <div
+          ref={menuRef}
           role="menu"
           aria-hidden={state === 'closing' || undefined}
+          style={shift === 0 ? undefined : { marginLeft: shift }}
           className={cx(
             styles.menu,
             state === 'closing' && styles.menuClosing,

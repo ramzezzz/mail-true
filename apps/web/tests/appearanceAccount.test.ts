@@ -214,3 +214,47 @@ describe('список тем не расходится с сервером', ()
     expect([...THEME_SETTINGS]).toEqual(['system', ...THEME_IDS]);
   });
 });
+
+describe('наложение запросов', () => {
+  /*
+   * Ответ по ПРЕЖНЕМУ ящику приходит после переключения.
+   *
+   * Сверки адреса из ответа для этого мало: она сравнивает ответ с
+   * аргументом того же вызова, а значит пропускает ровно тот случай,
+   * ради которого написана. Человек переключает ящик, уходит второй
+   * запрос, ответы возвращаются в обратном порядке — и оформление
+   * прежнего ящика применяется поверх уже открытого.
+   */
+  it('поздний ответ прежнего ящика не перебивает новый', async () => {
+    const answers: Record<string, { email: string; theme: string; wallpaper: string }> = {
+      'a@mail.local': { email: 'a@mail.local', theme: 'sunset', wallpaper: '' },
+      'b@mail.local': { email: 'b@mail.local', theme: 'lagoon', wallpaper: '' },
+    };
+    let holdFirst: (() => void) | null = null;
+    // Порядок запросов известен заранее: сперва прежний ящик, потом новый.
+    const fetchedFor = ['a@mail.local', 'b@mail.local'];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        if (method !== 'GET') return new Response('{}', { status: 200 });
+        const email = fetchedFor.shift() ?? 'a@mail.local';
+        const body = JSON.stringify(answers[email]);
+        if (email === 'a@mail.local') {
+          await new Promise<void>((resolve) => {
+            holdFirst = resolve;
+          });
+        }
+        return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+      }),
+    );
+
+    const first = syncAppearance('a@mail.local');
+    const second = syncAppearance('b@mail.local');
+    await second;
+    holdFirst?.();
+    await first;
+
+    expect(useUiStore.getState().themeSetting).toBe('lagoon');
+  });
+});
