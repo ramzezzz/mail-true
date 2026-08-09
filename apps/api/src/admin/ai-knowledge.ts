@@ -86,10 +86,33 @@ function settingsCatalog(): string {
   for (const spec of SETTING_SPECS) {
     const section = titles.get(spec.section) ?? spec.section;
     // Описание в реестре бывает многострочным — в справочнике нужна строка.
-    const description = spec.description.replace(/\s+/gu, ' ').trim();
+    const description = shorten(spec.description.replace(/\s+/gu, ' ').trim());
     lines.push(`${spec.key} (${section}) — ${description}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Назначение настройки одной фразой.
+ *
+ * Справочник уходит поставщику ПРИ КАЖДОМ вопросе и оплачивается каждый
+ * раз. Описания в реестре подробные — там они такими и должны быть, их
+ * читает человек у поля ввода. Здесь же две сотни подробных описаний
+ * превращаются в тридцать килобайт на каждую реплику разговора, то есть
+ * в заметную часть дневного предела домена за один вопрос «где DKIM».
+ *
+ * Берём первое предложение: в нём и сказано, что настройка делает. Всё
+ * остальное — оговорки и последствия, за которыми человек идёт в раздел
+ * настроек, а не к помощнику.
+ */
+function shorten(description: string): string {
+  const stop = description.search(/[.!?](\s|$)/u);
+  const first = stop === -1 ? description : description.slice(0, stop + 1);
+  if (first.length <= 160) return first;
+  // Предложение длиннее строки таблицы — обрезаем по границе слова.
+  const cut = first.slice(0, 160);
+  const space = cut.lastIndexOf(' ');
+  return `${space > 80 ? cut.slice(0, space) : cut}…`;
 }
 
 /**
