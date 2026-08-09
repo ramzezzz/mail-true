@@ -685,6 +685,7 @@ export class MailAssistant {
     const decision = await this.#budget.reserve(
       ctx.accountId,
       promptTokens + this.#config.maxOutputTokens,
+      promptTokens,
     );
     if (!decision.allowed) {
       await this.#record({
@@ -866,7 +867,11 @@ export class MailAssistant {
     // пределе «два» проходили все — каждый успевал прочитать нули.
     const maxTokens = Math.max(this.#config.maxOutputTokens, params.minOutputTokens ?? 0);
     const estimated = estimateMessagesTokens([params.system, params.user]);
-    const decision = await this.#budget.reserve(params.ctx.accountId, estimated + maxTokens);
+    const decision = await this.#budget.reserve(
+      params.ctx.accountId,
+      estimated + maxTokens,
+      estimated,
+    );
     if (!decision.allowed) {
       await this.#record({
         ctx: params.ctx,

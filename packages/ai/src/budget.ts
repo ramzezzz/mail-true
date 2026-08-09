@@ -54,8 +54,13 @@ export interface BudgetTracker {
    * Занимает бюджет ДО обращения к модели: увеличивает счётчики на
    * оценку (запрос + потолок ответа) и одно обращение. Отказ означает,
    * что счётчики остались нетронутыми.
+   *
+   * `requestTokens` — размер САМОГО запроса, без ответа. С ним, и только
+   * с ним, сравнивается предел «токенов на одно обращение»: это предел
+   * на величину письма, которое отдают модели, а не на стоимость вызова.
+   * Не передан — считается равным резерву (так ведут себя старые вызовы).
    */
-  reserve(key: string, estimatedTokens: number): Promise<BudgetDecision>;
+  reserve(key: string, estimatedTokens: number, requestTokens?: number): Promise<BudgetDecision>;
   /**
    * Поправка по факту. `usage: null` — вызов не состоялся вовсе
    * (модель ничего не сделала), резерв снимается целиком вместе
@@ -81,13 +86,28 @@ function decisionFor(
   limits: BudgetLimits,
   window: Window,
   estimatedTokens: number,
+  requestTokens: number,
 ): BudgetDecision {
-  if (limits.maxTokensPerRequest !== null && estimatedTokens > limits.maxTokensPerRequest) {
+  /*
+   * Предел «на одно обращение» сверяется с РАЗМЕРОМ ЗАПРОСА, а не с
+   * резервом.
+   *
+   * Резерв включает потолок ответа — иначе предел за период прорывался
+   * бы на длину ответа при каждом вызове. Но у предела на обращение
+   * смысл другой: он отвечает на вопрос «не слишком ли длинное письмо
+   * мы отдаём модели». Сложив одно с другим, мы получили нижнюю
+   * границу в 1024 токена (а для перевода — 2000) независимо от длины
+   * письма: администратор, поставивший разумную тысячу «чтобы не
+   * платить за простыни», получал мёртвого помощника — отказ на каждую
+   * кнопку, включая письмо в одну строку. Причём при пределе от 1024 до
+   * 2000 «Кратко» работало, а «Перевести» не работало никогда.
+   */
+  if (limits.maxTokensPerRequest !== null && requestTokens > limits.maxTokensPerRequest) {
     return {
       allowed: false,
       error: aiFail(
         'budget-exceeded',
-        `Запрос слишком велик: примерно ${String(estimatedTokens)} токенов вместе с ответом при пределе ${String(limits.maxTokensPerRequest)} на один вызов`,
+        `Запрос слишком велик: примерно ${String(requestTokens)} токенов при пределе ${String(limits.maxTokensPerRequest)} на один вызов`,
         { retryable: false },
       ).error,
     };
@@ -162,11 +182,16 @@ export class InMemoryBudgetTracker implements BudgetTracker {
     return fresh;
   }
 
-  reserve(key: string, estimatedTokens: number): Promise<BudgetDecision> {
+  reserve(key: string, estimatedTokens: number, requestTokens?: number): Promise<BudgetDecision> {
     const window = this.#window(key);
     window.tokens += estimatedTokens;
     window.requests += 1;
-    const decision = decisionFor(this.#limits, window, estimatedTokens);
+    const decision = decisionFor(
+      this.#limits,
+      window,
+      estimatedTokens,
+      requestTokens ?? estimatedTokens,
+    );
     if (!decision.allowed) {
       // Не поместились — забираем свою прибавку обратно, чтобы отказ
       // не расходовал предел сам по себе.
@@ -259,14 +284,21 @@ export class RedisBudgetTracker implements BudgetTracker {
     };
   }
 
-  async reserve(key: string, estimatedTokens: number): Promise<BudgetDecision> {
+  async reserve(
+    key: string,
+    estimatedTokens: number,
+    requestTokens?: number,
+  ): Promise<BudgetDecision> {
+    const request = requestTokens ?? estimatedTokens;
     // Предел на один вызов от счётчиков не зависит — проверяем до INCRBY,
     // чтобы заведомо неподъёмный запрос не трогал общий счёт.
-    if (
-      this.#limits.maxTokensPerRequest !== null &&
-      estimatedTokens > this.#limits.maxTokensPerRequest
-    ) {
-      return decisionFor(this.#limits, { startedAt: 0, tokens: 0, requests: 0 }, estimatedTokens);
+    if (this.#limits.maxTokensPerRequest !== null && request > this.#limits.maxTokensPerRequest) {
+      return decisionFor(
+        this.#limits,
+        { startedAt: 0, tokens: 0, requests: 0 },
+        estimatedTokens,
+        request,
+      );
     }
 
     const keys = this.#keys(key);
@@ -280,6 +312,7 @@ export class RedisBudgetTracker implements BudgetTracker {
         this.#limits,
         { startedAt: this.#windowIndex() * this.#limits.periodMs, tokens, requests },
         estimatedTokens,
+        request,
       );
       if (!decision.allowed) {
         await this.#redis.incrby(keys.requests, -1);

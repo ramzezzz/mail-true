@@ -19,7 +19,12 @@ import { createReadStream } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
+import {
+  BadRequestError,
+  NotFoundError,
+  UnauthorizedError,
+  UpstreamUnavailableError,
+} from '../errors.js';
 import type { MailSession } from '../types.js';
 import { describeIp, type AccessEvent } from './access-log.js';
 import { collectAccess } from './access-reader.js';
@@ -260,7 +265,35 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
     if (job.state === 'queued' || job.state === 'running') {
       throw new BadRequestError('Эта выгрузка ещё собирается — сначала отмените её');
     }
-    if (job.filePath) await rm(job.filePath, { force: true }).catch(() => undefined);
+    /*
+     * Забыть путь можно только после того, как файла ДЕЙСТВИТЕЛЬНО нет.
+     *
+     * `force: true` гасит лишь «файла и так не было». Настоящий отказ —
+     * том смонтирован только на чтение, файл держит идущее скачивание,
+     * чужой владелец — это исключение. Проглотив его и всё равно
+     * записав `state: 'expired', file_path: NULL`, мы теряли путь
+     * навсегда: уборщик по сроку берёт только `state = 'ready'`, то есть
+     * такую строку не возьмёт уже никто. Архив со всей перепиской в
+     * открытом виде оставался на диске бессрочно и попадал в каждую
+     * резервную копию — притом что человеку сказали «удалён», а в
+     * журнале записано «удалён по просьбе владельца». Раньше его хотя бы
+     * сносил уборщик через двое суток; молчаливое проглатывание сделало
+     * худший случай хуже, чем до появления самой кнопки.
+     *
+     * Поэтому отказ отдаётся наверх: строка остаётся `ready` с путём,
+     * файл заберёт уборщик по сроку, а человек увидит, что дело не
+     * сделано, и сможет позвать администратора.
+     */
+    if (job.filePath) {
+      try {
+        await rm(job.filePath, { force: true });
+      } catch (err) {
+        request.log.error({ err, exportId: id }, 'не удалось стереть архив выгрузки');
+        throw new UpstreamUnavailableError(
+          'Не удалось стереть архив с диска. Он остаётся на сервере — обратитесь к администратору.',
+        );
+      }
+    }
     await store.finishExport(id, { state: 'expired', filePath: null });
     app.deps.accessLog?.record({
       accountEmail: session.email,

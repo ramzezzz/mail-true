@@ -206,7 +206,48 @@ export function validateWallpaperFile(file: { type: string; size: number }): str
 
 const DB_NAME = 'mt-appearance';
 const STORE = 'wallpaper';
-const RECORD_KEY = 'custom';
+
+/**
+ * Ключ записи — АДРЕС ВЛАДЕЛЬЦА, а не одно слово на весь браузер.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Ключ был один — 'custom', — то есть картинка лежала на браузер, а не
+ * на человека. Отсюда две беды сразу, и лечили их друг за счёт друга.
+ *
+ * Сперва на общем компьютере следующий вошедший видел чужое фото в
+ * разделе «Своя картинка» и мог его применить. Тогда картинку стали
+ * стирать при сбросе оформления — но сброс зовётся и при обычном выходе,
+ * и при переключении между СВОИМИ связанными ящиками. Картинка живёт
+ * только в этом браузере и на сервер не уходит никогда, поэтому стирание
+ * безвозвратно: человек выходил из почты на своём же ноутбуке и терял
+ * загруженный файл, без предупреждения и без отмены.
+ *
+ * Ключ по владельцу закрывает обе беды разом: чужому картинки не видно —
+ * под его ключом её просто нет, — а своя переживает и выход, и
+ * переключение ящиков.
+ *
+ * Адрес приводится к нижнему регистру: тот же ящик, набранный с
+ * заглавной буквы, — тот же человек.
+ */
+function recordKey(owner: string): string {
+  return `custom:${owner.trim().toLowerCase()}`;
+}
+
+/**
+ * Чей ящик открыт сейчас. Пусто — вошедшего нет (страница входа), и
+ * тогда своей картинки быть не может.
+ *
+ * Значение пишет слой согласования оформления (appearance/sync.ts) при
+ * каждом обновлении сессии; здесь оно только читается.
+ */
+let currentOwner = '';
+
+/** Запомнить, чья картинка теперь считается своей. */
+export function setWallpaperOwner(email: string): void {
+  currentOwner = email.trim().toLowerCase();
+}
 
 function openDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
@@ -228,21 +269,25 @@ function requestDone<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 async function dbPut(blob: Blob): Promise<void> {
+  if (currentOwner === '') throw new Error('картинку некому сохранить: ящик не открыт');
   const db = await openDb();
   if (!db) throw new Error('браузер не даёт сохранить картинку (нет IndexedDB)');
   try {
-    await requestDone(db.transaction(STORE, 'readwrite').objectStore(STORE).put(blob, RECORD_KEY));
+    await requestDone(
+      db.transaction(STORE, 'readwrite').objectStore(STORE).put(blob, recordKey(currentOwner)),
+    );
   } finally {
     db.close();
   }
 }
 
 async function dbGet(): Promise<Blob | null> {
+  if (currentOwner === '') return null;
   const db = await openDb();
   if (!db) return null;
   try {
     const value = await requestDone(
-      db.transaction(STORE, 'readonly').objectStore(STORE).get(RECORD_KEY),
+      db.transaction(STORE, 'readonly').objectStore(STORE).get(recordKey(currentOwner)),
     );
     return value instanceof Blob ? value : null;
   } finally {
@@ -251,10 +296,13 @@ async function dbGet(): Promise<Blob | null> {
 }
 
 async function dbDelete(): Promise<void> {
+  if (currentOwner === '') return;
   const db = await openDb();
   if (!db) return;
   try {
-    await requestDone(db.transaction(STORE, 'readwrite').objectStore(STORE).delete(RECORD_KEY));
+    await requestDone(
+      db.transaction(STORE, 'readwrite').objectStore(STORE).delete(recordKey(currentOwner)),
+    );
   } finally {
     db.close();
   }

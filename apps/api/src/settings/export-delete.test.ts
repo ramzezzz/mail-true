@@ -128,6 +128,36 @@ test('удаление готового архива стирает файл с 
   }
 });
 
+test('файл не стёрся — строка остаётся под уборщиком, а человеку сказана правда', async () => {
+  /*
+   * Отказ `rm` до этого проглатывался (`.catch(() => undefined)`), и
+   * строка всё равно уходила в `expired` с пустым путём. Уборщик по
+   * сроку берёт только `ready`, то есть такую строку не взял бы уже
+   * никто: архив со всей перепиской в открытом виде оставался на диске
+   * бессрочно и попадал в каждую резервную копию — притом что человеку
+   * сказали «удалён». Раньше его хотя бы сносил уборщик через двое
+   * суток, так что молчание сделало худший случай хуже, чем до
+   * появления самой кнопки.
+   *
+   * Настоящий отказ здесь получен подстановкой каталога вместо файла:
+   * `rm` без `recursive` отвечает на него ERR_FS_EISDIR — ровно так же,
+   * как на том, смонтированный только для чтения.
+   */
+  const dir = await mkdtemp(path.join(tmpdir(), 'mt-export-busy-'));
+  const { app, store } = await harness('ivan@mail.local');
+  store.add({ id: 11, accountEmail: 'ivan@mail.local', filePath: dir });
+  try {
+    const res = await app.inject({ method: 'DELETE', url: '/api/settings/export/11' });
+    assert.notEqual(res.statusCode, 200, 'отказ выдан за успех');
+
+    const row = store.rows.get(11);
+    assert.equal(row?.state, 'ready', 'строка ушла из-под уборщика по сроку');
+    assert.equal(row?.filePath, dir, 'путь к файлу потерян — стирать больше нечего');
+  } finally {
+    await app.close();
+  }
+});
+
 test('чужую выгрузку удалить нельзя — её как будто и нет', async () => {
   const { app, store } = await harness('ivan@mail.local');
   store.add({ id: 8, accountEmail: 'anna@mail.local', filePath: null });

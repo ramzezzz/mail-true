@@ -330,6 +330,41 @@ describe('ограничение расходов', () => {
     }
   });
 
+  it('предел на обращение сравнивается с письмом, а не со стоимостью вызова', async () => {
+    /*
+     * Предел «токенов на одно обращение» отвечает на вопрос «не слишком
+     * ли длинное письмо мы отдаём модели». Когда с ним сравнили резерв —
+     * то есть письмо ПЛЮС потолок ответа, — нижней границей стали 1024
+     * токена независимо от длины письма: администратор, поставивший
+     * разумную тысячу, получал отказ на каждую кнопку, включая письмо в
+     * одну строку. Тысяча против письма на две строки обязана проходить.
+     */
+    const r = await rig([summaryReply()], { limits: { maxTokensPerRequest: 1000 } });
+    try {
+      const result = await r.assistant.summarizeMessage(sampleMessage(), ctx);
+      assert.ok(result.ok, result.ok ? '' : `помощник отказал: ${result.error.message}`);
+      assert.equal(r.server.requests.length, 1, 'запрос до модели не дошёл');
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('но в счёт периода потолок ответа входит: он тоже оплачивается', async () => {
+    // Обратная сторона того же: предел ЗА ПЕРИОД обязан считать ответ,
+    // иначе он прорывался бы на длину ответа при каждом вызове.
+    const r = await rig([summaryReply()], {
+      limits: { maxTokensPerRequest: 1000, maxTokensPerPeriod: 400 },
+    });
+    try {
+      const result = await r.assistant.summarizeMessage(sampleMessage(), ctx);
+      assert.equal(result.ok, false, 'резерв без потолка ответа пропустил вызов');
+      if (!result.ok) assert.equal(result.error.kind, 'budget-exceeded');
+      assert.equal(r.server.requests.length, 0);
+    } finally {
+      await r.close();
+    }
+  });
+
   it('ответ из кэша предел не расходует', async () => {
     const r = await rig([summaryReply()], { limits: { maxRequestsPerPeriod: 1 } });
     try {

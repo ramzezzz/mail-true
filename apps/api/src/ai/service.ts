@@ -165,8 +165,8 @@ export class DomainBudgetTracker implements BudgetTracker {
     return `domain:${this.#domain}`;
   }
 
-  reserve(_key: string, estimatedTokens: number): Promise<BudgetDecision> {
-    return this.#inner.reserve(this.key, estimatedTokens);
+  reserve(_key: string, estimatedTokens: number, requestTokens?: number): Promise<BudgetDecision> {
+    return this.#inner.reserve(this.key, estimatedTokens, requestTokens);
   }
 
   settle(_key: string, reserved: number, usage: TokenUsage | null): Promise<void> {

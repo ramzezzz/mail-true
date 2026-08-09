@@ -32,7 +32,7 @@ import { ImapFlow } from 'imapflow';
 import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
 import type { AppConfig } from '../config.js';
-import { ApiError } from '../errors.js';
+import { ApiError, UpstreamUnavailableError } from '../errors.js';
 import { existingUids } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import { masterLogin } from '../mail/snooze-service.js';
@@ -272,12 +272,41 @@ export class RecoveryService {
         })),
       );
     } catch (err) {
-      await returnFromRecovery(
-        client,
-        target,
-        source.path,
-        placements.map((p) => p.recoveryUid),
-      ).catch(() => undefined);
+      /*
+       * Запись в базу не прошла — возвращаем письма туда, откуда взяли.
+       *
+       * Отказ САМОГО отката глушить нельзя. Раньше здесь стоял
+       * `.catch(() => undefined)`, и когда не удавалось ни записать, ни
+       * вернуть, письма оставались в скрытой служебной папке `Recovery`
+       * без единой строки в базе: их не видно ни в почте, ни в разделе
+       * восстановления, и работник удаления по сроку их не выберет —
+       * они занимают квоту вечно, а поддержке не за что зацепиться.
+       * `returnFromRecovery` научили бросать ровно ради этого случая,
+       * так что глушить его здесь означало бы оставить починку мёртвой.
+       *
+       * Наверх идёт исходная ошибка (из-за неё всё и началось), но с
+       * причиной второго отказа в поле `cause` и отдельной строкой в
+       * журнале — иначе разбирающийся увидит только «база отказала» и
+       * не узнает, что письма остались не на месте.
+       */
+      const uids = placements.map((p) => p.recoveryUid);
+      try {
+        await returnFromRecovery(client, target, source.path, uids);
+      } catch (rollbackErr) {
+        this.#opts.logger.error(
+          {
+            err: rollbackErr,
+            accountEmail,
+            recoveryPath: target.path,
+            originPath: source.path,
+            uids,
+          },
+          'письма остались в служебной папке восстановления: не удалось ни записать, ни вернуть',
+        );
+        throw new UpstreamUnavailableError(
+          'Часть писем осталась в служебной папке восстановления — обратитесь к администратору.',
+        );
+      }
       throw err;
     }
 
