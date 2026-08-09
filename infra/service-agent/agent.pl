@@ -542,6 +542,15 @@ sub handle {
     if ($method eq 'GET' && $path eq '/version') {
         return do_version($client);
     }
+    if ($method eq 'POST' && $path eq '/update/check') {
+        return do_update_check($client);
+    }
+    if ($method eq 'POST' && $path eq '/update') {
+        return do_update($client, $params{mode});
+    }
+    if ($method eq 'GET' && $path eq '/update/status') {
+        return do_update_status($client);
+    }
     if ($method eq 'POST' && $path eq '/certbot') {
         return do_certbot($client, $body);
     }
@@ -840,28 +849,7 @@ sub do_version {
     # пользователю: без него git отказывается работать с «чужим»
     # репозиторием и снова вернул бы пустоту.
     #
-    my $git = sub {
-        my (@args) = @_;
-        return '' if $PROJECT_DIR eq '' || $OWN_IMAGE eq '';
-        #
-        # Монтируем РОДИТЕЛЬСКИЙ каталог: $PROJECT_DIR — это infra/
-        # (там лежит docker-compose.yml), а .git на уровень выше, в
-        # корне репозитория. Найдено живой проверкой: с самим
-        # $PROJECT_DIR git отвечал пустотой, потому что репозитория там
-        # нет.
-        #
-        my $root = $PROJECT_DIR;
-        $root =~ s{/[^/]+/?\z}{};
-        return '' if $root eq '';
-        my ($rc, $out) = run(
-            'docker', 'run', '--rm',
-            '-v', "$root:/repo:ro",
-            '--entrypoint', 'git',
-            $OWN_IMAGE,
-            '-c', 'safe.directory=/repo', '-C', '/repo', @args,
-        );
-        return $rc == 0 ? trim($out) : '';
-    };
+    my $git = \&git_read;
 
     my $current   = $git->('rev-parse', 'HEAD');
     my $short     = $git->('rev-parse', '--short', 'HEAD');
@@ -919,6 +907,240 @@ sub do_version {
         ahead     => ($ahead  =~ /^\d+$/ ? $ahead  + 0 : 0),
         pending   => \@pending,
         images    => \@images,
+    });
+}
+
+# Корень репозитория глазами демона Docker.
+#
+# $PROJECT_DIR — это infra/ (там лежит docker-compose.yml), а .git на
+# уровень выше. Найдено живой проверкой: с самим $PROJECT_DIR git
+# отвечал пустотой, и страница показывала пустую версию при живых
+# образах служб.
+sub repo_root {
+    return '' if $PROJECT_DIR eq '';
+    my $root = $PROJECT_DIR;
+    $root =~ s{/[^/]+/?\z}{};
+    return $root;
+}
+
+# Чтение из репозитория.
+#
+# git запускается В ОДНОРАЗОВОМ КОНТЕЙНЕРЕ, а не здесь: внутри контейнера
+# посредника каталога проекта нет — ему смонтированы только отдельные
+# файлы настроек, без .git. Образ берём свой же: он заведомо есть на
+# машине, и git в нём есть. Каталог монтируется ТОЛЬКО ДЛЯ ЧТЕНИЯ —
+# просмотр версии не должен уметь ничего изменить.
+#
+# `safe.directory` нужен потому, что каталог принадлежит другому
+# пользователю: без него git отказывается работать с «чужим»
+# репозиторием и снова вернул бы пустоту.
+sub git_read {
+    my (@args) = @_;
+    my $root = repo_root();
+    return '' if $root eq '' || $OWN_IMAGE eq '';
+    my ($rc, $out) = run(
+        'docker', 'run', '--rm',
+        '-v', "$root:/repo:ro",
+        '--entrypoint', 'git',
+        $OWN_IMAGE,
+        '-c', 'safe.directory=/repo', '-C', '/repo', @args,
+    );
+    return $rc == 0 ? trim($out) : '';
+}
+
+# Имя контейнера, который делает обновление. Оно постоянное: по нему и
+# ищется идущее обновление после перезапуска посредника.
+sub updater_name { return "$PROJECT-updater"; }
+
+# Строка для `sh -c`. Одинарные кавычки закрывают всё, кроме самой
+# одинарной кавычки, — её вставляем известным приёмом '\''.
+sub sh_quote {
+    my ($value) = @_;
+    $value = '' unless defined $value;
+    $value =~ s/'/'\\''/g;
+    return "'$value'";
+}
+
+#
+# СПРОСИТЬ УДАЛЁННЫЙ РЕПОЗИТОРИЙ.
+#
+# Страница версии в сеть не ходит намеренно: открытие раздела не должно
+# стучаться наружу. Но кнопка «проверить обновления» — это как раз явная
+# просьба человека сходить, поэтому fetch живёт отдельным действием.
+#
+# Каталог здесь монтируется НА ЗАПИСЬ: fetch пишет в .git скачанные
+# объекты. Рабочее дерево при этом не меняется — HEAD остаётся на месте,
+# и ни один файл продукта не трогается.
+#
+sub do_update_check {
+    my ($client) = @_;
+    my $root = repo_root();
+    if ($root eq '' || $OWN_IMAGE eq '') {
+        return reply($client, 503, { error => 'каталог проекта посреднику не виден' });
+    }
+    my ($rc, $out, $err) = run(
+        'docker', 'run', '--rm',
+        '-v', "$root:/repo",
+        '--entrypoint', 'git',
+        $OWN_IMAGE,
+        '-c', 'safe.directory=/repo', '-C', '/repo', 'fetch', '--prune', 'origin',
+    );
+    if ($rc != 0) {
+        my $detail = trim(($err || $out) || "код возврата $rc");
+        log_line("update/check: не удалось спросить репозиторий: $detail");
+        return reply($client, 502, { error => $detail });
+    }
+    log_line('update/check: репозиторий опрошен');
+    return do_version($client);
+}
+
+#
+# ЗАПУСК ОБНОВЛЕНИЯ.
+#
+# Работа идёт в ОТДЕЛЬНОМ контейнере, а не здесь, и это главное решение
+# всей затеи. Обновление пересобирает стек и поднимает его заново —
+# вместе с самим посредником. Делай мы это своим процессом, он был бы
+# убит на середине: пересоздание контейнера посредника прерывает всё, что
+# в нём запущено, ровно в тот момент, когда пересобранный образ готов, а
+# службы ещё не подняты. Сервер остался бы с половиной обновления и без
+# того, кто доведёт дело до конца.
+#
+# Отдельный контейнер переживает пересоздание посредника и спокойно
+# доводит `up -d` до конца. Он же хранит и весь ход работы: его вывод
+# читается через `docker logs` и после того, как посредник перезапустился.
+#
+# Каталог проекта монтируется ПО СВОЕМУ ЖЕ ПУТИ ($root:$root), а не в
+# /repo: аргументы compose (--project-directory, -f) — это пути глазами
+# демона, и внутри они обязаны означать то же самое, иначе compose соберёт
+# другой стек или не найдёт файл.
+#
+sub do_update {
+    my ($client, $mode) = @_;
+    $mode = '' unless defined $mode;
+    unless ($mode eq 'code' || $mode eq 'images') {
+        return reply($client, 400, {
+            error => 'режим обновления должен быть «code» (свой код с пересборкой) '
+                   . 'или «images» (свежие базовые образы)',
+        });
+    }
+
+    my $root = repo_root();
+    if ($root eq '' || $OWN_IMAGE eq '') {
+        return reply($client, 503, { error => 'каталог проекта посреднику не виден' });
+    }
+    if ($STARTUP_ERROR ne '') {
+        return reply($client, 503, { error => $STARTUP_ERROR });
+    }
+
+    # Второе обновление поверх идущего — это две сборки и два `up -d` над
+    # одним стеком одновременно. Отказываем, а не встаём в очередь: у
+    # человека на экране должно быть видно, что работа уже идёт.
+    my $name = updater_name();
+    my (undef, $running) = run('docker', 'inspect', '--format', '{{.State.Running}}', $name);
+    if (trim($running) eq 'true') {
+        return reply($client, 409, { error => 'обновление уже идёт' });
+    }
+    # Прошлый контейнер убираем: имя постоянное, а его вывод уже прочитан
+    # и больше не нужен.
+    run('docker', 'rm', '-f', $name);
+
+    my $git     = 'git -c ' . sh_quote("safe.directory=$root") . ' -C ' . sh_quote($root);
+    my $compose = join ' ', map { sh_quote($_) } compose_argv();
+
+    my $script;
+    if ($mode eq 'code') {
+        # merge --ff-only, а не pull: обновление обязано быть простым
+        # переходом вперёд. Если история разошлась (правили на сервере и
+        # закоммитили), слияние встанет с отказом — и это правильнее, чем
+        # молча создать узел слияния на боевом сервере.
+        $script = join "\n",
+            'set -e',
+            'echo "=== было: $(' . $git . ' rev-parse --short HEAD)"',
+            'echo "=== спрашиваем репозиторий"',
+            "$git fetch --prune origin",
+            'echo "=== переходим на свежий код"',
+            "$git merge --ff-only '\@{u}'",
+            'echo "=== стало: $(' . $git . ' rev-parse --short HEAD)"',
+            'echo "=== собираем службы (это долго)"',
+            "$compose build",
+            'echo "=== поднимаем стек"',
+            "$compose up -d",
+            'echo "=== готово"';
+    }
+    else {
+        # --ignore-buildable: наши собственные образы собираются здесь же
+        # и в реестре их нет — без этого флага pull падал бы на них.
+        $script = join "\n",
+            'set -e',
+            'echo "=== тянем свежие базовые образы"',
+            "$compose pull --ignore-buildable",
+            'echo "=== поднимаем стек"',
+            "$compose up -d",
+            'echo "=== готово"';
+    }
+
+    my ($rc, $out, $err) = run(
+        'docker', 'run', '-d',
+        '--name', $name,
+        '--label', "mt.update.mode=$mode",
+        '-v', '/var/run/docker.sock:/var/run/docker.sock',
+        '-v', "$root:$root",
+        '-w', $root,
+        '--entrypoint', 'sh',
+        $OWN_IMAGE,
+        '-c', $script,
+    );
+    if ($rc != 0) {
+        my $detail = trim(($err || $out) || "код возврата $rc");
+        log_line("update ($mode): не запустилось: $detail");
+        return reply($client, 500, { error => $detail });
+    }
+    log_line("update ($mode): запущено, контейнер $name");
+    return reply($client, 200, { ok => \1, mode => $mode, started => \1 });
+}
+
+#
+# ХОД ОБНОВЛЕНИЯ.
+#
+# Ответ читается со стороны контейнера обновления, а не из памяти
+# посредника: посредник во время обновления сам пересоздаётся и всё, что
+# он помнил, теряется. Единственное, что переживает пересоздание, —
+# состояние и вывод отдельного контейнера.
+#
+sub do_update_status {
+    my ($client) = @_;
+    my $name = updater_name();
+    my ($rc, $out) = run(
+        'docker', 'inspect', '--format',
+        '{{.State.Running}}|{{.State.ExitCode}}|{{.State.StartedAt}}|{{.State.FinishedAt}}'
+      . '|{{index .Config.Labels "mt.update.mode"}}',
+        $name,
+    );
+    if ($rc != 0) {
+        # Контейнера нет — обновление ни разу не запускали (или его уже
+        # убрали). Это не ошибка, это «ничего не идёт».
+        return reply($client, 200, { ok => \1, state => 'idle', log => '' });
+    }
+    my ($running, $exit, $started, $finished, $mode) = split /\|/, trim($out);
+    $running  = '' unless defined $running;
+    $mode     = '' unless defined $mode;
+    $exit     = 0  unless defined $exit && $exit =~ /^-?\d+$/;
+
+    # Вывод обновления идёт и в stdout, и в stderr (сборка пишет ход в
+    # stderr), поэтому берём оба и в том порядке, в каком они шли бы на
+    # экране.
+    my (undef, $logOut, $logErr) = run('docker', 'logs', '--tail', '400', $name);
+    my $log = join '', ($logErr // ''), ($logOut // '');
+
+    my $state = $running eq 'true' ? 'running' : ($exit == 0 ? 'done' : 'failed');
+    return reply($client, 200, {
+        ok         => \1,
+        state      => $state,
+        mode       => $mode,
+        exitCode   => $exit + 0,
+        startedAt  => $started  // '',
+        finishedAt => $finished // '',
+        log        => $log,
     });
 }
 

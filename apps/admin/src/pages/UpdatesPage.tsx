@@ -1,5 +1,6 @@
 /**
- * Обновления: что за версия продукта стоит и на чём работают службы.
+ * Обновления: что за версия продукта стоит, на чём работают службы и как
+ * обновиться, не заходя на сервер по ssh.
  *
  * ------------------------------------------------------------------
  * ЗАЧЕМ ЭТА СТРАНИЦА
@@ -15,24 +16,33 @@
  * nginx — и владелец об этом не узнает никак, пока не случится беда.
  *
  * ------------------------------------------------------------------
- * ПОЧЕМУ ЗДЕСЬ ПОКА ТОЛЬКО ЧТЕНИЕ
+ * ПОЧЕМУ ДВЕ РАЗНЫЕ КНОПКИ, А НЕ ОДНА «ОБНОВИТЬ»
  * ------------------------------------------------------------------
- * Обновление почтового сервера — действие, после которого может не
- * подняться служба, а миграция может не примениться. Кнопка «Обновить»
- * без снимка состояния, отката и проверки «служба ДЕЙСТВИТЕЛЬНО
- * встала» опаснее её отсутствия: именно на «служба ответила, но не
- * поднялась» этот продукт уже попадался в перевыпуске секрета.
+ * Это два разных по риску действия. Свой код — переход на новые
+ * коммиты с пересборкой служб: меняется поведение продукта, может
+ * приехать миграция базы. Базовые образы — только свежие сборки чужих
+ * служб под теми же тегами: продукт тот же, но приезжают исправления
+ * безопасности, ради которых пересобирать весь продукт незачем.
  *
- * Поэтому первым шагом — честная картина: на каком коммите работает
- * сервер, что уже скачано и не применено, какие слепки образов у служб.
- * Кнопки обновления и отката добавятся отдельно, с подтверждением и
- * предупреждением о перерыве в приёме почты.
+ * Одна кнопка «обновить всё» означала бы, что человек, которому нужен
+ * свежий nginx, заодно получает новую версию продукта — не спросив.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ХОД РАБОТЫ ЧИТАЕТСЯ ОПРОСОМ
+ * ------------------------------------------------------------------
+ * Обновление поднимает стек заново — вместе с сервером приложения,
+ * который отвечает на эти самые запросы, и посредником, который его
+ * запустил. Поэтому работу ведёт отдельный контейнер, а панель просто
+ * спрашивает его состояние. Пропали ответы на минуту — это не сбой, это
+ * ровно тот момент, когда служба поднимается заново.
  */
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 import { api } from '../api/client';
 import { PageTitle } from '../app/AdminLayout';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
-import { ErrorNotice, Notice, Panel } from '../components/ui';
+import { Button } from '@web/components';
+import { ErrorNotice, Modal, Notice, Panel } from '../components/ui';
 import { formatDateTime } from '../lib/format';
 
 /** Короткий вид слепка: «sha256:1f2e…» — целиком он не нужен никому. */
@@ -41,15 +51,47 @@ function shortDigest(digest: string): string {
   return value === '' ? '—' : value.slice(0, 12);
 }
 
+type Mode = 'code' | 'images';
+
 export function UpdatesPage() {
+  const queryClient = useQueryClient();
+  const [confirm, setConfirm] = useState<Mode | null>(null);
+
   const state = useQuery({ queryKey: ['server-version'], queryFn: () => api.serverVersion() });
   const version = state.data?.version ?? null;
+
+  /*
+   * Ход обновления опрашивается каждые три секунды, пока работа идёт.
+   * `retry: false` намеренно: во время обновления сервер приложения
+   * поднимается заново, и запрос честно не проходит — повторять его
+   * пачкой незачем, следующий опрос всё равно через три секунды.
+   */
+  const progress = useQuery({
+    queryKey: ['update-status'],
+    queryFn: () => api.updateStatus(),
+    refetchInterval: (query) => (query.state.data?.state === 'running' ? 3000 : false),
+    retry: false,
+  });
+  const running = progress.data?.state === 'running';
+
+  const check = useMutation({
+    mutationFn: () => api.checkUpdates(),
+    onSuccess: (data) => queryClient.setQueryData(['server-version'], data),
+  });
+
+  const start = useMutation({
+    mutationFn: (mode: Mode) => api.startUpdate(mode),
+    onSuccess: async () => {
+      setConfirm(null);
+      await progress.refetch();
+    },
+  });
 
   return (
     <>
       <PageTitle
         title="Обновления"
-        subtitle="Какая версия продукта стоит и на каких образах работают службы"
+        subtitle="Какая версия продукта стоит, на каких образах работают службы и как обновиться"
       />
 
       <ErrorNotice error={state.error} />
@@ -58,6 +100,52 @@ export function UpdatesPage() {
         <Notice tone="error">
           Версию с сервера прочитать нечем: {state.data.reason ?? 'причина неизвестна'}
         </Notice>
+      )}
+
+      {progress.data && progress.data.state !== 'idle' && (
+        <Panel title="Ход обновления">
+          {running ? (
+            <Notice tone="info">
+              {progress.data.mode === 'images'
+                ? 'Тянутся свежие базовые образы, потом службы поднимутся заново.'
+                : 'Идёт обновление кода: код переезжает на свежий, службы пересобираются.'}{' '}
+              Панель на минуту-другую может перестать отвечать — это и есть тот момент, когда она
+              поднимается заново. Страницу можно закрыть: работа идёт на сервере и от неё не
+              зависит.
+            </Notice>
+          ) : progress.data.state === 'done' ? (
+            <Notice tone="success">
+              Обновление закончено{' '}
+              {progress.data.finishedAt ? formatDateTime(progress.data.finishedAt) : ''}.
+            </Notice>
+          ) : (
+            <Notice tone="error">
+              Обновление не доведено до конца (код возврата {progress.data.exitCode}). Ниже — вывод
+              целиком: в нём и написано, на чём оно встало. Службы при этом остались на прежней
+              версии, кроме тех, что успели подняться.
+            </Notice>
+          )}
+
+          {progress.data.log !== '' && (
+            <pre
+              style={{
+                margin: '10px 0 0',
+                padding: '10px 12px',
+                maxHeight: 320,
+                overflow: 'auto',
+                background: 'var(--mt-admin-surface-alt, var(--mt-admin-surface))',
+                border: '1px solid var(--mt-admin-border)',
+                borderRadius: 6,
+                fontSize: 12,
+                lineHeight: 1.45,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {progress.data.log}
+            </pre>
+          )}
+        </Panel>
       )}
 
       {version && (
@@ -69,8 +157,9 @@ export function UpdatesPage() {
             */}
             {version.dirty && (
               <Notice tone="error">
-                В каталоге сервера есть изменения, сделанные руками. Обновление их затрёт или
-                упрётся в конфликт — сначала перенесите их в репозиторий или отмените.
+                В каталоге сервера есть изменения, сделанные руками. Обновление кода их затрёт или
+                упрётся в конфликт, поэтому оно запрещено — сначала перенесите их в репозиторий или
+                отмените. Свежие базовые образы это не затрагивает: они рабочее дерево не трогают.
               </Notice>
             )}
 
@@ -99,15 +188,30 @@ export function UpdatesPage() {
 
             {version.behind > 0 ? (
               <Notice tone="info">
-                Скачано и ещё не применено: {version.behind}. Обновление пока делается на сервере
-                командой <span className="mt-mono">git pull</span> и пересборкой служб.
+                Скачано и ещё не применено: {version.behind}. Список — ниже.
               </Notice>
             ) : (
               <p style={{ margin: '10px 0 0', color: 'var(--mt-color-text-secondary)' }}>
-                Ничего не применённого нет. Это не значит «обновлений не существует»: страница
-                показывает только уже скачанное и намеренно не ходит в сеть сама.
+                Не применённого нет. Это не значит «обновлений не существует»: страница сама в сеть
+                не ходит — спросить репозиторий нужно кнопкой.
               </p>
             )}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+              <Button mode="secondary" disabled={check.isPending} onClick={() => check.mutate()}>
+                {check.isPending ? 'Спрашиваем…' : 'Проверить обновления'}
+              </Button>
+              <Button
+                disabled={running || version.dirty || version.behind === 0}
+                onClick={() => setConfirm('code')}
+              >
+                Обновить продукт
+              </Button>
+              <Button mode="secondary" disabled={running} onClick={() => setConfirm('images')}>
+                Обновить базовые образы
+              </Button>
+            </div>
+            <ErrorNotice error={check.error} />
           </Panel>
 
           {version.pending.length > 0 && (
@@ -170,6 +274,53 @@ export function UpdatesPage() {
             </TableWrap>
           </Panel>
         </>
+      )}
+
+      {confirm !== null && (
+        <Modal
+          title={confirm === 'code' ? 'Обновить продукт' : 'Обновить базовые образы'}
+          onClose={() => setConfirm(null)}
+          footer={
+            <>
+              <Button mode="secondary" onClick={() => setConfirm(null)}>
+                Отмена
+              </Button>
+              <Button disabled={start.isPending} onClick={() => start.mutate(confirm)}>
+                {start.isPending ? 'Запускаем…' : 'Обновить'}
+              </Button>
+            </>
+          }
+        >
+          <ErrorNotice error={start.error} />
+          {confirm === 'code' ? (
+            <>
+              <Notice tone="error">
+                Почта на несколько минут прервётся. Службы пересоберутся и поднимутся заново: приём
+                писем встанет, почтовые программы сотрудников отвалятся и переподключатся, панель на
+                это время может не отвечать.
+              </Notice>
+              <p>
+                Перейдём на свежий код ветки{' '}
+                <span className="mt-mono">{version?.branch || 'текущей'}</span>
+                {version && version.behind > 0 ? ` — это ${String(version.behind)} коммит(ов)` : ''}
+                . Обновление не откатывается кнопкой: вернуть прежнюю версию можно только на
+                сервере. Делать его лучше тогда, когда почтой не пользуются.
+              </p>
+            </>
+          ) : (
+            <>
+              <Notice tone="error">
+                Почта прервётся на время подъёма служб — те, у кого образ обновился, будут созданы
+                заново.
+              </Notice>
+              <p>
+                Скачаются свежие сборки чужих служб (postgres, redis, nginx, clamav и прочие) под
+                теми же тегами. Версия продукта при этом не меняется — приезжают только исправления
+                самих служб, в том числе исправления безопасности.
+              </p>
+            </>
+          )}
+        </Modal>
       )}
     </>
   );

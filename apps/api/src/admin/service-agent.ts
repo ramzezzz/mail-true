@@ -87,6 +87,24 @@ export interface VersionInfo {
   images: Array<{ service: string; image: string; digest: string; created: string }>;
 }
 
+/**
+ * Ход обновления.
+ *
+ * `idle` — ничего не идёт и не шло; `running` — работа в стороне;
+ * `done`/`failed` — чем кончилось прошлое. Состояние хранит отдельный
+ * контейнер обновления, а не посредник: посредник во время обновления
+ * пересоздаётся сам и всё, что помнил, теряет.
+ */
+export interface UpdateStatus {
+  state: 'idle' | 'running' | 'done' | 'failed';
+  mode: 'code' | 'images' | null;
+  exitCode: number;
+  startedAt: string;
+  finishedAt: string;
+  /** Вывод как есть — человек читает его, когда обновление не задалось. */
+  log: string;
+}
+
 export class ServiceAgentUnavailableError extends ApiError {
   constructor(message: string) {
     super(503, 'SERVICE_AGENT_UNAVAILABLE', message);
@@ -142,6 +160,16 @@ export class ServiceAgent {
    * заведомо меньше терпения nginx.
    */
   private static readonly READ_TIMEOUT_MS = 10_000;
+
+  /**
+   * Предел для действий, которые запускают контейнер: обращение к
+   * удалённому репозиторию и запуск обновления. Сама сборка идёт в
+   * стороне и сюда не считается — здесь ждём только «запустилось».
+   * Десяти секунд не хватает: `git fetch` через интернет на медленном
+   * канале дольше, а обрыв ожидания выглядел бы отказом при работающем
+   * посреднике.
+   */
+  private static readonly SLOW_TIMEOUT_MS = 60_000;
 
   private async call(
     path: string,
@@ -356,6 +384,54 @@ export class ServiceAgent {
         digest: typeof row.digest === 'string' ? row.digest : '',
         created: typeof row.created === 'string' ? row.created : '',
       })),
+    };
+  }
+
+  /**
+   * Спросить удалённый репозиторий, есть ли что-то новое.
+   *
+   * Отдельное действие, а не часть просмотра: открытие раздела не должно
+   * стучаться в сеть, а нажатие кнопки — как раз явная просьба сходить.
+   * Ответ тот же, что у version(), только уже с учётом скачанного.
+   */
+  async checkUpdates(): Promise<VersionInfo> {
+    await this.call('/update/check', 'POST', undefined, ServiceAgent.SLOW_TIMEOUT_MS);
+    return this.version();
+  }
+
+  /**
+   * Запустить обновление. Возврат — сразу, работа идёт в стороне.
+   *
+   * `code` — свой код: git и пересборка служб. `images` — только свежие
+   * базовые образы (postgres, redis, nginx, clamav): их обновляют чаще и
+   * отдельно, потому что там приезжают исправления безопасности, а
+   * пересобирать ради них весь продукт незачем.
+   */
+  async startUpdate(mode: 'code' | 'images'): Promise<void> {
+    await this.call(`/update?mode=${mode}`, 'POST', undefined, ServiceAgent.SLOW_TIMEOUT_MS);
+  }
+
+  /**
+   * Ход обновления.
+   *
+   * Спрашивается у посредника, но живёт НЕ в нём: обновление пересоздаёт
+   * и сам посредник, поэтому состояние хранит отдельный контейнер, а
+   * посредник только пересказывает. Отсюда и `idle` — «ничего не идёт»,
+   * а не «не знаю».
+   */
+  async updateStatus(): Promise<UpdateStatus> {
+    const body = await this.call('/update/status', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
+    const raw = typeof body.state === 'string' ? body.state : 'idle';
+    const state: UpdateStatus['state'] =
+      raw === 'running' || raw === 'done' || raw === 'failed' ? raw : 'idle';
+    const mode = body.mode === 'code' || body.mode === 'images' ? body.mode : null;
+    return {
+      state,
+      mode,
+      exitCode: typeof body.exitCode === 'number' ? body.exitCode : 0,
+      startedAt: typeof body.startedAt === 'string' ? body.startedAt : '',
+      finishedAt: typeof body.finishedAt === 'string' ? body.finishedAt : '',
+      log: typeof body.log === 'string' ? body.log : '',
     };
   }
 

@@ -55,6 +55,12 @@ import { describeState, ServiceAgentUnavailableError } from '../service-agent.js
 import { settingsAppliedBy } from '../server-settings-registry.js';
 
 const bodySchema = z.object({ action: z.enum(['restart', 'recreate']) });
+/**
+ * Что обновляем: свой код (git и пересборка) или базовые образы служб.
+ * Третьего не бывает, и «на всякий случай обновить всё» здесь тоже нет —
+ * это два разных по риску действия с разными кнопками.
+ */
+const updateSchema = z.object({ mode: z.enum(['code', 'images']) });
 const idSchema = z.object({ id: z.string().regex(/^\d{1,19}$/) });
 
 /**
@@ -169,6 +175,25 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
     return store;
   }
 
+  /**
+   * Посредник для действий обновления.
+   *
+   * Просмотр версии без посредника отвечает «недоступно и вот почему» —
+   * там это уместно, раздел должен открываться. Действию же отвечать
+   * нечем: обновление без посредника не сделать никак, и притворяться,
+   * что кнопка нажалась, нельзя.
+   */
+  function requireAgent(): NonNullable<typeof ctx.serviceAgent> {
+    const agent = ctx.serviceAgent;
+    if (!agent?.configured) {
+      throw new ServiceAgentUnavailableError(
+        'Обновление из панели недоступно: не настроен посредник служб. На сервере ' +
+          'это делается вручную: git -C /opt/mailtrue pull и пересборка стека.',
+      );
+    }
+    return agent;
+  }
+
   /* ---------------------------------------------------------------- */
   /* Что за версия стоит на сервере                                     */
   /* ---------------------------------------------------------------- */
@@ -219,6 +244,74 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
         version: null,
       };
     }
+  });
+
+  /**
+   * Спросить репозиторий, есть ли что-то новое.
+   *
+   * Отдельно от просмотра: открытие раздела в сеть не ходит, а нажатие
+   * кнопки — как раз просьба сходить. Право на чтение: fetch не меняет
+   * ни одного файла продукта, он только скачивает в .git.
+   */
+  app.post('/version/check', { preHandler: requireAdmin(app, 'serversettings.read') }, async () => {
+    const agent = requireAgent();
+    return { available: true, reason: null, version: await agent.checkUpdates() };
+  });
+
+  /**
+   * Запустить обновление.
+   *
+   * Право то же, что у перезапуска служб, и это не экономия на правах:
+   * обновление и есть пересоздание всех служб разом, только с новым
+   * кодом. Отдавать его тому, кому не доверили перезапуск одной службы,
+   * было бы странно.
+   *
+   * Ответ приходит сразу: работа идёт в отдельном контейнере, который
+   * переживает пересоздание и самого посредника, и сервера приложения.
+   * Ход смотрится через GET /version/update.
+   */
+  app.post(
+    '/version/update',
+    { preHandler: requireAdmin(app, 'services.restart') },
+    async (request, reply) => {
+      const agent = requireAgent();
+      const { mode } = updateSchema.parse(request.body);
+
+      /*
+       * Правки руками — стоп-кран. Обновление кода на таком сервере либо
+       * упрётся в конфликт на середине, либо (если правки не мешают
+       * слиянию) переедет вместе с ними в неизвестное состояние. Человеку
+       * нужно сначала решить, что с ними делать, и это решение не
+       * принимается кнопкой «обновить».
+       *
+       * Базовых образов это не касается: они не трогают рабочее дерево.
+       */
+      if (mode === 'code') {
+        const version = await agent.version();
+        if (version.dirty) {
+          throw new ConflictError(
+            'В каталоге сервера есть правки, сделанные руками. Обновление их затрёт ' +
+              'или встанет с конфликтом. Перенесите их в репозиторий или отмените ' +
+              '(git -C /opt/mailtrue status), затем повторите.',
+          );
+        }
+      }
+
+      await agent.startUpdate(mode);
+      await audit(ctx, request, {
+        action: 'server.update',
+        targetType: 'server',
+        targetLabel: mode === 'code' ? 'код продукта' : 'базовые образы',
+        after: { mode },
+      });
+      return reply.code(202).send({ ok: true, mode });
+    },
+  );
+
+  /** Ход обновления: состояние отдельного контейнера и его вывод. */
+  app.get('/version/update', { preHandler: requireAdmin(app, 'serversettings.read') }, async () => {
+    const agent = requireAgent();
+    return agent.updateStatus();
   });
 
   /* ---------------------------------------------------------------- */

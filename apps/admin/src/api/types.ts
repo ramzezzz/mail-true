@@ -2066,3 +2066,22 @@ export interface VersionInfo {
    */
   images: Array<{ service: string; image: string; digest: string; created: string }>;
 }
+
+/**
+ * Ход обновления.
+ *
+ * `idle` — ничего не идёт и не шло; `running` — работа в стороне;
+ * `done`/`failed` — чем кончилось прошлое. Состояние живёт в отдельном
+ * контейнере обновления, а не в посреднике: посредник во время
+ * обновления пересоздаётся сам и всё, что помнил, теряет. Поэтому
+ * страницу можно закрыть и вернуться — ход не пропадёт.
+ */
+export interface UpdateStatus {
+  state: 'idle' | 'running' | 'done' | 'failed';
+  mode: 'code' | 'images' | null;
+  exitCode: number;
+  startedAt: string;
+  finishedAt: string;
+  /** Вывод как есть — его читают, когда обновление не задалось. */
+  log: string;
+}

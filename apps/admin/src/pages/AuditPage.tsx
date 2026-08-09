@@ -19,6 +19,8 @@ const TARGET_TYPES = [
   { value: 'domain', label: 'Домены' },
   { value: 'admin', label: 'Администраторы' },
   { value: 'mailbox', label: 'Входы в ящики' },
+  { value: 'service', label: 'Перезапуски служб' },
+  { value: 'server', label: 'Обновления сервера' },
 ];
 
 export function AuditPage() {

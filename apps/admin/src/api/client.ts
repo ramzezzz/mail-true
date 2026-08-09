@@ -64,6 +64,7 @@ import type {
   RestartAction,
   RestartJobState,
   RestartState,
+  UpdateStatus,
   VersionInfo,
   RotatableSecretsResponse,
   ServerSettingsResponse,
@@ -739,6 +740,20 @@ export const api = {
   /** Версия продукта и образы служб. Только чтение, ничего не тянет. */
   serverVersion: () =>
     get<{ available: boolean; reason: string | null; version: VersionInfo | null }>('/version'),
+  /**
+   * Спросить репозиторий, есть ли что-то новое. Отдельное действие:
+   * открытие страницы в сеть не ходит, а кнопка — как раз просьба сходить.
+   */
+  checkUpdates: () =>
+    post<{ available: boolean; reason: string | null; version: VersionInfo | null }>(
+      '/version/check',
+      {},
+    ),
+  /** Запустить обновление. Ответ приходит сразу — работа идёт в стороне. */
+  startUpdate: (mode: 'code' | 'images') =>
+    post<{ ok: boolean; mode: string }>('/version/update', { mode }),
+  /** Ход обновления: состояние и вывод. */
+  updateStatus: () => get<UpdateStatus>('/version/update'),
   requestRestart: (target: string, action: RestartAction) =>
     post<RestartAccepted>(`/restart/${encodeURIComponent(target)}`, { action }),
   restartJob: (id: string) => get<RestartJobState>(`/restart/jobs/${encodeURIComponent(id)}`),
