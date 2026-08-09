@@ -251,21 +251,20 @@ IDEM_ENV="$TMPD/idempotent.env"
 cat > "$IDEM_ENV" <<'EOF'
 SMTP_PORT=2525
 IMAPS_PORT=9993
-NGINX_HTTP_PORT=8080
+NGINX_HTTP_PORT=8090
 EOF
 #
 # БЕЗ ПОДОБОЛОЧКИ. Первая версия делала эту часть в «( … )», и счётчики
 # пройденного оставались внутри: проверки печатались, а в итог не
 # попадали — провал прошёл бы незаметно. Поэтому ENV_FILE подменяется на
 # время и возвращается обратно.
+#
+# И БЕЗ СВОЕЙ КОПИИ env_port. Здесь стояла её копия с пометкой «ровно та
+# функция, что стоит в install.sh» — то есть проверка сторожила копию, а
+# расхождение копии с оригиналом и есть та поломка, которую она обязана
+# ловить. Теперь env_port живёт в lib/common.sh, и проверяется именно она.
 IDEM_ENV_KEEP="$ENV_FILE"
 ENV_FILE="$IDEM_ENV"
-# Ровно та функция, что стоит в install.sh.
-env_port() {
-    local key="$1" explicit="$2" fallback="$3"
-    if [ -n "$explicit" ]; then env_set "$key" "$explicit"
-    else env_ensure "$key" "$fallback" || true; fi
-}
 env_port SMTP_PORT       ''     25    >/dev/null 2>&1
 env_port IMAPS_PORT      ''     993   >/dev/null 2>&1
 env_port NGINX_HTTP_PORT ''     80    >/dev/null 2>&1
@@ -274,12 +273,86 @@ env_port SUBMISSION_PORT '2587' 587   >/dev/null 2>&1
 
 t_eq "повторная установка не сбрасывает порт SMTP" "$(env_get SMTP_PORT)" "2525"
 t_eq "повторная установка не сбрасывает порт IMAPS" "$(env_get IMAPS_PORT)" "9993"
-t_eq "повторная установка не сбрасывает порт HTTP" "$(env_get NGINX_HTTP_PORT)" "8080"
+t_eq "повторная установка не сбрасывает набранный руками порт HTTP" \
+     "$(env_get NGINX_HTTP_PORT)" "8090"
 t_eq "недостающий порт всё же заполняется умолчанием" "$(env_get POP3_PORT)" "110"
 t_eq "заданное явно при запуске сильнее прежнего" "$(env_get SUBMISSION_PORT)" "2587"
 
 ENV_FILE="$IDEM_ENV_KEEP"
 rm -f "$IDEM_ENV"
+
+# ------------------------------------------------------------------
+# УСТАНОВКА С НУЛЯ ПОЛУЧАЕТ БОЕВЫЕ ПОРТЫ, А НЕ ПОРТЫ ОБРАЗЦА
+# ------------------------------------------------------------------
+# Самая дорогая из возможных поломок установщика: она НЕ ВИДНА НИГДЕ.
+# Свежий infra/.env — дословная копия infra/.env.example, а образец держит
+# NGINX_HTTP_PORT=8080, NGINX_HTTPS_PORT=8443, REDIS_PORT=6380 — значения
+# для машины разработчика. Правило «не трогаем непустое» считало их
+# человеческими, compose публиковал веб на 8080/8443, и установка
+# заканчивалась зелёным отчётом со строкой «Почта: https://mail…», по
+# которой браузер получал отказ соединения. Ни одна живая проверка этого
+# не ловит: nginx здоров изнутри контейнера, 80-й порт хоста и правда
+# свободен, сертификат выпускается своим слушателем certbot.
+#
+# Проверяем НАСТОЯЩИМ образцом и НАСТОЯЩИМ списком портов из install.sh:
+# перечень здесь разошёлся бы с установщиком в первый же раз, когда порт
+# добавят или переименуют.
+FRESH_ENV="$TMPD/fresh-from-example.env"
+tr -d '\r' < "$ENV_EXAMPLE" > "$FRESH_ENV"
+IDEM_ENV_KEEP="$ENV_FILE"
+ENV_FILE="$FRESH_ENV"
+FRESH_BAD=''
+FRESH_SEEN=0
+while read -r key fallback; do
+    [ -n "$key" ] || continue
+    FRESH_SEEN=$((FRESH_SEEN + 1))
+    env_port "$key" '' "$fallback" >/dev/null 2>&1
+    got="$(env_get "$key")"
+    [ "$got" = "$fallback" ] || FRESH_BAD="$FRESH_BAD $key=$got(ждали $fallback)"
+done < <(sed -n 's/^env_port  *\([A-Z0-9_]*\)  *"\${MAILTRUE_[A-Z0-9_]*:-}"  *\([0-9][0-9]*\).*/\1 \2/p' \
+            "$INSTALL_DIR/install.sh")
+ENV_FILE="$IDEM_ENV_KEEP"
+rm -f "$FRESH_ENV"
+# Список пуст — значит разбор install.sh перестал находить вызовы, и
+# проверка выше зелёная просто потому, что ничего не проверила.
+t_eq "список портов из install.sh прочитан (иначе проверка ниже пустая)" \
+     "$([ "$FRESH_SEEN" -ge 12 ] && echo да || echo "нет: $FRESH_SEEN")" "да"
+t_eq "установка с нуля ставит боевые порты, а не порты из образца" "${FRESH_BAD# }" ""
+
+# Порт из образца заменяется НЕ МОЛЧА: человек, которому нужен именно он,
+# должен узнать, как его отстоять.
+PORT_SAY_ENV="$TMPD/port-say.env"
+printf 'NGINX_HTTP_PORT=8080\n' > "$PORT_SAY_ENV"
+IDEM_ENV_KEEP="$ENV_FILE"
+ENV_FILE="$PORT_SAY_ENV"
+PORT_SAY_OUT="$(env_port NGINX_HTTP_PORT '' 80 2>&1)"
+ENV_FILE="$IDEM_ENV_KEEP"
+rm -f "$PORT_SAY_ENV"
+t_ok "о замене порта из образца сказано вслух, с именем ключа" \
+    bash -c "printf '%s' \"\$1\" | grep -q 'MAILTRUE_NGINX_HTTP_PORT'" _ "$PORT_SAY_OUT"
+
+# ------------------------------------------------------------------
+# ВЫБОР ЧЕЛОВЕКА В МАСТЕРЕ НЕ ОТМЕНЯЕТСЯ СЛЕДУЮЩИМ ЗАПУСКОМ
+# ------------------------------------------------------------------
+# Мастер в браузере задаёт порты явно (MAILTRUE_*_PORT) и на шаге «Порты»
+# вполне законно предлагает 8080/8443 — ровно те числа, что стоят в
+# образце: их и выбирают, когда на машине уже живёт другой стек. Если бы
+# правило «совпало с образцом — заменить» смотрело только на совпадение,
+# следующий же запуск install.sh (обновление, починка) уводил бы такой
+# стенд с 8080 на 80 и роняли бы его оба. Спасает вторая половина правила
+# — отметка INSTALL_COMPLETED_AT: на установленном сервере порты не наши.
+WEB_PORT_ENV="$TMPD/web-port.env"
+tr -d '\r' < "$ENV_EXAMPLE" > "$WEB_PORT_ENV"
+IDEM_ENV_KEEP="$ENV_FILE"
+ENV_FILE="$WEB_PORT_ENV"
+env_port NGINX_HTTP_PORT '8080' 80 >/dev/null 2>&1
+t_eq "порт из мастера в браузере переживает установку" "$(env_get NGINX_HTTP_PORT)" "8080"
+env_set INSTALL_COMPLETED_AT '2026-01-01T00:00:00+00:00'
+env_port NGINX_HTTP_PORT '' 80 >/dev/null 2>&1
+t_eq "он же переживает повторный запуск установщика без переменных" \
+     "$(env_get NGINX_HTTP_PORT)" "8080"
+ENV_FILE="$IDEM_ENV_KEEP"
+rm -f "$WEB_PORT_ENV"
 
 # Резервный вход в панель раньше пересчитывался при каждом запуске, и
 # всегда в сторону ослабления: сужение до 127.0.0.1 отменялось само.
@@ -1063,6 +1136,46 @@ t_eq "включённый антивирус читается как «yes»" \
      "$(prev=no; case "$(env_get CLAMAV_ENABLED "$TMPD/clamav.env")" in true|yes|1) prev=yes ;; esac; printf '%s' "$prev")" \
      "yes"
 
+# --- Галочка в мастере не превращается в «нет» -------------------------
+#
+# Мастер в браузере пишет в файл ответов MAILTRUE_CLAMAV=yes, а ветка
+# --answers ставит MT_NONINTERACTIVE=1. Дальше стоял безусловный
+# `confirm "Всё равно включить антивирус?"`, а confirm в неинтерактивном
+# режиме ВСЕГДА отвечает «нет» — спрашивать некого. Итог: на машине с
+# 2 ГБ, то есть ровно там, где предупреждение и написано, галочка не
+# делала ничего. Ни ошибки, ни отметки в панели — одна строка info в
+# длинном журнале установки.
+#
+# Проверяем ту же развилку целиком и под теми же set-ами, на памяти ниже
+# порога: явный ответ обязан пережить неинтерактивный режим.
+t_eq "явная галочка «антивирус» переживает неинтерактивный режим" \
+     "$(bash -c "
+        set -euo pipefail
+        . '$MT_LIB_DIR/common.sh'
+        MT_NONINTERACTIVE=1
+        CLAMAV_CHOICE=yes
+        CLAMAV_EXPLICIT=1
+        RAM_MB=1024
+        if [ \"\$CLAMAV_CHOICE\" = yes ] && [ \"\$RAM_MB\" -gt 0 ] && [ \"\$RAM_MB\" -lt \"\$MT_MIN_RAM_CLAMAV_MB\" ]; then
+            if [ \"\$CLAMAV_EXPLICIT\" = 1 ] || [ \"\$MT_NONINTERACTIVE\" = 1 ]; then :
+            elif ! confirm 'Всё равно включить антивирус?'; then CLAMAV_CHOICE=no; fi
+        fi
+        printf '%s' \"\$CLAMAV_CHOICE\"" 2>/dev/null)" \
+     "yes"
+# Та же проверка на самом install.sh: развилка должна быть в нём, а не
+# только в этом файле. confirm про антивирус обязан стоять под условием.
+t_ok "install.sh запоминает, что ответ про антивирус задан явно" \
+    bash -c "grep -q 'CLAMAV_EXPLICIT=1' '$INSTALL_DIR/install.sh'"
+t_ok "переспрос про память стоит под условием" \
+    bash -c "grep -qE '^[[:space:]]*elif ! confirm' '$INSTALL_DIR/install.sh'"
+t_no "безусловного переспроса про антивирус больше нет" \
+    bash -c "grep -qE '^[[:space:]]*if ! confirm' '$INSTALL_DIR/install.sh'"
+# И обратная сторона: confirm в неинтерактивном режиме и правда отвечает
+# «нет». Если это когда-нибудь изменят, развилка выше станет лишней — но
+# менять её надо осознанно, а не обнаружить расхождение на боевой машине.
+t_no "confirm в неинтерактивном режиме отказывает (согласия не выдумывает)" \
+    bash -c ". '$MT_LIB_DIR/common.sh'; MT_NONINTERACTIVE=1 MT_ASSUME_YES=0; confirm 'спрашиваем некого'"
+
 # ==================================================================
 step "14. Секреты infra/.env: один список на генерацию и на проверку"
 # ==================================================================
@@ -1169,8 +1282,10 @@ t_ok "установщик пользуется именно этим спосо
 # ключ TLS копирует смена домена (mail.key.before-<id>). «Удалено
 # безвозвратно» было сказано, а файлы оставались — на машине, которую
 # после снятия сервера передают дальше.
-t_ok "полное удаление сносит все копии infra/.env" \
-    bash -c "grep -q 'for f in \"\$ENV_FILE\".\\*' '$INSTALL_DIR/uninstall.sh'"
+# Что именно сносится и что обязано уцелеть — настоящими файлами, в
+# разделе 18: список масок в комментарии соврать может, каталог — нет.
+t_ok "полное удаление сносит копии infra/.env" \
+    bash -c "grep -q 'env_copies_purge' '$INSTALL_DIR/uninstall.sh'"
 t_ok "полное удаление сносит каталог сертификатов целиком" \
     bash -c "grep -q 'rm -rf \"\${CERT_DIR:?}\"$' '$INSTALL_DIR/uninstall.sh'"
 
@@ -1204,7 +1319,60 @@ t_ok "смена домена читает отметку «свой серти�
 # DNS при этом опубликован открытый ключ от прежнего файла — и каждое
 # исходящее письмо перестаёт проходить проверку подписи.
 t_ok "смена домена не перевыпускает уже выпущенный ключ DKIM" \
-    bash -c "grep -q 'test -s \"\$KEY_PATH\"' '$INFRA_DIR/scripts/change-domain.sh'"
+    bash -c "grep -q 'MT-DKIM-KEY-PRESENT' '$INFRA_DIR/scripts/change-domain.sh'"
+#
+# ------------------------------------------------------------------
+# «КЛЮЧА НЕТ» И «НЕ СМОГ СПРОСИТЬ» — РАЗНЫЕ ОТВЕТЫ
+# ------------------------------------------------------------------
+# Сторож выше сторожил только половину. Стояло
+# «exec -T rspamd test -s "$KEY_PATH" 2>/dev/null», а ненулевой код тут
+# означает и «файла нет» (код 1 от самого test), и «спросить не вышло»:
+# rspamd перезапускается, помечен unhealthy, ещё не поднялся, в образе нет
+# /usr/bin/test. Второй случай уходил в ту же ветку — и скрипт перевыпускал
+# ключ ПОТОМУ, ЧТО НЕ СМОГ ПРОВЕРИТЬ, есть ли он. В DNS при этом лежит
+# открытый ключ от прежнего файла, и подпись всей исходящей почты ломается
+# молча; чинится только новой публикацией записи и ожиданием кэшей.
+# «2>/dev/null» гасило единственное объяснение происходящего.
+#
+# Проверяем НАСТОЯЩИМ запуском скрипта с подставным docker, который на
+# rspamd отвечает так же, как отвечает неподнявшийся контейнер.
+mkdir -p "$TMPD/dockerbin"
+cat > "$TMPD/dockerbin/docker" <<'EOS'
+#!/usr/bin/env bash
+# Изображаем docker: сведения о смене домена отдаём, а rspamd «не запущен».
+case " $* " in
+    *" domain-change-last "*)
+        cat <<'VARS'
+DC_ID=7
+DC_NEW_DOMAIN=new.example
+DC_OLD_DOMAIN=old.example
+DC_NEW_HOSTNAME=mail.new.example
+DC_OLD_HOSTNAME=mail.old.example
+DC_DKIM_SELECTOR=mail
+DC_HAS_KEY=0
+VARS
+        exit 0 ;;
+    *rspamd*)
+        printf 'service "rspamd" is not running\n' >&2
+        exit 1 ;;
+esac
+exit 0
+EOS
+chmod +x "$TMPD/dockerbin/docker"
+printf 'MAIL_DOMAIN=old.example\n' > "$TMPD/change-domain.env"
+DKIM_OUT="$(PATH="$TMPD/dockerbin:$PATH" MT_ENV_FILE="$TMPD/change-domain.env" \
+            MT_USE_PROD_OVERRIDE=0 bash "$INFRA_DIR/scripts/change-domain.sh" 2>&1)"
+DKIM_CODE=$?
+t_eq "непонятный ответ rspamd останавливает смену домена, а не перевыпускает ключ" \
+     "$([ "$DKIM_CODE" -ne 0 ] && echo стоп || echo продолжил)" "стоп"
+t_ok "и объясняет, почему ключ не тронут" \
+    bash -c "printf '%s' \"\$1\" | grep -q 'не удалось выяснить, есть ли уже ключ DKIM'" _ "$DKIM_OUT"
+t_no "перевыпуска при этом не было" \
+    bash -c "printf '%s' \"\$1\" | grep -q 'выпускаю на сервере'" _ "$DKIM_OUT"
+# Настоящая причина обязана дойти до человека: раньше её съедал 2>/dev/null.
+t_ok "ответ контейнера показан целиком" \
+    bash -c "printf '%s' \"\$1\" | grep -q 'is not running'" _ "$DKIM_OUT"
+rm -f "$TMPD/change-domain.env"
 
 # ==================================================================
 step "17. Восстановление на ДРУГУЮ машину поднимает стек"
@@ -1240,6 +1408,50 @@ t_ok "восстановление сверяет привязанные к ма
     bash -c "grep -q 'MT_MACHINE_BOUND_ENV_KEYS' '$INSTALL_DIR/restore.sh'"
 t_ok "ADMIN_LOCAL_BIND объявлен привязанным к машине" \
     bash -c "printf '%s' ' ${MT_MACHINE_BOUND_ENV_KEYS[*]} ' | grep -q ' ADMIN_LOCAL_BIND '"
+
+# ==================================================================
+step "18. Полное удаление уносит наши копии настроек — и только их"
+# ==================================================================
+# Копии .env удалять надо: в них пароль базы, ключи шифрования чужих
+# паролей, секрет сессий, пароль служебного доступа ко всем ящикам, а
+# машину после снятия сервера отдают или продают. Но маска «<файл>.*»
+# забирала лишнее, и обе потери тихие:
+#
+#   infra/.env.example — файл из репозитория. Без него install.sh
+#     останавливается на «нет образца»: переустановиться из того же
+#     каталога уже нельзя, а из распакованного архива — тем более.
+#   infra/.env.<стек> и его копии — настройки ДРУГОГО стека на этой же
+#     машине. Сосед лишался .env со всеми секретами и продолжал работать
+#     ровно до первого перезапуска.
+#
+# Проверяем настоящими файлами: список масок в комментарии соврать может,
+# каталог — нет.
+PURGE_DIR="$TMPD/purge"
+mkdir -p "$PURGE_DIR"
+for n in .env .env.example .env.bak .env.tmp .env.before-restore \
+         .env.before-domain-change-7 .env.mtdom .env.mtdom.before-domain-change-2; do
+    printf 'POSTGRES_PASSWORD=секрет\n' > "$PURGE_DIR/$n"
+done
+PURGE_RESULT="$(env_copies_purge "$PURGE_DIR/.env")"
+t_eq "удалены все четыре наши копии" "${PURGE_RESULT%% *}" "4"
+t_ok "образец .env.example остался — иначе переустановка невозможна" \
+    test -f "$PURGE_DIR/.env.example"
+t_ok "настройки соседнего стека остались" test -f "$PURGE_DIR/.env.mtdom"
+t_ok "и копия настроек соседнего стека тоже" \
+    test -f "$PURGE_DIR/.env.mtdom.before-domain-change-2"
+t_no "наша .bak удалена"                   test -f "$PURGE_DIR/.env.bak"
+t_no "наша .tmp удалена"                   test -f "$PURGE_DIR/.env.tmp"
+t_no "наша .before-restore удалена"        test -f "$PURGE_DIR/.env.before-restore"
+t_no "наша .before-domain-change-7 удалена" test -f "$PURGE_DIR/.env.before-domain-change-7"
+t_eq "о чужих файлах сказано вслух, а не умолчано" "${PURGE_RESULT##* }" "3"
+# Сам .env удаляет uninstall.sh отдельной строкой — функция его не трогает.
+t_ok "функция не трогает сам файл настроек" test -f "$PURGE_DIR/.env"
+# И маска в uninstall.sh не должна вернуться в прежний вид.
+t_ok "полное удаление зовёт общий разбор, а не свою маску" \
+    bash -c "grep -q 'env_copies_purge' '$INSTALL_DIR/uninstall.sh'"
+t_no "маска «.env.*» больше не сносит всё подряд" \
+    bash -c "grep -qE 'for f in \"\\\$ENV_FILE\"\\.\\*' '$INSTALL_DIR/uninstall.sh'"
+rm -rf "$PURGE_DIR"
 
 # ==================================================================
 step "Итог"
