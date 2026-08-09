@@ -64,6 +64,7 @@ import type {
   RestartAction,
   RestartJobState,
   RestartState,
+  VersionInfo,
   RotatableSecretsResponse,
   ServerSettingsResponse,
   TlsApplyResult,
@@ -735,6 +736,9 @@ export const api = {
    * следующий процесс, при старте, — и это же будет ответом «поднялся».
    */
   restartState: () => get<RestartState>('/restart'),
+  /** Версия продукта и образы служб. Только чтение, ничего не тянет. */
+  serverVersion: () =>
+    get<{ available: boolean; reason: string | null; version: VersionInfo | null }>('/version'),
   requestRestart: (target: string, action: RestartAction) =>
     post<RestartAccepted>(`/restart/${encodeURIComponent(target)}`, { action }),
   restartJob: (id: string) => get<RestartJobState>(`/restart/jobs/${encodeURIComponent(id)}`),

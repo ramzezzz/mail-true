@@ -2034,3 +2034,35 @@ export interface TlsBundleInputDto {
   privateKey: string;
   chain?: string;
 }
+
+/**
+ * Что за версия продукта стоит на сервере и какие образы у служб.
+ *
+ * Обновления в продукте не было как явления: обновиться можно только
+ * руками по ssh, базовые образы прибиты тегами, а версии в панели не
+ * видно вовсе. Сервер, поставленный полгода назад, крутит полугодовалый
+ * nginx — и владелец об этом не узнает.
+ */
+export interface VersionInfo {
+  commit: string;
+  /** Коротко — его и показываем человеку. */
+  short: string;
+  branch: string;
+  committedAt: string;
+  /** Заголовок коммита: он говорит больше, чем набор букв. */
+  subject: string;
+  /**
+   * В рабочем дереве правки руками. Обновление их затрёт или упрётся в
+   * конфликт — сказать об этом надо ДО кнопки.
+   */
+  dirty: boolean;
+  /** Сколько скачанных коммитов ещё не применено. */
+  behind: number;
+  ahead: number;
+  pending: Array<{ hash: string; at: string; subject: string }>;
+  /**
+   * Тег («nginx:1.27-alpine») ничего не говорит: под ним за полгода
+   * лежит другой слепок, и разница видна только по digest.
+   */
+  images: Array<{ service: string; image: string; digest: string; created: string }>;
+}

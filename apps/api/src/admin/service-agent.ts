@@ -55,6 +55,38 @@ export interface ServiceAgentOptions {
 }
 
 /** Посредник не настроен или не отвечает. */
+/** Что стоит на сервере: версия продукта и образы служб. */
+export interface VersionInfo {
+  /** Полный идентификатор коммита, на котором работает сервер. */
+  commit: string;
+  /** Он же коротко — его и показывают человеку. */
+  short: string;
+  branch: string;
+  /** Когда этот коммит сделан (ISO). */
+  committedAt: string;
+  /** Заголовок коммита: человеку он говорит больше, чем набор букв. */
+  subject: string;
+  /**
+   * В рабочем дереве есть правки руками.
+   *
+   * Важный признак: на таком сервере обновление затрёт эти правки или
+   * упрётся в конфликт — и об этом надо предупредить ДО кнопки.
+   */
+  dirty: boolean;
+  /** Сколько скачанных коммитов ещё не применено. */
+  behind: number;
+  /** Сколько своих коммитов не отправлено (обычно ноль). */
+  ahead: number;
+  /** Что именно приедет: заголовки ожидающих коммитов. */
+  pending: Array<{ hash: string; at: string; subject: string }>;
+  /**
+   * Образы служб. Тег («nginx:1.27-alpine») ничего не говорит: под ним
+   * за полгода лежит уже другой слепок, и разница видна только по
+   * digest.
+   */
+  images: Array<{ service: string; image: string; digest: string; created: string }>;
+}
+
 export class ServiceAgentUnavailableError extends ApiError {
   constructor(message: string) {
     super(503, 'SERVICE_AGENT_UNAVAILABLE', message);
@@ -288,6 +320,45 @@ export class ServiceAgent {
    * скопируйте оттуда p=». Установщик эту строку печатает сам — значит
    * и панель может её показать.
    */
+  /**
+   * Что за версия продукта стоит и какие образы у служб.
+   *
+   * Только чтение: ничего не тянется и не пересобирается. Обновление —
+   * отдельное действие, и делать его заодно с просмотром страницы
+   * нельзя. По той же причине посредник не ходит в сеть за свежими
+   * коммитами: просмотр не должен зависеть от доступности удалённого
+   * репозитория.
+   */
+  async version(): Promise<VersionInfo> {
+    const body = await this.call('/version', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
+    const str = (key: string): string => (typeof body[key] === 'string' ? body[key] : '');
+    const num = (key: string): number => (typeof body[key] === 'number' ? body[key] : 0);
+    const rows = (key: string): Record<string, unknown>[] =>
+      Array.isArray(body[key]) ? (body[key] as Record<string, unknown>[]) : [];
+
+    return {
+      commit: str('commit'),
+      short: str('short'),
+      branch: str('branch'),
+      committedAt: str('committedAt'),
+      subject: str('subject'),
+      dirty: body.dirty === true,
+      behind: num('behind'),
+      ahead: num('ahead'),
+      pending: rows('pending').map((row) => ({
+        hash: typeof row.hash === 'string' ? row.hash : '',
+        at: typeof row.at === 'string' ? row.at : '',
+        subject: typeof row.subject === 'string' ? row.subject : '',
+      })),
+      images: rows('images').map((row) => ({
+        service: typeof row.service === 'string' ? row.service : '',
+        image: typeof row.image === 'string' ? row.image : '',
+        digest: typeof row.digest === 'string' ? row.digest : '',
+        created: typeof row.created === 'string' ? row.created : '',
+      })),
+    };
+  }
+
   async dkimRecord(domain: string, selector: string): Promise<string> {
     const query = `domain=${encodeURIComponent(domain)}&selector=${encodeURIComponent(selector)}`;
     const body = await this.call(`/dkim?${query}`, 'GET');

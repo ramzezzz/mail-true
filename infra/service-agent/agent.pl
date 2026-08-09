@@ -536,6 +536,9 @@ sub handle {
     if ($method eq 'GET' && $path eq '/stack') {
         return do_stack($client);
     }
+    if ($method eq 'GET' && $path eq '/version') {
+        return do_version($client);
+    }
     if ($method eq 'POST' && $path eq '/certbot') {
         return do_certbot($client, $body);
     }
@@ -788,6 +791,99 @@ sub do_restart {
 # docker stats запускается с --no-stream: без него команда висит вечно, отдавая
 # показания раз в секунду, и запрос из панели никогда бы не завершился.
 # ------------------------------------------------------------------
+#
+# Что за версия продукта стоит и что доступно.
+#
+# ------------------------------------------------------------------
+# ЗАЧЕМ
+# ------------------------------------------------------------------
+# Обновления в продукте не было как явления: отдельного скрипта нет,
+# обновиться можно только руками по ssh (`git pull` и пересборка), а
+# базовые образы (postgres, redis, nginx, clamav) прибиты тегами и
+# свежие исправления безопасности приезжают только при явном `pull` —
+# которого не делает никто. Версии продукта в панели тоже не видно.
+#
+# То есть сервер, поставленный полгода назад, крутит полугодовалый
+# nginx, и владелец об этом не узнает.
+#
+# Здесь — ТОЛЬКО ЧТЕНИЕ: какой коммит стоит, когда он собран, есть ли
+# что-то новее в репозитории и какие образы у служб. Ничего не тянем и
+# не пересобираем: обновление — отдельное действие, и делать его
+# «заодно с просмотром» нельзя.
+#
+# `git fetch` не делаем по той же причине: он ходит в сеть, а просмотр
+# страницы не должен зависеть от доступности удалённого репозитория и
+# уж тем более менять состояние. Новизну считаем по тому, что уже
+# скачано; отдельная кнопка «Проверить обновления» сделает fetch явно.
+#
+sub do_version {
+    my ($client) = @_;
+
+    my $git = sub {
+        my (@args) = @_;
+        my ($rc, $out) = run('git', '-C', $PROJECT_DIR, @args);
+        return $rc == 0 ? trim($out) : '';
+    };
+
+    my $current   = $git->('rev-parse', 'HEAD');
+    my $short     = $git->('rev-parse', '--short', 'HEAD');
+    my $branch    = $git->('rev-parse', '--abbrev-ref', 'HEAD');
+    my $committed = $git->('log', '-1', '--format=%cI');
+    my $subject   = $git->('log', '-1', '--format=%s');
+    # Грязное дерево — важный признак: на таком сервере правили файлы
+    # руками, и обновление затрёт эти правки или упрётся в конфликт.
+    my $dirty     = $git->('status', '--porcelain');
+
+    # Что уже скачано, но не применено. Пусто — либо мы на свежем, либо
+    # давно не спрашивали удалённый репозиторий.
+    my $behind = $git->('rev-list', '--count', 'HEAD..@{upstream}');
+    my $ahead  = $git->('rev-list', '--count', '@{upstream}..HEAD');
+
+    my @pending;
+    if ($behind =~ /^\d+$/ && $behind > 0) {
+        my $log = $git->('log', '--format=%h|%cI|%s', '--max-count=20', 'HEAD..@{upstream}');
+        for my $line (split /
+/, $log) {
+            my ($hash, $at, $title) = split /\|/, trim($line), 3;
+            next unless defined $hash && $hash ne '';
+            push @pending, { hash => $hash, at => $at // '', subject => $title // '' };
+        }
+    }
+
+    # Образы служб: какой именно слепок сейчас работает. Тег ничего не
+    # говорит — под `nginx:1.27-alpine` за полгода лежит уже другой
+    # слепок, и разница видна только по digest.
+    my @images;
+    for my $service (sort keys %SERVICES) {
+        my $id = container_of($service);
+        next if $id eq '';
+        my ($rc, $out) = run('docker', 'inspect', '--format',
+                             '{{.Config.Image}}|{{.Image}}|{{.Created}}', $id);
+        next unless $rc == 0;
+        my ($image, $digest, $created) = split /\|/, trim($out);
+        push @images, {
+            service => $service,
+            image   => $image   // '',
+            digest  => $digest  // '',
+            created => $created // '',
+        };
+    }
+
+    return reply($client, 200, {
+        ok        => \1,
+        commit    => $current,
+        short     => $short,
+        branch    => $branch,
+        committedAt => $committed,
+        subject   => $subject,
+        dirty     => ($dirty ne '' ? \1 : \0),
+        behind    => ($behind =~ /^\d+$/ ? $behind + 0 : 0),
+        ahead     => ($ahead  =~ /^\d+$/ ? $ahead  + 0 : 0),
+        pending   => \@pending,
+        images    => \@images,
+    });
+}
+
 sub do_stack {
     my ($client) = @_;
 
