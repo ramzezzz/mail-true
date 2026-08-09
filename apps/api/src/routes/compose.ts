@@ -572,11 +572,27 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     deliver: async (entry: DeferredEntry, raw: Buffer): Promise<DeliveryOutcome> => {
       const password = secretBox.decrypt(entry.passwordEnc);
       const transport = openTransport(entry.owner, password);
+      let partial: RejectedRecipient[] = [];
       try {
-        await transport.sendMail({
+        const info = await transport.sendMail({
           envelope: { from: entry.owner, to: entry.envelopeTo },
           raw,
         });
+        /*
+         * ЧАСТИЧНЫЙ ОТКАЗ. Нижняя библиотека бросает ошибку, только когда
+         * отвергнуты ВСЕ получатели. Если одному ответили 250, а другому
+         * 550 «нет такого ящика», обещание разрешается успешно, а отказ
+         * лежит внутри ответа.
+         *
+         * Раньше результат здесь просто выбрасывался, и путь через очередь
+         * (а это путь ПО УМОЛЧАНИЮ — отмена отправки включена) терял отказ
+         * целиком: человеку сказано «письмо принято», письмо ушло из
+         * очереди, извещения нет, черновика нет. Узнать правду он мог
+         * только из отчёта о недоставке, если тот вообще настроен. В
+         * синхронном пути это давно разобрано (см. send-result.ts) — здесь
+         * дефект был воспроизведён заново.
+         */
+        partial = readSendOutcome(info).rejected;
       } catch (err) {
         const failure = classifySmtpError(err);
         app.log.warn(
@@ -606,6 +622,36 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       // Теперь письмо у получателя, и возвращать его в окно написания
       // больше не придётся — вложения можно убирать (см. attachmentIds)
       await dropHeldUploads(entry);
+
+      /*
+       * Часть адресатов письмо не получила — и это надо СКАЗАТЬ.
+       *
+       * Отправка считается состоявшейся: остальным письмо доставлено,
+       * копия в «Отправленных» лежит, повторять нечего. Но извещение
+       * выписывается тем же способом, что и при полном отказе, потому что
+       * вопрос у человека ровно один: «дошло ли». Молчание здесь означает
+       * «дошло всем», а это неправда.
+       */
+      if (partial.length > 0) {
+        app.log.warn(
+          { deferredId: entry.id, rejected: partial.map((r) => r.address) },
+          'Отложенное письмо ушло не всем получателям',
+        );
+        // Черновика здесь нет и не нужно: письмо ушло, переписывать и
+        // отправлять заново нечего — правится список получателей, а не
+        // само письмо. Поэтому draftUid = null.
+        await noticeSendFailure(
+          entry,
+          {
+            reason: 'Письмо доставлено не всем получателям',
+            rejected: partial.map((r) => ({ address: r.address, message: r.message })),
+            attempts: entry.attempts + 1,
+            lastAttemptAt: new Date().toISOString(),
+            envelopeTo: entry.envelopeTo,
+          },
+          null,
+        );
+      }
       return 'sent';
     },
     onGiveUp: async (entry, raw) => {
@@ -660,6 +706,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     log: {
       info: (obj, msg) => app.log.info(obj, msg),
       warn: (obj, msg) => app.log.warn(obj, msg),
+      error: (obj, msg) => app.log.error(obj, msg),
     },
   });
   deferred.start(DEFERRED_TICK_MS);

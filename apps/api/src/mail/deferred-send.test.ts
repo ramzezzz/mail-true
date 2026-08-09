@@ -171,6 +171,81 @@ test('после исчерпания попыток письмо тоже ух�
   }
 });
 
+test('уборка в черновики не удалась — письмо остаётся в очереди, а не исчезает', async () => {
+  /*
+   * Самая дорогая из ошибок этого файла, и она была тихой.
+   *
+   * Раньше здесь стояло `onGiveUp(...).catch(() => undefined)` и сразу
+   * `remove()`: отказ уборки проглатывался, письмо стиралось с диска, а в
+   * журнал уходило «сохранено в черновиках» — то есть неправда.
+   *
+   * Достижимо это не в теории: onGiveUp начинается с расшифровки пароля
+   * из конверта, и после смены SESSION_SECRET (плановая ротация, перенос
+   * установки, восстановление тома) расшифровка бросает на первой же
+   * строке — до того, как хоть что-то сделано.
+   */
+  const { spool, dir } = await tempSpool();
+  try {
+    await spool.add(
+      entry('2026-08-06T09:00:00.000Z'),
+      Buffer.from('письмо, которое нельзя терять'),
+    );
+    const sender = new DeferredSender({
+      spool,
+      deliver: async () => 'failed',
+      onGiveUp: async () => {
+        throw new Error('расшифровать пароль нечем: секрет сессий сменили');
+      },
+    });
+
+    await sender.tick(new Date('2026-08-06T09:05:00.000Z'));
+
+    const left = await spool.all();
+    assert.equal(left.length, 1, 'письмо стёрто, хотя убрать его в черновики не удалось');
+    const raw = await spool.raw(left[0]!.id);
+    assert.equal(
+      raw?.toString('utf8'),
+      'письмо, которое нельзя терять',
+      'тело письма обязано остаться нетронутым',
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('отметка попытки переживает обрыв: конверт не остаётся обрезанным', async () => {
+  /*
+   * Инвариант из шапки файла: наличие `.json` значит «запись целая».
+   * Отметка попытки была единственным местом, где конверт переписывался
+   * ПОВЕРХ, без временного имени. Пропадание питания посреди записи
+   * оставляло обрезанный файл: `all()` такую запись пропускает — письмо
+   * не ушло бы никогда, а тело осталось бы лежать в очереди навсегда.
+   *
+   * Проверяем результат, а не способ: после отметки запись обязана
+   * читаться целиком и хранить увеличенный счётчик.
+   */
+  const { spool, dir } = await tempSpool();
+  try {
+    await spool.add(entry('2026-08-06T09:00:00.000Z'), Buffer.from('письмо'));
+    const [before] = await spool.all();
+    assert.ok(before);
+
+    const attempts = await spool.bumpAttempt(before.id);
+    assert.equal(attempts, 1);
+
+    const after = await spool.get(before.id);
+    assert.ok(after, 'конверт после отметки попытки не читается — запись обрезана');
+    assert.equal(after.attempts, 1);
+    assert.equal(after.owner, before.owner, 'при перезаписи потерялись поля конверта');
+    // Временных файлов после себя не оставляем: они попадут в all() как
+    // мусор и будут висеть в очереди вечно.
+    const leftovers = (await readdir(dir)).filter((name) => name.endsWith('.tmp'));
+    assert.deepEqual(leftovers, []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('исключение при отправке считается временной бедой, а не потерей письма', async () => {
   const { spool, dir } = await tempSpool();
   try {
