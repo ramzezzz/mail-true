@@ -748,12 +748,47 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     spool,
     deliver: async (entry: DeferredEntry, raw: Buffer): Promise<DeliveryOutcome> => {
       const password = secretBox.decrypt(entry.passwordEnc);
-      const transport = openTransport(entry.owner, password);
       let partial: RejectedRecipient[] = [];
+
+      /*
+       * SMTP уже принимал это письмо — второй раз не отдаём.
+       *
+       * Так бывает, когда процесс умер между ответом «250» и удалением
+       * конверта: там остаются копия в «Отправленные», уборка вложений
+       * и пометка исходного письма, то есть секунды сетевой работы.
+       * Перезапуск в этот момент — обычное дело (кнопка в панели,
+       * обновление образа), а письмо у получателя задваивалось.
+       *
+       * Хвост доделываем: копия в «Отправленных» могла не лечь, а
+       * вложения — остаться. Отправку пропускаем.
+       */
+      if (entry.sentAt) {
+        app.log.warn(
+          { deferredId: entry.id, sentAt: entry.sentAt },
+          'Письмо уже принято SMTP ранее: повторно не отправляем, доделываем хвост',
+        );
+        await appendToSent(entry.owner, password, raw).catch((err: unknown) => {
+          app.log.warn(errorInfo(err), 'Копия письма в «Отправленные» не легла и на этот раз');
+        });
+        await dropHeldUploads(entry);
+        return 'sent';
+      }
+
+      const transport = openTransport(entry.owner, password);
       try {
         const info = await transport.sendMail({
           envelope: { from: entry.owner, to: entry.envelopeTo },
           raw,
+        });
+        /*
+         * Отметка «SMTP принял» — ПЕРВЫМ делом, до всего хвоста.
+         * Разбор — в комментарии к DeferredEntry.sentAt.
+         */
+        await spool.markSent(entry.id).catch((err: unknown) => {
+          app.log.error(
+            errorInfo(err, { deferredId: entry.id }),
+            'Не удалось отметить письмо принятым: при перезапуске оно может уйти повторно',
+          );
         });
         /*
          * ЧАСТИЧНЫЙ ОТКАЗ. Нижняя библиотека бросает ошибку, только когда
@@ -799,6 +834,28 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       // Теперь письмо у получателя, и возвращать его в окно написания
       // больше не придётся — вложения можно убирать (см. attachmentIds)
       await dropHeldUploads(entry);
+
+      /*
+       * Флаг «отвечено» на исходном письме — ЗДЕСЬ, а не только на
+       * синхронном пути.
+       *
+       * Отмена отправки включена по умолчанию, то есть каждое обычное
+       * письмо уходит через эту очередь: пометку ставил код, до которого
+       * при настройках по умолчанию не доходило никогда. Стрелка у
+       * отвеченного письма не появлялась ни в вебе, ни в почтовой
+       * программе — и человек отвечал во второй раз.
+       *
+       * Неудача пометки отправку не отменяет: письмо уже у получателя, а
+       * флаг — украшение поверх.
+       */
+      if (entry.inReplyTo) {
+        const original = entry.inReplyTo;
+        await pool
+          .withClient(entry.owner, password, (client) => markAnswered(client, original))
+          .catch((err: unknown) => {
+            app.log.warn(errorInfo(err), 'Исходное письмо не помечено отвеченным');
+          });
+      }
 
       /*
        * Часть адресатов письмо не получила — и это надо СКАЗАТЬ.
@@ -1053,6 +1110,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           sendAt: schedule.at.toISOString(),
           envelopeTo: allRecipients(payload),
           subject: payload.subject,
+          // На какое письмо отвечаем: работник очереди поставит исходному
+          // флаг «отвечено» после успешной отправки.
+          ...(payload.inReplyTo ? { inReplyTo: payload.inReplyTo } : {}),
           // Скрытых получателей в собранных байтах нет и быть не должно —
           // они едут отдельно, чтобы вернуться в письмо, если оно уедет
           // в «Черновики» (см. DeferredEntry.bcc).
@@ -1102,6 +1162,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           sendAt: sendAt.toISOString(),
           envelopeTo: allRecipients(payload),
           subject: payload.subject,
+          // Та же причина, что и у отложенной отправки: пометку
+          // «отвечено» ставит работник очереди, а не этот запрос.
+          ...(payload.inReplyTo ? { inReplyTo: payload.inReplyTo } : {}),
           attachmentIds: payload.attachmentIds,
           bcc: payload.bcc.map((a) => a.address),
         },
@@ -1301,6 +1364,43 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     } finally {
       deferred.release(pendingId);
     }
+  });
+
+  /**
+   * Письма, ожидающие своего часа: «Отправить позже».
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ ЭТОТ СПИСОК
+   * ------------------------------------------------------------------
+   * Нажав «Отправить позже», человек терял письмо из виду целиком: оно
+   * уходит из «Черновиков» (иначе одно письмо лежало бы в двух местах и
+   * ушло бы дважды), в «Отправленные» ещё не попало, а списка очереди в
+   * продукте не было. Ни посмотреть, ни исправить, ни отменить — при
+   * том что отмена по номеру работает давно, только сам номер жил в
+   * памяти окна написания и пропадал вместе с ним.
+   *
+   * Отдаётся ровно то, что нужно строке списка: кому, о чём и когда
+   * уйдёт. Самих писем здесь нет — за телом человек идёт в отмену,
+   * которая возвращает письмо в окно.
+   */
+  app.get('/messages/scheduled', { preHandler: app.requireSession }, async (request) => {
+    const session = request.mailSession;
+    if (!session) throw new UnauthorizedError();
+    const items = await spool.scheduledFor(session.email);
+    return {
+      items: items.map((entry) => ({
+        id: entry.id,
+        sendAt: entry.sendAt,
+        subject: entry.subject,
+        to: entry.envelopeTo,
+        /**
+         * Сколько раз отправка срывалась. Ноль — обычное ожидание;
+         * больше — сервер получателя пока не принимает, и человеку
+         * лучше знать об этом до срока, а не после.
+         */
+        attempts: entry.attempts ?? 0,
+      })),
+    };
   });
 
   /**
