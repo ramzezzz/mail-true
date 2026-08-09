@@ -126,24 +126,32 @@ export function splitMessageId(id: string): { folderId: string; uid: number } {
 }
 
 /**
- * Наш `до:` — «включительно», а IMAP BEFORE — «строго раньше этого дня».
+ * Границы дат для IMAP: строкой, а не объектом Date, и «до» — включительно.
  *
- * Из-за этой разницы `до:2026-08-01` теряло весь первый день августа:
- * подсказка и чип обещали «не позже этой даты», а письма названного дня в
- * ответ не попадали. Замечают это на отборе за месяц — «где письмо, я его
- * своими глазами вчера видел», — и виноватым выглядит поиск целиком.
+ * Здесь два разных подвоха, и оба видны только на живом сервере.
  *
- * Поэтому серверу называется СЛЕДУЮЩИЙ день: «строго раньше 2 августа» и
- * есть «не позже 1 августа». Точность IMAP тут дневная в любом случае —
- * BEFORE сравнивает даты, а не время, — поэтому и `старше:1г` округляется
- * так же: включает день ровно год назад целиком, а не половину его.
+ * ПЕРВЫЙ. imapflow, если сервер объявил расширение WITHIN (Dovecot его
+ * объявляет), НЕ отправляет `BEFORE`/`SINCE` вовсе: он переводит дату в
+ * «столько-то секунд назад» и шлёт `OLDER`/`YOUNGER`
+ * (search-compiler.js, ветка WITHIN). Граница из дневной становится
+ * посекундной, и `до:2026-08-01` превращается в «старше момента 1 августа
+ * 00:00» — весь первый день августа пропадает, хотя подсказка и чип
+ * обещают «не позже этой даты». Хуже того, на сегодняшней дате счёт
+ * секунд даёт ноль, уходит `UID SEARCH OLDER 0`, и Dovecot отвечает
+ * `BAD Invalid search interval parameter` — поиск не сужается, а
+ * ОТКАЗЫВАЕТ целиком. Проверено на стенде: `до:<сегодня>` — 503.
+ *
+ * Строка эту ветку обходит (`isDate` для неё ложно), и к серверу уходит
+ * настоящее `BEFORE 02-Aug-2026`, которое Dovecot сравнивает по дню.
+ *
+ * ВТОРОЙ. `BEFORE` у IMAP значит «строго раньше этого дня». Поэтому
+ * серверу называется СЛЕДУЮЩИЙ день: «раньше 2 августа» и есть «не позже
+ * 1-го». `SINCE` день уже включает, ему сдвиг не нужен.
  */
-function imapBefore(inclusive: Date): Date {
-  const next = new Date(
-    Date.UTC(inclusive.getUTCFullYear(), inclusive.getUTCMonth(), inclusive.getUTCDate()),
-  );
-  next.setUTCDate(next.getUTCDate() + 1);
-  return next;
+function imapDate(value: Date, plusDay = false): string {
+  const day = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+  if (plusDay) day.setUTCDate(day.getUTCDate() + 1);
+  return day.toISOString();
 }
 
 export function buildSearchQuery(
@@ -182,8 +190,8 @@ export function buildSearchQuery(
   if (parsed.to) query.to = parsed.to;
   if (parsed.cc) query.cc = parsed.cc;
   if (parsed.subject) query.subject = ftsSafeText(parsed.subject);
-  if (parsed.since) query.since = parsed.since;
-  if (parsed.before) query.before = imapBefore(parsed.before);
+  if (parsed.since) query.since = imapDate(parsed.since);
+  if (parsed.before) query.before = imapDate(parsed.before, true);
   if (parsed.seen !== null) query.seen = parsed.seen;
   if (parsed.flagged !== null) query.flagged = parsed.flagged;
   /*
