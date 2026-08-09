@@ -243,7 +243,15 @@ interface UiState {
 
   /** Открытые окна написания письма (несколько одновременно). */
   composeWindows: readonly ComposeWindowState[];
-  openCompose(init?: ComposeInit): void;
+  /**
+   * Открыть окно написания. Возвращает НОМЕР окна.
+   *
+   * Номер нужен пересылке: вложения исходного письма переносятся
+   * отдельным шагом (их надо скачать и загрузить обратно), и дописать их
+   * потом можно только в конкретное окно — человек за это время успевает
+   * открыть второе.
+   */
+  openCompose(init?: ComposeInit): number;
   closeCompose(id: number): void;
   /**
    * Закрыть ВСЕ окна написания — при выходе и при смене ящика.
@@ -328,13 +336,16 @@ export const useUiStore = create<UiState>((set) => ({
   clearSelection: () => set({ selectedIds: new Set<string>() }),
 
   composeWindows: [],
-  openCompose: (init = {}) =>
+  openCompose: (init = {}) => {
+    const id = ++composeSeq;
     set((s) => ({
       composeWindows: [
         ...s.composeWindows,
-        { id: ++composeSeq, minimized: false, init, draft: emptyDraft(init) },
+        { id, minimized: false, init, draft: emptyDraft(init) },
       ],
-    })),
+    }));
+    return id;
+  },
   closeCompose: (id) =>
     set((s) => ({ composeWindows: s.composeWindows.filter((w) => w.id !== id) })),
   closeAllCompose: () => set({ composeWindows: [] }),

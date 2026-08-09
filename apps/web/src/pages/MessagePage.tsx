@@ -40,6 +40,7 @@ import { LabelPills } from '../mail/LabelPill';
 import { useApplyLabels, useLabelsState } from '../mail/useLabels';
 import { isReliable, messageCategory } from '../lib/categories';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
+import { collectForwardAttachments } from '../lib/forwardAttachments';
 import { errorText, isNotFoundError } from '../lib/errorText';
 import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
@@ -165,6 +166,8 @@ export function MessagePage() {
      между «письмо загружается» и «письмо показано». */
   const { available: labelsAvailable, items: labelDictionary } = useLabelsState();
   const applyLabels = useApplyLabels();
+  const updateComposeDraft = useUiStore((s) => s.updateComposeDraft);
+  const showNotice = useUiStore((s) => s.showNotice);
   const openCompose = useUiStore((s) => s.openCompose);
   const setVisitedMessage = useUiStore((s) => s.setVisitedMessage);
   const readReceipt = useSendReadReceipt(id);
@@ -364,9 +367,32 @@ export function MessagePage() {
     openCompose(replyInit(message, preferences.quoteOriginalOnReply));
   };
 
+  /**
+   * Пересылка: вложения исходного письма переносим в новое.
+   *
+   * Отдельным шагом, потому что их надо скачать и загрузить обратно, а
+   * окно должно открыться сразу. Пока файлы едут, человек уже набирает
+   * текст — они появятся в списке вложений по мере готовности.
+   */
+  const bringAttachments = async (message: Message, windowId: number): Promise<void> => {
+    if ((message.attachments ?? []).every((a) => a.inline)) return;
+    const { attachments, failed } = await collectForwardAttachments(message);
+    if (attachments.length > 0) {
+      updateComposeDraft(windowId, (draft) => ({
+        attachments: [...draft.attachments, ...attachments],
+      }));
+    }
+    if (failed.length > 0) {
+      // Молчать нельзя: человек уверен, что вложения на месте, и пишет
+      // «см. вложение».
+      showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
+    }
+  };
+
   const forward = () => {
     if (!message) return;
-    openCompose(forwardInit(message));
+    const windowId = openCompose(forwardInit(message));
+    void bringAttachments(message, windowId);
   };
 
   /**

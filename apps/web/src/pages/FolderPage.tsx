@@ -20,6 +20,7 @@ import { useUiStore } from '../app/store';
 import { Button } from '../components';
 import { useOpenDraft } from '../compose/useOpenDraft';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
+import { collectForwardAttachments } from '../lib/forwardAttachments';
 import { actionErrorText, errorText } from '../lib/errorText';
 import { serializeRulePrefill } from '../lib/filterRules';
 import { selectAllLabel } from '../lib/paging';
@@ -104,6 +105,7 @@ export function FolderPage() {
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
 
+  const updateComposeDraft = useUiStore((s) => s.updateComposeDraft);
   const showNotice = useUiStore((s) => s.showNotice);
   const selectedIds = useUiStore((s) => s.selectedIds);
   const selectMany = useUiStore((s) => s.selectMany);
@@ -310,11 +312,28 @@ export function FolderPage() {
           queryKey: queryKeys.message(id, false),
           queryFn: () => api.getMessage(id, { images: false }),
         });
-        openCompose(
+        const windowId = openCompose(
           kind === 'reply'
             ? replyInit(message, preferences.quoteOriginalOnReply)
             : forwardInit(message),
         );
+        /*
+         * Пересылка обязана донести вложения. Их надо скачать и загрузить
+         * обратно, поэтому окно открывается сразу, а файлы догоняют: пока
+         * они едут, человек уже набирает текст.
+         */
+        if (kind === 'forward') {
+          void collectForwardAttachments(message).then(({ attachments, failed }) => {
+            if (attachments.length > 0) {
+              updateComposeDraft(windowId, (draft) => ({
+                attachments: [...draft.attachments, ...attachments],
+              }));
+            }
+            if (failed.length > 0) {
+              showNotice(`Не удалось перенести вложения: ${failed.join(', ')}`);
+            }
+          });
+        }
       } catch (error) {
         showNotice(actionErrorText('Не удалось открыть письмо', error));
       }
@@ -326,6 +345,7 @@ export function FolderPage() {
       openCompose,
       preferences.quoteOriginalOnReply,
       showNotice,
+      updateComposeDraft,
     ],
   );
 

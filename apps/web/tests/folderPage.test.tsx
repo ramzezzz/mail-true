@@ -275,6 +275,73 @@ describe('перетаскивание в папку', () => {
  * с приложенным письмом, а байты письма берёт сервер прямо из ящика —
  * поэтому наружу уходит идентификатор, а не тело.
  */
+describe('обычная пересылка', () => {
+  it('доносит вложения исходного письма, а не бросает их', async () => {
+    /*
+     * «Переслать» собирало только тему и цитату тела. Вложения молча
+     * отбрасывались: человек открывал письмо со счётом, нажимал
+     * «Переслать», писал «см. вложение» и отправлял — получатель получал
+     * письмо без файла. Ни предупреждения, ни следа.
+     */
+    vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
+    vi.spyOn(api, 'getMessage').mockResolvedValue({
+      ...summary(2),
+      bodyHtml: '<p>во вложении счёт</p>',
+      bodyText: 'во вложении счёт',
+      attachments: [
+        {
+          partId: '2',
+          filename: 'счёт.pdf',
+          mimeType: 'application/pdf',
+          size: 1024,
+          contentId: null,
+          inline: false,
+        },
+        // Встроенная картинка не переносится: она уже внутри цитаты, и
+        // вторая копия приехала бы отдельным файлом image001.png.
+        {
+          partId: '3',
+          filename: 'image001.png',
+          mimeType: 'image/png',
+          size: 512,
+          contentId: '<img1>',
+          inline: true,
+        },
+      ],
+      headers: {},
+    } as never);
+    const getPart = vi
+      .spyOn(api, 'getMessagePart')
+      .mockResolvedValue(new Blob(['%PDF-1.4'], { type: 'application/pdf' }));
+    const upload = vi.spyOn(api, 'uploadAttachment').mockResolvedValue({
+      id: 'up-1',
+      filename: 'счёт.pdf',
+      size: 1024,
+      mimeType: 'application/pdf',
+    } as never);
+
+    render();
+    await waitFor(() => Boolean(button('Показать ещё')), 'загруженный список');
+
+    // Пересылка из списка вызывается клавишей F — кнопки в панели нет.
+    act(() => useUiStore.getState().selectMany(['inbox:2']));
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }));
+    });
+
+    await waitFor(
+      () => (useUiStore.getState().composeWindows[0]?.draft.attachments.length ?? 0) > 0,
+      'вложение должно доехать в окно написания',
+    );
+
+    const win = useUiStore.getState().composeWindows[0];
+    expect(win?.draft.attachments.map((a) => a.filename)).toEqual(['счёт.pdf']);
+    // Скачиваем и загружаем ровно одну часть: встроенную картинку не трогаем.
+    expect(getPart).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('переслать как вложение', () => {
   it('открывает окно написания с приложенным письмом', async () => {
     vi.spyOn(api, 'getMessages').mockImplementation(serverPages());
