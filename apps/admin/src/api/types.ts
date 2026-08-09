@@ -1728,6 +1728,14 @@ export interface ServerSetting {
   group: SettingGroup;
   kind: SettingKind;
   unit: SettingUnit | null;
+  /**
+   * Пустое значение допустимо: «адрес наружу определяем сами», «свои
+   * резольверы не заданы». Без этого признака панель отвергала любую
+   * пустую строку, и однажды заданную настройку нельзя было очистить
+   * обратно — а кнопки «вернуть к умолчанию» у значения из infra/.env
+   * нет.
+   */
+  allowEmpty: boolean;
   min: number | null;
   max: number | null;
   options: string[] | null;

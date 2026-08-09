@@ -265,7 +265,7 @@ export function validate(setting: ServerSetting, draft: SettingValue): string | 
     if (setting.max !== null && number > setting.max) return `Не больше ${String(setting.max)}.`;
     return null;
   }
-  if (setting.kind === 'string' && String(draft).trim() === '') {
+  if (setting.kind === 'string' && String(draft).trim() === '' && !setting.allowEmpty) {
     return 'Значение не может быть пустым.';
   }
   return null;

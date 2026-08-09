@@ -8,7 +8,7 @@
  * Сеанс помечен плашкой, отправка писем недоступна — в этом режиме API
  * её просто не предоставляет.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Button } from '@web/components';
@@ -16,7 +16,7 @@ import { api, ApiError } from '../api/client';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { EmptyRow, Table, TableWrap, tableStyles } from '../components/Table';
-import { ErrorNotice, Notice, Panel } from '../components/ui';
+import { ErrorNotice, Notice, Pager, Panel } from '../components/ui';
 import { formatBytes, formatDateTime } from '../lib/format';
 import { folderTitle, isServiceFolder } from '../lib/folderNames';
 
@@ -55,9 +55,36 @@ export function MailboxPage() {
     enabled: active !== null,
   });
 
+  /*
+   * Сколько писем показываем за раз и с какого начинаем.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Стояло жёсткое `(path, 50, 0)`: ровно полсотни последних писем и
+   * никакого способа посмотреть дальше. Число всех писем сервер отдавал
+   * тем же ответом, но страница его не читала — и не говорила, что
+   * показывает лишь часть. Счётчик писем в папке рядом при этом
+   * показывал настоящее число, то есть противоречие было на одном
+   * экране.
+   *
+   * Цена молчания прямая: в чужой ящик входят с обоснованием «письмо не
+   * пришло, проверяем», а у активного ящика нужное письмо уже за
+   * пределами полусотни. Вывод «письма нет» делался по обрезанному
+   * списку — и это самый неверный вывод, который тут можно сделать.
+   */
+  const MESSAGES_PAGE = 50;
+  const [offset, setOffset] = useState(0);
+
+  // Смена папки — начинаем с начала: отступ прошлой папки к новой
+  // отношения не имеет и показал бы пустоту в короткой папке.
+  useEffect(() => {
+    setOffset(0);
+  }, [path]);
+
   const messages = useQuery({
-    queryKey: ['mailbox-messages', active?.mailboxEmail, path],
-    queryFn: () => api.mailboxMessages(path, 50, 0),
+    queryKey: ['mailbox-messages', active?.mailboxEmail, path, offset],
+    queryFn: () => api.mailboxMessages(path, MESSAGES_PAGE, offset),
     enabled: active !== null,
   });
 
@@ -193,6 +220,20 @@ export function MailboxPage() {
               </tbody>
             </Table>
           </TableWrap>
+
+          {/*
+            Сколько писем в папке всего и где мы сейчас. Без этого
+            «последние пятьдесят» выглядели как «все письма».
+          */}
+          <Pager
+            total={messages.data?.total ?? 0}
+            limit={MESSAGES_PAGE}
+            offset={offset}
+            onChange={(next) => {
+              setOffset(next);
+              setOpenUid(null);
+            }}
+          />
 
           {openUid !== null && message.data && (
             <div style={{ marginTop: 12 }}>

@@ -68,6 +68,7 @@ function setting(patch: Partial<ServerSetting> = {}): ServerSetting {
     group: 'live',
     kind: 'int',
     unit: 'seconds',
+    allowEmpty: false,
     min: 60,
     max: 2_592_000,
     options: null,
@@ -453,5 +454,30 @@ describe('перезапускаются только те службы, чьи 
 
   it('сохранять нечего — перезапускать некого', () => {
     expect(restartTargetsFor([])).toEqual([]);
+  });
+});
+
+describe('настройку, которой пустое значение разрешено, можно очистить', () => {
+  /*
+   * Признак `allowEmpty` объявлен в реестре сервера давно — «адрес
+   * наружу определяем сами», «свои резольверы не заданы», — но в панель
+   * не передавался, и там любая пустая строка отвергалась как ошибка.
+   * Настройку, которую администратор однажды задал, нельзя было очистить
+   * обратно: кнопки «вернуть к умолчанию» у значения из infra/.env нет.
+   */
+  it('пустое значение принимается там, где оно разрешено', () => {
+    const s = setting({ key: 'MAIL_PUBLIC_IPV4', kind: 'string', allowEmpty: true });
+    expect(validate(s, '')).toBeNull();
+    expect(validate(s, '   ')).toBeNull();
+  });
+
+  it('где не разрешено — по-прежнему отказ', () => {
+    const s = setting({ key: 'SMTP_HELO', kind: 'string', allowEmpty: false });
+    expect(validate(s, '')).not.toBeNull();
+  });
+
+  it('непустое значение проверяется как обычно', () => {
+    const s = setting({ key: 'MAIL_PUBLIC_IPV4', kind: 'string', allowEmpty: true });
+    expect(validate(s, '203.0.113.7')).toBeNull();
   });
 });
