@@ -246,7 +246,19 @@ export async function adminServerSettingsRoutes(app: FastifyInstance): Promise<v
           if (!target) continue;
           try {
             await ctx.serviceAgent.unsetEnv(target, [after.spec.key]);
+            await settings.clearEnvUnsetDebt([after.spec.key], apply.target);
           } catch (err) {
+            /*
+             * Долг записываем, а не надеемся вычислить потом.
+             *
+             * Догнать неубранную строку надо при ближайшем пересоздании
+             * службы, и раньше «что убрать» вычислялось по признаку
+             * «значение сейчас берётся из файла, а не из базы». Под него
+             * попадает не только наш след, но и любая настройка,
+             * прописанная в infra/.env руками: пересоздание ради одной
+             * настройки молча стирало соседние (см. oweEnvUnset).
+             */
+            await settings.oweEnvUnset(after.spec.key, apply.target).catch(() => undefined);
             request.log.warn(
               { err, key: after.spec.key, service: apply.target },
               'Настройка сброшена в базе, но строку из infra/.env убрать не удалось',

@@ -423,6 +423,59 @@ export class ServerSettings {
     return { before, after: await this.resolve(key) };
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Долг перед infra/.env                                                */
+  /* ------------------------------------------------------------------ */
+  /*
+   * Сброс настройки убирает значение из базы И строку из infra/.env —
+   * иначе панель показывает умолчание, а служба поднимается с прежним.
+   * Строку убирает посредник, а он бывает недоступен: перезапускается, не
+   * настроен, сеть моргнула. Тогда сброс остаётся сделанным наполовину, и
+   * догнать его надо при ближайшем пересоздании службы.
+   *
+   * Помним ИМЕННО ЭТО — какие строки панель хотела убрать и не смогла.
+   * Раньше список собирался иначе: «значение сейчас берётся из файла, а
+   * не из базы» — под такой признак попадает не только забытый след
+   * панели, но и любая настройка, которую человек прописал в infra/.env
+   * своей рукой. Пересоздание ради одной настройки молча стирало
+   * соседние, написанные при установке, — и то же самое проделывало бы
+   * снова после каждого обновления.
+   *
+   * Отличить «моё, забытое» от «чужого, написанного руками» по
+   * содержимому файла невозможно, и гадать здесь нельзя: цена ошибки —
+   * тихо выключенная защита (например, разрешённые страны входа).
+   */
+
+  /** Записывает долг: строку из infra/.env убрать не удалось. */
+  async oweEnvUnset(key: string, service: string): Promise<void> {
+    if (this.#db === null) return;
+    await this.#db.query(
+      `INSERT INTO server_settings_env_debt (key, service)
+            VALUES ($1, $2)
+       ON CONFLICT (key, service) DO NOTHING`,
+      [key, service],
+    );
+  }
+
+  /** Долги этой службы — что убрать из infra/.env при пересоздании. */
+  async envUnsetDebt(service: string): Promise<string[]> {
+    if (this.#db === null) return [];
+    const rows = await this.#db.query<{ key: string }>(
+      'SELECT key FROM server_settings_env_debt WHERE service = $1 ORDER BY key',
+      [service],
+    );
+    return rows.map((row) => row.key);
+  }
+
+  /** Гасит долги: строки из infra/.env убраны. */
+  async clearEnvUnsetDebt(keys: readonly string[], service: string): Promise<void> {
+    if (this.#db === null || keys.length === 0) return;
+    await this.#db.query(
+      'DELETE FROM server_settings_env_debt WHERE service = $1 AND key = ANY($2::text[])',
+      [service, [...keys]],
+    );
+  }
+
   /**
    * Описание настройки, которую разрешено записывать. Публичный метод, а
    * не внутренний: групповое сохранение обязано отказать по locked-ключу

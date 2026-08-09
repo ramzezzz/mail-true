@@ -64,6 +64,66 @@ const idSchema = z.object({ id: z.string().regex(/^\d{1,19}$/) });
  */
 const STALE_MINUTES = 5;
 
+/** То, что умеет ServerSettings и нужно здесь. */
+interface EnvSource {
+  resolve(key: string): Promise<{ raw: string; source: string }>;
+  envUnsetDebt(service: string): Promise<string[]>;
+}
+
+/**
+ * Что уедет в infra/.env перед пересозданием службы.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО ЗАПИСЫВАЕТСЯ
+ * ------------------------------------------------------------------
+ * Только заданное в панели (source = db). Без этого пересоздание
+ * бессмысленно: новый контейнер получил бы прежнее окружение, а человек —
+ * сохранённую настройку, которая не работает. Значения из самого файла
+ * переписывать самими собой незачем, а умолчания продукта делать в файле
+ * явными — не наше дело.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО УБИРАЕТСЯ — И ПОЧЕМУ НЕ ПО ДОГАДКЕ
+ * ------------------------------------------------------------------
+ * «Вернуть к умолчанию» обязано убрать строку и из файла: иначе панель
+ * показывает умолчание, а служба поднимается с прежним значением
+ * (поймано живьём на потолке памяти — в панели 512 МБ, в процессе Node
+ * 768). Убирает строку посредник, и если в тот момент он недоступен,
+ * уборку надо догнать при ближайшем пересоздании.
+ *
+ * Раньше «что догонять» вычислялось по признаку «значение берётся из
+ * файла, а не из базы — значит его записала панель, а в базе его больше
+ * нет». Признак неверный: под него попадает ЛЮБАЯ настройка, которую
+ * человек прописал в infra/.env своей рукой и панелью никогда не трогал.
+ *
+ * Живой сценарий: администратор при установке прописал
+ * GEOIP_LOGIN_POLICY=allow и список стран, полгода всё работало — и
+ * первое же нажатие «Пересоздать» ради совершенно другой настройки молча
+ * стирало обе строки, выключая защиту по стране. Ни предупреждения, ни
+ * следа: с точки зрения панели ничего не менялось, значение «и так было
+ * умолчанием».
+ *
+ * Отличить свой забытый след от чужой строки по содержимому файла нечем,
+ * поэтому и не гадаем: долг ставится в момент неудачной уборки и гасится,
+ * когда уборка удалась (см. ServerSettings.oweEnvUnset).
+ */
+export async function collectRecreateEnv(
+  settings: EnvSource | null,
+  service: string,
+  action: RestartAction,
+): Promise<Record<string, string>> {
+  const env: Record<string, string> = {};
+  if (action !== 'recreate' || settings === null) return env;
+
+  for (const spec of settingsAppliedBy(service, 'recreate')) {
+    const resolved = await settings.resolve(spec.key);
+    if (resolved.source === 'db') env[spec.key] = resolved.raw;
+  }
+  const unset = await settings.envUnsetDebt(service);
+  if (unset.length > 0) env.__unset = unset.join(',');
+  return env;
+}
+
 function jobView(record: RestartRecord): Record<string, unknown> {
   return {
     id: record.id,
@@ -290,30 +350,7 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
      * значения из самого файла переписывать самими собой незачем, а
      * умолчания продукта в файле делать явными — не наше дело.
      */
-    const env: Record<string, string> = {};
-    /*
-     * И отдельно — ключи, которые надо УБРАТЬ из infra/.env.
-     *
-     * «Вернуть к умолчанию» убирало значение из базы, а строка в файле
-     * оставалась навсегда: панель показывала умолчание продукта, сервер
-     * работал с прежним значением. Поймано живьём — сброс потолка памяти
-     * вернул в панели 512 МБ, а контейнер поднялся с 768 из файла.
-     *
-     * Убираем строку, а не пишем в неё умолчание: тогда значение берётся
-     * оттуда, откуда и должно, — из умолчания в docker-compose.yml, и в
-     * файле не остаётся следов панели там, где человек их не просил.
-     */
-    const unset: string[] = [];
-    if (action === 'recreate' && ctx.serverSettings) {
-      for (const spec of settingsAppliedBy(target.id, 'recreate')) {
-        const resolved = await ctx.serverSettings.resolve(spec.key);
-        if (resolved.source === 'db') env[spec.key] = resolved.raw;
-        // Значение пришло из файла, хотя настройкой управляет панель, —
-        // значит его туда записала она же, а в базе его больше нет.
-        else if (resolved.source === 'env') unset.push(spec.key);
-      }
-    }
-    if (unset.length > 0) env.__unset = unset.join(',');
+    const env = await collectRecreateEnv(ctx.serverSettings ?? null, target.id, action);
 
     const record = await journal.begin(target.id, action, login);
     await audit(ctx, request, {
@@ -364,6 +401,16 @@ export async function adminRestartRoutes(app: FastifyInstance): Promise<void> {
     try {
       const state = await agent.apply(target, action, env);
       const detail = describeState(state);
+      /*
+       * Долг погашен: посредник строки из infra/.env убрал. Гасим ДО
+       * проверки «поднялась ли служба» — файл он правит первым делом, и
+       * не поднявшийся контейнер не повод просить убрать то же самое
+       * ещё раз при следующем пересоздании.
+       */
+      const removed = (env.__unset ?? '').split(',').filter((key) => key !== '');
+      if (removed.length > 0) {
+        await ctx.serverSettings?.clearEnvUnsetDebt(removed, target.id).catch(() => undefined);
+      }
       await journal.finish(record.id, state.up ? 'ok' : 'failed', detail);
       if (!state.up) {
         // Отдельная запись аудита: «служба не поднялась» — не то же
