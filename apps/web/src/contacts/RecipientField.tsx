@@ -35,6 +35,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { normalizeAddress } from '@mail-true/shared';
+import { formatAddresses, splitRecipientParts } from '../lib/addresses';
 import styles from './RecipientField.module.css';
 import { setContactHidden, type ContactSuggestion } from './contactsApi';
 import { useContactSuggest } from './useContactSuggest';
@@ -51,9 +52,6 @@ export interface RecipientFieldProps {
   autoFocus?: boolean | undefined;
 }
 
-/** Разделители адресов в строке — те же, что понимает parseAddresses. */
-const SEPARATORS = /[,;]/;
-
 /**
  * Что человек набирает ПРЯМО СЕЙЧАС и что уже введено до этого.
  *
@@ -62,7 +60,11 @@ const SEPARATORS = /[,;]/;
  * бы по строке «anna@example.com, пет» и не находила ничего.
  */
 export function splitRecipients(value: string): { entered: string[]; current: string } {
-  const parts = value.split(SEPARATORS);
+  // Режем тем же разбором, что и отправка (splitRecipientParts): запятая
+  // внутри имени «Иванов, Иван» — часть имени, а не граница адреса.
+  // Своим value.split(/[,;]/) подсказка считала бы уже введённый контакт
+  // за два и предлагала бы его повторно.
+  const parts = splitRecipientParts(value);
   const current = parts.length > 0 ? (parts[parts.length - 1] ?? '') : '';
   const entered = parts.slice(0, -1);
   return { entered, current };
@@ -79,9 +81,17 @@ export function enteredAddresses(value: string): string[] {
   return result;
 }
 
-/** Как подсказка выглядит в строке поля после выбора. */
+/**
+ * Как подсказка выглядит в строке поля после выбора.
+ *
+ * Через общую сборку адресов, а не своей склейкой: имена вида «Иванов,
+ * Иван» (их массово ставят корпоративные почтовые системы, и приходят они
+ * к нам сами — из заголовков писем) требуют кавычек. Без них выбранный из
+ * подсказки контакт превращался при отправке в ДВУХ получателей:
+ * несуществующего «Иванов» и настоящий адрес.
+ */
 export function formatChosen(item: ContactSuggestion): string {
-  return item.name ? `${item.name} <${item.address}>` : item.address;
+  return item.name ? formatAddresses([{ name: item.name, address: item.address }]) : item.address;
 }
 
 /**
