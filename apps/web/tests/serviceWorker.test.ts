@@ -94,8 +94,38 @@ function loadWorker(
     },
   };
 
+  /*
+   * Хранилище отпечатка ящика. Настоящий Cache Storage работнику нужен
+   * ровно для одного: помнить, чей это браузер, между запусками (его
+   * останавливают между уведомлениями). Здесь — простейшая замена с тем
+   * же поведением.
+   */
+  const store = new Map<string, string>();
+  const caches = {
+    open: async () => ({
+      match: async (key: string) => {
+        const value = store.get(key);
+        return value === undefined ? undefined : { text: async () => value };
+      },
+      put: async (key: string, response: { text: () => Promise<string> }) => {
+        store.set(key, await response.text());
+      },
+      delete: async (key: string) => store.delete(key),
+    }),
+  };
+
   const context = createContext({
     self,
+    caches,
+    Response: class {
+      #body: string;
+      constructor(body: string) {
+        this.#body = body;
+      }
+      async text(): Promise<string> {
+        return this.#body;
+      }
+    },
     fetch: fetchMock,
     // Браузер, который умеет кнопки в уведомлении
     Notification: function Notification() {} as unknown,
@@ -282,13 +312,36 @@ describe('показ уведомления', () => {
     expect(harness.shown[0]?.options['body']).toBe('Откройте почту, чтобы прочитать');
   });
 
-  it('готовое окно в push не требует обращения к серверу', async () => {
+  it('готовое окно в push показывается своему ящику без обращения к серверу', async () => {
+    /*
+     * «Класть содержимое в push» затевалось ради случая, когда до
+     * сервера не достучаться, — значит сверка отпечатка обязана
+     * обходиться без сети. Страница сообщает работнику, чей это
+     * браузер, сообщением mt-own-key.
+     */
     const harness = loadWorker();
+    await fire(harness, 'message', { data: { type: 'mt-own-key', key: 'abc' } });
     await fire(harness, 'push', {
       data: { text: () => '{"v":1,"k":"abc","view":{"title":"Пётр","body":"Договор"}}' },
     });
     expect(harness.requests.filter((r) => r.url === '/api/push/notifications')).toHaveLength(0);
     expect(harness.shown[0]?.title).toBe('Пётр');
+  });
+
+  it('готовое окно ЧУЖОГО ящика не показывается: на общем компьютере это чужая почта', async () => {
+    /*
+     * Сессия первого истекла (именно истекла — выход подписку снимает),
+     * вошёл второй. Уведомление первому приходит с содержимым внутри, и
+     * раньше окно рисовалось как есть: второй видел отправителя и тему
+     * чужого письма.
+     */
+    const harness = loadWorker();
+    await fire(harness, 'message', { data: { type: 'mt-own-key', key: 'второй' } });
+    await fire(harness, 'push', {
+      data: { text: () => '{"v":1,"k":"первый","view":{"title":"Пётр","body":"Договор"}}' },
+    });
+    expect(harness.shown[0]?.title).not.toBe('Пётр');
+    expect(String(harness.shown[0]?.options['body'] ?? '')).not.toContain('Договор');
   });
 
   it('проверочное уведомление не притворяется письмом', async () => {

@@ -69,6 +69,7 @@ const PUSH_ON_MOCKS: PushState = {
   pushAvailable: false,
   pushUnavailableReason: 'На заглушечных данных уведомления не работают',
   vapidPublicKey: null,
+  accountKey: '',
   prefs: {
     enabled: false,
     level: 'sender-subject',

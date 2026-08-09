@@ -133,6 +133,11 @@ export interface PushStateDto {
   pushUnavailableReason: string | null;
   /** Открытый ключ VAPID для подписки в браузере. */
   vapidPublicKey: string | null;
+  /**
+   * Отпечаток открытого ящика. По нему Service Worker сверяет
+   * содержимое, приехавшее внутри push, не выходя в сеть.
+   */
+  accountKey: string;
   prefs: NotificationPrefs;
   devices: PushDeviceDto[];
   /** Доступен ли уровень «сводка от ИИ» и почему нет. */
@@ -328,6 +333,14 @@ export class PushService {
       pushAvailable: this.pushAvailable,
       pushUnavailableReason: this.pushUnavailableReason,
       vapidPublicKey: this.#keys?.publicKey ?? null,
+      /*
+       * Отпечаток открытого ящика. По нему работник сверяет содержимое,
+       * приехавшее ВНУТРИ push, не выходя в сеть, — а «класть содержимое
+       * в push» затевалось ровно для случая, когда до сервера не
+       * достучаться. Тайны здесь нет: это хеш собственного адреса,
+       * отданный собственной же сессии.
+       */
+      accountKey: accountKey(email),
       prefs,
       devices: subscriptions.map((sub) => ({
         id: sub.id,

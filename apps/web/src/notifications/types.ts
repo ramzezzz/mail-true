@@ -41,6 +41,11 @@ export interface PushState {
   pushAvailable: boolean;
   pushUnavailableReason: string | null;
   vapidPublicKey: string | null;
+  /**
+   * Отпечаток открытого ящика: работник сверяет по нему содержимое,
+   * приехавшее внутри push, и не показывает чужое на общем компьютере.
+   */
+  accountKey: string;
   prefs: NotificationPrefs;
   devices: PushDevice[];
   ai: { available: boolean; reason: string | null };

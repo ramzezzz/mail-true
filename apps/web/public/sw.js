@@ -186,6 +186,51 @@ async function fetchView(key) {
 }
 
 /**
+ * Отпечаток ящика, о котором сказала страница.
+ *
+ * Живёт в Cache Storage, а не в памяти: работник останавливают между
+ * уведомлениями, и переменная не переживает даже двух подряд.
+ */
+const KEY_CACHE = 'mt-own-key';
+
+async function knownKey() {
+  try {
+    const cache = await caches.open(KEY_CACHE);
+    const stored = await cache.match('/own-key');
+    if (!stored) return null;
+    const value = (await stored.text()).trim();
+    return value === '' ? null : value;
+  } catch {
+    return null;
+  }
+}
+
+async function rememberKey(key) {
+  try {
+    const cache = await caches.open(KEY_CACHE);
+    if (typeof key === 'string' && key !== '') {
+      await cache.put('/own-key', new Response(key));
+    } else {
+      await cache.delete('/own-key');
+    }
+  } catch {
+    /* Хранилище недоступно — сверка пойдёт через сервер. */
+  }
+}
+
+/*
+ * Страница сообщает, чей это браузер: при входе, при подписке и при
+ * выходе (пустым значением). Это единственный способ сверить содержимое,
+ * приехавшее внутри push, не выходя в сеть.
+ */
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (data && typeof data === 'object' && data.type === 'mt-own-key') {
+    event.waitUntil(rememberKey(data.key));
+  }
+});
+
+/**
  * Отпечаток ящика, открытого в этом браузере.
  *
  * Тот же маршрут, что и за содержимым, но без списка писем: нам нужен
@@ -252,10 +297,26 @@ self.addEventListener('push', (event) => {
        * Не смогли спросить (нет сети) — тоже: обещание «чужого не
        * покажем» дороже удобства.
        */
+      /*
+       * Отпечаток ящика сверяем ДО показа, а не только на пути «забрать
+       * содержимое с сервера».
+       *
+       * Когда включено «класть содержимое в push», за содержимым работник
+       * не ходит вовсе, и сверка не работала: общий компьютер, сессия
+       * первого истекла (именно истекла — выход подписку снимает), вошёл
+       * второй, и на письмо первому второй видел отправителя и тему.
+       *
+       * Сверяем МЕСТНО, по отпечатку, который страница присылает при
+       * входе и подписке: сеть для этого не нужна, а «класть содержимое в
+       * push» затевалось ровно ради случая, когда до сервера не достучаться.
+       * Отпечатка нет (работник только что поднялся) — спрашиваем сервер;
+       * не ответил — показываем безымянное окно.
+       */
       let view = incoming.view;
       if (view && incoming.key) {
-        const mine = await ownKey().catch(() => null);
-        if (mine !== incoming.key) view = null;
+        const mine = (await knownKey()) ?? (await ownKey().catch(() => null));
+        if (mine !== null && mine !== incoming.key) view = null;
+        else if (mine === null) view = null;
       }
       if (!view) {
         try {
