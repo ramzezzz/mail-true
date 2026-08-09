@@ -183,6 +183,16 @@ export class ExportRunner {
 
     try {
       await mkdir(dir, { recursive: true });
+      /*
+       * Имя будущего архива записывается в задание ДО первого байта.
+       *
+       * Иначе ветка выше не срабатывала никогда: путь появлялся в записи
+       * только в finishExport, то есть у ГОТОВОГО архива, а у задания в
+       * работе он всегда был NULL. Перезапуск посреди выгрузки оставлял
+       * на диске частичную копию переписки — навсегда и невидимо ни для
+       * кого: уборщик по сроку смотрит только на готовые записи.
+       */
+      await store.updateExportProgress(job.id, { filePath: file });
       client = await this.#connect(job.accountEmail);
       zip = new ZipWriter(file);
 

@@ -12,6 +12,18 @@
   border-radius: 10px;
 }
 
+/*
+ * Две кнопки в одной строке: «Очистить корзину» (письма ещё можно
+ * вернуть) и «Удалить всё сейчас» (уже нельзя). На узком экране
+ * переносятся, а не выдавливают число с занятым местом.
+ */
+.summaryActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .summaryValue {
   display: block;
   color: var(--mt-color-text-primary);

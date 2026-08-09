@@ -13,6 +13,7 @@ import {
   emptyRule,
   isRuleComplete,
   moveRule,
+  moveVisibleRule,
   operatorsFor,
   parseRulePrefill,
   serializeRulePrefill,
@@ -221,6 +222,62 @@ describe('moveRule', () => {
 
   it('неизвестный id ничего не ломает', () => {
     expect(moveRule(rules, 'нет такого', 'up').map((r) => r.id)).toEqual(['a', 'b', 'c']);
+  });
+});
+
+describe('moveVisibleRule', () => {
+  /*
+   * Автофильтры спрятаны под флажком «Показывать автофильтры», а порядок
+   * сервер хранит общий. Раньше стрелка двигала правило на одну позицию
+   * в ПОЛНОМ списке: скрытый автофильтр между двумя видимыми правилами
+   * менялся местами вместо соседа, на экране не менялось ничего, а
+   * порядок применения фильтров уезжал незаметно для человека.
+   */
+  const all: FilterRule[] = ['a', 'auto', 'b'].map((id) => ({
+    ...emptyRule(),
+    id,
+    auto: id === 'auto',
+  }));
+  const visible = all.filter((r) => !r.auto);
+
+  it('меняет местами соседей ВИДИМОГО списка', () => {
+    expect(moveVisibleRule(all, visible, 'a', 'down').map((r) => r.id)).toEqual(['b', 'auto', 'a']);
+    expect(moveVisibleRule(all, visible, 'b', 'up').map((r) => r.id)).toEqual(['b', 'auto', 'a']);
+  });
+
+  it('скрытое правило остаётся на своём месте', () => {
+    const moved = moveVisibleRule(all, visible, 'a', 'down');
+    expect(moved[1]?.id, 'автофильтр никуда не уезжал').toBe('auto');
+  });
+
+  it('на границах видимого списка порядок не меняется', () => {
+    expect(moveVisibleRule(all, visible, 'a', 'up').map((r) => r.id)).toEqual(['a', 'auto', 'b']);
+    expect(moveVisibleRule(all, visible, 'b', 'down').map((r) => r.id)).toEqual(['a', 'auto', 'b']);
+  });
+});
+
+describe('операторы поля «Размер»', () => {
+  /*
+   * «Совпадает с» у размера БЫТЬ НЕ ДОЛЖНО. Выполнить точное совпадение
+   * нечем: правила переводятся в Sieve, а он умеет только `:over` и
+   * `:under`. Сервер такое условие молча чинил в «больше чем», и правило
+   * «Размер совпадает с 1000 Кб → удалить безвозвратно» стирало ВСЁ
+   * тяжелее 1000 Кб — а выбирал этот оператор человек из списка, который
+   * предлагали мы.
+   */
+  it('их ровно два — «больше чем» и «меньше чем»', () => {
+    expect(operatorsFor('size')).toEqual(['greater', 'less']);
+    expect(operatorsFor('size')).not.toContain('equals');
+  });
+
+  it('оставшийся от текстового поля оператор чинится в «больше чем»', () => {
+    const rule = buildRule({
+      ...emptyRule(),
+      conditions: [{ field: 'size', operator: 'equals', value: '1000' }],
+    });
+    // Форма показывает первый допустимый оператор, и записывается ровно он:
+    // показанное и сохранённое обязаны совпадать.
+    expect(rule.conditions[0]?.operator).toBe('greater');
   });
 });
 

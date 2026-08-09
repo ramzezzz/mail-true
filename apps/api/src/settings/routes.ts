@@ -334,7 +334,21 @@ export async function settingsUserRoutes(
         ids.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0),
       ),
     );
-    await service.syncSieve(session.email);
+    const sieve = await service.syncSieve(session.email);
+    /*
+     * Ответ этого маршрута — массив правил (контракт интерфейса), и
+     * приписать к нему предупреждение, как у остальных маршрутов
+     * фильтров, некуда. Но и выбрасывать состояние молча нельзя:
+     * порядок правил — это порядок их применения, и пока файл не
+     * переписан, почту раскладывает ПРЕЖНИЙ порядок. Причина уходит
+     * в журнал сервера — единственное место, куда она здесь помещается.
+     */
+    if (!sieve.ok) {
+      app.deps.logger.warn(
+        { email: session.email, reason: sieve.error },
+        'Порядок правил сохранён, но файл правил в ящике не переписан',
+      );
+    }
     const folders = await foldersOf(session);
     return rules.map((rule) => toWebRule(rule, folders));
   });
@@ -346,8 +360,11 @@ export async function settingsUserRoutes(
     const folders = await foldersOf(session);
     const created = await guard(() => db.createFilter(session.email, fromWebRule(dto, folders)));
     const sieve = await service.syncSieve(session.email);
-    await applyToExisting(session, created.id, dto, folders);
-    return withSieveWarning(toWebRule(created, folders), sieve);
+    const applyWarning = await applyToExisting(session, created.id, dto, folders);
+    return withSieveWarning(
+      { ...toWebRule(created, folders), ...(applyWarning ? { applyWarning } : {}) },
+      sieve,
+    );
   });
 
   app.put('/filters/:id', { preHandler: app.requireSession }, async (request) => {
@@ -365,8 +382,11 @@ export async function settingsUserRoutes(
     );
     if (!updated) throw new NotFoundError('Правило не найдено');
     const sieve = await service.syncSieve(session.email);
-    await applyToExisting(session, updated.id, dto, folders);
-    return withSieveWarning(toWebRule(updated, folders), sieve);
+    const applyWarning = await applyToExisting(session, updated.id, dto, folders);
+    return withSieveWarning(
+      { ...toWebRule(updated, folders), ...(applyWarning ? { applyWarning } : {}) },
+      sieve,
+    );
   });
 
   app.delete('/filters/:id', { preHandler: app.requireSession }, async (request) => {
@@ -387,26 +407,53 @@ export async function settingsUserRoutes(
    * почту не действует. Интерфейс передаёт список папок прямо в правиле
    * (`applyToExistingFolderIds`), и это разовое действие: в сохранённом
    * правиле список не остаётся.
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ ОТКАЗ ЗДЕСЬ НЕ ОТКАЗ ЗАПРОСА
+   * ------------------------------------------------------------------
+   * К этому моменту правило уже создано (или изменено) и файл Sieve уже
+   * переписан — то есть главное человек получил. А сам прогон идёт по
+   * тысячам писем в IMAP и может оборваться на любом из них: отвалилось
+   * соединение, папку заняли, сервер ответил «нет».
+   *
+   * Раньше такой обрыв отдавался как 500. Окно правила не закрывалось,
+   * человек видел «Не удалось сохранить правило» и нажимал «Сохранить»
+   * ещё раз — и получал ВТОРОЕ такое же правило. В том числе второе
+   * правило с безвозвратным удалением.
+   *
+   * Поэтому отказ возвращается СЛОВАМИ, а не кодом ответа: правило
+   * сохранено, прогон не удался, повторить его можно отдельно
+   * (POST /filters/:id/apply).
    */
   async function applyToExisting(
     session: MailSession,
     ruleId: number,
     dto: WebFilterRule,
     folders: Folder[],
-  ): Promise<void> {
+  ): Promise<string | null> {
     const paths = dto.actions.applyToExistingFolderIds
       .map((id) => pathOfFolderId(folders, id))
       .filter((p): p is string => p !== null);
-    if (paths.length === 0) return;
-    const rule = await service.requireDb().getFilter(session.email, ruleId);
-    if (!rule) return;
-    await pool.withClient(session.email, session.password, (client) =>
-      applyRuleToMailbox(client, {
-        rule,
-        folderPaths: paths,
-        maxMessages: service.config.FILTER_APPLY_MAX_MESSAGES,
-      }),
-    );
+    if (paths.length === 0) return null;
+    try {
+      const rule = await service.requireDb().getFilter(session.email, ruleId);
+      if (!rule) return null;
+      await pool.withClient(session.email, session.password, (client) =>
+        applyRuleToMailbox(client, {
+          rule,
+          folderPaths: paths,
+          maxMessages: service.config.FILTER_APPLY_MAX_MESSAGES,
+        }),
+      );
+      return null;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      app.deps.logger.warn(
+        { email: session.email, rule: ruleId, reason },
+        'Правило сохранено, но прогон по уже полученным письмам не удался',
+      );
+      return `Правило сохранено, но к уже полученным письмам применить его не удалось: ${reason}`;
+    }
   }
 
   /**

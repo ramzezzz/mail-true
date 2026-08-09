@@ -43,7 +43,20 @@ export const OPERATOR_TITLES: Record<FilterOperator, string> = {
 
 /** Размер сравнивается числом, вложение — наличием, остальные поля — текстом. */
 export const TEXT_OPERATORS: readonly FilterOperator[] = ['contains', 'not-contains', 'equals'];
-export const SIZE_OPERATORS: readonly FilterOperator[] = ['greater', 'less', 'equals'];
+/*
+ * У размера ровно два оператора, и «совпадает с» среди них НЕТ.
+ *
+ * Он там был — и это было опасно. Выполнить точное совпадение размера
+ * нечем: правила переводятся в Sieve, а тот умеет только «больше» и
+ * «меньше» (`:over`/`:under`). Сервер такое условие молча чинил в
+ * «больше чем» (apps/api/src/settings/webdto.ts), и правило «Размер
+ * совпадает с 1000 Кб → удалить безвозвратно» стирало ВСЁ тяжелее
+ * 1000 Кб. Человек выбирал оператор из списка, который предлагали мы, а
+ * узнать о подмене было неоткуда.
+ *
+ * Просить точное совпадение и незачем: письма ровно в 1000 Кб не бывает.
+ */
+export const SIZE_OPERATORS: readonly FilterOperator[] = ['greater', 'less'];
 export const ATTACHMENT_OPERATORS: readonly FilterOperator[] = ['has', 'has-not'];
 
 export function operatorsFor(field: FilterField): readonly FilterOperator[] {
@@ -306,14 +319,41 @@ export function moveRule(
   id: string,
   direction: 'up' | 'down',
 ): FilterRule[] {
-  const index = rules.findIndex((r) => r.id === id);
-  const target = index + (direction === 'up' ? -1 : 1);
-  if (index < 0 || target < 0 || target >= rules.length) return [...rules];
+  return moveVisibleRule(rules, rules, id, direction);
+}
+
+/**
+ * Перестановка правила, когда на экране видны НЕ ВСЕ правила.
+ *
+ * Автофильтры (заведённые сервисом) спрятаны под флажком «Показывать
+ * автофильтры», а порядок сервер хранит общий. Раньше стрелка двигала
+ * правило на одну позицию в ПОЛНОМ списке: под видимым правилом мог
+ * стоять скрытый автофильтр — и «Ниже» меняло местами их, а на экране не
+ * менялось ничего. Человек нажимал ещё раз, потом ещё, и порядок
+ * применения фильтров уезжал незаметно для него. Стрелки при этом
+ * гасились по краям ВИДИМОГО списка, то есть обещали одно, а делали
+ * другое.
+ *
+ * Теперь соседа выбираем в видимом списке, а меняем местами их места в
+ * полном: скрытые правила остаются там, где стояли.
+ */
+export function moveVisibleRule(
+  rules: readonly FilterRule[],
+  visible: readonly FilterRule[],
+  id: string,
+  direction: 'up' | 'down',
+): FilterRule[] {
+  const seen = visible.findIndex((r) => r.id === id);
+  const target = seen + (direction === 'up' ? -1 : 1);
+  if (seen < 0 || target < 0 || target >= visible.length) return [...rules];
+  const moved = visible[seen];
+  const replaced = visible[target];
+  if (!moved || !replaced) return [...rules];
+  const from = rules.findIndex((r) => r.id === moved.id);
+  const to = rules.findIndex((r) => r.id === replaced.id);
+  if (from < 0 || to < 0) return [...rules];
   const next = [...rules];
-  const moved = next[index];
-  const replaced = next[target];
-  if (!moved || !replaced) return next;
-  next[index] = replaced;
-  next[target] = moved;
+  next[from] = replaced;
+  next[to] = moved;
   return next;
 }

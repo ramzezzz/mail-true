@@ -13,12 +13,30 @@
  * Поэтому занятый объём показан числом вверху, а кнопка «удалить сразу»
  * стоит рядом с ним, а не спрятана внизу: человек, у которого кончается
  * место, приходит сюда именно за ней.
+ *
+ * ------------------------------------------------------------------
+ * ВТОРОЕ — ПРО «ОЧИСТИТЬ КОРЗИНУ»
+ * ------------------------------------------------------------------
+ * Кнопка «Очистить корзину» стоит здесь потому, что сюда за ней и
+ * приходят: в списке писем «Эти письма уже в „Корзине“» отсылает
+ * человека «в настройки, в раздел „Восстановление писем“». Раньше
+ * обещание не выполнялось — очистить корзину было нельзя ВООБЩЕ
+ * НИГДЕ, — и заодно этот раздел был мёртвым: список возвращаемых писем
+ * наполняет ровно очистка корзины, а вызвать её было неоткуда.
+ *
+ * Обе кнопки рядом делают разное, и это видно по словам:
+ * «Очистить корзину» убирает письма ИЗ корзины (их ещё можно вернуть),
+ * «Удалить всё сейчас» стирает уже очищенное — насовсем.
  */
 
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { ConfirmDialog } from '../../settings/ConfirmDialog';
 import { Button, Checkbox, SelectField, Spinner } from '../../components';
+import { useFolders } from '../../api/queries';
+import { useClearFolder } from '../../api/settingsQueries';
 import { actionErrorText } from '../../lib/errorText';
+import { formatCount } from '../../lib/folderRights';
 import {
   formatBytes,
   formatLeft,
@@ -28,6 +46,7 @@ import {
 } from '../../settings/ownerApi';
 import {
   usePurgeMessages,
+  ownerKeys,
   useRecovery,
   useRestoreMessages,
   useSetRecoveryDays,
@@ -58,13 +77,25 @@ export function RecoveryPage() {
   const setDays = useSetRecoveryDays();
   const restore = useRestoreMessages();
   const purge = usePurgeMessages();
+  const { data: folders } = useFolders();
+  const clearTrash = useClearFolder();
+  const queryClient = useQueryClient();
   const [selected, setSelected] = useState<Set<number>>(new Set());
   /** Открыто окно «удалить всё сейчас»: действие необратимо. */
   const [confirmPurgeAll, setConfirmPurgeAll] = useState(false);
+  /** Открыто окно «очистить корзину». */
+  const [confirmClearTrash, setConfirmClearTrash] = useState(false);
 
   const { available, reason, items, totals, days, maxDays, scheduledPurge, loading } = state;
   const error = setDays.error ?? restore.error ?? purge.error;
   const busy = restore.isPending || purge.isPending;
+  /*
+   * Корзину ищем по РОЛИ, а не по имени: у ящика, приехавшего с чужого
+   * сервера, она называется как угодно («Deleted Items», «Удалённые»), а
+   * роль сервер определяет по SPECIAL-USE. Нет корзины — нет и кнопки:
+   * кнопка, которой нечего чистить, хуже её отсутствия.
+   */
+  const trash = folders?.find((folder) => folder.role === 'trash') ?? null;
 
   const toggle = (id: number) => {
     setSelected((prev) => {
@@ -118,23 +149,38 @@ export function RecoveryPage() {
                   : `занимают письма, ждущие удаления — их ${totals.count}`}
               </span>
             </div>
-            {totals.count > 0 && (
-              <Button
-                mode="secondary"
-                onClick={() => {
-                  // Спрашиваем ОБЯЗАТЕЛЬНО: кнопка стоит вплотную к строке
-                  // с занятым объёмом — там же, где человек читает, сколько
-                  // места едят письма, — и один промах мышью безвозвратно
-                  // стирал всё, что ещё можно было вернуть. Восстановления
-                  // после этого нет никакого.
-                  purge.reset();
-                  setConfirmPurgeAll(true);
-                }}
-                disabled={busy}
-              >
-                Удалить всё сейчас
-              </Button>
-            )}
+            <div className={styles.summaryActions}>
+              {trash && trash.totalCount > 0 && (
+                <Button
+                  onClick={() => {
+                    // Тоже с вопросом: письма из корзины уедут в служебную
+                    // папку, и если срок хранения выключен — исчезнут сразу.
+                    clearTrash.reset();
+                    setConfirmClearTrash(true);
+                  }}
+                  disabled={busy || clearTrash.isPending}
+                >
+                  {`Очистить корзину (${formatCount(trash.totalCount)})`}
+                </Button>
+              )}
+              {totals.count > 0 && (
+                <Button
+                  mode="secondary"
+                  onClick={() => {
+                    // Спрашиваем ОБЯЗАТЕЛЬНО: кнопка стоит вплотную к строке
+                    // с занятым объёмом — там же, где человек читает, сколько
+                    // места едят письма, — и один промах мышью безвозвратно
+                    // стирал всё, что ещё можно было вернуть. Восстановления
+                    // после этого нет никакого.
+                    purge.reset();
+                    setConfirmPurgeAll(true);
+                  }}
+                  disabled={busy}
+                >
+                  Удалить всё сейчас
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className={styles.setting}>
@@ -219,6 +265,36 @@ export function RecoveryPage() {
             Thunderbird она видна под именем «Recovery», и это не поломка.
           </SettingsHint>
         </>
+      )}
+
+      {confirmClearTrash && trash && (
+        <ConfirmDialog
+          title="Очистить корзину?"
+          text={
+            days > 0
+              ? `Письма из корзины будут удалены — их ${formatCount(trash.totalCount)}. Вернуть их можно будет здесь же ещё ${String(days)} ${plural(days, 'день', 'дня', 'дней')}: место в ящике они всё это время занимают.`
+              : `Письма из корзины будут удалены — их ${formatCount(trash.totalCount)}. Срок хранения очищенного выключен, поэтому вернуть их будет нельзя ничем.`
+          }
+          confirmText="Очистить"
+          busy={clearTrash.isPending}
+          error={clearTrash.isError ? 'Не удалось очистить корзину. Попробуйте ещё раз.' : null}
+          onClose={() => setConfirmClearTrash(false)}
+          onConfirm={() => {
+            clearTrash.mutate(trash.id, {
+              onSuccess: () => {
+                setConfirmClearTrash(false);
+                /*
+                 * Список возвращаемых писем наполняет именно очистка
+                 * корзины — перечитываем его сразу. Без этого человек
+                 * очищал корзину и видел «возвращать нечего» до
+                 * перезагрузки страницы, то есть считал, что письма
+                 * пропали навсегда.
+                 */
+                void queryClient.invalidateQueries({ queryKey: ownerKeys.recovery });
+              },
+            });
+          }}
+        />
       )}
 
       {confirmPurgeAll && (

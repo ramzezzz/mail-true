@@ -12,6 +12,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useUiStore } from '../../app/store';
 import { useFolders } from '../../api/queries';
 import {
   useDeleteFilterRule,
@@ -24,7 +25,7 @@ import {
   describeActions,
   describeConditions,
   emptyRule,
-  moveRule,
+  moveVisibleRule,
   parseRulePrefill,
   type FilterRule,
 } from '../../lib/filterRules';
@@ -53,6 +54,8 @@ export function FiltersPage() {
   const deleteRule = useDeleteFilterRule();
   const reorder = useReorderFilterRules();
 
+  const showNotice = useUiStore.getState().showNotice;
+
   const [showAuto, setShowAuto] = useState(false);
   const [editing, setEditing] = useState<FilterRule | null>(null);
   /*
@@ -75,9 +78,15 @@ export function FiltersPage() {
 
   const visible = (rules ?? []).filter((r) => showAuto || !r.auto);
 
+  /*
+   * Стрелка двигает правило на одну позицию В ВИДИМОМ списке, а не в
+   * полном: под правилом может стоять скрытый автофильтр, и обмен с ним
+   * на экране выглядел бы как «кнопка не работает» — при том что порядок
+   * применения фильтров при этом менялся. См. moveVisibleRule.
+   */
   const applyOrder = (id: string, direction: 'up' | 'down') => {
     if (!rules) return;
-    reorder.mutate(moveRule(rules, id, direction).map((r) => r.id));
+    reorder.mutate(moveVisibleRule(rules, visible, id, direction).map((r) => r.id));
   };
 
   return (
@@ -206,7 +215,21 @@ export function FiltersPage() {
           error={saveRule.isError ? 'Не удалось сохранить правило' : null}
           onClose={() => setEditing(null)}
           onSave={(rule) => {
-            saveRule.mutate(rule, { onSuccess: () => setEditing(null) });
+            saveRule.mutate(rule, {
+              onSuccess: (saved) => {
+                setEditing(null);
+                /*
+                 * «Применить к уже полученным письмам» идёт по тысячам
+                 * писем в ящике и может оборваться — правило при этом уже
+                 * сохранено. Раньше сервер отвечал на такой обрыв ошибкой,
+                 * окно не закрывалось, человек жал «Сохранить» ещё раз и
+                 * получал ВТОРОЕ такое же правило. Теперь окно закрывается,
+                 * а о неудавшемся прогоне сказано словами.
+                 */
+                const warning = (saved as { applyWarning?: unknown }).applyWarning;
+                if (typeof warning === 'string' && warning !== '') showNotice(warning);
+              },
+            });
           }}
         />
       )}

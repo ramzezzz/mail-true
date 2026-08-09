@@ -121,3 +121,10 @@
   justify-content: center;
   padding: 32px 0;
 }
+
+/* «Показать более ранние» — под таблицей, по центру: продолжение списка. */
+.more {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0 4px;
+}

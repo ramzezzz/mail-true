@@ -46,17 +46,43 @@ export interface SettingsApi {
   saveGeneral(settings: GeneralSettings): Promise<GeneralSettings>;
 
   getFilterRules(): Promise<FilterRule[]>;
-  /** Создаёт правило при пустом `id`, иначе перезаписывает существующее. */
+  /**
+   * Создаёт правило при пустом `id`, иначе перезаписывает существующее.
+   *
+   * Ответ может нести два необязательных поля-предупреждения:
+   * `sieveWarning` — правило сохранено, но файл правил в ящике не
+   * переписан; `applyWarning` — правило сохранено, но прогон по уже
+   * полученным письмам оборвался. Оба означают «сохранено», поэтому это
+   * поля ответа, а не ошибка: на ошибке человек нажимал «Сохранить»
+   * второй раз и заводил второе такое же правило.
+   */
   saveFilterRule(rule: FilterRule): Promise<FilterRule>;
   deleteFilterRule(id: string): Promise<void>;
   /** Полный порядок правил: фильтры выполняются сверху вниз. */
   reorderFilterRules(ids: string[]): Promise<FilterRule[]>;
 
   createFolder(draft: FolderDraft): Promise<Folder>;
+  /**
+   * Переименование. Сервер переносит следом правила фильтрации: путь
+   * папки записан в них, и без переноса Sieve завёл бы папку со старым
+   * именем заново (apps/api/src/settings/folders.ts).
+   */
   renameFolder(id: string, name: string): Promise<Folder>;
+  /** Удаление папки ВМЕСТЕ с вложенными папками и письмами. */
   deleteFolder(id: string): Promise<void>;
-  /** Удалить все письма папки, саму папку оставить. */
-  clearFolder(id: string): Promise<{ removed: number }>;
+  /**
+   * Удалить все письма папки, саму папку оставить.
+   *
+   * У КОРЗИНЫ это не окончательное удаление: письма уезжают в служебную
+   * папку и ждут там свой срок (`kept` — сколько можно вернуть в разделе
+   * «Восстановление писем», `restoreUntil` — до какого момента). У
+   * остальных папок письма удаляются сразу, и тогда `kept: 0`.
+   */
+  clearFolder(id: string): Promise<{
+    removed: number;
+    kept?: number;
+    restoreUntil?: string | null;
+  }>;
 
   getCollectors(): Promise<CollectorAccount[]>;
   addCollector(draft: CollectorDraft): Promise<CollectorAccount>;

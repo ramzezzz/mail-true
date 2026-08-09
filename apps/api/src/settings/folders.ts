@@ -17,6 +17,7 @@ import { z } from 'zod';
 import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import { listFolders } from '../imap/service.js';
+import { errorInfo } from '../log.js';
 import {
   findFolderById,
   folderPathBytes,
@@ -25,6 +26,7 @@ import {
 } from '../mail/folders.js';
 import type { MailSession } from '../types.js';
 import { originOf } from './access-record.js';
+import type { FilterActions, FilterRule } from './types.js';
 
 const draftSchema = z.object({
   name: z.string().trim().min(1).max(255),
@@ -73,6 +75,82 @@ function checkPathLength(path: string, name: string): void {
       ? `Слишком длинный путь до папки «${name}»: вместе с родительскими папками получается ${bytes} байт, а допустимо ${MAX_FOLDER_PATH_BYTES}. Сократите название или выберите родителя выше по дереву.`
       : `Слишком длинное название папки: ${bytes} байт при допустимых ${MAX_FOLDER_PATH_BYTES}. Русская буква занимает два байта, поэтому предел — около ${Math.floor(MAX_FOLDER_PATH_BYTES / 2)} русских букв.`,
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Правила фильтрации, которые смотрят на эту папку                     */
+/* ------------------------------------------------------------------ */
+
+/** Что поправить в правиле после переименования или удаления папки. */
+export interface FilterFolderPatch {
+  id: number;
+  /** Новый путь папки-приёмника; null — папки больше нет. */
+  folder: string | null;
+  /** Выключить правило: без папки от него не осталось ни одного действия. */
+  disable: boolean;
+}
+
+/** Осталось ли правилу что делать, кроме раскладки в папку. */
+function hasOtherActions(actions: FilterActions): boolean {
+  return (
+    actions.markRead ||
+    actions.flag ||
+    actions.labels.length > 0 ||
+    actions.deleteMessage !== null ||
+    actions.forwardTo.length > 0 ||
+    actions.autoReply !== null
+  );
+}
+
+/**
+ * Правила, раскладывающие почту в эту папку, после её переименования
+ * (`to` — новый путь) или удаления (`to === null`).
+ *
+ * ------------------------------------------------------------------
+ * ЗАЧЕМ ЭТО ВООБЩЕ НУЖНО
+ * ------------------------------------------------------------------
+ * Правило хранит ПУТЬ папки, а не её номер, а файл Sieve собирается с
+ * `fileinto :create`. Переименовали папку — путь в правиле остался
+ * старым, и первое же подходящее письмо ЗАВОДИЛО папку со старым именем
+ * заново: человек видел папку-призрак и не находил в новой папке ничего.
+ * В списке правил действие при этом пропадало с глаз (folderIdOfPath не
+ * находит путь и отдаёт null), и первое же сохранение правила записывало
+ * folder: null — раскладка исчезала насовсем, без единого сообщения.
+ *
+ * Вложенные папки переезжают вместе с родителем: переименование «Работа»
+ * меняет путь и у правила, кладущего письма в «Работа/Счета».
+ *
+ * У удалённой папки приёмника нет и быть не может: правило перестаёт
+ * перекладывать (иначе `:create` завёл бы её обратно), а если больше оно
+ * ничего не делало — выключается. Выключенное правило видно и его можно
+ * починить; молча оставленное пустое правило выглядело бы работающим.
+ */
+export function retargetFilterFolders(
+  rules: readonly FilterRule[],
+  from: string,
+  to: string | null,
+  delimiter: string,
+): FilterFolderPatch[] {
+  const prefix = `${from}${delimiter}`;
+  const patches: FilterFolderPatch[] = [];
+  for (const rule of rules) {
+    const current = rule.actions.folder;
+    if (current === null) continue;
+    let next: string | null;
+    if (current === from) {
+      next = to;
+    } else if (current.startsWith(prefix)) {
+      next = to === null ? null : `${to}${current.slice(from.length)}`;
+    } else {
+      continue;
+    }
+    patches.push({
+      id: rule.id,
+      folder: next,
+      disable: next === null && !hasOtherActions(rule.actions),
+    });
+  }
+  return patches;
 }
 
 export async function folderManagementRoutes(app: FastifyInstance): Promise<void> {
@@ -169,6 +247,9 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
       }
 
       await client.mailboxRename(folder.path, target);
+      // Правила фильтрации переезжают следом за папкой — иначе Sieve
+      // заведёт папку со старым именем заново. См. retargetFilterFolders.
+      await moveFilters(session.email, folder.path, target, delimiter);
       const refreshed = await listFolders(client);
       const renamed = refreshed.find((f) => f.path === target);
       if (!renamed) throw new BadRequestError('Папка переименована, но не найдена в списке');
@@ -176,7 +257,20 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
     });
   });
 
-  // Удаление вместе с содержимым. Системные папки не удаляются.
+  /*
+   * Удаление вместе с содержимым И СО ВЛОЖЕННЫМИ ПАПКАМИ. Системные
+   * папки не удаляются.
+   *
+   * Вложенные удаляются здесь же, потому что ровно это обещано человеку
+   * в вопросе перед удалением («папка и все её вложенные папки будут
+   * удалены вместе с письмами»). Раньше удалялась одна папка: по IMAP
+   * родитель с детьми превращается в пустой узел дерева, дети остаются
+   * на месте вместе с письмами — то есть человек видел на экране прямо
+   * противоположное тому, на что согласился.
+   *
+   * Порядок — от самых глубоких к родителю: удалить родителя первым
+   * означало бы оставить детей без пути, по которому их можно назвать.
+   */
   app.delete('/folders/:id', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
@@ -185,10 +279,74 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
       const folder = findFolderById(folders, id);
       if (!folder) throw new NotFoundError(`Папка не найдена: ${id}`);
       if (folder.system) throw new BadRequestError('Системную папку удалить нельзя');
+
+      const delimiter = await delimiterOf(client, folders);
+      const prefix = `${folder.path}${delimiter}`;
+      const children = folders.filter((f) => f.path.startsWith(prefix));
+      /*
+       * Служебная папка внутри своей — редкость, но она возможна у ящика,
+       * приехавшего с чужого сервера. Молча снести её вместе с родителем
+       * нельзя: это «Корзина» или «Спам» со всем их содержимым.
+       */
+      const system = children.find((f) => f.system);
+      if (system) {
+        throw new BadRequestError(
+          `Внутри папки «${folder.name}» лежит системная папка «${system.name}», а её удалить нельзя. ` +
+            'Перенесите её выше по дереву и повторите удаление.',
+        );
+      }
+
+      for (const child of [...children].sort((a, b) => b.path.length - a.path.length)) {
+        await client.mailboxDelete(child.path);
+      }
       await client.mailboxDelete(folder.path);
+      // Правила, раскладывавшие почту сюда, теряют приёмник — иначе Sieve
+      // с `fileinto :create` заведёт удалённую папку заново.
+      await moveFilters(session.email, folder.path, null, delimiter);
     });
     return { ok: true };
   });
+
+  /**
+   * Переносит правила фильтрации следом за папкой и переписывает Sieve.
+   *
+   * Отказ базы настроек НЕ отменяет операцию над папкой: папка уже
+   * переименована (или удалена) в почтовом хранилище, и ответить
+   * человеку ошибкой значило бы соврать о том, что произошло. Поэтому
+   * причина уходит в журнал сервера, а не в ответ.
+   */
+  async function moveFilters(
+    email: string,
+    from: string,
+    to: string | null,
+    delimiter: string,
+  ): Promise<void> {
+    const service = app.settingsService as FastifyInstance['settingsService'] | undefined;
+    if (!service?.available) return;
+    try {
+      const db = service.requireDb();
+      const rules = await db.listFilters(email);
+      const patches = retargetFilterFolders(rules, from, to, delimiter);
+      if (patches.length === 0) return;
+      for (const patch of patches) {
+        const rule = rules.find((r) => r.id === patch.id);
+        if (!rule) continue;
+        await db.updateFilter(email, patch.id, {
+          actions: { ...rule.actions, folder: patch.folder },
+          ...(patch.disable ? { enabled: false } : {}),
+        });
+      }
+      // Файл правил в ящике собирается из базы целиком — без этого
+      // переписанные правила остались бы только в базе, а почту
+      // продолжал бы раскладывать старый файл со старым путём.
+      await service.syncSieve(email);
+    } catch (err) {
+      app.deps.logger.warn(
+        errorInfo(err, { email, from, to }),
+        'Папка переименована или удалена, но правила фильтрации остались со старым путём',
+      );
+    }
+  }
 
   /*
    * Очистка: письма удаляются, папка остаётся. Отдельная операция,

@@ -194,6 +194,65 @@ test('правило: DTO -> внутреннее, «совпадает с» с�
   assert.equal(input.name, 'Тема: Счёт');
 });
 
+/*
+ * САМОЕ ОПАСНОЕ ПРАВИЛО, КОТОРОЕ МОЖНО БЫЛО ЗАВЕСТИ.
+ *
+ * Форма предлагала у размера оператор «совпадает с», а преобразователь
+ * молча чинил его в «больше чем». Правило «Размер совпадает с 1000 Кб →
+ * удалить безвозвратно» стирало ВСЁ тяжелее 1000 Кб, и узнать о подмене
+ * было неоткуда. Теперь оператор из формы убран, а сюда он не проходит
+ * вовсе: правило, которое нельзя выполнить, лучше не сохранить, чем
+ * сохранить другим.
+ */
+test('размер «совпадает с» не превращается в «больше чем», а отвергается', () => {
+  const dto: WebFilterRule = {
+    id: '',
+    enabled: true,
+    auto: false,
+    conditions: [{ field: 'size', operator: 'equals', value: '1000' }],
+    actions: {
+      moveToFolderId: null,
+      markRead: false,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: 'purge',
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  };
+  assert.throws(
+    () => fromWebRule(dto, FOLDERS),
+    /размер/iu,
+    'условие по размеру с невыполнимым оператором обязано отвергаться, а не переписываться',
+  );
+});
+
+test('размеру по-прежнему можно «больше» и «меньше»', () => {
+  const dto = (operator: 'greater' | 'less'): WebFilterRule => ({
+    id: '',
+    enabled: true,
+    auto: false,
+    conditions: [{ field: 'size', operator, value: '1000' }],
+    actions: {
+      moveToFolderId: 'inbox',
+      markRead: false,
+      markFlagged: false,
+      labelKeys: [],
+      deleteMode: null,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  });
+  assert.equal(fromWebRule(dto('greater'), FOLDERS).conditions[0]?.op, 'greater');
+  assert.equal(fromWebRule(dto('less'), FOLDERS).conditions[0]?.op, 'less');
+});
+
 test('правило переживает оборот DTO -> внутреннее -> DTO', () => {
   const dto: WebFilterRule = {
     id: '5',

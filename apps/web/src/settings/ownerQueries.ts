@@ -6,7 +6,7 @@
  * интерфейс их просто не показывает — то же правило, что у меток.
  */
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ACCESS_UNAVAILABLE,
   EXPORT_UNAVAILABLE,
@@ -26,16 +26,55 @@ export const ownerKeys = {
 
 /* --- Вход и действия --------------------------------------------------- */
 
-export function useAccessLog(): AccessLogState & { loading: boolean } {
-  const query = useQuery({
+export interface AccessLogView extends AccessLogState {
+  loading: boolean;
+  /** Идёт догрузка более старых записей. */
+  loadingMore: boolean;
+  /** Показать записи старше уже показанных. */
+  loadMore(): void;
+}
+
+/**
+ * История входов страницами.
+ *
+ * Постраничный проход сервер умел с самого начала: маршрут принимает
+ * `before` и честно отвечает `hasMore`. А интерфейс запрашивал ровно
+ * одну страницу и оба этих поля выбрасывал — то есть за сотой записью
+ * история просто обрывалась, и человек, разбирающийся «это был я?»,
+ * упирался в стену без единого слова о том, что дальше что-то есть.
+ *
+ * Курсор — время ПОСЛЕДНЕЙ СВОЕЙ записи (origin: 'app'), а не последней
+ * строки на экране. Строки из журналов почтового сервера сервер
+ * подмешивает только к первой странице и своего курсора не имеют; взяв
+ * время журнальной строки, мы перепрыгнули бы через свои записи и
+ * потеряли их навсегда.
+ */
+export function useAccessLog(): AccessLogView {
+  const query = useInfiniteQuery({
     queryKey: ownerKeys.access,
-    queryFn: () => ownerApi.getAccessLog(),
+    queryFn: ({ pageParam }) => ownerApi.getAccessLog(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: AccessLogState) => {
+      if (!last.hasMore) return undefined;
+      const own = [...last.items].reverse().find((item) => item.origin === 'app');
+      return own?.at;
+    },
     // История — не то, что должно жить в кэше долго: человек открывает
     // раздел именно чтобы увидеть, что было ТОЛЬКО ЧТО.
     staleTime: 15_000,
     retry: false,
   });
-  return { ...(query.data ?? ACCESS_UNAVAILABLE), loading: query.isLoading };
+
+  const pages = query.data?.pages ?? [];
+  const first = pages[0] ?? ACCESS_UNAVAILABLE;
+  return {
+    ...first,
+    items: pages.flatMap((page) => page.items),
+    hasMore: query.hasNextPage,
+    loading: query.isLoading,
+    loadingMore: query.isFetchingNextPage,
+    loadMore: () => void query.fetchNextPage(),
+  };
 }
 
 /* --- Выгрузка ящика ---------------------------------------------------- */

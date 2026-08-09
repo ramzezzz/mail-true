@@ -18,7 +18,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Checkbox, Spinner } from '../../components';
+import { Button, Checkbox, Spinner } from '../../components';
 import { cx } from '../../lib/cx';
 import { CHANNEL_TITLES, formatMoment, plural, type AccessEvent } from '../../settings/ownerApi';
 import { useAccessLog } from '../../settings/ownerQueries';
@@ -32,7 +32,8 @@ import {
 import styles from './AccessLogPage.module.css';
 
 export function AccessLogPage() {
-  const { available, reason, items, retentionDays, loading } = useAccessLog();
+  const { available, reason, items, retentionDays, loading, hasMore, loadingMore, loadMore } =
+    useAccessLog();
   const [showService, setShowService] = useState(false);
 
   const serviceCount = useMemo(() => items.filter((e) => e.service).length, [items]);
@@ -105,6 +106,19 @@ export function AccessLogPage() {
                 ))}
               </tbody>
             </table>
+          )}
+
+          {/*
+            «Показать ещё» появляется ровно тогда, когда серверу есть что
+            показать: он отвечает hasMore, и раньше это поле выбрасывалось —
+            история обрывалась на сотой записи молча.
+          */}
+          {hasMore && (
+            <div className={styles.more}>
+              <Button mode="secondary" disabled={loadingMore} onClick={() => loadMore()}>
+                {loadingMore ? 'Загружаем…' : 'Показать более ранние'}
+              </Button>
+            </div>
           )}
 
           <SettingsHint>

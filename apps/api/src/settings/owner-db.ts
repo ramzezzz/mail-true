@@ -292,6 +292,17 @@ export interface ExportProgressPatch {
   totalBytes?: number;
   doneBytes?: number;
   skipped?: number;
+  /**
+   * Куда работник пишет архив ПРЯМО СЕЙЧАС.
+   *
+   * Раньше путь появлялся в записи только в finishExport, то есть у
+   * готового архива. У задания в состоянии 'running' он был всегда NULL,
+   * и перезапуск процесса посреди выгрузки оставлял на диске недописанный
+   * архив с настоящими письмами человека навсегда: новое имя содержит
+   * текущее время, старый файл никто не перезаписывал, а уборщик по сроку
+   * смотрит только на готовые записи. Знать о таком файле было некому.
+   */
+  filePath?: string;
 }
 
 export interface ExportFinishPatch {
@@ -527,6 +538,9 @@ export class OwnerDb implements OwnerStore {
          total_bytes    = COALESCE($4, total_bytes),
          done_bytes     = COALESCE($5, done_bytes),
          skipped        = COALESCE($6, skipped),
+         -- Путь только записывается, но не стирается: стереть его может
+         -- лишь finishExport, и только вместе с судьбой самого файла.
+         file_path      = COALESCE($7, file_path),
          heartbeat_at   = now()
        WHERE id = $1`,
       [
@@ -536,6 +550,7 @@ export class OwnerDb implements OwnerStore {
         patch.totalBytes ?? null,
         patch.doneBytes ?? null,
         patch.skipped ?? null,
+        patch.filePath ?? null,
       ],
     );
   }
