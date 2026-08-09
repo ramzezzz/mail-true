@@ -705,8 +705,25 @@ async function upsertDomain(client: PoolClient, domain: DomainEntry): Promise<bo
   return created;
 }
 
-/** Колонки mail_user_settings, которые восстанавливаем. Список явный: */
-/* чужой файл не должен уметь вписать что попало в незнакомую колонку.  */
+/**
+ * Колонки mail_user_settings, которые восстанавливаем.
+ *
+ * Список явный намеренно: чужой файл не должен уметь вписать что попало в
+ * незнакомую колонку. Но у явного списка есть своя цена — он отстаёт от
+ * схемы молча, и ровно это здесь и произошло: шести колонок не хватало.
+ *
+ * Выгрузка берёт строку целиком (SELECT *) и кладёт её в копию как есть,
+ * поэтому значения в файле БЫЛИ. Терялись они на восстановлении: тема
+ * оформления, обои, показ логотипов отправителей, срок отмены отправки,
+ * режим списка (цепочками или письмами) и — самое дорогое — срок
+ * восстановления из корзины возвращались к умолчаниям. При восстановлении
+ * поверх существующей установки они и вовсе не восстанавливались: их не
+ * было в списке обновляемых. Отчёт при этом показывал успех.
+ *
+ * Это тот же дефект «список, написанный руками, отстал от схемы», от
+ * которого в соседних местах уже уходили (см. OWNER_ADDRESS_COLUMNS в
+ * domain-change.ts и разбор у purgeMailboxData).
+ */
 const USER_SETTINGS_COLUMNS = [
   'sender_name',
   'reply_quote',
@@ -720,23 +737,46 @@ const USER_SETTINGS_COLUMNS = [
   'autoreply_from',
   'autoreply_until',
   'autoreply_days',
+  'theme',
+  'wallpaper',
+  'sender_logos',
+  'undo_send_seconds',
+  'threaded_list',
+  'trash_recovery_days',
 ] as const;
 
 async function restoreUserSettings(client: PoolClient, entry: UserSettingsEntry): Promise<void> {
   const email = entry.accountEmail;
 
   if (entry.settings) {
-    const values = USER_SETTINGS_COLUMNS.map(
-      (col) => (entry.settings as Record<string, unknown>)[col] ?? null,
-    );
-    const placeholders = USER_SETTINGS_COLUMNS.map((_, i) => `$${i + 2}`).join(', ');
-    const updates = USER_SETTINGS_COLUMNS.map((col) => `${col} = EXCLUDED.${col}`).join(', ');
-    await client.query(
-      `INSERT INTO mail_user_settings (account_email, ${USER_SETTINGS_COLUMNS.join(', ')})
+    /*
+     * Берём только те колонки, которые В КОПИИ ЕСТЬ.
+     *
+     * Раньше отсутствующее поле подставлялось как null — и это работало,
+     * пока в списке стояли только колонки, допускающие null. Шесть
+     * добавленных (тема, обои, логотипы отправителей, срок отмены
+     * отправки, режим списка, срок восстановления из корзины) объявлены
+     * NOT NULL: копия, снятая до их появления, уронила бы восстановление
+     * целиком — то есть починка одной потери устроила бы другую, крупнее.
+     *
+     * Пропущенное поле означает «в копии этого не было»; колонка тогда
+     * остаётся со своим умолчанием (при создании) или с текущим
+     * значением (при восстановлении поверх). Это и есть честный ответ:
+     * восстановить можно только то, что записано.
+     */
+    const stored = entry.settings as Record<string, unknown>;
+    const columns = USER_SETTINGS_COLUMNS.filter((col) => stored[col] !== undefined);
+    if (columns.length > 0) {
+      const values = columns.map((col) => stored[col] ?? null);
+      const placeholders = columns.map((_, i) => `$${i + 2}`).join(', ');
+      const updates = columns.map((col) => `${col} = EXCLUDED.${col}`).join(', ');
+      await client.query(
+        `INSERT INTO mail_user_settings (account_email, ${columns.join(', ')})
        VALUES ($1, ${placeholders})
        ON CONFLICT (account_email) DO UPDATE SET ${updates}, updated_at = now()`,
-      [email, ...values],
-    );
+        [email, ...values],
+      );
+    }
   }
 
   // Подписи и правила — упорядоченные наборы без устойчивых ключей.
