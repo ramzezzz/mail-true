@@ -16,7 +16,9 @@ export type AiFeature =
   | 'rewrite'
   | 'extract'
   | 'translate'
-  | 'search.query';
+  | 'search.query'
+  /** Подсказка адреса файла логотипа по домену отправителя. */
+  | 'logo.hint';
 
 /** Расход токенов за один вызов сервиса. */
 export interface TokenUsage {

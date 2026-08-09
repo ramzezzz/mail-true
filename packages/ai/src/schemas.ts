@@ -216,3 +216,14 @@ export const searchQuerySchema = z.object({
   explanation: z.string().min(1),
 });
 export type ParsedSearchQuery = z.output<typeof searchQuerySchema>;
+
+/**
+ * Ответ на вопрос «где лежит логотип этого домена».
+ *
+ * Строка или явное null. Проверку «адрес ведёт внутрь ТОГО ЖЕ домена»
+ * схема не делает намеренно: это не форма ответа, а правило безопасности,
+ * и живёт оно там, где известен домен отправителя (apps/api/src/logos).
+ */
+export const logoHintSchema = z.object({
+  url: z.string().min(1).nullable().catch(null),
+});

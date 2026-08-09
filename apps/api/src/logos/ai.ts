@@ -36,21 +36,10 @@
  * Источник включается, только когда помощник ИИ включён администратором
  * домена (AiService.availability) — как и все прочие его возможности.
  */
-import { CompatibleChatProvider, parseProviderConfig } from '@mail-true/ai';
 import type { Logger } from 'pino';
 import type { AiService } from '../ai/service.js';
 import { domainsAligned } from '../mail/sender-auth.js';
 import type { LogoHintProvider } from './sources.js';
-
-/** Предел ответа. Нам нужен один адрес, а не рассказ о компании. */
-const MAX_ANSWER_TOKENS = 60;
-
-const SYSTEM_PROMPT =
-  'Ты помогаешь почтовому серверу найти файл логотипа компании на её собственном сайте. ' +
-  'Отвечай ОДНОЙ строкой — полным адресом https, ведущим на файл картинки ' +
-  '(png, svg, jpg, webp, ico) ВНУТРИ указанного домена или его поддомена. ' +
-  'Если не знаешь точного адреса, ответь одним словом: НЕТ. ' +
-  'Не придумывай адреса на других доменах и ничего не поясняй.';
 
 export class AiLogoHints implements LogoHintProvider {
   readonly #ai: AiService;
@@ -68,55 +57,34 @@ export class AiLogoHints implements LogoHintProvider {
   }
 
   async hint(domain: string): Promise<string | null> {
-    let availability;
+    /*
+     * ЧЕРЕЗ СЛУЖБУ, А НЕ МИМО НЕЁ.
+     *
+     * Раньше здесь собирался свой провайдер и звался напрямую. Так
+     * обходилось разом всё, что стоит на пути обычного обращения к
+     * помощнику: согласие пользователя (запросы шли и до него, и ПОСЛЕ
+     * ОТЗЫВА), список возможностей, разрешённых администратором домена,
+     * предел расходов и журнал обращений — тот самый, который в описании
+     * назван «учётной записью администратора о том, что уходило наружу».
+     *
+     * Домены корреспондентов при этом уезжали во внешний сервис на
+     * каждый незнакомый адрес в списке писем.
+     *
+     * forFeature бросает при любом отказе — это не ошибка почты, а
+     * «источник недоступен»: логотип просто не найдётся третьим способом,
+     * и список писем этого даже не заметит.
+     */
+    let assistant;
     try {
-      availability = await this.#ai.availability(this.#email);
+      ({ assistant } = await this.#ai.forFeature(this.#email, 'logos'));
     } catch {
       return null;
     }
-    if (!availability.available || !availability.domain) return null;
 
-    const settings = availability.domain;
-    if (!settings.baseUrl || !settings.model) return null;
+    const outcome = await assistant.logoHint(domain, { accountId: this.#email });
+    if (!outcome.ok || outcome.value.url === null) return null;
 
-    let apiKey: string | null = null;
-    if (settings.apiKeyEnc) {
-      const box = this.#ai.keyBox;
-      if (!box) return null;
-      try {
-        apiKey = box.decrypt(settings.apiKeyEnc);
-      } catch {
-        return null;
-      }
-    }
-
-    const parsed = parseProviderConfig({
-      enabled: true,
-      baseUrl: settings.baseUrl,
-      chatPath: settings.chatPath,
-      model: settings.model,
-      providerLabel: settings.providerLabel,
-      local: settings.local,
-      timeoutMs: settings.timeoutMs,
-      maxOutputTokens: settings.maxOutputTokens,
-      ...(apiKey === null ? {} : { apiKey }),
-    });
-    if (!parsed.ok) return null;
-
-    const provider = new CompatibleChatProvider(parsed.config);
-    const outcome = await provider.chat({
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Домен: ${domain}` },
-      ],
-      // Ноль намеренно: гадание здесь не нужно, нужен либо известный
-      // адрес, либо честное «НЕТ».
-      temperature: 0,
-      maxTokens: MAX_ANSWER_TOKENS,
-    });
-    if (!outcome.ok) return null;
-
-    const url = sameDomainImageUrl(outcome.value.text, domain);
+    const url = sameDomainImageUrl(outcome.value.url, domain);
     if (url === null) {
       this.#logger.debug({ domain }, 'Подсказка ИИ по логотипу отброшена');
     }

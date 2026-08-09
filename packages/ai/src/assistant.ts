@@ -59,6 +59,7 @@ import {
   extractionSchema,
   replyVariantsSchema,
   rewriteSchema,
+  logoHintSchema,
   searchQuerySchema,
   summarySchema,
   translationSchema,
@@ -558,6 +559,45 @@ export class MailAssistant {
       ctx,
       temperature: 0,
       minOutputTokens: 600,
+    });
+  }
+
+  /**
+   * Где на сайте домена лежит файл логотипа.
+   *
+   * Метод живёт здесь, а не в модуле логотипов, по той же причине, что и
+   * все остальные: только через #run обращение проходит проверку предела
+   * расходов, попадает в журнал обращений и получает опись того, что
+   * ушло наружу. Модуль логотипов раньше создавал провайдера сам и звал
+   * его напрямую — и обходил всё перечисленное разом, включая согласие
+   * пользователя.
+   *
+   * Наружу уходит ОДНО СЛОВО — доменное имя отправителя. Ни адреса, ни
+   * темы, ни текста письма здесь нет и быть не может: сам вызывающий их
+   * не знает.
+   */
+  async logoHint(domain: string, ctx: AiCallContext): Promise<AiOutcome<{ url: string | null }>> {
+    const value = domain.trim().toLowerCase();
+    if (value === '') {
+      return aiFail('invalid-input', 'Домен пуст', { retryable: false });
+    }
+    return this.#run({
+      feature: 'logo.hint',
+      messageId: null,
+      system:
+        'Ты помогаешь почтовому серверу найти файл логотипа компании на её собственном сайте. ' +
+        'Верни адрес https, ведущий на файл картинки (png, svg, jpg, webp, ico) ВНУТРИ ' +
+        'указанного домена или его поддомена. Не знаешь точного адреса — верни null. ' +
+        'Не придумывай адреса на других доменах. ' +
+        'Ответь ТОЛЬКО объектом JSON вида {"url": "https://…"} или {"url": null}.',
+      user: `Домен: ${value}`,
+      disclosure: describePlainText('Домен отправителя', value, this.#disclosureContext()),
+      schema: logoHintSchema,
+      variant: {},
+      ctx,
+      // Ноль намеренно: нужен либо известный адрес, либо честное «не знаю».
+      temperature: 0,
+      minOutputTokens: 200,
     });
   }
 

@@ -25,6 +25,7 @@ export const PROMPT_VERSIONS: Record<AiFeature, string> = {
   extract: 'v1',
   translate: 'v1',
   'search.query': 'v1',
+  'logo.hint': 'v1',
 };
 
 const JSON_RULE =
