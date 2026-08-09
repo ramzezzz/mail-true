@@ -56,6 +56,11 @@ function fakeDb(subscriptions: PushSubscriptionRecord[], prefs: NotificationPref
     failures,
     db: {
       listSubscriptions: async () => subscriptions,
+      /*
+       * Свои адреса ящика: по ним отсеиваются письма, отправленные
+       * самому себе — в том числе со своего алиаса.
+       */
+      ownAddressesOf: async (email: string) => [email.toLowerCase()],
       getPrefs: async () => prefs,
       savePrefs: async () => prefs,
       touchSubscription: async () => undefined,

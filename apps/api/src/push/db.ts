@@ -121,6 +121,8 @@ export interface NotificationPrefsPatch {
 export class PushDb {
   readonly #pool: Pool;
   readonly #logger: Logger;
+  /** Свои адреса ящика: алиасы меняются редко, спрашивать их на каждое письмо незачем. */
+  readonly #aliasCache = new Map<string, { at: number; list: string[] }>();
 
   constructor(opts: PushDbOptions) {
     this.#pool = new Pool({
@@ -272,6 +274,40 @@ export class PushDb {
       [endpoint, accountEmail],
     );
     return rows.length > 0;
+  }
+
+  /**
+   * Адреса, письма с которых считаются «своими же».
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ
+   * ------------------------------------------------------------------
+   * Отсев собственных писем сверялся с одним адресом — тем, под которым
+   * человек вошёл. Письмо, отправленное со СВОЕГО ЖЕ алиаса и попавшее
+   * во «Входящие» (правило, копия себе, рассылка на общий адрес),
+   * давало уведомление о собственном письме — ровно то, что отсев и
+   * обещает не допускать.
+   *
+   * Кэш на пять минут: алиасы меняются в панели и редко, а спрашивать
+   * базу на каждое пришедшее письмо незачем.
+   */
+  async ownAddressesOf(email: string): Promise<string[]> {
+    const key = email.toLowerCase();
+    const cached = this.#aliasCache.get(key);
+    if (cached && Date.now() - cached.at < 5 * 60_000) return cached.list;
+
+    let list = [key];
+    try {
+      const rows = await this.#query<{ source: string }>(
+        `SELECT source FROM virtual_aliases WHERE lower(destination) = lower($1) LIMIT 200`,
+        [key],
+      );
+      list = [key, ...rows.map((row) => row.source.toLowerCase())];
+    } catch {
+      // Таблицы нет (миграция не применена) — работаем с одним адресом.
+    }
+    this.#aliasCache.set(key, { at: Date.now(), list });
+    return list;
   }
 
   /**

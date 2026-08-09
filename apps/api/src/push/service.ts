@@ -420,7 +420,15 @@ export class PushService {
     const prefs = await this.prefs(session.email);
     const decision = shouldNotify(message, {
       prefs,
-      ownAddresses: options.ownAddresses ?? [session.email],
+      /*
+       * Свои адреса — не только тот, под которым вошли: письмо со СВОЕГО
+       * алиаса, попавшее во «Входящие», давало уведомление о собственном
+       * письме. Список берётся из базы с кэшем (ownAddressesOf).
+       */
+      ownAddresses: options.ownAddresses ??
+        (await this.#db?.ownAddressesOf(session.email).catch(() => [session.email])) ?? [
+          session.email,
+        ],
       now: new Date(),
     });
     if (!decision.notify) {
