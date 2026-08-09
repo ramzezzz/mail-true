@@ -57,7 +57,8 @@ async function main(): Promise<number> {
       model,
       ...(apiKey ? { apiKey } : {}),
       providerLabel: 'Живая проверка',
-      local: baseUrl.includes('127.0.0.1') || baseUrl.includes('localhost'),
+      // Признак «внутри периметра» здесь не задаётся: он выводится
+      // из адреса самим пакетом (см. perimeter.ts).
       timeoutMs: 600_000,
       maxRetries: 1,
       // Модели с «размышлением» тратят часть предела на рассуждение.

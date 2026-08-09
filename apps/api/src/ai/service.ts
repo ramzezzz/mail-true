@@ -15,11 +15,11 @@
 import { createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import {
+  InMemoryBudgetTracker,
   LoggerAuditLog,
   MailAssistant,
   RedisAiCache,
   RedisBudgetTracker,
-  UnlimitedBudgetTracker,
   budgetLimitsSchema,
   messageKeyMarker,
   type AiAuditLog,
@@ -165,12 +165,12 @@ export class DomainBudgetTracker implements BudgetTracker {
     return `domain:${this.#domain}`;
   }
 
-  check(_key: string, estimatedTokens: number): Promise<BudgetDecision> {
-    return this.#inner.check(this.key, estimatedTokens);
+  reserve(_key: string, estimatedTokens: number): Promise<BudgetDecision> {
+    return this.#inner.reserve(this.key, estimatedTokens);
   }
 
-  record(_key: string, usage: TokenUsage): Promise<void> {
-    return this.#inner.record(this.key, usage);
+  settle(_key: string, reserved: number, usage: TokenUsage | null): Promise<void> {
+    return this.#inner.settle(this.key, reserved, usage);
   }
 
   snapshot(_key: string): Promise<BudgetSnapshot> {
@@ -191,6 +191,14 @@ export class AiService {
   readonly #logger: Logger;
   readonly #audit: AiAuditLog;
   readonly #settingsCache = new Map<string, CachedSettings>();
+  /**
+   * Счётчики расхода по доменам, когда Redis нет. Живут на сервисе,
+   * а не на помощнике: помощник собирается заново на каждый запрос.
+   */
+  readonly #memoryBudgets = new Map<
+    string,
+    { signature: string; tracker: InMemoryBudgetTracker }
+  >();
 
   constructor(init: {
     config: AiConfig;
@@ -324,6 +332,13 @@ export class AiService {
    * и в домене на сто ящиков предел вырастал в сто раз. Подменяем ключ
    * здесь, у самой границы с пакетом, — тогда ни один вызывающий не может
    * это обойти, даже случайно.
+   *
+   * БЕЗ REDIS предел раньше не действовал ВООБЩЕ: ставился «учёт без
+   * ограничений», а /state и /usage показывали нулевой расход и полный
+   * остаток — то есть администратор видел работающий предел там, где его
+   * не было. Теперь без Redis считаем в памяти процесса: предел работает,
+   * счёт живёт до перезапуска и не общий на несколько узлов. Об этом
+   * прямо сказано в сообщении при старте (см. index.ts).
    */
   #limits(domain: AiDomainSettings): BudgetTracker {
     const parsed = budgetLimitsSchema.safeParse({
@@ -333,18 +348,33 @@ export class AiService {
       maxTokensPerRequest: domain.maxTokensPerRequest,
     });
     const limits = parsed.success ? parsed.data : budgetLimitsSchema.parse({});
-    const hasLimits =
-      limits.maxTokensPerPeriod !== null ||
-      limits.maxRequestsPerPeriod !== null ||
-      limits.maxTokensPerRequest !== null;
 
-    const inner =
-      !hasLimits || !this.#redis
-        ? new UnlimitedBudgetTracker(limits)
-        : new RedisBudgetTracker(this.#redis, limits, {
-            prefix: `${this.#config.AI_REDIS_PREFIX}budget`,
-          });
-    return new DomainBudgetTracker(inner, domain.domain);
+    if (this.#redis) {
+      return new DomainBudgetTracker(
+        new RedisBudgetTracker(this.#redis, limits, {
+          prefix: `${this.#config.AI_REDIS_PREFIX}budget`,
+        }),
+        domain.domain,
+      );
+    }
+
+    /*
+     * Помощник собирается заново на каждый запрос, поэтому счётчик
+     * в памяти надо переживать между запросами — иначе он обнулялся бы
+     * ещё до того, как кто-нибудь успел упереться в предел.
+     *
+     * Смена пределов администратором начинает учёт заново: старый
+     * счётчик считался по другим правилам, и переносить его в новые
+     * было бы обманом в обе стороны.
+     */
+    const signature = JSON.stringify(limits);
+    const key = domain.domain.toLowerCase();
+    let kept = this.#memoryBudgets.get(key);
+    if (!kept || kept.signature !== signature) {
+      kept = { signature, tracker: new InMemoryBudgetTracker(limits) };
+      this.#memoryBudgets.set(key, kept);
+    }
+    return new DomainBudgetTracker(kept.tracker, domain.domain);
   }
 
   /**
@@ -393,7 +423,14 @@ export class AiService {
       chatPath: domain.chatPath,
       model: domain.model,
       providerLabel: domain.providerLabel,
-      local: domain.local,
+      /*
+       * Признак «модель внутри периметра» отсюда НЕ передаётся: пакет
+       * выводит его из baseUrl сам. Раньше сюда шло значение из базы,
+       * а туда оно попадало булевым полем запроса — и строка, записанная
+       * мимо формы админки, заставляла экран согласия обещать каждому
+       * пользователю домена «письма не покидают периметр», пока письма
+       * уходили во внешний сервис.
+       */
       timeoutMs: domain.timeoutMs,
       maxOutputTokens: domain.maxOutputTokens,
       maxBodyChars: domain.maxBodyChars,

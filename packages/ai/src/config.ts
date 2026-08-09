@@ -7,9 +7,10 @@
  */
 
 import { z } from 'zod';
+import { isInsidePerimeter } from './perimeter.js';
 import { DEFAULT_MAX_BODY_CHARS } from './sanitize.js';
 
-export const providerConfigSchema = z.object({
+const providerFieldsSchema = z.object({
   /** Разрешён ли помощник. По умолчанию нет. */
   enabled: z.boolean().default(false),
   /**
@@ -33,11 +34,6 @@ export const providerConfigSchema = z.object({
   model: z.string().min(1, 'Не указано название модели'),
   /** Человекочитаемое название сервиса для показа пользователю. */
   providerLabel: z.string().default('Сервис ИИ'),
-  /**
-   * Модель поднята внутри периметра. Влияет только на текст описи:
-   * пользователю важно знать, покидают ли письма сервер.
-   */
-  local: z.boolean().default(false),
   /** Таймаут одного запроса. */
   timeoutMs: z.number().int().positive().max(600_000).default(30_000),
   /** Сколько раз повторять при временных ошибках. */
@@ -53,6 +49,23 @@ export const providerConfigSchema = z.object({
   /** Предельная длина тела письма, отправляемого наружу. */
   maxBodyChars: z.number().int().positive().max(200_000).default(DEFAULT_MAX_BODY_CHARS),
 });
+
+/**
+ * Настройки поставщика.
+ *
+ * Признак `local` («модель поднята внутри периметра, письма не покидают
+ * сервер») в ЧИСЛО ВХОДНЫХ ПОЛЕЙ НЕ ВХОДИТ намеренно: это единственное
+ * поле настроек, на котором держится обещание, показанное пользователю
+ * почты на экране согласия. Пока его можно было прислать булевым флагом,
+ * запрос мимо формы админки записывал «внутри периметра» при адресе
+ * api.openai.com — и обещание становилось неправдой сразу для всего
+ * домена. Теперь признак выводится из адреса здесь (см. perimeter.ts),
+ * и другого источника у него нет.
+ */
+export const providerConfigSchema = providerFieldsSchema.transform((config) => ({
+  ...config,
+  local: isInsidePerimeter(config.baseUrl),
+}));
 
 export type ProviderConfigInput = z.input<typeof providerConfigSchema>;
 export type ProviderConfig = z.output<typeof providerConfigSchema>;

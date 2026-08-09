@@ -17,7 +17,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
-import { replyTones, rewriteModes, type AiOutcome } from '@mail-true/ai';
+import { replyTones, rewriteModes, type AiError, type AiOutcome } from '@mail-true/ai';
 import { UnauthorizedError } from '../errors.js';
 import type { MailSession } from '../types.js';
 import { AI_FEATURES, defaultFeatures, type AiUserFeature } from './features.js';
@@ -117,6 +117,36 @@ function unwrap<T>(outcome: AiOutcome<T>): {
 
 /** Ограничение частоты для тяжёлых маршрутов: сервис ИИ медленный и платный. */
 const AI_RATE_LIMIT = { rateLimit: { max: 60, timeWindow: 60_000 } };
+
+/**
+ * Событие потока в том виде, в каком его можно показать браузеру.
+ *
+ * Поток сериализовал событие целиком, вместе с полем `details`, про
+ * которое в типе прямо написано «в интерфейс не выводится»: туда
+ * попадает сырое тело ответа поставщика — до 500 символов, в том числе
+ * при 401 и 403, где сервисы охотно пишут подробности про ключ и
+ * организацию. Обычные маршруты берут из отказа только `message`
+ * (см. errors.ts), а потоковый отдавал всё. Здесь тот же отбор.
+ */
+export interface StreamEventLike {
+  type: string;
+  error?: AiError;
+}
+
+export function publicStreamEvent(event: StreamEventLike): unknown {
+  if (event.type !== 'error') return event;
+  const error = event.error;
+  if (!error) return { type: 'error' };
+  return {
+    type: 'error',
+    error: {
+      kind: error.kind,
+      message: error.message,
+      retryable: error.retryable,
+      status: error.status,
+    },
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Маршруты                                                             */
@@ -389,8 +419,8 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
         if (!finished) controller.abort();
       });
 
-      const send = (event: unknown): void => {
-        reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+      const send = (event: StreamEventLike): void => {
+        reply.raw.write(`data: ${JSON.stringify(publicStreamEvent(event))}\n\n`);
       };
 
       try {
@@ -406,7 +436,16 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
         }
       } catch (err) {
         request.log.warn(errorInfo(err), 'Поток ответа ИИ оборвался');
-        send({ type: 'error', error: { kind: 'network', message: 'Поток прервался' } });
+        send({
+          type: 'error',
+          error: {
+            kind: 'network',
+            message: 'Поток прервался',
+            retryable: true,
+            status: null,
+            details: null,
+          },
+        });
       } finally {
         finished = true;
         reply.raw.end();

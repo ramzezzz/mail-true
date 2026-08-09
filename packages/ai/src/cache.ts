@@ -29,6 +29,20 @@ export interface CacheKeyParts {
   model: string;
   /** Идентификатор письма или цепочки; для запросов без письма — null. */
   messageId: string | null;
+  /**
+   * Письма, которых запись КАСАЕТСЯ, помимо messageId.
+   *
+   * Нужно сводке переписки. Её ключ строится по идентификатору цепочки
+   * (`t-<base64url(Message-ID)>`), а «Забыть результаты по этому письму»
+   * ищет по идентификатору письма (`папка:uid`) — шаблоны не совпадали
+   * никогда. Человек нажимал «Забыть», видел «Удалено записей: N»
+   * (удалялись резюме одного письма, перевод и извлечение), нажимал
+   * «Кратко» — и получал ту же самую старую сводку переписки из кэша,
+   * которая живёт 30 суток. Здесь перечисляются письма цепочки, и их
+   * метки попадают в ключ, поэтому удаление по любому из них находит
+   * и сводку.
+   */
+  relatedIds?: readonly string[];
   /** Всё, что влияет на результат: тон, язык, режим правки и т. п. */
   variant?: Record<string, unknown>;
   /**
@@ -50,12 +64,22 @@ export function buildCacheKey(parts: CacheKeyParts): string {
       ? fingerprint(JSON.stringify(sortKeys(parts.variant)))
       : 'default';
   const message = parts.messageId ?? '-';
+  /*
+   * Каждое связанное письмо — отдельный кусок ключа, а не список внутри
+   * одного: метка удаления обрамлена двоеточиями с обеих сторон
+   * (см. messageKeyMarker), и только в таком виде её находит поиск
+   * по шаблону. Свой messageId не повторяем.
+   */
+  const related = (parts.relatedIds ?? [])
+    .filter((id) => id !== parts.messageId)
+    .map((id) => encodeURIComponent(id));
   return [
     'ai',
     parts.feature,
     parts.promptVersion,
     fingerprint(parts.model),
     encodeURIComponent(message),
+    ...related,
     variant,
     parts.contentFingerprint,
   ].join(':');

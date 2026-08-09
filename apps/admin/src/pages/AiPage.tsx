@@ -11,7 +11,7 @@
  * проверку связи, audit.read на журнал) — он ответит 403 независимо от
  * того, что нарисовано в интерфейсе.
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
@@ -170,7 +170,6 @@ interface Draft {
   chatPath: string;
   model: string;
   providerLabel: string;
-  local: boolean;
   /** Новый ключ доступа; пусто — сохранённый не трогаем. */
   apiKey: string;
   /** Стереть сохранённый ключ при сохранении. */
@@ -194,7 +193,6 @@ function toDraft(domain: AiDomain): Draft {
     chatPath: domain.chatPath,
     model: domain.model ?? '',
     providerLabel: domain.providerLabel,
-    local: domain.local,
     apiKey: '',
     clearKey: false,
     maxBodyChars: String(domain.maxBodyChars),
@@ -236,9 +234,11 @@ function DomainSettings({
   const presetHint = AI_PRESETS.find((item) => item.id === presetId)?.hint ?? '';
 
   /**
-   * Периметр — вывод из адреса, а не отдельная галочка. `local` в черновике
-   * остаётся (он уходит на сервер и виден пользователю почты), но теперь
-   * следует за адресом и руками не задаётся.
+   * Периметр — вывод из адреса, а не отдельная галочка и не поле запроса.
+   * Здесь он считается ТОЛЬКО ради подсказки в форме: настоящий ответ даёт
+   * сервер (apps/api/src/ai/admin.ts), и прислать ему «внутри периметра»
+   * нельзя — раньше это поле принималось от клиента, и запрос мимо формы
+   * заставлял экран согласия обещать пользователям почты то, чего нет.
    */
   const inside = isInsidePerimeter(draft.baseUrl);
 
@@ -252,15 +252,9 @@ function DomainSettings({
       // Название модели — только если человек ещё не вписал своё:
       // затирать набранное выбором из списка нельзя.
       model: previous.model.trim() === '' ? preset.model : previous.model,
-      local: preset.local,
     }));
     setFlash(null);
   };
-
-  // Признак периметра держим согласованным с адресом при любой правке.
-  useEffect(() => {
-    setDraft((previous) => (previous.local === inside ? previous : { ...previous, local: inside }));
-  }, [inside]);
 
   /* Разбор числовых полей: границы те же, что в схеме сервера. */
   const maxBodyChars = parseNumber(draft.maxBodyChars, 200, 200_000);
@@ -301,7 +295,7 @@ function DomainSettings({
       chatPath: draft.chatPath.trim(),
       model: draft.model.trim() === '' ? null : draft.model.trim(),
       providerLabel: draft.providerLabel.trim(),
-      local: draft.local,
+      // `local` не отправляем: сервер выводит его из адреса сам.
       maxBodyChars: maxBodyChars ?? domain.maxBodyChars,
       timeoutMs: timeoutMs ?? domain.timeoutMs,
       maxOutputTokens: maxOutputTokens ?? domain.maxOutputTokens,

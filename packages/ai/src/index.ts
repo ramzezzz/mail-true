@@ -13,7 +13,7 @@
  *
  * ```ts
  * const created = MailAssistant.create({
- *   provider: { enabled: true, baseUrl, apiKey, model, providerLabel, local },
+ *   provider: { enabled: true, baseUrl, apiKey, model, providerLabel },
  *   limits: { maxTokensPerPeriod: 200_000 },
  *   deps: { cache: new RedisAiCache(redis), audit: new LoggerAuditLog(logger) },
  * });
@@ -63,6 +63,7 @@ export {
   parseProviderConfig,
   providerConfigSchema,
 } from './config.js';
+export { isInsidePerimeter } from './perimeter.js';
 export type {
   AssistantOptions,
   AssistantOptionsInput,
@@ -165,7 +166,7 @@ export type { AiCacheStore, CacheKeyParts, RedisCacheClient } from './cache.js';
 
 // --- Ограничение расходов --------------------------------------------------
 
-export { InMemoryBudgetTracker, RedisBudgetTracker, UnlimitedBudgetTracker } from './budget.js';
+export { InMemoryBudgetTracker, RedisBudgetTracker } from './budget.js';
 export type { BudgetDecision, BudgetSnapshot, BudgetTracker, RedisLike } from './budget.js';
 
 // --- Журнал обращений ------------------------------------------------------

@@ -53,8 +53,17 @@ export async function aiRoutes(app: FastifyInstance): Promise<void> {
     redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: false });
     redis.on('error', (err) => logger.warn({ err: err.message }, 'Redis недоступен (ИИ)'));
   } else {
+    /*
+     * Раньше здесь было сказано «расход считается без Redis», а на деле
+     * без Redis учёт подменялся безлимитным: предел не действовал вовсе,
+     * при этом /state и /usage показывали нулевой расход и полный
+     * остаток. Теперь расход действительно считается — в памяти этого
+     * процесса, — и ограничение сказано ровно то, которое есть.
+     */
     logger.warn(
-      'SESSION_STORE=memory: результаты помощника не кэшируются, расход считается без Redis',
+      'SESSION_STORE=memory: результаты помощника не кэшируются, а расход на ИИ считается ' +
+        'в памяти процесса. Предел работает, но счёт обнуляется при перезапуске и у каждого ' +
+        'узла свой. Для общего учёта нужен SESSION_STORE=redis.',
     );
   }
 

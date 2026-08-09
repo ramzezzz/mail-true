@@ -13,7 +13,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { PROMPT_VERSIONS, type AiFeature } from '@mail-true/ai';
+import { PROMPT_VERSIONS, isInsidePerimeter, type AiFeature } from '@mail-true/ai';
 import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
@@ -44,7 +44,22 @@ const settingsSchema = z.object({
     .optional(),
   model: z.string().trim().min(1).max(255).nullable().optional(),
   providerLabel: z.string().trim().min(1).max(255).optional(),
-  local: z.boolean().optional(),
+  /*
+   * Поля `local` здесь НЕТ и быть не может.
+   *
+   * Признак «модель поднята на этом же сервере — письма не покидают
+   * периметр» — это обещание, которое читает каждый пользователь домена
+   * на экране согласия. Пока он принимался обычным булевым полем,
+   * запрос мимо формы (curl, старая сборка админки, чей-нибудь скрипт)
+   * с baseUrl=https://api.openai.com/v1 и local=true заставлял почту
+   * обещать людям то, чего нет: письма уходили наружу, а экран согласия,
+   * опись отправленного и журнал обращений говорили обратное. Вывод
+   * делался только в браузере админки, то есть защищал ровно тех, кто
+   * и так пользовался формой.
+   *
+   * Теперь признак выводится из адреса на сервере (isInsidePerimeter),
+   * и прислать его нельзя никак.
+   */
   maxBodyChars: z.number().int().min(200).max(200_000).optional(),
   timeoutMs: z.number().int().min(1000).max(600_000).optional(),
   maxOutputTokens: z.number().int().min(64).max(32_000).optional(),
@@ -70,6 +85,14 @@ const auditQuerySchema = z.object({
 });
 
 /**
+ * Внутри периметра ли адрес сервиса. Пустой адрес — нет: отправлять
+ * некуда, но и обещать «не покидают сервер» не за что.
+ */
+function perimeterOf(baseUrl: string | null): boolean {
+  return baseUrl !== null && isInsidePerimeter(baseUrl);
+}
+
+/**
  * Настройки для админки. Ключ доступа заменён подсказкой:
  * увидеть его нельзя, отличить один от другого — можно.
  */
@@ -85,7 +108,13 @@ function toDto(row: AiDomainSettings): Record<string, unknown> {
     apiKeyHint: row.apiKeyHint,
     model: row.model,
     providerLabel: row.providerLabel,
-    local: row.local,
+    /*
+     * Считаем из адреса, а не отдаём как записано: в базе могла остаться
+     * строка от старой версии, где признак приходил от клиента. Показывать
+     * администратору «внутри периметра» при внешнем адресе нельзя ни
+     * секунды — по этому полю он решает, включать ли помощника.
+     */
+    local: perimeterOf(row.baseUrl),
     maxBodyChars: row.maxBodyChars,
     timeoutMs: row.timeoutMs,
     maxOutputTokens: row.maxOutputTokens,
@@ -159,7 +188,13 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
       if (body.chatPath !== undefined) patch.chatPath = body.chatPath;
       if (body.model !== undefined) patch.model = body.model;
       if (body.providerLabel !== undefined) patch.providerLabel = body.providerLabel;
-      if (body.local !== undefined) patch.local = body.local;
+      /*
+       * Признак периметра всегда пересчитывается из адреса — и когда
+       * адрес меняют, и когда его не трогают (тогда из сохранённого).
+       * Так строка в базе приводится к правде даже при сохранении
+       * соседнего поля, а прислать сюда «внутри периметра» руками нельзя.
+       */
+      patch.local = perimeterOf(body.baseUrl === undefined ? before.baseUrl : body.baseUrl);
       if (body.maxBodyChars !== undefined) patch.maxBodyChars = body.maxBodyChars;
       if (body.timeoutMs !== undefined) patch.timeoutMs = body.timeoutMs;
       if (body.maxOutputTokens !== undefined) patch.maxOutputTokens = body.maxOutputTokens;

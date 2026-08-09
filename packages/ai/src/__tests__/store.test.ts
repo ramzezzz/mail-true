@@ -215,16 +215,28 @@ const usage = (total: number): AiAuditEntry['usage'] => ({
   estimated: false,
 });
 
+/** Обычный вызов: заняли резерв — получили ответ — записали факт. */
+async function spend(
+  tracker: InMemoryBudgetTracker | RedisBudgetTracker,
+  key: string,
+  reserveTokens: number,
+  actualTokens: number,
+): Promise<boolean> {
+  const decision = await tracker.reserve(key, reserveTokens);
+  if (!decision.allowed) return false;
+  await tracker.settle(key, decision.reserved, usage(actualTokens));
+  return true;
+}
+
 describe('InMemoryBudgetTracker', () => {
   it('предел по токенам срабатывает и снимается в новом окне', async () => {
     let now = 0;
     const limits = budgetLimitsSchema.parse({ periodMs: 1000, maxTokensPerPeriod: 100 });
     const tracker = new InMemoryBudgetTracker(limits, () => now);
 
-    assert.equal((await tracker.check('a', 50)).allowed, true);
-    await tracker.record('a', usage(90));
+    assert.equal(await spend(tracker, 'a', 50, 90), true);
 
-    const denied = await tracker.check('a', 50);
+    const denied = await tracker.reserve('a', 50);
     assert.equal(denied.allowed, false);
     if (!denied.allowed) {
       assert.equal(denied.error.kind, 'budget-exceeded');
@@ -232,32 +244,84 @@ describe('InMemoryBudgetTracker', () => {
     }
 
     now += 1500;
-    assert.equal((await tracker.check('a', 50)).allowed, true);
+    assert.equal((await tracker.reserve('a', 50)).allowed, true);
   });
 
   it('учёт ведётся раздельно по ключам', async () => {
     const limits = budgetLimitsSchema.parse({ maxRequestsPerPeriod: 1 });
     const tracker = new InMemoryBudgetTracker(limits);
-    await tracker.record('a', usage(10));
-    assert.equal((await tracker.check('a', 1)).allowed, false);
-    assert.equal((await tracker.check('b', 1)).allowed, true);
+    assert.equal(await spend(tracker, 'a', 10, 10), true);
+    assert.equal((await tracker.reserve('a', 1)).allowed, false);
+    assert.equal((await tracker.reserve('b', 1)).allowed, true);
   });
 
-  it('без пределов вызовы не отклоняются', async () => {
+  it('без пределов вызовы не отклоняются, но расход всё равно считается', async () => {
+    // Раньше при отсутствии пределов ставился «учёт без ограничений»,
+    // и снимок показывал нули при живом расходе — человек видел полный
+    // остаток там, где токены уже потрачены.
     const tracker = new InMemoryBudgetTracker(budgetLimitsSchema.parse({}));
-    await tracker.record('a', usage(1_000_000));
-    assert.equal((await tracker.check('a', 1_000_000)).allowed, true);
+    assert.equal(await spend(tracker, 'a', 1_000_000, 1_000_000), true);
+    assert.equal((await tracker.reserve('a', 1_000_000)).allowed, true);
+    assert.equal((await tracker.snapshot('a')).tokensUsed >= 1_000_000, true);
   });
 
   it('снимок показывает остаток', async () => {
     const limits = budgetLimitsSchema.parse({ maxTokensPerPeriod: 500 });
     const tracker = new InMemoryBudgetTracker(limits);
-    await tracker.record('a', usage(120));
+    await spend(tracker, 'a', 200, 120);
     const snapshot = await tracker.snapshot('a');
-    assert.equal(snapshot.tokensUsed, 120);
+    assert.equal(snapshot.tokensUsed, 120, 'резерв заменяется фактом, а не складывается с ним');
     assert.equal(snapshot.tokensLeft, 380);
     assert.equal(snapshot.requestsUsed, 1);
     assert.equal(snapshot.requestsLeft, null);
+  });
+
+  it('отклонённый вызов предел не расходует', async () => {
+    const limits = budgetLimitsSchema.parse({ maxTokensPerPeriod: 100 });
+    const tracker = new InMemoryBudgetTracker(limits);
+    assert.equal((await tracker.reserve('a', 500)).allowed, false);
+    const snapshot = await tracker.snapshot('a');
+    assert.equal(snapshot.tokensUsed, 0, 'неудавшийся резерв обязан откатиться');
+    assert.equal(snapshot.requestsUsed, 0);
+  });
+
+  it('не состоявшийся вызов возвращает и токены, и занятое обращение', async () => {
+    const limits = budgetLimitsSchema.parse({ maxRequestsPerPeriod: 2 });
+    const tracker = new InMemoryBudgetTracker(limits);
+    const decision = await tracker.reserve('a', 300);
+    assert.ok(decision.allowed);
+    await tracker.settle('a', decision.reserved, null);
+    const snapshot = await tracker.snapshot('a');
+    assert.equal(snapshot.tokensUsed, 0);
+    assert.equal(snapshot.requestsUsed, 0);
+  });
+
+  /*
+   * ГЛАВНАЯ ПРОВЕРКА ЭТОГО БЛОКА.
+   *
+   * Проверка предела была неатомарной: read читал счётчики, а запись
+   * расхода шла ПОСЛЕ ответа модели — через секунды. Двадцать
+   * одновременных запросов при пределе «два» проходили все двадцать,
+   * потому что каждый успевал прочитать нули до того, как первый
+   * дописал расход.
+   */
+  it('двадцать одновременных вызовов при пределе «два» проходят ровно два', async () => {
+    const limits = budgetLimitsSchema.parse({ maxRequestsPerPeriod: 2 });
+    const tracker = new InMemoryBudgetTracker(limits);
+
+    const results = await Promise.all(
+      Array.from({ length: 20 }, async () => {
+        const decision = await tracker.reserve('domain:mail.local', 300);
+        if (!decision.allowed) return false;
+        // Модель «думает»: между резервом и записью факта проходит время.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await tracker.settle('domain:mail.local', decision.reserved, usage(100));
+        return true;
+      }),
+    );
+
+    assert.equal(results.filter(Boolean).length, 2, 'предел домена обязан отсечь остальные 18');
+    assert.equal((await tracker.snapshot('domain:mail.local')).requestsUsed, 2);
   });
 });
 
@@ -268,19 +332,39 @@ describe('RedisBudgetTracker', () => {
     const redis = new FakeRedis();
     const tracker = new RedisBudgetTracker(redis, limits, { now: () => now });
 
-    await tracker.record('a', usage(80));
-    assert.equal((await tracker.check('a', 50)).allowed, false);
+    assert.equal(await spend(tracker, 'a', 50, 80), true);
+    assert.equal((await tracker.reserve('a', 50)).allowed, false);
 
     now += 1000; // новое окно — другой ключ
-    assert.equal((await tracker.check('a', 50)).allowed, true);
+    assert.equal((await tracker.reserve('a', 50)).allowed, true);
+  });
+
+  it('одновременные резервы через Redis тоже упираются в предел', async () => {
+    const limits = budgetLimitsSchema.parse({ maxRequestsPerPeriod: 3 });
+    const redis = new FakeRedis();
+    const tracker = new RedisBudgetTracker(redis, limits);
+
+    const results = await Promise.all(
+      Array.from({ length: 10 }, async () => {
+        const decision = await tracker.reserve('domain:mail.local', 200);
+        if (!decision.allowed) return false;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await tracker.settle('domain:mail.local', decision.reserved, usage(50));
+        return true;
+      }),
+    );
+
+    assert.equal(results.filter(Boolean).length, 3);
+    assert.equal((await tracker.snapshot('domain:mail.local')).requestsUsed, 3);
   });
 
   it('недоступный Redis не блокирует почту', async () => {
     const redis = new FakeRedis();
     const tracker = new RedisBudgetTracker(redis, budgetLimitsSchema.parse({}));
     redis.failing = true;
-    assert.equal((await tracker.check('a', 10)).allowed, true);
-    await tracker.record('a', usage(10));
+    const decision = await tracker.reserve('a', 10);
+    assert.equal(decision.allowed, true);
+    if (decision.allowed) await tracker.settle('a', decision.reserved, usage(10));
     await tracker.reset('a');
   });
 });

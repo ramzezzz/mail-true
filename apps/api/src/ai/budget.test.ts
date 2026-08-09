@@ -194,11 +194,11 @@ function letterFor(
 void test('ключ учёта строится по домену, а не по ящику', async () => {
   const calls: string[] = [];
   const inner = {
-    check: (key: string) => {
+    reserve: (key: string) => {
       calls.push(key);
-      return Promise.resolve({ allowed: true as const });
+      return Promise.resolve({ allowed: true as const, reserved: 10 });
     },
-    record: (key: string) => {
+    settle: (key: string) => {
       calls.push(key);
       return Promise.resolve();
     },
@@ -212,8 +212,8 @@ void test('ключ учёта строится по домену, а не по 
     },
   };
   const tracker = new DomainBudgetTracker(inner, 'Mail.Local');
-  await tracker.check('ivan@mail.local', 10);
-  await tracker.record('anna@mail.local', {
+  await tracker.reserve('ivan@mail.local', 10);
+  await tracker.settle('anna@mail.local', 10, {
     promptTokens: 1,
     completionTokens: 1,
     totalTokens: 2,
@@ -328,6 +328,79 @@ void test('остаток предела в состоянии для интер
     const state = await service.state('anna@mail.local');
     assert.equal(state.budget?.requestsUsed, 1);
     assert.equal(state.budget?.requestsLeft, 4);
+  } finally {
+    await upstream.close();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Предел без Redis                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * При SESSION_STORE=memory (или пока Redis не поднят) учёт подменялся
+ * безлимитным: предел не действовал ВООБЩЕ, а /state и /usage показывали
+ * нулевой расход и полный остаток — администратор видел работающее
+ * ограничение там, где его не было, и сообщение при старте уверяло, что
+ * «расход считается без Redis».
+ *
+ * Теперь без Redis расход считается в памяти процесса: предел работает,
+ * счёт виден, и в сообщении при старте сказано ровно это (и то, что счёт
+ * обнуляется при перезапуске).
+ */
+void test('без Redis предел всё равно действует, а расход виден', async () => {
+  const upstream = await fakeAiServer();
+  try {
+    const store = new MultiDomainStore(
+      new Map([
+        [
+          'mail.local',
+          settingsFor('mail.local', { baseUrl: upstream.baseUrl, maxRequestsPerPeriod: 1 }),
+        ],
+      ]),
+    );
+    const service = new AiService({
+      config: loadAiConfig({
+        DATABASE_URL: 'postgres://unused/unused',
+        AI_SETTINGS_CACHE_MS: '0',
+      }),
+      db: store,
+      // Ровно то, что бывает при SESSION_STORE=memory.
+      redis: null,
+      keyBox: new AiKeyBox(SECRET),
+      keyBoxReason: null,
+      logger,
+    });
+
+    const ivan = 'ivan@mail.local';
+    const anna = 'anna@mail.local';
+    await service.grantConsent(ivan, defaultFeatures());
+    await service.grantConsent(anna, defaultFeatures());
+
+    const summarize = async (account: string): Promise<{ ok: boolean; kind: string | null }> => {
+      const { assistant } = await service.forFeature(account, 'summary');
+      const outcome = await assistant.summarizeMessage(letterFor(account), {
+        accountId: account,
+        skipCache: true,
+      });
+      return { ok: outcome.ok, kind: outcome.ok ? null : outcome.error.kind };
+    };
+
+    assert.equal((await summarize(ivan)).ok, true);
+
+    // Помощник собирается заново на каждый запрос — счётчик обязан это
+    // пережить, иначе предел обнулялся бы до того, как в него упрутся.
+    const second = await summarize(anna);
+    assert.equal(second.ok, false, 'предел домена обязан действовать и без Redis');
+    assert.equal(second.kind, 'budget-exceeded');
+    assert.equal(upstream.calls, 1, 'сверх предела наружу ничего не уходит');
+
+    // И расход виден в состоянии для интерфейса, а не нули при полном
+    // остатке.
+    const state = await service.state(anna);
+    assert.equal(state.budget?.requestsUsed, 1);
+    assert.equal(state.budget?.requestsLeft, 0);
+    assert.ok((state.budget?.tokensUsed ?? 0) > 0, 'израсходованные токены обязаны быть видны');
   } finally {
     await upstream.close();
   }

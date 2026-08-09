@@ -9,7 +9,8 @@ import assert from 'node:assert/strict';
 import { MailAssistant, disabledAssistant } from '../assistant.js';
 import { InMemoryAuditLog } from '../audit.js';
 import { MemoryAiCache } from '../cache.js';
-import type { OutboundDisclosure } from '../types.js';
+import type { ChatProvider, ChatResult, StreamEvent } from '../provider.js';
+import { ZERO_USAGE, aiFail, type AiOutcome, type OutboundDisclosure } from '../types.js';
 import {
   SSE_DONE,
   completion,
@@ -44,7 +45,8 @@ async function rig(
       baseUrl: server.baseUrl,
       model: 'local-model',
       providerLabel: 'Локальная модель',
-      local: true,
+      // Признак «внутри периметра» здесь не задаётся: baseUrl поддельного
+      // сервера — 127.0.0.1, и пакет выводит его сам.
       maxRetries: 0,
       retryBaseDelayMs: 1,
       timeoutMs: 2000,
@@ -286,13 +288,22 @@ describe('ограничение расходов', () => {
   });
 
   it('предел по токенам за период останавливает вызовы', async () => {
-    const r = await rig([summaryReply()], { limits: { maxTokensPerPeriod: 400 } });
+    /*
+     * Потолок ответа входит в резерв: раньше оценивался только текст
+     * запроса, и предел прорывался ровно на длину ответа. Поэтому здесь
+     * потолок задан явно (64), иначе стандартные 1024 токена ответа
+     * съели бы весь предел ещё на первом вызове — и это было бы честно.
+     */
+    const r = await rig([summaryReply()], {
+      provider: { maxOutputTokens: 64 },
+      limits: { maxTokensPerPeriod: 400 },
+    });
     try {
       const first = await r.assistant.summarizeMessage(sampleMessage(), ctx);
       assert.ok(first.ok);
 
       const snapshot = await r.assistant.budgetSnapshot(ctx.accountId);
-      assert.equal(snapshot.tokensUsed, 340);
+      assert.equal(snapshot.tokensUsed, 340, 'резерв обязан смениться фактическим расходом');
       assert.equal(snapshot.tokensLeft, 60);
 
       const second = await r.assistant.summarizeMessage(
@@ -721,5 +732,214 @@ describe('потоковый черновик ответа', () => {
     } finally {
       await r.close();
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Периметр: обещание, которое читает пользователь почты                */
+/* ------------------------------------------------------------------ */
+
+describe('модель внутри периметра', () => {
+  /**
+   * Признак «письма не покидают сервер» показывается человеку на экране
+   * согласия и ложится в опись отправленного и в журнал обращений.
+   * Пока он приходил булевым полем настроек, его можно было выставить
+   * при любом адресе — и почта обещала людям то, чего нет.
+   */
+  it('выводится из адреса, а не из присланного флага', () => {
+    const outside = MailAssistant.create({
+      provider: {
+        enabled: true,
+        baseUrl: 'https://api.openai.com/v1',
+        model: 'gpt-4o-mini',
+        // Ровно то, что раньше присылал запрос мимо формы админки.
+        local: true,
+      } as unknown as Parameters<typeof MailAssistant.create>[0]['provider'],
+    });
+    assert.ok(outside.ok);
+    assert.equal(
+      outside.assistant.local,
+      false,
+      'внешний сервис не может назваться внутренним, что бы ни прислали',
+    );
+    assert.equal(outside.assistant.previewOutbound(sampleMessage()).local, false);
+
+    const inside = MailAssistant.create({
+      provider: { enabled: true, baseUrl: 'http://ollama:11434/v1', model: 'qwen2.5:7b' },
+    });
+    assert.ok(inside.ok);
+    assert.equal(inside.assistant.local, true, 'сосед по сети контейнеров — внутри периметра');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* «Забыть результаты по этому письму» и сводка переписки               */
+/* ------------------------------------------------------------------ */
+
+describe('забыть насчитанное по письму', () => {
+  /**
+   * Сводка переписки лежала в кэше под идентификатором ЦЕПОЧКИ
+   * (`t-<base64url(Message-ID)>`), а удаление искало по идентификатору
+   * ПИСЬМА (`папка:uid`) — шаблоны не совпадали никогда. Человек жал
+   * «Забыть», видел «Удалено записей: N», жал «Кратко» — и получал ту же
+   * старую сводку из кэша, которая живёт 30 суток.
+   */
+  it('удаление по письму убирает и сводку всей переписки', async () => {
+    const r = await rig([summaryReply('Первая сводка.'), summaryReply('Пересчитано.')]);
+    try {
+      const thread = [
+        sampleMessage({ id: 'inbox:42', threadId: 't-cm9vdEBtYWls' }),
+        sampleMessage({ id: 'inbox:43', threadId: 't-cm9vdEBtYWls' }),
+      ];
+
+      const first = await r.assistant.summarizeThread(thread, ctx);
+      assert.ok(first.ok);
+      assert.equal(first.cached, false);
+      assert.equal(r.server.requests.length, 1);
+
+      // Пока не забыли — берётся из кэша, наружу ничего не идёт.
+      const cached = await r.assistant.summarizeThread(thread, ctx);
+      assert.ok(cached.ok);
+      assert.equal(cached.cached, true);
+      assert.equal(r.server.requests.length, 1);
+
+      // Забываем по ОДНОМУ письму цепочки — именно так делает интерфейс.
+      const removed = await r.assistant.forgetMessage('inbox:42');
+      assert.ok(removed > 0, 'сводка переписки должна попасть под удаление');
+
+      const afresh = await r.assistant.summarizeThread(thread, ctx);
+      assert.ok(afresh.ok);
+      assert.equal(afresh.cached, false, 'забытая сводка не должна воскреснуть из кэша');
+      assert.equal(afresh.value.summary, 'Пересчитано.');
+      assert.equal(r.server.requests.length, 2);
+    } finally {
+      await r.close();
+    }
+  });
+
+  it('удаление по любому письму цепочки, не только по первому', async () => {
+    const r = await rig([summaryReply('Сводка.'), summaryReply('Ещё раз.')]);
+    try {
+      const thread = [sampleMessage({ id: 'inbox:42' }), sampleMessage({ id: 'inbox:43' })];
+      assert.ok((await r.assistant.summarizeThread(thread, ctx)).ok);
+      assert.ok((await r.assistant.forgetMessage('inbox:43')) > 0);
+      const again = await r.assistant.summarizeThread(thread, ctx);
+      assert.ok(again.ok);
+      assert.equal(again.cached, false);
+    } finally {
+      await r.close();
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Обрыв потока и учёт расхода                                          */
+/* ------------------------------------------------------------------ */
+
+/** Поставщик, отдающий заранее заданные события потока. */
+class ScriptedProvider implements ChatProvider {
+  readonly endpoint = 'http://127.0.0.1:11434/v1/chat/completions';
+  readonly model = 'local-model';
+  readonly #events: StreamEvent[];
+
+  constructor(events: StreamEvent[]) {
+    this.#events = events;
+  }
+
+  chat(): Promise<AiOutcome<ChatResult>> {
+    return Promise.resolve(aiFail('network', 'в этом тесте не используется'));
+  }
+
+  async *stream(): AsyncGenerator<StreamEvent, void, void> {
+    for (const event of this.#events) {
+      await Promise.resolve();
+      yield event;
+    }
+  }
+}
+
+function streamingAssistant(events: StreamEvent[]): {
+  assistant: MailAssistant;
+  audit: InMemoryAuditLog;
+} {
+  const audit = new InMemoryAuditLog();
+  const created = MailAssistant.create({
+    provider: {
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'local-model',
+      maxOutputTokens: 512,
+    },
+    deps: { audit, cache: new MemoryAiCache(), provider: new ScriptedProvider(events) },
+  });
+  assert.ok(created.ok);
+  return { assistant: created.assistant, audit };
+}
+
+describe('обрыв потокового черновика', () => {
+  /**
+   * Расход записывался ТОЛЬКО по событию `done`. При обрыве (человек
+   * закрыл вкладку, маршрут дёрнул abort) поставщик отдаёт `error`,
+   * `done` не наступает — и не росли ни токены, ни счётчик обращений,
+   * хотя модель текст уже сгенерировала и поставщик его тарифицировал.
+   * Повторяя обрыв, можно было тратить бюджет домена без следа в учёте.
+   */
+  it('прерванный поток всё равно попадает в предел расходов', async () => {
+    const { assistant, audit } = streamingAssistant([
+      { type: 'delta', text: 'Добрый день! Счёт получен, ' },
+      { type: 'delta', text: 'оплатим до пятницы.' },
+      { type: 'error', error: aiFail('aborted', 'Запрос отменён', { retryable: false }).error },
+    ]);
+
+    for await (const event of assistant.streamReply(sampleMessage(), ctx)) {
+      void event;
+    }
+
+    const snapshot = await assistant.budgetSnapshot(ctx.accountId);
+    assert.equal(snapshot.requestsUsed, 1, 'обращение обязано попасть в счётчик');
+    assert.ok(snapshot.tokensUsed > 0, 'сгенерированный текст оплачен — он обязан быть в учёте');
+
+    const entries = await audit.list();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]?.ok, false);
+    assert.ok(
+      (entries[0]?.usage.totalTokens ?? 0) > 0,
+      'в журнале обращений расход прерванного вызова не должен быть нулевым',
+    );
+  });
+
+  it('брошенный на середине поток учитывается так же', async () => {
+    // Ровно то, что делает маршрут, когда соединение с браузером
+    // оборвалось: перебор прекращается, событий `done` и `error` нет.
+    const { assistant, audit } = streamingAssistant([
+      { type: 'delta', text: 'Добрый день!' },
+      { type: 'delta', text: ' Отвечаю по пунктам…' },
+      { type: 'done', text: 'не дойдёт', usage: ZERO_USAGE, finishReason: 'stop' },
+    ]);
+
+    for await (const event of assistant.streamReply(sampleMessage(), ctx)) {
+      if (event.type === 'delta') break;
+    }
+
+    const snapshot = await assistant.budgetSnapshot(ctx.accountId);
+    assert.equal(snapshot.requestsUsed, 1);
+    assert.ok(snapshot.tokensUsed > 0);
+    assert.equal((await audit.list()).length, 1, 'запись в журнале должна быть ровно одна');
+  });
+
+  it('отказ до первой буквы предел не расходует', async () => {
+    // Модель ничего не сделала: занимать чужой предел таким отказом
+    // нечестно — резерв возвращается целиком.
+    const { assistant } = streamingAssistant([
+      { type: 'error', error: aiFail('network', 'Не удалось связаться с сервисом ИИ').error },
+    ]);
+
+    for await (const event of assistant.streamReply(sampleMessage(), ctx)) {
+      void event;
+    }
+
+    const snapshot = await assistant.budgetSnapshot(ctx.accountId);
+    assert.equal(snapshot.requestsUsed, 0);
+    assert.equal(snapshot.tokensUsed, 0);
   });
 });

@@ -15,12 +15,7 @@ import {
   type AiAuditLog,
   type AiAuditTotals,
 } from './audit.js';
-import {
-  InMemoryBudgetTracker,
-  UnlimitedBudgetTracker,
-  type BudgetSnapshot,
-  type BudgetTracker,
-} from './budget.js';
+import { InMemoryBudgetTracker, type BudgetSnapshot, type BudgetTracker } from './budget.js';
 import { MemoryAiCache, buildCacheKey, fingerprint, type AiCacheStore } from './cache.js';
 import {
   assistantOptionsSchema,
@@ -82,11 +77,13 @@ import {
   type DisclosureContext,
   type PreparedMessage,
 } from './sanitize.js';
-import { estimateMessagesTokens } from './tokens.js';
+import { estimateMessagesTokens, estimateTokens } from './tokens.js';
 import {
   ZERO_USAGE,
   aiFail,
   aiOk,
+  type AiError,
+  type AiErrorKind,
   type AiFailureResult,
   type AiFeature,
   type AiOutcome,
@@ -127,10 +124,23 @@ export interface MailAssistantInit {
 export type CreateAssistantResult =
   { ok: true; assistant: MailAssistant } | { ok: false; message: string; issues: string[] };
 
+/**
+ * Отказы, при которых модель успела поработать, а значит поставщик уже
+ * выставит счёт.
+ *
+ * `timeout` и `aborted` — ответ генерировался, просто мы его не дождались
+ * или отменили; `bad-response` — ответ пришёл целиком, не разобралась
+ * только его форма. Всё остальное (сеть, 4xx/5xx до генерации) означает,
+ * что до модели не дошло, и занимать чужой предел таким отказом нечестно.
+ */
+const SPENT_ON_FAILURE = new Set<AiErrorKind>(['timeout', 'aborted', 'bad-response']);
+
 interface RunParams<S extends z.ZodTypeAny> {
   feature: AiFeature;
   /** Идентификатор письма или цепочки для кэша и журнала. */
   messageId: string | null;
+  /** Письма, которых результат касается помимо messageId (цепочка). */
+  relatedIds?: readonly string[];
   system: string;
   user: string;
   disclosure: OutboundDisclosure;
@@ -204,10 +214,6 @@ export class MailAssistant {
 
     const deps = init.deps ?? {};
     const now = deps.now ?? ((): number => Date.now());
-    const hasLimits =
-      limits.data.maxRequestsPerPeriod !== null ||
-      limits.data.maxTokensPerPeriod !== null ||
-      limits.data.maxTokensPerRequest !== null;
 
     return {
       ok: true,
@@ -217,11 +223,14 @@ export class MailAssistant {
         provider:
           deps.provider ?? new CompatibleChatProvider(parsed.config, deps.providerDeps ?? {}),
         cache: deps.cache ?? new MemoryAiCache({ now }),
-        budget:
-          deps.budget ??
-          (hasLimits
-            ? new InMemoryBudgetTracker(limits.data, now)
-            : new UnlimitedBudgetTracker(limits.data)),
+        /*
+         * Учёт в памяти ставится всегда, даже когда пределов нет: он
+         * считает честно и без них, а «учёт без ограничений», который
+         * стоял здесь раньше, показывал в /state и /usage нули при живом
+         * расходе — человек видел полный остаток там, где токены уже
+         * потрачены.
+         */
+        budget: deps.budget ?? new InMemoryBudgetTracker(limits.data, now),
         audit: deps.audit ?? new InMemoryAuditLog(),
         now,
       }),
@@ -335,6 +344,15 @@ export class MailAssistant {
     return this.#run({
       feature: 'summarize.thread',
       messageId: threadId,
+      /*
+       * Сводка переписки лежит в кэше под идентификатором ЦЕПОЧКИ, а
+       * «Забыть результаты по этому письму» ищет по идентификатору
+       * ПИСЬМА. Перечисляем письма, из которых сводка собрана: тогда
+       * удаление по любому из них её находит. Без этого человек жал
+       * «Забыть», получал «Удалено записей: N» — и следующий же «Кратко»
+       * возвращал ту же сводку из кэша, живущего 30 суток.
+       */
+      relatedIds: messages.map((m) => m.id),
       system: summarizeThreadPrompt(language),
       user,
       disclosure: describeOutbound(prepared, this.#disclosureContext()),
@@ -663,8 +681,11 @@ export class MailAssistant {
         ? `${renderPrepared(prepared)}\n\nПожелание к ответу: ${instruction}`
         : renderPrepared(prepared);
 
-    const estimated = estimateMessagesTokens([system, user]);
-    const decision = await this.#budget.check(ctx.accountId, estimated);
+    const promptTokens = estimateMessagesTokens([system, user]);
+    const decision = await this.#budget.reserve(
+      ctx.accountId,
+      promptTokens + this.#config.maxOutputTokens,
+    );
     if (!decision.allowed) {
       await this.#record({
         ctx,
@@ -680,6 +701,7 @@ export class MailAssistant {
       yield { type: 'error', error: decision.error };
       return;
     }
+    const reserved = decision.reserved;
 
     const started = this.#now();
     const messages: ChatMessage[] = [
@@ -693,34 +715,71 @@ export class MailAssistant {
       maxTokens: this.#config.maxOutputTokens,
     };
 
-    for await (const event of this.#provider.stream(request, ctx.signal)) {
-      if (event.type === 'done') {
-        await this.#budget.record(ctx.accountId, event.usage);
-        await this.#record({
-          ctx,
-          feature: 'reply.variants',
-          messageId: message.id,
-          usage: event.usage,
-          cached: false,
-          outboundChars: disclosure.totalChars,
-          durationMs: this.#now() - started,
-          ok: true,
-          errorKind: null,
-        });
-      } else if (event.type === 'error') {
-        await this.#record({
-          ctx,
-          feature: 'reply.variants',
-          messageId: message.id,
-          usage: ZERO_USAGE,
-          cached: false,
-          outboundChars: disclosure.totalChars,
-          durationMs: this.#now() - started,
-          ok: false,
-          errorKind: event.error.kind,
-        });
+    /*
+     * УЧЁТ ЗАКРЫВАЕТСЯ РОВНО ОДИН РАЗ И ПРИ ЛЮБОМ ИСХОДЕ.
+     *
+     * Раньше расход записывался только по событию `done`. Но при обрыве
+     * (человек закрыл вкладку, маршрут дёрнул abort) поставщик отдаёт
+     * `error`, а `done` не наступает вовсе — и не росли ни токены, ни
+     * счётчик обращений, хотя модель текст уже сгенерировала и поставщик
+     * его тарифицировал. Повторяя обрыв, можно было тратить бюджет
+     * домена без единого следа в учёте и в журнале обращений.
+     *
+     * Поэтому закрытие вынесено в функцию, и она же зовётся из finally:
+     * генератор может быть брошен потребителем на середине, и тогда
+     * события `error` не будет тоже.
+     */
+    let text = '';
+    let settled = false;
+    const settle = async (usage: TokenUsage | null, error: AiError | null): Promise<void> => {
+      if (settled) return;
+      settled = true;
+      await this.#budget.settle(ctx.accountId, reserved, usage);
+      await this.#record({
+        ctx,
+        feature: 'reply.variants',
+        messageId: message.id,
+        usage: usage ?? ZERO_USAGE,
+        cached: false,
+        outboundChars: disclosure.totalChars,
+        durationMs: this.#now() - started,
+        ok: error === null,
+        errorKind: error?.kind ?? null,
+      });
+    };
+
+    /** Сколько израсходовано, когда поставщик так и не сказал этого сам. */
+    const guessedUsage = (): TokenUsage => ({
+      promptTokens,
+      completionTokens: estimateTokens(text),
+      totalTokens: promptTokens + estimateTokens(text),
+      estimated: true,
+    });
+
+    try {
+      for await (const event of this.#provider.stream(request, ctx.signal)) {
+        if (event.type === 'delta') {
+          text += event.text;
+        } else if (event.type === 'done') {
+          await settle(event.usage, null);
+        } else {
+          /*
+           * Сгенерированный до ошибки текст оплачен, поэтому в учёт идёт
+           * оценка по нему. Отказ, при котором модель ничего не делала
+           * (сеть, отклонённый ключ), резерв возвращает целиком.
+           */
+          const spent = SPENT_ON_FAILURE.has(event.error.kind) || text.length > 0;
+          await settle(spent ? guessedUsage() : null, event.error);
+        }
+        yield event;
       }
-      yield event;
+    } finally {
+      // Поток бросили на середине: событий больше не будет, но модель
+      // работала — расход обязан попасть и в предел, и в журнал.
+      await settle(
+        text.length > 0 ? guessedUsage() : null,
+        aiFail('aborted', 'Поток черновика прерван').error,
+      );
     }
   }
 
@@ -765,6 +824,7 @@ export class MailAssistant {
       promptVersion: PROMPT_VERSIONS[params.feature],
       model: this.#config.model,
       messageId: params.messageId,
+      ...(params.relatedIds === undefined ? {} : { relatedIds: params.relatedIds }),
       variant: params.variant,
       contentFingerprint: fingerprint(`${params.system}\n---\n${params.user}`),
     });
@@ -799,8 +859,14 @@ export class MailAssistant {
     }
 
     // 2. Предел расходов — до отправки, а не после.
+    //
+    // Резервируем запрос ВМЕСТЕ с потолком ответа: пока модель думает,
+    // счётчик уже занят, и параллельные вызовы видят его. Раньше расход
+    // записывался после ответа, и двадцать одновременных запросов при
+    // пределе «два» проходили все — каждый успевал прочитать нули.
+    const maxTokens = Math.max(this.#config.maxOutputTokens, params.minOutputTokens ?? 0);
     const estimated = estimateMessagesTokens([params.system, params.user]);
-    const decision = await this.#budget.check(params.ctx.accountId, estimated);
+    const decision = await this.#budget.reserve(params.ctx.accountId, estimated + maxTokens);
     if (!decision.allowed) {
       await this.#record({
         ctx: params.ctx,
@@ -821,11 +887,25 @@ export class MailAssistant {
       messages,
       json: true,
       ...(params.temperature === undefined ? {} : { temperature: params.temperature }),
-      maxTokens: Math.max(this.#config.maxOutputTokens, params.minOutputTokens ?? 0),
+      maxTokens,
     };
     const response = await this.#provider.chat(request, params.ctx.signal);
 
     if (!response.ok) {
+      // Резерв снимаем в любом случае, но по-разному: отказ, при котором
+      // модель успела поработать, расход занимает, а обрыв связи — нет.
+      await this.#budget.settle(
+        params.ctx.accountId,
+        decision.reserved,
+        SPENT_ON_FAILURE.has(response.error.kind)
+          ? {
+              promptTokens: estimated,
+              completionTokens: 0,
+              totalTokens: estimated,
+              estimated: true,
+            }
+          : null,
+      );
       await this.#record({
         ctx: params.ctx,
         feature: params.feature,
@@ -841,7 +921,8 @@ export class MailAssistant {
     }
 
     const usage: TokenUsage = response.value.usage;
-    await this.#budget.record(params.ctx.accountId, usage);
+    // Поправка по факту: резерв заменяется настоящим расходом.
+    await this.#budget.settle(params.ctx.accountId, decision.reserved, usage);
 
     // 4. Разбор ответа: искажённый ответ не должен ронять почту.
     const parsed = parseWithSchema(response.value.text, params.schema);
