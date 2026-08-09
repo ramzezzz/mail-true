@@ -417,13 +417,29 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
         // Права файла настроек.
         if (audit.env.readable) {
           const open = audit.env.groupReadable === true || audit.env.worldReadable === true;
-          const stale = audit.env.sameAsExample ?? 0;
-          const crlf = audit.env.crlfLines ?? 0;
+          /*
+           * Непришедшее поле — это «не проверяли», а не «нарушений ноль».
+           *
+           * Раньше здесь стояло `?? 0`, и разница выходила ровно
+           * противоположной смыслу: посредник постарше или сбойный разбор
+           * не присылали поля вовсе — а панель показывала зелёную строку
+           * «файл настроек в порядке». То есть проверка, которая ничего
+           * не проверила, отчитывалась как успешная. Это худший вид
+           * молчания: человек видит ОК там, где не смотрели.
+           */
+          const stale = audit.env.sameAsExample;
+          const crlf = audit.env.crlfLines;
+          const unchecked: string[] = [];
+          if (stale === undefined) unchecked.push('совпадение значений с примером');
+          if (crlf === undefined) unchecked.push('концы строк');
 
           const notes: string[] = [`права ${audit.env.mode ?? '?'}`];
           if (audit.env.keys !== undefined) notes.push(`ключей: ${String(audit.env.keys)}`);
-          if (stale > 0) notes.push(`значений из примера: ${String(stale)}`);
-          if (crlf > 0) notes.push(`строк с возвратом каретки: ${String(crlf)}`);
+          if (stale !== undefined && stale > 0) notes.push(`значений из примера: ${String(stale)}`);
+          if (crlf !== undefined && crlf > 0) {
+            notes.push(`строк с возвратом каретки: ${String(crlf)}`);
+          }
+          if (unchecked.length > 0) notes.push(`не проверено: ${unchecked.join(', ')}`);
 
           let state: 'ok' | 'warn' | 'fail' = 'ok';
           let hint: string | undefined;
@@ -432,19 +448,38 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
             // ещё, — это выданные ключи от всего сервера.
             state = 'fail';
             hint = 'Закрыть: chmod 600 infra/.env';
-          } else if (stale > 0) {
+          } else if (stale !== undefined && stale > 0) {
             state = 'warn';
             hint =
               'Часть значений совпадает с примером из репозитория — вероятно, это ' +
               'пароли-заглушки, которые знает любой, кто видел исходники. Смените их ' +
               'и пересоздайте затронутые службы. Какие именно — намеренно не показываем: ' +
               'ответ панели не должен быть подсказкой для подбора.';
-          } else if (crlf > 0) {
+          } else if (crlf !== undefined && crlf > 0) {
             // Возврат каретки уезжает в значение переменной целиком.
             state = 'warn';
             hint =
               'Файл сохранён с виндовыми концами строк. Значения получат лишний символ в ' +
-              'конце — пароль с ним не подойдёт. Исправить: sed -i "s/\\r$//" infra/.env';
+              'конце — пароль с ним не подойдёт. Исправить, не заменяя сам файл: ' +
+              'tr -d "\\r" < infra/.env > /tmp/env.fix && cat /tmp/env.fix > infra/.env && ' +
+              'rm -f /tmp/env.fix';
+            // Именно так, а не через «sed -i»: тот не правит файл, а
+            // заменяет его новым, и посредник остаётся с прежним —
+            // настройки из панели после такой «починки» перестают
+            // доходить до служб (см. write_env в agent.pl).
+          } else if (unchecked.length > 0) {
+            /*
+             * Проверить не смогли — говорим об этом вслух.
+             *
+             * Зелёная строка означала бы «проверено и нарушений нет», а
+             * это неправда: посредник не прислал полей. Молчаливое ОК
+             * здесь опаснее любого предупреждения — именно на такую
+             * строку человек и смотрит, чтобы больше не смотреть.
+             */
+            state = 'warn';
+            hint =
+              'Посредник не прислал часть данных о файле настроек. Проверьте, что служба ' +
+              'service-agent поднята и обновлена: docker compose up -d --build service-agent';
           }
 
           checks.push({
@@ -510,19 +545,33 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
      * раздел не проверяет», хотя ответить на них ничего не мешало.
      */
     const files = await readMigrationFiles(ctx.config.MIGRATIONS_DIR);
-    if (files.length > 0) {
-      let applied = new Set<string>();
-      try {
-        const rows = await ctx.db.query<{ filename: string }>(
-          'SELECT filename FROM schema_migrations',
-        );
-        applied = new Set(rows.map((row) => row.filename));
-      } catch {
-        // Журнала миграций нет (сам он появляется миграцией 0000) —
-        // значит не применено ничего, и проверка так и скажет.
-      }
-      checks.push(gradeMigrations({ files, applied }));
+    /*
+     * gradeMigrations зовётся ВСЕГДА, в том числе когда файлов не видно.
+     *
+     * Здесь стояло `if (files.length > 0)`, и при несмонтированном
+     * каталоге строка про миграции просто исчезала из списка. Человек
+     * видел раздел без единого упоминания схемы и читал это единственным
+     * доступным способом: «раз не жалуется — значит докатано». Означало
+     * же оно обратное: readMigrationFiles глотает любую ошибку чтения, и
+     * о состоянии схемы не известно НИЧЕГО — в том числе о непримененной
+     * миграции, из-за которой разделы панели начинают отвечать 503.
+     *
+     * Ответ на этот случай в самой проверке был написан с самого начала
+     * («Каталог миграций не виден серверу приложения», состояние
+     * unknown) — до него просто не доходило управление. Пропавшая
+     * проверка хуже красной: красную видно.
+     */
+    let applied = new Set<string>();
+    try {
+      const rows = await ctx.db.query<{ filename: string }>(
+        'SELECT filename FROM schema_migrations',
+      );
+      applied = new Set(rows.map((row) => row.filename));
+    } catch {
+      // Журнала миграций нет (сам он появляется миграцией 0000) —
+      // значит не применено ничего, и проверка так и скажет.
     }
+    checks.push(gradeMigrations({ files, applied }));
 
     checks.push(gradeBackup({ at: await readLastBackup(ctx.config.INSTALL_STATE_DIR) }));
 
