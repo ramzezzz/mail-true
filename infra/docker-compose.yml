@@ -233,6 +233,11 @@ services:
       # Антивирус: по умолчанию выключен (ClamAV с базами ≈ 1 ГБ памяти).
       # Включается вместе с профилем: CLAMAV_ENABLED=true + --profile clamav
       CLAMAV_ENABLED: ${CLAMAV_ENABLED:-false}
+      # Сколько писем может отправить один вошедший. Разбор чисел — в
+      # entrypoint.sh рядом с самой настройкой.
+      RATELIMIT_USER_HOURLY: ${RATELIMIT_USER_HOURLY:-150}
+      RATELIMIT_USER_DAILY: ${RATELIMIT_USER_DAILY:-600}
+      RATELIMIT_USER_RCPT: ${RATELIMIT_USER_RCPT:-300}
     volumes:
       - rspamd-data:/var/lib/rspamd
       - ./rspamd/local.d:/etc/rspamd/local.d:ro
