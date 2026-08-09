@@ -42,7 +42,6 @@ import {
 } from '../mail/deferred-send.js';
 import {
   forwardedAttachment,
-  forwardedFilename,
   loadForwardedMessages as readForwardedMessages,
   type ForwardedMessage,
 } from '../mail/forwarded.js';
