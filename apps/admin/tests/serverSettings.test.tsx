@@ -38,7 +38,7 @@ import {
   valueText,
   type SettingFilter,
 } from '../src/lib/serverSettings';
-import { SettingRow } from '../src/pages/ServerSettingsPage';
+import { restartTargetsFor, SettingRow } from '../src/pages/ServerSettingsPage';
 import type {
   Permission,
   ServerSetting,
@@ -412,5 +412,46 @@ describe('обычная настройка', () => {
     const input = container.querySelector('input');
     expect(input?.disabled).toBe(true);
     expect(container.textContent).not.toContain('Вернуть к умолчанию');
+  });
+});
+
+describe('перезапускаются только те службы, чьи настройки сохранились', () => {
+  /** Настройка с одним действием — больше для этого расчёта не нужно. */
+  const setting = (key: string, target: string, action: 'restart' | 'recreate'): ServerSetting =>
+    ({ key, applies: [{ target, action }] }) as unknown as ServerSetting;
+
+  it('каждая служба названа один раз, даже если её настроек несколько', () => {
+    const targets = restartTargetsFor([
+      setting('SMTP_HELO', 'postfix', 'restart'),
+      setting('SMTP_BANNER', 'postfix', 'restart'),
+    ]);
+    expect(targets.map((t) => t.target)).toEqual(['postfix']);
+  });
+
+  it('пересоздание побеждает перезапуск: оно его в себя включает', () => {
+    const targets = restartTargetsFor([
+      setting('A', 'api', 'restart'),
+      setting('B', 'api', 'recreate'),
+    ]);
+    expect(targets).toEqual([{ target: 'api', action: 'recreate' }]);
+  });
+
+  it('служба настройки, которая не сохранилась, не перезапускается', () => {
+    /*
+     * Ровно тот случай, ради которого расчёт вынесен сюда: опечатка в
+     * поле HELO (Postfix) плюс верная правка срока сессии (api). Кнопка
+     * остаётся живой — невалидны не все правки, — сохраняется одна
+     * настройка, а перезапускались обе службы. Незаказанный перезапуск
+     * Postfix означает отказ приёма почты 4xx и обрыв сессий почтовых
+     * программ: человек правил срок сессии, а положил приём почты.
+     */
+    const saved = [setting('SESSION_TTL_SECONDS', 'api', 'restart')];
+    const targets = restartTargetsFor(saved);
+    expect(targets.map((t) => t.target)).toEqual(['api']);
+    expect(targets.map((t) => t.target)).not.toContain('postfix');
+  });
+
+  it('сохранять нечего — перезапускать некого', () => {
+    expect(restartTargetsFor([])).toEqual([]);
   });
 });

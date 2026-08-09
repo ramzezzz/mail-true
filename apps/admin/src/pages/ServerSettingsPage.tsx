@@ -100,6 +100,35 @@ function errorText(error: unknown): string {
   return 'Неизвестная ошибка.';
 }
 
+/**
+ * Какие службы перезапустить ради этих настроек.
+ *
+ * Каждая служба попадает в список один раз, даже если изменённых настроек
+ * у неё десяток, и с самым сильным из требуемых действий: пересоздание
+ * контейнера включает в себя перезапуск, обратное неверно.
+ *
+ * Считать надо по тем настройкам, которые ДЕЙСТВИТЕЛЬНО уезжают на
+ * сервер. Раньше список собирался по всему изменённому, включая значения
+ * с ошибкой, которые сохранение выбрасывает, а кнопка выключается только
+ * если невалидны ВСЕ правки. Обычная ситуация: опечатка в поле HELO
+ * (Postfix) плюс верная правка срока сессии (api) — сохранялась одна, а
+ * перезапускались обе. Незаказанный перезапуск Postfix по описанию самого
+ * продукта означает отказ приёма почты 4xx и обрыв сессий почтовых
+ * программ: человек правил срок сессии, а положил приём почты.
+ */
+export function restartTargetsFor(settings: readonly ServerSetting[]): SettingApply[] {
+  const byTarget = new Map<string, SettingApply>();
+  for (const setting of settings) {
+    for (const apply of setting.applies) {
+      const known = byTarget.get(apply.target);
+      if (!known || (known.action === 'restart' && apply.action === 'recreate')) {
+        byTarget.set(apply.target, apply);
+      }
+    }
+  }
+  return [...byTarget.values()];
+}
+
 export function ServerSettingsPage() {
   const { can } = useSession();
   const queryClient = useQueryClient();
@@ -246,6 +275,16 @@ export function ServerSettingsPage() {
    * пишет только про то, что действительно поднялось.
    */
   const runRestarts = async (targets: SettingApply[]): Promise<void> => {
+    /*
+     * Отчёт о ПРОШЛОЙ попытке гасится в начале новой.
+     *
+     * Плашка ставилась в одном месте и не снималась нигде: ни при успехе,
+     * ни при следующем сохранении. Администратор чинил настройку,
+     * сохранял, получал зелёное «перезапущены службы: postfix» — и под
+     * ним по-прежнему висело красное про позапрошлый отказ. Прочитав их
+     * вместе, невозможно понять, чем кончилось дело сейчас.
+     */
+    setRestartError(null);
     const { done, failed } = await runRestartsIo(
       targets,
       {
@@ -313,18 +352,7 @@ export function ServerSettingsPage() {
    * десяток, и с самым сильным из требуемых действий: пересоздание
    * контейнера включает в себя перезапуск, обратное неверно.
    */
-  const affected = useMemo((): SettingApply[] => {
-    const byTarget = new Map<string, SettingApply>();
-    for (const setting of changed) {
-      for (const apply of setting.applies) {
-        const known = byTarget.get(apply.target);
-        if (!known || (known.action === 'restart' && apply.action === 'recreate')) {
-          byTarget.set(apply.target, apply);
-        }
-      }
-    }
-    return [...byTarget.values()];
-  }, [changed]);
+  const affected = useMemo((): SettingApply[] => restartTargetsFor(changed), [changed]);
 
   /*
    * НЕСОХРАНЁННЫЕ ПРАВКИ НЕ ПРОПАДАЮТ МОЛЧА.
@@ -370,15 +398,31 @@ export function ServerSettingsPage() {
 
   const submit = (thenRestart = false): void => {
     const values: Record<string, SettingValue | null> = {};
+    /*
+     * Службы считаем по тем настройкам, которые ДЕЙСТВИТЕЛЬНО уезжают на
+     * сервер, а не по всем правкам подряд.
+     *
+     * `affected` собирается из `changed` — то есть из всего изменённого,
+     * включая значения с ошибкой, которые цикл ниже выбрасывает. Кнопка
+     * выключается, только если невалидны ВСЕ правки, поэтому обычная
+     * ситуация была такой: опечатка в поле HELO (Postfix) плюс верная
+     * правка срока сессии (api) — сохранялась одна, а перезапускались
+     * обе. Незаказанный перезапуск Postfix по описанию самого продукта
+     * означает отказ приёма почты 4xx и обрыв сессий почтовых программ:
+     * человек правил срок сессии, а положил приём почты на полминуты.
+     */
+    const saved: ServerSetting[] = [];
     for (const setting of changed) {
       const value = draft[setting.key];
       if (value === undefined || validate(setting, value) !== null) continue;
       values[setting.key] = toWire(setting, value);
+      saved.push(setting);
     }
+    const applied = restartTargetsFor(saved);
     if (Object.keys(values).length === 0) return;
     setFlash(null);
     // Что перезапускать, решаем ДО сохранения: после него changed опустеет.
-    setRestartAfterSave(thenRestart ? affected : null);
+    setRestartAfterSave(thenRestart ? applied : null);
     save.mutate(values);
   };
 
