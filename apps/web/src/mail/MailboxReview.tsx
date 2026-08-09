@@ -30,7 +30,7 @@ import type { Folder } from '@mail-true/shared';
 import { Button, Checkbox, Modal, Spinner } from '../components';
 import { useMoveMessages } from '../api/queries';
 import { useUiStore } from '../app/store';
-import { errorText } from '../lib/errorText';
+import { actionErrorText, errorText } from '../lib/errorText';
 import { folderTitle } from '../lib/folderNames';
 import { cx } from '../lib/cx';
 import {
@@ -100,15 +100,25 @@ function SweepConfirm({
   pending,
   preview,
   pendingPreview,
+  previewError,
   running,
   onCancel,
+  onRetry,
   onRun,
 }: {
   pending: PendingSweep;
   preview: SweepResult | null;
   pendingPreview: boolean;
+  /**
+   * Отказ подсчёта. Раньше его не показывали вовсе: счёт падал, окно
+   * оставалось с одним заголовком и мёртвой кнопкой «Убрать» — ни числа,
+   * ни причины, ни что делать дальше. Человек, уже согласившийся на
+   * массовое действие, видел пустоту и уходил перезагружать страницу.
+   */
+  previewError: string | null;
   running: boolean;
   onCancel(): void;
+  onRetry(): void;
   onRun(): void;
 }) {
   return (
@@ -117,6 +127,11 @@ function SweepConfirm({
       {pendingPreview && (
         <p className={styles.confirmPending}>
           <Spinner size={16} /> Считаем, сколько писем это затронет…
+        </p>
+      )}
+      {!pendingPreview && previewError !== null && (
+        <p className={styles.confirmError} role="alert">
+          {previewError}. Пока не посчитали, сколько писем это затронет, убирать нельзя.
         </p>
       )}
       {!pendingPreview && preview && preview.count === 0 && (
@@ -149,6 +164,13 @@ function SweepConfirm({
         >
           {running ? 'Убираем…' : 'Убрать'}
         </Button>
+        {/* Повтор — рядом с отказом: сбой счёта чаще всего минутный
+            (сервер перечитывает ящик), и уходить со страницы незачем. */}
+        {previewError !== null && !pendingPreview && (
+          <Button mode="secondary" onClick={onRetry} disabled={running}>
+            Посчитать ещё раз
+          </Button>
+        )}
         <Button mode="secondary" onClick={onCancel} disabled={running}>
           Отмена
         </Button>
@@ -378,6 +400,13 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
     previewMutation.mutate({ ...next.request, scanAt });
   };
 
+  /** Повторный подсчёт для того же отбора — после отказа сервера. */
+  const retryPreview = (): void => {
+    if (!pending) return;
+    previewMutation.reset();
+    previewMutation.mutate({ ...pending.request, scanAt });
+  };
+
   const runSweep = (): void => {
     if (!pending) return;
     runMutation.mutate(
@@ -460,8 +489,14 @@ export function MailboxReview({ onClose, initialTab = 'mailings', folders }: Mai
           pending={pending}
           preview={previewMutation.data ?? null}
           pendingPreview={previewMutation.isPending}
+          previewError={
+            previewMutation.isError
+              ? actionErrorText('Не удалось посчитать отбор', previewMutation.error)
+              : null
+          }
           running={runMutation.isPending}
           onCancel={() => setPending(null)}
+          onRetry={retryPreview}
           onRun={runSweep}
         />
       ) : (

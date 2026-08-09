@@ -395,6 +395,32 @@ describe('массовое удаление', () => {
     expect(button('Убрать')?.hasAttribute('disabled')).toBe(true);
   });
 
+  /*
+   * Отказ подсчёта раньше проглатывался: окно подтверждения оставалось с
+   * одним заголовком и мёртвой кнопкой «Убрать» — ни числа, ни причины,
+   * ни что делать дальше. Человек, уже согласившийся на массовое
+   * действие, видел пустоту.
+   */
+  it('отказ подсчёта виден, и его можно повторить', async () => {
+    vi.spyOn(mailingsApi, 'getMailings').mockResolvedValue(mailingsState([group()]));
+    const sweep = vi.spyOn(mailingsApi, 'sweep').mockRejectedValue(new Error('IMAP не отвечает'));
+
+    render(<MailboxReview onClose={() => undefined} folders={FOLDERS} />);
+    await waitFor(() => Boolean(button('Удалить все')), 'кнопка удаления');
+    click(button('Удалить все')!);
+
+    await waitFor(() => text().includes('Не удалось посчитать отбор'), 'отказ подсчёта');
+    // Убирать по-прежнему нельзя: числа так и нет.
+    expect(button('Убрать')?.hasAttribute('disabled')).toBe(true);
+
+    const retry = button('Посчитать ещё раз');
+    expect(retry, 'из окна должен быть выход, кроме перезагрузки страницы').toBeDefined();
+    click(retry!);
+    await waitFor(() => sweep.mock.calls.length === 2, 'повторный подсчёт');
+    // И повтор тоже сухой — отказ ничего не развязывает.
+    expect(sweep.mock.calls.every((call) => call[0].dryRun)).toBe(true);
+  });
+
   it('подтверждение уносит письма в корзину и присылает отметку разбора', async () => {
     vi.spyOn(mailingsApi, 'getMailings').mockResolvedValue(mailingsState([group()]));
     const sweep = vi.spyOn(mailingsApi, 'sweep').mockImplementation((request) =>
