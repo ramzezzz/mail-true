@@ -112,6 +112,16 @@ export function UserSettingsPage() {
   const [flash, setFlash] = useState<string | null>(null);
   const [sieve, setSieve] = useState<SieveSyncState | null>(null);
   const [editingRule, setEditingRule] = useState<UserFilterRule | null>(null);
+  /*
+   * Правило, которое собираются удалить.
+   *
+   * Удаление шло сразу по нажатию — без вопроса и без возможности
+   * вернуть. Значок стоит вплотную к «Изменить», промах на один значок
+   * стоил человеку правила, которое он настраивал руками: условия,
+   * папка, порядок в цепочке. Восстановить его неоткуда — правила
+   * живут в sieve-файле ящика, а не в журнале.
+   */
+  const [deletingRule, setDeletingRule] = useState<UserFilterRule | null>(null);
   const [showScript, setShowScript] = useState(false);
 
   const bundle = useQuery({
@@ -464,7 +474,7 @@ export function UserSettingsPage() {
                             icon: <IconTrash />,
                             label: 'Удалить',
                             danger: true,
-                            onClick: () => deleteRule.mutate(rule.id),
+                            onClick: () => setDeletingRule(rule),
                           },
                         ]}
                       />
@@ -530,6 +540,37 @@ export function UserSettingsPage() {
           onClose={() => setEditingRule(null)}
           onSave={(rule) => saveRule.mutate(rule)}
         />
+      )}
+
+      {deletingRule && (
+        <Modal
+          title="Удалить правило?"
+          onClose={() => setDeletingRule(null)}
+          footer={
+            <>
+              <Button mode="secondary" onClick={() => setDeletingRule(null)}>
+                Отмена
+              </Button>
+              <Button
+                disabled={deleteRule.isPending}
+                onClick={() => {
+                  deleteRule.mutate(deletingRule.id);
+                  setDeletingRule(null);
+                }}
+              >
+                Удалить
+              </Button>
+            </>
+          }
+        >
+          <Notice tone="error">
+            Правило удаляется насовсем: вернуть его будет неоткуда — правила живут в файле фильтров
+            ящика, а не в журнале.
+          </Notice>
+          <p className="mt-mono" style={{ margin: '10px 0 0' }}>
+            {ruleSummary(deletingRule, folders)}
+          </p>
+        </Modal>
       )}
     </>
   );

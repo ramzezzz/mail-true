@@ -47,7 +47,22 @@ export function UsersPage() {
   const [status, setStatus] = useState<'all' | 'active' | 'blocked'>('all');
   const [domainId, setDomainId] = useState<number | undefined>(undefined);
   const [offset, setOffset] = useState(0);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  /*
+   * Выбранные ящики: НОМЕР → АДРЕС, а не просто набор номеров.
+   *
+   * Адреса для подтверждения удаления собирались из текущей страницы
+   * списка (items.filter(...)), а сам выбор страницу переживает: он не
+   * сбрасывается ни при перелистывании, ни при смене поиска или фильтра.
+   *
+   * Отсюда и беда. Выбрал двадцать ящиков, перелистнул, отметил ещё два,
+   * открыл «Действия над 22 ящиками» — а в подтверждении показаны ДВА
+   * адреса, те, что видны сейчас. Человек читает короткий список, набирает
+   * «удалить» и сносит двадцать два ящика, из которых видел два.
+   *
+   * Держим адрес рядом с номером в момент отметки: тогда список в
+   * подтверждении всегда полный и всегда тот самый.
+   */
+  const [selected, setSelected] = useState<Map<number, string>>(new Map());
 
   const [createOpen, setCreateOpen] = useState(false);
   const [passwordFor, setPasswordFor] = useState<MailUser | null>(null);
@@ -94,7 +109,7 @@ export function UsersPage() {
   const items = users.data?.items ?? [];
   const allSelected = items.length > 0 && items.every((u) => selected.has(u.id));
 
-  const selectedIds = useMemo(() => [...selected], [selected]);
+  const selectedIds = useMemo(() => [...selected.keys()], [selected]);
 
   return (
     <>
@@ -191,9 +206,17 @@ export function UsersPage() {
                 <th style={{ width: 28 }}>
                   <Checkbox
                     checked={allSelected}
-                    onChange={(e) =>
-                      setSelected(e.target.checked ? new Set(items.map((u) => u.id)) : new Set())
-                    }
+                    onChange={(e) => {
+                      // «Отметить все» — про ЭТУ страницу, поэтому прежний
+                      // выбор с других страниц сохраняется, а снятие
+                      // убирает только видимое.
+                      const next = new Map(selected);
+                      for (const u of items) {
+                        if (e.target.checked) next.set(u.id, u.email);
+                        else next.delete(u.id);
+                      }
+                      setSelected(next);
+                    }}
                   />
                 </th>
               )}
@@ -217,8 +240,8 @@ export function UsersPage() {
                     <Checkbox
                       checked={selected.has(user.id)}
                       onChange={(e) => {
-                        const next = new Set(selected);
-                        if (e.target.checked) next.add(user.id);
+                        const next = new Map(selected);
+                        if (e.target.checked) next.set(user.id, user.email);
                         else next.delete(user.id);
                         setSelected(next);
                       }}
@@ -373,7 +396,7 @@ export function UsersPage() {
           onDone={(message) => {
             setFlash(message);
             setDeleting(null);
-            setSelected(new Set());
+            setSelected(new Map());
             invalidate();
           }}
         />
@@ -381,13 +404,13 @@ export function UsersPage() {
       {bulkOpen && (
         <BulkModal
           ids={selectedIds}
-          emails={items.filter((u) => selected.has(u.id)).map((u) => u.email)}
+          emails={[...selected.values()]}
           canDelete={can('users.delete')}
           onClose={() => setBulkOpen(false)}
           onDone={(message) => {
             setFlash(message);
             setBulkOpen(false);
-            setSelected(new Set());
+            setSelected(new Map());
             invalidate();
           }}
         />
