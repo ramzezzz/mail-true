@@ -168,7 +168,7 @@ if [ -f "$CERT_DIR/source" ]; then
     CERT_SOURCE="$(tr -d '[:space:]' < "$CERT_DIR/source")"
 fi
 if [ "$CERT_SOURCE" = "custom" ] && [ "${MT_REPLACE_CUSTOM_CERT:-0}" != "1" ]; then
-    CURRENT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')"
+    CURRENT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p' || true)"
     # В отчёте это НЕ отказ: продление сработало ровно так, как задумано.
     # Покрась мы этот случай красным, панель ругалась бы дважды в сутки на
     # сервере, где всё правильно, — и на её ругань перестали бы смотреть.

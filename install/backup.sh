@@ -69,7 +69,11 @@ step "1. База данных"
 if dc exec -T postgres pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists \
         --exclude-table-data=sender_logo_cache \
         > "$WORK/database.sql" 2>"$WORK/pg.err"; then
-    SIZE="$(du -h "$WORK/database.sql" | cut -f1)"
+    # «|| true» здесь и ниже — не небрежность: под set -euo pipefail
+    # ненулевой код внутри подстановки обрывает копию МОЛЧА, на середине,
+    # уже после удачной выгрузки базы. Пустое значение — штатный случай,
+    # его показывают как «?».
+    SIZE="$(du -h "$WORK/database.sql" | cut -f1 || true)"
     ok "выгружена база $POSTGRES_DB ($SIZE)"
 else
     cat "$WORK/pg.err" >&2
@@ -107,10 +111,10 @@ step "2. Письма, ключи и очередь"
 if REDIS_PASSWORD="$(grep -E '^REDIS_PASSWORD=' "$ENV_FILE" 2>/dev/null | cut -d= -f2-)" \
    && [ -n "${REDIS_PASSWORD:-}" ]; then
     redis_cli() { dc exec -T redis redis-cli -a "$REDIS_PASSWORD" --no-auth-warning "$@" 2>/dev/null; }
-    BEFORE="$(redis_cli lastsave | tr -d '\r')"
+    BEFORE="$(redis_cli lastsave | tr -d '\r' || true)"
     if [ -n "$BEFORE" ] && redis_cli bgsave >/dev/null; then
         for _ in $(seq 1 30); do
-            AFTER="$(redis_cli lastsave | tr -d '\r')"
+            AFTER="$(redis_cli lastsave | tr -d '\r' || true)"
             [ -n "$AFTER" ] && [ "$AFTER" != "$BEFORE" ] && break
             sleep 1
         done

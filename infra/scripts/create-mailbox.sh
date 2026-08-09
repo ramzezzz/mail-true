@@ -24,7 +24,17 @@ DOMAIN="${EMAIL#*@}"
 [ "$DOMAIN" != "$EMAIL" ] || { echo "Ошибка: '$EMAIL' — не e-mail"; exit 1; }
 
 # Хэш пароля считает doveadm внутри контейнера dovecot (с префиксом {SCHEME})
-HASH=$("${COMPOSE[@]}" exec -T dovecot doveadm pw -s "$SCHEME" -p "$PASSWORD" | tr -d '\r\n')
+#
+# «|| true» и проверка ниже — вместо молчаливого обрыва: под set -e
+# неподнятый Dovecot заканчивал скрипт без единого слова, и человек не
+# понимал, создан ящик или нет. Пустой хэш пускать в базу нельзя тем
+# более: получился бы ящик, в который невозможно войти.
+HASH=$("${COMPOSE[@]}" exec -T dovecot doveadm pw -s "$SCHEME" -p "$PASSWORD" | tr -d '\r\n' || true)
+if [ -z "$HASH" ]; then
+    echo "Ошибка: не удалось посчитать хэш пароля — Dovecot не ответил." >&2
+    echo "Проверьте: docker compose ps dovecot" >&2
+    exit 1
+fi
 
 "${COMPOSE[@]}" exec -T \
     -e M_EMAIL="$EMAIL" -e M_DOMAIN="$DOMAIN" -e M_HASH="$HASH" \

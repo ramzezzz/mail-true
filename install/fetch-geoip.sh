@@ -64,7 +64,10 @@ fi
 gunzip -c "$TARGET_DIR/.country.csv.gz" > "$TARGET_DIR/.country.csv.new"
 rm -f "$TARGET_DIR/.country.csv.gz"
 
-lines="$(wc -l < "$TARGET_DIR/.country.csv.new" | tr -d ' ')"
+# Без «|| true» пустой или нечитаемый файл обрывал скачивание молча —
+# ровно там, где ниже написана внятная жалоба на подозрительно малый файл.
+lines="$(wc -l < "$TARGET_DIR/.country.csv.new" | tr -d ' ' || true)"
+lines="${lines:-0}"
 if [ "$lines" -lt 1000 ]; then
     printf 'Скачанный файл подозрительно мал (%s строк) — не заменяем прежний.\n' "$lines" >&2
     rm -f "$TARGET_DIR/.country.csv.new"

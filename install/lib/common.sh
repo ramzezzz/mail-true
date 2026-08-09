@@ -1022,7 +1022,7 @@ install_mark_env() {
 # а «спросить не удалось», и решает по совокупности вызывающий.
 install_mark_db() {
     dc exec -T postgres psql -U "${POSTGRES_USER:-}" -d "${POSTGRES_DB:-}" -qtA \
-        -c "SELECT completed_at FROM install_state WHERE id" 2>/dev/null | tr -d '\r' | head -1
+        -c "SELECT completed_at FROM install_state WHERE id" 2>/dev/null | tr -d '\r' | head -1 || true
 }
 
 # install_mark_clear — снять обе отметки. Печатает, что именно сняла.

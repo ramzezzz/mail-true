@@ -569,7 +569,9 @@ if [ -f "$CERT_SOURCE_FILE" ]; then
 fi
 
 if [ -f "$CERT_DIR/mail.crt" ] && [ -f "$CERT_DIR/mail.key" ]; then
-    CERT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p')"
+    # Повреждённый сертификат — не повод обрывать установку молча:
+    # без «|| true» ненулевой код openssl под pipefail делал именно это.
+    CERT_CN="$(openssl x509 -in "$CERT_DIR/mail.crt" -noout -subject 2>/dev/null | sed -n 's/.*CN *= *//p' || true)"
     ok "сертификат уже есть (CN=${CERT_CN:-?})"
 else
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
@@ -756,9 +758,14 @@ process.stdin.on("end", () => {
   const salt = randomBytes(16);
   const key = scryptSync(pw.normalize("NFKC"), salt, 32, { N, r, p, maxmem: 64 * 1024 * 1024 });
   process.stdout.write(["scrypt", N, r, p, salt.toString("base64url"), key.toString("base64url")].join("$"));
-});' | tr -d '\r\n')"
+});' | tr -d '\r\n' || true)"
 
 if [ -z "$ADMIN_HASH" ]; then
+    # Проверка ниже была написана правильно, а сработать не могла: без
+    # «|| true» выше ненулевой код контейнера под pipefail обрывал
+    # установку ДО неё. То есть заготовленное объяснение было
+    # недостижимо, и человек получал молчаливый обрыв ровно на шаге
+    # создания администратора — самом непонятном месте для обрыва.
     fail "не удалось посчитать хэш пароля администратора"
 else
     # Переменные раскрываются внутри контейнера, поэтому кавычки одинарные.
@@ -801,7 +808,7 @@ issue_letsencrypt() {
     # проверяет владение через HTTP-запрос по этому имени.
     local reachable=()
     for name in "${names[@]}"; do
-        resolved="$(resolve_a "$name" | tr '\n' ' ')"
+        resolved="$(resolve_a "$name" | tr '\n' ' ' || true)"
         if [ -z "$resolved" ]; then
             warn "$name — A-записи нет, имя в сертификат не попадёт"
             continue

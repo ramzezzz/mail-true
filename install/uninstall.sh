@@ -101,8 +101,15 @@ ok "контейнеры и тома удалены"
 # «полное удаление» оставляло на машине данные, о которых человеку сказали,
 # что их больше нет. Ровно на этом же расхождении списков однажды потеряли
 # очередь в резервной копии.
+# «|| true» обязателен: без него нечитаемый compose-файл обрывал удаление
+# МОЛЧА — на середине, когда контейнеры уже сняты, а тома остались. Человек
+# при этом уверен, что удалил всё. Пустой список разбирается ниже.
 COMPOSE_VOLUMES="$(sed -n '/^volumes:/,$p' "$COMPOSE_FILE" |
-                   sed -n 's/^  \([a-z0-9-]*\):[[:space:]]*$/\1/p')"
+                   sed -n 's/^  \([a-z0-9-]*\):[[:space:]]*$/\1/p' || true)"
+if [ -z "$COMPOSE_VOLUMES" ]; then
+    warn "список томов из $COMPOSE_FILE не прочитан — тома придётся удалить вручную"
+    hint "посмотреть, что осталось: docker volume ls --filter name=${PROJECT}_"
+fi
 for vol in $COMPOSE_VOLUMES; do
     if docker volume inspect "${PROJECT}_${vol}" >/dev/null 2>&1; then
         if docker volume rm "${PROJECT}_${vol}" >/dev/null 2>&1; then

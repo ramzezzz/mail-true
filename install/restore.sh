@@ -274,8 +274,8 @@ fi
 USERS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
     -c 'SELECT count(*) FROM virtual_users;' 2>/dev/null | tr -d '\r')"
 DOMAINS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
-    -c 'SELECT count(*) FROM virtual_domains;' 2>/dev/null | tr -d '\r')"
-MAILS="$(dc exec -T dovecot sh -c 'find /var/mail/vhosts -type f -name "*." -o -type f -name "*,*" 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')"
+    -c 'SELECT count(*) FROM virtual_domains;' 2>/dev/null | tr -d '\r' || true)"
+MAILS="$(dc exec -T dovecot sh -c 'find /var/mail/vhosts -type f -name "*." -o -type f -name "*,*" 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r' || true)"
 
 ok "в базе: ${DOMAINS:-?} доменов, ${USERS:-?} ящиков"
 ok "файлов писем в Maildir: ${MAILS:-?}"
@@ -302,14 +302,14 @@ else
 fi
 
 # --- Доступ к базе из сервиса, а не только из контейнера базы -------
-API_DB="$(dc exec -T api sh -c 'wget -qO- http://127.0.0.1:3000/healthz 2>/dev/null' 2>/dev/null | tr -d '\r')"
+API_DB="$(dc exec -T api sh -c 'wget -qO- http://127.0.0.1:3000/healthz 2>/dev/null' 2>/dev/null | tr -d '\r' || true)"
 case "$API_DB" in
     *'"ok":true'*) ok "сервер приложения отвечает и видит свои зависимости" ;;
     *)
         # Тела нет — значит проба ответила 503 (wget считает это ошибкой)
         # или сервер молчит вовсе. Различить и назвать виновника умеет
         # /health: он отвечает 200 всегда и перечисляет части поимённо.
-        API_PARTS="$(dc exec -T api sh -c 'wget -qO- http://127.0.0.1:3000/health 2>/dev/null' 2>/dev/null | tr -d '\r')"
+        API_PARTS="$(dc exec -T api sh -c 'wget -qO- http://127.0.0.1:3000/health 2>/dev/null' 2>/dev/null | tr -d '\r' || true)"
         if [ -n "$API_PARTS" ]; then
             fail "сервер приложения работает не полностью: $API_PARTS"
         else
