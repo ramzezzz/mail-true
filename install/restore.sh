@@ -264,9 +264,17 @@ if want config && [ -d "$WORK/config" ]; then
         chmod 600 "$CERT_DIR/mail.key" 2>/dev/null || true
         ok "TLS-сертификаты восстановлены"
     fi
+    # Копии, снятые до переезда карт в том, несут их в config/maps.d.
+    # Такие списки надо доставить в том, иначе восстановление из старой
+    # копии молча вернуло бы сервер к пустым спискам.
     if [ -d "$WORK/config/maps.d" ]; then
-        cp -a "$WORK/config/maps.d/." "$INFRA_DIR/rspamd/maps.d/" 2>/dev/null || true
-        ok "белые и чёрные списки антиспама восстановлены"
+        if docker run --rm -v "${PROJECT}_rspamd-maps":/dst \
+            -v "$WORK/config/maps.d":/src:ro \
+            alpine:3.20 sh -c 'cp -a /src/. /dst/' >/dev/null 2>&1; then
+            ok "белые и чёрные списки антиспама восстановлены (из старой копии)"
+        else
+            warn "не удалось восстановить списки антиспама из старой копии"
+        fi
     fi
     if [ -f "$WORK/letsencrypt.tar.gz" ] && [ -d /etc ]; then
         if tar xzf "$WORK/letsencrypt.tar.gz" -C /etc 2>/dev/null; then

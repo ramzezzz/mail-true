@@ -152,10 +152,9 @@ if [ -d "$CERT_DIR" ]; then
     mkdir -p "$WORK/config/certs"
     cp -a "$CERT_DIR/." "$WORK/config/certs/" 2>/dev/null || true
 fi
-if [ -d "$INFRA_DIR/rspamd/maps.d" ]; then
-    mkdir -p "$WORK/config/maps.d"
-    cp -a "$INFRA_DIR/rspamd/maps.d/." "$WORK/config/maps.d/" 2>/dev/null || true
-fi
+# Карты антиспама больше не копируются отсюда: они переехали в том
+# rspamd-maps и снимаются вместе с остальными томами (MT_BACKUP_VOLUMES).
+# В рабочем дереве остались только заготовки, они и так лежат в git.
 if [ -d /etc/letsencrypt ]; then
     if tar czf "$WORK/letsencrypt.tar.gz" -C /etc letsencrypt 2>/dev/null; then
         ok "сертификаты Let's Encrypt сохранены"
