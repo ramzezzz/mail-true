@@ -98,7 +98,16 @@ export function decodeLabel(raw: string | null): LabelFlags {
   if (raw === null) {
     return { label: null, leaveOnServer: true, applyFilters: false, protocol: 'imap' };
   }
-  const idx = raw.indexOf(FLAG_PREFIX);
+  /*
+   * Разделитель ищется С КОНЦА, потому что `encodeLabel` дописывает его
+   * последним. Поиск с начала ломался о название, заданное человеком:
+   * метку подключения принимает POST /api/accounts/external (до 255
+   * символов любого текста), и «Почта mt: рабочая» разрезалась по ПЕРВОМУ
+   * вхождению. Название обрубалось до «Почта », а флаги читались из
+   * остатка — то есть «оставлять письма на сервере» молча слетало в
+   * «нет», хотя в мастере стояла галочка.
+   */
+  const idx = raw.lastIndexOf(FLAG_PREFIX);
   if (idx < 0) return { label: raw, leaveOnServer: true, applyFilters: false, protocol: 'imap' };
   const label = raw.slice(0, idx);
   const bits = raw.slice(idx + FLAG_PREFIX.length).split(',');
