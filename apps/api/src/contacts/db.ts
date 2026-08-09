@@ -90,6 +90,56 @@ function toContactRow(row: ContactDbRow): ContactRow {
   };
 }
 
+/**
+ * Какой давностью помечается строка, заведённая СКРЫТИЕМ адреса.
+ *
+ * Начало эпохи, а не `now()`, и это не мелочь. Убрать из подсказок можно
+ * адрес, которого сборщик ещё не видел ни в одном письме (он пришёл в
+ * подсказке из памяти окна написания) — строка тогда заводится здесь же,
+ * с пустым именем. Позже сборщик доходит до писем этого человека и зовёт
+ * `upsert`, а тот обновляет имя и строку поиска ТОЛЬКО письмом более
+ * свежим, чем уже учтённое: иначе имя из письма трёхлетней давности
+ * затирало бы нынешнее.
+ *
+ * Письма всегда старше момента скрытия. Значит, с `now()` имя не
+ * проставлялось НИКОГДА: человек возвращал контакт из скрытых, а дальше
+ * находил его только по адресу и не находил по фамилии — притом что
+ * переписка с этим человеком в ящике лежит.
+ *
+ * Начало эпохи старше любого письма, поэтому первое же настоящее письмо
+ * заполняет имя, как и должно.
+ */
+export const HIDDEN_PLACEHOLDER_SEEN_AT = new Date(0);
+
+/**
+ * Запрос скрытия (или возврата) адреса.
+ *
+ * Вынесен из метода отдельно, чтобы его можно было проверить без живой
+ * базы: беда была не в схеме, а в ЗНАЧЕНИЯХ, которые уходят в запрос, —
+ * см. HIDDEN_PLACEHOLDER_SEEN_AT.
+ */
+export function setHiddenStatement(
+  accountEmail: string,
+  address: string,
+  hidden: boolean,
+): { text: string; values: unknown[] } {
+  return {
+    text: `INSERT INTO mail_contacts
+         (account_email, address, display_name, tokens, hidden,
+          first_seen_at, last_seen_at, updated_at)
+       VALUES ($1, $2, NULL, $3, $4, $5, $5, now())
+       ON CONFLICT (account_email, address)
+       DO UPDATE SET hidden = EXCLUDED.hidden, updated_at = now()`,
+    values: [
+      accountEmail,
+      address,
+      contactTokens(null, address),
+      hidden,
+      HIDDEN_PLACEHOLDER_SEEN_AT,
+    ],
+  };
+}
+
 export class ContactsDb {
   readonly #pool: Pool;
   readonly #logger: Logger;
@@ -248,14 +298,8 @@ export class ContactsDb {
    * уже перезаписан. Отказ «нечего убирать» выглядел бы как поломка.
    */
   async setHidden(accountEmail: string, address: string, hidden: boolean): Promise<void> {
-    await this.#pool.query(
-      `INSERT INTO mail_contacts
-         (account_email, address, display_name, tokens, hidden, last_seen_at, updated_at)
-       VALUES ($1, $2, NULL, $3, $4, now(), now())
-       ON CONFLICT (account_email, address)
-       DO UPDATE SET hidden = EXCLUDED.hidden, updated_at = now()`,
-      [accountEmail, address, contactTokens(null, address), hidden],
-    );
+    const statement = setHiddenStatement(accountEmail, address, hidden);
+    await this.#pool.query(statement.text, statement.values);
   }
 
   /** Сколько адресов в указателе ящика (без скрытых). */

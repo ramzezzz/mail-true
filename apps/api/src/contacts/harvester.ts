@@ -83,9 +83,24 @@ export interface HarvestOutcome {
   contacts: number;
   /** Осталась ли неразобранная старая почта. */
   more: boolean;
+  /**
+   * Заход оборвался отказом (соединение с Dovecot, база).
+   *
+   * Отдельно от `more`, и это главное различие всего сборщика: `more:
+   * false` значит «разбирать больше нечего», а отказ значит «неизвестно,
+   * что осталось». Раньше их не различали, и любой обрыв соединения
+   * объявлял указатель разобранным целиком: подсказка отвечала `complete:
+   * true`, подпись «Собираем адреса из переписки…» пропадала, и человек,
+   * набравший фамилию, видел пустоту как окончательный ответ — хотя
+   * половина писем ящика ещё не просмотрена.
+   */
+  failed: boolean;
 }
 
-const EMPTY: HarvestOutcome = { scanned: 0, contacts: 0, more: false };
+const EMPTY: HarvestOutcome = { scanned: 0, contacts: 0, more: false, failed: false };
+
+/** Заход не состоялся: сколько осталось разобрать — неизвестно. */
+const FAILED: HarvestOutcome = { scanned: 0, contacts: 0, more: false, failed: true };
 
 /** Роли папок, из которых берутся адреса, и в каком порядке. */
 const ROLES: readonly HarvestRole[] = ['sent', 'inbox'];
@@ -153,8 +168,16 @@ export class ContactHarvester {
   async #loop(request: HarvestRequest): Promise<void> {
     for (;;) {
       const outcome = await this.run(request);
-      this.#opts.onProgress?.(request.session.email, !outcome.more);
-      if (!outcome.more || this.#closed) return;
+      /*
+       * Об отказе наружу НЕ сообщаем вовсе — ни «разобрано», ни «не
+       * разобрано». Сказать «разобрано» было бы враньём (см. failed), а
+       * сказать «не разобрано» значило бы снять признак с ящика, который
+       * на самом деле разобран давно, и заставить подсказку год писать
+       * «Собираем адреса…» из-за одного оборванного соединения. Молчание
+       * оставляет прежнюю правду до следующего удачного захода.
+       */
+      if (!outcome.failed) this.#opts.onProgress?.(request.session.email, !outcome.more);
+      if (outcome.failed || !outcome.more || this.#closed) return;
       // Пауза между порциями — не «чтобы не нагрузить сервер», а чтобы
       // очередь соединения досталась запросам человека: он в это время
       // читает почту, и его список писем важнее нашего указателя.
@@ -188,10 +211,10 @@ export class ContactHarvester {
       cursors = await this.#opts.db.cursors(account);
     } catch (err) {
       this.#opts.logger.debug(errorInfo(err), 'Сборщик адресов: отметки не прочитаны');
-      return EMPTY;
+      return FAILED;
     }
 
-    const total: HarvestOutcome = { scanned: 0, contacts: 0, more: false };
+    const total: HarvestOutcome = { scanned: 0, contacts: 0, more: false, failed: false };
     for (const role of ROLES) {
       if (role === 'inbox' && !request.collectReceived) continue;
       const before = cursors.find((c) => c.role === role) ?? null;
@@ -199,6 +222,9 @@ export class ContactHarvester {
       total.scanned += outcome.scanned;
       total.contacts += outcome.contacts;
       total.more ||= outcome.more;
+      // Хватает отказа по ОДНОЙ папке: «Входящие» не разобраны — значит,
+      // указатель ящика разобранным называть нельзя.
+      total.failed ||= outcome.failed;
     }
     return total;
   }
@@ -308,10 +334,12 @@ export class ContactHarvester {
       // запрос человека, ни попадать в журнал уровнем «ошибка»: чаще
       // всего это просто оборванное соединение.
       logger.debug(errorInfo(err, { role }), 'Сборщик адресов: папка не разобрана');
-      return EMPTY;
+      // Разобранное до обрыва не выбрасывается: порции уже записаны в базу
+      // вместе с отметкой, и следующий заход продолжит с этого места.
+      return { scanned, contacts, more: false, failed: true };
     }
 
-    return { scanned, contacts, more };
+    return { scanned, contacts, more, failed: false };
   }
 
   /** Разбирает один диапазон UID: конверты -> наблюдения -> свёртка. */

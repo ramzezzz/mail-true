@@ -374,3 +374,21 @@ test('придуманное имя годится по тем же правил
   assert.equal(checkLocalPart(suggestLocalPart('!!!', random)), null);
   assert.equal(checkLocalPart(suggestLocalPart('a'.repeat(80), random)), null);
 });
+
+test('длинная пометка не даёт имени с двойным дефисом', () => {
+  /*
+   * Обрезка длинной приставки может попасть ровно на дефис — и тогда к
+   * имени, уже кончающемуся дефисом, дописывался случайный хвост через
+   * ещё один. Человек нажимал «Придумать имя» и получал отказ «в имени
+   * можно использовать строчные латинские буквы…» за имя, которого он не
+   * вводил.
+   */
+  const random = () => 0.5;
+  const name = suggestLocalPart('My Super Long Shop Name 2026', random);
+  assert.ok(!name.includes('--'), `двойной дефис в придуманном имени: ${name}`);
+  assert.equal(checkLocalPart(name), null, `форма не приняла своё же имя: ${name}`);
+
+  // Обратный ход: приставка всё-таки узнаётся — она и есть ответ на
+  // вопрос «кому я это выдал»
+  assert.ok(name.startsWith('my-super-long-shop-name'), name);
+});

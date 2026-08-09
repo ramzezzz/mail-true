@@ -407,4 +407,43 @@ describe('поле «Кому» с подсказкой', () => {
     expect(options()).toHaveLength(0);
     expect(fieldValue()).toBe('ив');
   });
+
+  it('неотвеченный запрос не запоминается как «ничего не найдено»', async () => {
+    /*
+     * Перезапуск API (502 от nginx), истёкшая сессия, пропавшая сеть — всё
+     * это отдавало пустой список, неотличимый от честного ответа, и он
+     * ложился в память окна навсегда. Человек, набравший «пет» в неудачную
+     * секунду, больше не получал подсказку по этим буквам НИКОГДА: стирал
+     * букву, дописывал обратно — пусто, до закрытия окна письма.
+     */
+    let broken = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        calls.push({ url, method: 'GET', body: null });
+        if (broken) return { ok: false, json: async () => ({}) } as unknown as Response;
+        return {
+          ok: true,
+          json: async () => ({ items: [person('petrov@example.com', 'Пётр')], complete: true }),
+        } as unknown as Response;
+      }),
+    );
+
+    render();
+    type('пет');
+    await settle();
+    expect(options()).toHaveLength(0);
+    expect(suggestCalls()).toHaveLength(1);
+
+    // Сервер вернулся. Человек стёр буквы и набрал те же самые заново.
+    broken = false;
+    type('');
+    await settle();
+    type('пет');
+    await settle();
+
+    expect(suggestCalls()).toHaveLength(2);
+    expect(options()).toHaveLength(1);
+    expect(options()[0]?.textContent).toContain('petrov@example.com');
+  });
 });

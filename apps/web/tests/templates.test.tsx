@@ -132,6 +132,39 @@ describe('первый получатель из поля «Кому»', () => {
     expect(firstRecipient('petr@mail.local')).toEqual({ name: null, address: 'petr@mail.local' });
     expect(firstRecipient('')).toEqual({ name: null, address: null });
   });
+
+  it('запятая ВНУТРИ имени не разрезает получателя пополам', () => {
+    /*
+     * «Иванов, Иван» в кавычки ставит сама подсказка адреса (formatAddresses),
+     * а такие имена массово раздают корпоративные почтовые системы. Наивное
+     * деление по запятой давало первым получателем обрывок «"Иванов»: ни
+     * адреса, ни имени — и подстановки шаблона оставались в тексте, а
+     * отправка останавливалась на «заполните вручную».
+     */
+    expect(firstRecipient('"Иванов, Иван" <ivan@mail.local>')).toEqual({
+      name: 'Иванов, Иван',
+      address: 'ivan@mail.local',
+    });
+
+    // И письмо, которое из этого получается, уходит без «заполните вручную»
+    const recipient = firstRecipient('"Иванов, Иван" <ivan@mail.local>, anna@mail.local');
+    const ctx: SubstitutionContext = {
+      recipientName: recipient.name,
+      recipientAddress: recipient.address,
+      ownName: null,
+    };
+    expect(prepareTemplateBody('<p>Здравствуйте, {{имя}}!</p>', ctx)).toBe(
+      '<p>Здравствуйте, Иван!</p>',
+    );
+    expect(unresolvedPlaceholders(prepareTemplateSubject('Для {{адрес}}', ctx))).toEqual([]);
+  });
+
+  it('имя вида «Фамилия, Имя» обращается по имени, а не по фамилии с запятой', () => {
+    expect(firstName('Иванов, Иван')).toBe('Иван');
+    expect(firstName('Иванов, Иван Петрович')).toBe('Иван');
+    // Обратный ход: обычная запись читается как читалась
+    expect(firstName('Пётр Волков')).toBe('Пётр');
+  });
 });
 
 describe('порядок шаблонов', () => {

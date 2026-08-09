@@ -144,6 +144,20 @@ export function useContactSuggest(options: UseContactSuggestOptions): ContactSug
     const timer = setTimeout(() => {
       void fetchContactSuggestions(query, exclude, controller.signal).then((response) => {
         if (controller.signal.aborted) return;
+        if (!response) {
+          /*
+           * Ответа не было вовсе (истёкшая сессия, перезапуск API, обрыв
+           * сети). Запоминать это нельзя: в памяти окна оно лежало бы как
+           * честное «ничего не найдено», и те же буквы больше никогда не
+           * спрашивались бы у сервера — человек стирал бы букву, дописывал
+           * обратно и видел пустоту до самого закрытия окна письма.
+           *
+           * Ничего не запомнив, оставляем показанное как есть: следующее
+           * же нажатие спросит снова, и подсказка вернётся сама.
+           */
+          setState((prev) => ({ ...prev, loading: false }));
+          return;
+        }
         cache.set(query, response);
         // Память не должна расти бесконечно за одно написание письма.
         if (cache.size > 100) {

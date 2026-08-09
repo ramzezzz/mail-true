@@ -31,13 +31,18 @@ interface Harness {
 
 async function buildHarness(
   store: MemoryTemplateStore | null = new MemoryTemplateStore(),
+  /** Предел временного хранилища на ящик. По умолчанию — как на сервере. */
+  mailboxLimit = 250 * 1024 * 1024,
 ): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-templates-'));
   const uploads = new UploadStore(dir);
   await uploads.init();
 
   const app = Fastify({ logger: false }) as unknown as FastifyInstance;
-  app.decorate('deps', { uploads } as unknown as AppDeps);
+  app.decorate('deps', {
+    uploads,
+    config: { UPLOAD_MAILBOX_MAX_BYTES: mailboxLimit },
+  } as unknown as AppDeps);
   app.decorateRequest('mailSession', null);
   app.decorate('requireSession', async function (request) {
     request.mailSession = { id: 'сессия', email: 'test@mail.local', password: 'test12345' };
@@ -279,6 +284,51 @@ test('вставка шаблона отдаёт КОПИЮ: убрав влож
     assert.equal(secondFiles.length, 1);
     assert.equal(secondFiles[0]?.filename, 'договор.pdf');
     assert.notEqual(secondFiles[0]?.id, firstId);
+  } finally {
+    await h.close();
+  }
+});
+
+test('повторные вставки шаблона не съедают предел ящика молча', async () => {
+  /*
+   * Каждая вставка шаблона заводит НОВЫЕ файлы, живущие сутки. Без
+   * проверки предела десяток вставок забивал место ящика, и человек
+   * узнавал об этом с другой стороны: обычный файл к обычному письму
+   * перестаёт прикрепляться, хотя сам он ничего не загружал.
+   */
+  const limit = 2048;
+  const h = await buildHarness(new MemoryTemplateStore(), limit);
+  try {
+    const payload = 'п'.repeat(300); // кириллица — два байта на знак, 600 Б
+    const uploadId = await upload(h.uploads, 'прайс.pdf', payload);
+    const { id } = await createTemplate(h.app, {
+      name: 'С прайсом',
+      bodyHtml: '<div>Прайс.</div>',
+      attachmentIds: [uploadId],
+    });
+
+    // Пока помещается — вставка работает как работала
+    for (let i = 0; i < 2; i += 1) {
+      const ok = await h.app.inject({
+        method: 'POST',
+        url: `/api/templates/${String(id)}/attachments`,
+      });
+      assert.equal(ok.statusCode, 200, ok.body);
+    }
+
+    const before = await h.uploads.usedBy('test@mail.local');
+    assert.ok(before + 600 > limit, 'подготовка: следующая вставка обязана не поместиться');
+
+    const denied = await h.app.inject({
+      method: 'POST',
+      url: `/api/templates/${String(id)}/attachments`,
+    });
+    assert.equal(denied.statusCode, 413, denied.body);
+    // Числами, а не словом «нельзя»: человек должен понять, что убирать
+    assert.match(denied.json().message as string, /Отправьте или удалите начатые письма/u);
+
+    // И отказ не оставил на диске половину вложений шаблона
+    assert.equal(await h.uploads.usedBy('test@mail.local'), before);
   } finally {
     await h.close();
   }

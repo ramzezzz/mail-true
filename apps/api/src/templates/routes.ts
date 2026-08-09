@@ -37,7 +37,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import type { MailSession } from '../types.js';
-import type { UploadMeta } from '../uploads.js';
+import { UploadQuotaError, type UploadMeta } from '../uploads.js';
 import {
   isUndefinedTable,
   isUniqueViolation,
@@ -133,7 +133,7 @@ export function checkAttachmentBudget(files: readonly StoredAttachment[]): void 
 }
 
 export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps): Promise<void> {
-  const { uploads } = app.deps;
+  const { uploads, config } = app.deps;
 
   const requireStore = (): TemplateStore => {
     if (!deps.store) throw new BadRequestError(deps.unavailableReason);
@@ -313,6 +313,32 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
     const { id } = idParamSchema.parse(request.params);
     const files = await guard(() => requireStore().contents(session.email, Number(id)));
     if (files === null) throw new NotFoundError(`Шаблон не найден: ${id}`);
+
+    /*
+     * Предел временного хранилища на ящик проверяется и ЗДЕСЬ, а не только
+     * при обычной загрузке файла (routes/uploads.ts) и при открытии
+     * черновика с вложениями (routes/compose.ts).
+     *
+     * Здесь это нужнее, чем там: маршрут намеренно неидемпотентен — каждая
+     * вставка шаблона заводит НОВЫЕ файлы, и живут они сутки, пока их не
+     * заберёт уборщик. Пятьдесят вставок шаблона на пять мегабайт съедали
+     * весь предел ящика молча, и человек узнавал об этом с другой стороны:
+     * обычный файл к обычному письму перестаёт прикрепляться, хотя сам он
+     * ничего никуда не загружал и связать одно с другим не может.
+     *
+     * Проверка идёт ДО первого сохранения: отказ не должен оставлять на
+     * диске половину вложений шаблона.
+     */
+    const incoming = files.reduce((sum, file) => sum + file.size, 0);
+    const used = await uploads.usedBy(session.email);
+    if (used + incoming > config.UPLOAD_MAILBOX_MAX_BYTES) {
+      throw new UploadQuotaError(
+        'Вложения шаблона не помещаются во временное хранилище: ' +
+          `занято ${formatBytes(used)} из ${formatBytes(config.UPLOAD_MAILBOX_MAX_BYTES)}, ` +
+          `а шаблон добавляет ещё ${formatBytes(incoming)}. ` +
+          'Отправьте или удалите начатые письма и вставьте шаблон снова.',
+      );
+    }
 
     const created: UploadMeta[] = [];
     for (const file of files) {

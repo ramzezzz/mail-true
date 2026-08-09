@@ -30,12 +30,22 @@ export const EMPTY_SUGGESTIONS: ContactSuggestResponse = { items: [], complete: 
  * `signal` обязателен по смыслу, хоть и необязателен по типу: человек
  * печатает быстрее, чем отвечает сеть, и ответ на позавчерашние буквы,
  * пришедший последним, перезаписал бы список под курсором.
+ *
+ * Возвращает `null`, если ответа НЕ БЫЛО: истёкшая сессия (401), 429, 502
+ * от nginx на перезапуске API, обрыв сети, прерванный запрос. Раньше все
+ * эти случаи отдавали пустой список, неотличимый от честного «ничего не
+ * найдено», — и поле «Кому» запоминало его навсегда (см.
+ * useContactSuggest). Набравший «пет» в неудачную секунду человек дальше
+ * не получал подсказку по этим буквам никогда, до закрытия окна письма.
+ *
+ * Отказ по-прежнему не поднимается наверх и человеку не показывается:
+ * подсказка — помощь, а не действие.
  */
 export async function fetchContactSuggestions(
   query: string,
   exclude: readonly string[],
   signal?: AbortSignal,
-): Promise<ContactSuggestResponse> {
+): Promise<ContactSuggestResponse | null> {
   const params = new URLSearchParams({ q: query });
   if (exclude.length > 0) params.set('exclude', exclude.join(','));
   try {
@@ -43,7 +53,7 @@ export async function fetchContactSuggestions(
       credentials: 'same-origin',
       signal: signal ?? null,
     });
-    if (!response.ok) return EMPTY_SUGGESTIONS;
+    if (!response.ok) return null;
     const body = (await response.json()) as Partial<ContactSuggestResponse>;
     return {
       items: Array.isArray(body.items) ? body.items : [],
@@ -51,8 +61,8 @@ export async function fetchContactSuggestions(
     };
   } catch {
     // Прерванный запрос — это норма, а не сбой: значит, человек уже
-    // набрал следующую букву.
-    return EMPTY_SUGGESTIONS;
+    // набрал следующую букву. Ответа всё равно нет, и запоминать нечего.
+    return null;
   }
 }
 

@@ -11,8 +11,17 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { ContactCursor } from './db.js';
-import { applyRange, folderPathForRole, planRanges, type UidRange } from './harvester.js';
+import type { Logger } from 'pino';
+import type { ImapPool } from '../imap/pool.js';
+import type { MailSession } from '../types.js';
+import type { ContactCursor, ContactsDb } from './db.js';
+import {
+  applyRange,
+  ContactHarvester,
+  folderPathForRole,
+  planRanges,
+  type UidRange,
+} from './harvester.js';
 
 const CHUNK = 500;
 
@@ -193,4 +202,145 @@ test('служебные каталоги Dovecot и невыбираемые п
   // Обратный ход: раз подходящей папки нет — честный null, а не первая
   // попавшаяся
   assert.equal(await folderPathForRole(client, 'sent'), null);
+});
+
+/* ------------------------------------------------------------------ */
+/* Что сборщик сообщает наружу                                          */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Это единственный путь, которым сборщик разговаривает с подсказкой:
+ * onProgress -> ContactsService.markComplete -> `complete` в ответе ->
+ * подпись «Собираем адреса из переписки…» в поле «Кому».
+ *
+ * Отдельная беда, ради которой проверки ниже и написаны: отказ (оборванное
+ * соединение с Dovecot, недоступная база) выглядел для этого пути в
+ * точности как «ящик разобран целиком». Человек, набравший фамилию, видел
+ * пустой список без единого слова о том, что половина писем ещё не
+ * просмотрена, — и признак был липким, до перезапуска.
+ */
+
+const SILENT = {
+  debug: () => undefined,
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+} as unknown as Logger;
+
+const SESSION: MailSession = { id: 's1', email: 'test@mail.local', password: 'secret' };
+
+const SENT_FOLDER: ListedFolder = {
+  path: 'Sent',
+  name: 'Sent',
+  delimiter: '/',
+  parentPath: '',
+  specialUse: '\\Sent',
+  flags: new Set<string>(),
+};
+
+interface HarvesterFakes {
+  /** Что сборщик сказал наружу: пары «ящик — разобран целиком». */
+  progress: Array<{ email: string; complete: boolean }>;
+  /** Сколько порций дошло до базы. */
+  upserts: number;
+  harvester: ContactHarvester;
+}
+
+function buildHarvester(
+  fail: { cursors?: boolean; fetch?: boolean } = {},
+  letters = 2,
+): HarvesterFakes {
+  const progress: HarvesterFakes['progress'] = [];
+  let upserts = 0;
+
+  const db = {
+    cursors: async (): Promise<ContactCursor[]> => {
+      if (fail.cursors) throw new Error('база недоступна');
+      return [];
+    },
+    saveCursor: async (): Promise<void> => undefined,
+    upsert: async (): Promise<number> => {
+      upserts += 1;
+      return 1;
+    },
+  } as unknown as ContactsDb;
+
+  const client = {
+    list: async () => [SENT_FOLDER],
+    getMailboxLock: async () => ({ release: () => undefined }),
+    mailbox: { uidValidity: 1, uidNext: letters + 1, exists: letters },
+    fetchAll: async () => {
+      if (fail.fetch) throw new Error('соединение оборвано');
+      return [
+        {
+          uid: 1,
+          envelope: {
+            date: new Date(),
+            to: [{ address: 'ivan@example.com', name: 'Иван Петров' }],
+          },
+        },
+      ];
+    },
+  };
+
+  const pool = {
+    withClient: async <T>(
+      _email: string,
+      _password: string,
+      fn: (c: typeof client) => Promise<T>,
+    ): Promise<T> => fn(client),
+  } as unknown as ImapPool;
+
+  const harvester = new ContactHarvester({
+    db,
+    pool,
+    logger: SILENT,
+    backfillPauseMs: 0,
+    onProgress: (email, complete) => progress.push({ email, complete }),
+  });
+  return {
+    progress,
+    get upserts() {
+      return upserts;
+    },
+    harvester,
+  };
+}
+
+/** Даёт фоновому заходу закончиться: kick результата не ждёт. */
+async function drain(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+test('разобранный целиком ящик так и объявляется', async () => {
+  const fakes = buildHarvester();
+  fakes.harvester.kick({ session: SESSION, collectReceived: false });
+  await drain();
+  assert.deepEqual(fakes.progress, [{ email: SESSION.email, complete: true }]);
+  assert.equal(fakes.upserts, 1, 'адреса из конвертов дошли до указателя');
+});
+
+test('отказ базы НЕ выдаётся за «ящик разобран целиком»', async () => {
+  const fakes = buildHarvester({ cursors: true });
+  fakes.harvester.kick({ session: SESSION, collectReceived: false });
+  await drain();
+  /*
+   * Ни слова наружу: сказать «разобран» — соврать, сказать «не разобран» —
+   * снять признак с ящика, который на самом деле разобран давно. Прежняя
+   * правда остаётся до следующего удачного захода.
+   */
+  assert.deepEqual(fakes.progress, []);
+});
+
+test('оборванное соединение посреди разбора тоже не объявляет ящик разобранным', async () => {
+  const fakes = buildHarvester({ fetch: true });
+  fakes.harvester.kick({ session: SESSION, collectReceived: false });
+  await drain();
+  assert.deepEqual(fakes.progress, []);
+  assert.equal(fakes.upserts, 0);
+  // Обратный ход к молчанию: оно не должно превратиться в вечный перебор.
+  // Соединение с Dovecot у человека одно и общее, занимать его
+  // бесполезными попытками нельзя — следующая будет по kick.
+  await drain();
+  assert.equal(fakes.upserts, 0);
 });
