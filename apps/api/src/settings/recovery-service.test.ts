@@ -33,6 +33,19 @@ import type {
 } from './owner-db.js';
 import { RecoveryService } from './recovery-service.js';
 
+/** Набор номеров списком: строку `1,4:6` разворачиваем в числа. */
+function uidsOf(range: string | number[]): number[] {
+  if (Array.isArray(range)) return range;
+  const out: number[] = [];
+  for (const part of range.split(',')) {
+    const [from, to] = part.split(':');
+    const start = Number(from);
+    const end = to === undefined ? start : Number(to);
+    for (let uid = start; uid <= end; uid += 1) out.push(uid);
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ */
 /* Подставное хранилище                                                 */
 /* ------------------------------------------------------------------ */
@@ -258,7 +271,14 @@ class FakeMailbox {
           };
         }
       },
-      async messageMove(uids: number[], target: string) {
+      /*
+       * Номера приходят набором вида `1,4:6` — так их шлёт и настоящий
+       * imapflow, и наш код (длинный список режется на команды-диапазоны:
+       * Dovecot отвергает слишком длинный аргумент). Заглушка, умевшая
+       * только массив чисел, на такой строке падала.
+       */
+      async messageMove(range: string | number[], target: string) {
+        const uids = uidsOf(range);
         self.calls.push(`move:${self.#selected}->${target}:${uids.join(',')}`);
         const from = self.folders.get(self.#selected)!;
         const to = self.folders.get(target)!;
@@ -273,7 +293,8 @@ class FakeMailbox {
         }
         return self.noUidPlus ? {} : { uidMap, uidValidity: 42 };
       },
-      async messageDelete(uids: number[]) {
+      async messageDelete(rangeOrUids: string | number[]) {
+        const uids = uidsOf(rangeOrUids);
         self.calls.push(`delete:${self.#selected}:${uids.join(',')}`);
         const list = self.folders.get(self.#selected)!;
         for (const uid of uids) {

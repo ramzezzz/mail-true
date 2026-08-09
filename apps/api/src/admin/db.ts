@@ -1602,6 +1602,32 @@ export class AdminDb {
     );
   }
 
+  /**
+   * Считает сорвавшуюся попытку и возвращает, сколько их подряд.
+   *
+   * Отдельный счётчик нужен потому, что «сорвалось» перестало завершать
+   * задание: завершение стирает пароли исходных ящиков, и секундный
+   * перерыв в работе базы не повод их уничтожать. Но и крутить задание
+   * вечно нельзя — а именно это и выходило: работник берёт его каждые
+   * десять секунд и тем же запросом обновляет отметку «жив», поэтому
+   * сторож «молчит дольше 48 часов» не срабатывает никогда.
+   */
+  async bumpMigrationAttempt(id: number): Promise<number> {
+    const rows = await this.query<{ attempts: number }>(
+      `UPDATE mail_migration_jobs
+          SET attempts = attempts + 1, updated_at = now()
+        WHERE id = $1
+        RETURNING attempts`,
+      [id],
+    );
+    return rows[0]?.attempts ?? 0;
+  }
+
+  /** Удачный проход — счётчик сорвавшихся попыток обнуляется. */
+  async resetMigrationAttempts(id: number): Promise<void> {
+    await this.query(`UPDATE mail_migration_jobs SET attempts = 0 WHERE id = $1`, [id]);
+  }
+
   /** Отметиться живым. Пока биение идёт, задание не отберёт другой процесс. */
   async touchMigrationJob(id: number, runner: string): Promise<void> {
     await this.query(

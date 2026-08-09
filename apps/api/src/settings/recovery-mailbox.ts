@@ -40,7 +40,8 @@
 import type { ImapFlow } from 'imapflow';
 import type { Folder } from '@mail-true/shared';
 import { encodePathId, RECOVERY_FOLDER_PATH } from '../mail/folders.js';
-import { listFolders, searchUids } from '../imap/service.js';
+import { chunkUidSets, listFolders, searchUids } from '../imap/service.js';
+import { UpstreamUnavailableError } from '../errors.js';
 
 export { RECOVERY_FOLDER_PATH };
 
@@ -154,11 +155,40 @@ export async function moveToRecovery(
   info: Map<number, RecoverySourceInfo>,
 ): Promise<RecoveryPlacement[]> {
   if (uids.length === 0) return [];
-  const result = (await client.messageMove(uids, target.path, { uid: true })) as
-    UidMapResult | undefined;
-  const map = result?.uidMap;
-  if (!map || map.size === 0) return [];
-  const uidValidity = Number(result?.uidValidity ?? target.uidValidity ?? 0);
+  /*
+   * ОТКАЗ переноса и «сервер не назвал номера» — разные вещи.
+   *
+   * imapflow при неудаче MOVE исключения не бросает: он возвращает
+   * `false`. Раньше этот `false` молча превращался в пустой список, а
+   * вызывающий трактовал пустоту как «письма перенесены, записывать
+   * нечего». Итог: ответ «удалено N», строки уходят из списка, в журнал
+   * пишется «Очищена корзина» — а письма на месте. Ровно тот случай, ради
+   * которого заведены storeFlags и moveUids; сюда правку не донесли.
+   *
+   * Вторая половина: список номеров уходил одной командой. Корзину чистят
+   * как раз тогда, когда она разрослась, а Dovecot отвергает слишком
+   * длинный аргумент примерно с двенадцати тысяч писем — и это снова
+   * `false`, снова «удалено N» и снова письма на месте.
+   */
+  const map = new Map<number, number>();
+  let uidValidityFromServer = 0;
+  for (const range of chunkUidSets(uids)) {
+    const result = (await client.messageMove(range, target.path, { uid: true })) as
+      UidMapResult | boolean | undefined;
+    if (result === false) {
+      throw new UpstreamUnavailableError(
+        'Почтовый сервер не смог очистить корзину. Повторите попытку позже.',
+      );
+    }
+    const chunkMap = typeof result === 'object' && result ? result.uidMap : undefined;
+    if (chunkMap) {
+      for (const [from, to] of chunkMap) map.set(from, to);
+      const validity = Number((result as UidMapResult).uidValidity ?? 0);
+      if (validity > 0) uidValidityFromServer = validity;
+    }
+  }
+  if (map.size === 0) return [];
+  const uidValidity = uidValidityFromServer || Number(target.uidValidity ?? 0);
   const placements: RecoveryPlacement[] = [];
   for (const [sourceUid, recoveryUid] of map) {
     const source = info.get(sourceUid);
@@ -229,7 +259,22 @@ export async function returnFromRecovery(
   if (recoveryUids.length === 0) return;
   const lock = await client.getMailboxLock(recovery.path);
   try {
-    await client.messageMove([...recoveryUids], originPath, { uid: true });
+    /*
+     * Возврат — единственная защита от худшего исхода: письма лежат в
+     * скрытой служебной папке, а записи о них в базе нет. Такие письма не
+     * видны нигде — ни в почте, ни в разделе восстановления, ни работнику
+     * удаления по сроку, — лежат вечно и занимают квоту. Поэтому отказ
+     * здесь обязан быть громким: раньше `false` от messageMove не читался
+     * вовсе, а вызывающий глушил и исключения.
+     */
+    for (const range of chunkUidSets([...recoveryUids])) {
+      const result = await client.messageMove(range, originPath, { uid: true });
+      if (result === false) {
+        throw new UpstreamUnavailableError(
+          'Не удалось вернуть письма из служебной папки восстановления.',
+        );
+      }
+    }
   } finally {
     lock.release();
   }

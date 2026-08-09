@@ -18,7 +18,7 @@
  */
 import type { ImapFlow } from 'imapflow';
 import type { Folder } from '@mail-true/shared';
-import { listFolders, moveUids, storeFlags } from '../imap/service.js';
+import { deleteUids, listFolders, moveUids, storeFlags } from '../imap/service.js';
 import { hasRealAttachments, pickTextPart } from '../mail/structure.js';
 import { decodeBuffer, htmlToText } from '../mail/text.js';
 import type { FilterCondition, FilterRule } from './types.js';
@@ -320,7 +320,9 @@ export async function applyRuleToMailbox(
         // messageDelete без корзины: ставит \Deleted и делает EXPUNGE.
         // Вернуть после этого нечего — потому действие и требует явного
         // выбора в интерфейсе, с предупреждением.
-        await client.messageDelete(matchedUids, { uid: true });
+        // Через deleteUids — по той же причине, что storeFlags и moveUids
+        // строками выше: отказ приходит значением, а не исключением.
+        await deleteUids(client, matchedUids);
         result.deleted += matchedUids.length;
       } else if (targetPath) {
         // Тот же разбор ответа, что и у переноса из списка писем: молчаливый

@@ -16,7 +16,7 @@ import type { ImapFlow } from 'imapflow';
 import { z } from 'zod';
 import type { Folder } from '@mail-true/shared';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
-import { listFolders } from '../imap/service.js';
+import { deleteUids, listFolders } from '../imap/service.js';
 import { errorInfo } from '../log.js';
 import {
   findFolderById,
@@ -392,7 +392,13 @@ export async function folderManagementRoutes(app: FastifyInstance): Promise<void
       }
 
       await withFolder(client, folder.path, async () => {
-        await client.messageDelete(uids, { uid: true });
+        // Через deleteUids: отказ EXPUNGE imapflow отдаёт возвратом
+        // `false`, а число «удалено N» считалось строкой ниже по длине
+        // присланного списка. Эта ветка работает и при выключенном сроке
+        // хранения, и на любой НЕ-корзинной папке — то есть «Очистить» на
+        // своей папке в тысячи писем отчитывалось об успехе, не удалив
+        // ничего.
+        await deleteUids(client, uids);
       });
       return { removed: uids.length, kept: 0, restoreUntil: null };
     });

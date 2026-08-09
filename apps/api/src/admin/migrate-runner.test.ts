@@ -143,6 +143,18 @@ class FakeDb {
   ): Promise<void> {
     this.itemPatches.push({ position, patch });
   }
+
+  /** Сколько попыток подряд уже сорвалось — счётчик из базы. */
+  attempts = 0;
+
+  async bumpMigrationAttempt(): Promise<number> {
+    this.attempts += 1;
+    return this.attempts;
+  }
+
+  async resetMigrationAttempts(): Promise<void> {
+    this.attempts = 0;
+  }
 }
 
 function runnerWith(
@@ -542,4 +554,65 @@ test('исправный ящик-приёмник по-прежнему пер�
   // проверки ниже, и она молча зеленела бы при любой ошибке.
   const errors = typeof errorsRaw === 'string' ? errorsRaw : '';
   assert.doesNotMatch(errors, /отключ|нет на сервере/iu, 'исправный ящик не должен отказывать');
+});
+
+/*
+ * Безнадёжное задание обязано закрыться, а не крутиться вечно.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Перехват неожиданной ошибки перестал завершать задание — и правильно:
+ * завершение стирает пароли исходных ящиков, а секундный перерыв в работе
+ * базы не повод уничтожать заново собранную выгрузку паролей сотен чужих
+ * ящиков. Взамен подразумевалось, что задание «упрётся в срок молчания» и
+ * его пометит брошенным сторож.
+ *
+ * Обещание оказалось невыполнимым: работник берёт задание каждые десять
+ * секунд и ТЕМ ЖЕ запросом обновляет отметку «жив», поэтому условие
+ * «молчит дольше 48 часов» не наступает никогда. Отказ, который сам не
+ * пройдёт (неверная строка подключения к хранилищу состояния, нет таблицы
+ * курсоров, права), означал вечное «идёт»: каждые десять секунд новая
+ * попытка и обращение к чужому серверу, пароли хранятся бессрочно, а
+ * выхода нет ни одного — повтор для идущего задания запрещён, «Остановить»
+ * читается уже после подготовки.
+ */
+void test('несколько сорванных попыток подряд закрывают задание и стирают пароли', async () => {
+  const db = new FakeDb();
+  db.failListItems = new Error('нет таблицы курсоров');
+  const box = new SecretBox(SECRET);
+  const runner = runnerWith(db, box);
+
+  // Первые попытки только считаются: база могла моргнуть.
+  const row = () => jobRow({ secret_enc: packSecrets(box, {}) });
+  for (let i = 0; i < 4; i += 1) {
+    await runner.runJob(row());
+    assert.equal(
+      db.jobPatches.at(-1)?.finished,
+      undefined,
+      `попытка ${String(i + 1)} завершила задание`,
+    );
+    assert.equal(db.released.length, i + 1, 'задание должно быть отпущено до следующего прохода');
+  }
+
+  // Пятая — это уже не «моргнула база».
+  await runner.runJob(row());
+  const last = db.jobPatches.at(-1);
+  assert.equal(last?.finished, true, 'задание крутится вечно: попытки не кончаются');
+  assert.equal(last?.state, 'failed');
+  assert.match(String(last?.error), /попыток/i, 'человеку не сказано, почему задание закрыто');
+});
+
+void test('удачная подготовка обнуляет счётчик сорванных попыток', async () => {
+  const db = new FakeDb();
+  db.failListItems = new Error('база моргнула');
+  const box = new SecretBox(SECRET);
+  const runner = runnerWith(db, box);
+  await runner.runJob(jobRow({ secret_enc: packSecrets(box, {}) }));
+  assert.equal(db.attempts, 1);
+
+  // База вернулась — задание доходит до работы, счётчик сбрасывается.
+  db.failListItems = null;
+  await runner.runJob(jobRow({ secret_enc: packSecrets(box, {}) }));
+  assert.equal(db.attempts, 0, 'редкие срывы копились бы и однажды закрыли исправное задание');
 });

@@ -397,6 +397,28 @@ export async function moveUids(client: ImapFlow, uids: number[], path: string): 
   return moved;
 }
 
+/**
+ * IMAP EXPUNGE (безвозвратное удаление), который не выдаёт отказ за успех.
+ *
+ * Третья команда из того же ряда: `messageDelete` при неудаче возвращает
+ * `false` (node_modules/imapflow/lib/commands/expunge.js, `catch { … return
+ * false; }`). Вызывающие считали удалённым весь присланный список сразу
+ * после вызова — и «Очистить» на своей папке в тысячи писем отчитывалось
+ * об успехе, ничего не удалив. Нарезка нужна по той же причине, что и у
+ * остальных: очищают как раз разросшуюся папку, а слишком длинный
+ * аргумент Dovecot отвергает — и это снова `false`.
+ */
+export async function deleteUids(client: ImapFlow, uids: number[]): Promise<void> {
+  for (const range of chunkUidSets(uids)) {
+    const ok = await client.messageDelete(range, { uid: true });
+    if (ok === false) {
+      throw new UpstreamUnavailableError(
+        'Почтовый сервер не удалил письма. Повторите попытку позже.',
+      );
+    }
+  }
+}
+
 /** Сколько писем в наборе вида `1,4:6,9` — для честного счёта перенесённых. */
 export function countUids(range: string): number {
   let total = 0;
