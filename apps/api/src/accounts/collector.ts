@@ -71,17 +71,43 @@ export class CollectTimeoutError extends Error {
  *
  * Нужен именно здесь, а не в вызывающем коде: IMAP-клиент может принять
  * соединение и замолчать на команде, и тогда обещание не разрешится
- * никогда. Сама работа при этом продолжает висеть в фоне — оборвать её
- * снаружи нечем, но состояние подключения мы записать обязаны.
+ * никогда.
+ *
+ * ВМЕСТЕ С ОТКАЗОМ РАБОТА ОТМЕНЯЕТСЯ. Раньше она продолжала висеть в
+ * фоне — «оборвать её снаружи нечем», как было написано здесь же, — и
+ * это стоило людям дублей в ящике:
+ *
+ *   1. предел сработал, подключение помечено ошибкой, пометка «идёт»
+ *      снята;
+ *   2. настоящий перенос при этом ЖИВ: держит оба соединения и
+ *      продолжает по одному складывать письма в папку человека;
+ *   3. человек видит ошибку и жмёт «Забрать почту сейчас» (или через
+ *      пятнадцать минут приходит планировщик — а брошенным подключение
+ *      считается только через тридцать);
+ *   4. второй проход строит набор для сверки ОДИН раз, в начале. Всё,
+ *      что первый — ещё живой — проход допишет после этого снимка, во
+ *      втором числится отсутствующим и кладётся ЗАНОВО.
+ *
+ * Пакет переноса умеет прерываться (MigrateMailboxOptions.signal), им и
+ * пользуемся: висящая работа прекращается на ближайшей проверке, и
+ * второго прохода по тем же письмам не будет.
  */
-async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
+async function withTimeout<T>(
+  work: Promise<T>,
+  ms: number,
+  /** Чем оборвать работу, когда время вышло. */
+  cancel?: AbortController,
+): Promise<T> {
   if (ms <= 0) return work;
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new CollectTimeoutError(ms)), ms);
+        timer = setTimeout(() => {
+          cancel?.abort();
+          reject(new CollectTimeoutError(ms));
+        }, ms);
         timer.unref?.();
       }),
     ]);
@@ -194,6 +220,13 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
   const deadline = () => (timeoutMs <= 0 ? 0 : Math.max(1, timeoutMs - (Date.now() - started)));
 
   let state: StateStore | null = null;
+  /*
+   * Чем оборвать работу по пределу времени — и признак того, что
+   * оборвали. Оба нужны в finally: закрывать хранилище состояния
+   * сразу после отмены нельзя, работа ещё дописывает отметки.
+   */
+  let cancel: AbortController | null = null;
+  let cancelled = false;
   try {
     const sourcePaths = await withTimeout(listSourceFolders(source), deadline());
     const { overrides, exclude } = buildFolderOverrides(
@@ -207,6 +240,9 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
       await state.init();
     }
 
+    // Один и тот же сигнал уходит в перенос и срабатывает по пределу
+    // времени: иначе брошенная работа продолжает класть письма в ящик.
+    cancel = new AbortController();
     const report = await withTimeout(
       migrateMailbox({
         source,
@@ -214,9 +250,11 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
         mapping: { overrides, exclude },
         batchSize,
         logger,
+        signal: cancel.signal,
         ...(state ? { state } : {}),
       }),
       deadline(),
+      cancel,
     );
 
     return {
@@ -230,6 +268,7 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    cancelled = err instanceof CollectTimeoutError;
     logger.warn(
       errorInfo(err, { account: account.address }),
       'Сбор почты с внешнего ящика не удался',
@@ -244,6 +283,20 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
       report: null,
     };
   } finally {
+    /*
+     * Хранилище состояния закрываем ПОСЛЕ отмены, а не одновременно с ней.
+     *
+     * Перенос прерывается на ближайшей проверке сигнала, а закрытие
+     * происходит сразу — между этими двумя мгновениями работа ещё жива и
+     * пишет отметки о перенесённых письмах. Раньше `pool.end()` выдёргивал
+     * у неё хранилище прямо на ходу: каждая такая запись падала, попадала
+     * в поштучный перехват и письмо, УЖЕ ПОЛОЖЕННОЕ в ящик, помечалось
+     * неудачным. То есть отчёт врал и во вторую сторону — «не перенесено»
+     * о том, что перенесено.
+     *
+     * Короткой паузы хватает: проверка сигнала стоит между письмами.
+     */
+    if (cancelled) await new Promise((resolve) => setTimeout(resolve, 250));
     if (state) await state.close().catch(() => undefined);
   }
 }
