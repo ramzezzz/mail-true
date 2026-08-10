@@ -261,13 +261,6 @@ async function moveAside(path: string): Promise<Kept> {
   }
 }
 
-/** Атомарная запись: временный файл рядом плюс переименование. */
-async function writeAtomic(path: string, data: Buffer | string, mode: number): Promise<void> {
-  const tmp = `${path}.new`;
-  await writeFile(tmp, data, { mode });
-  await rename(tmp, path);
-}
-
 /**
  * ЗАМЕНА СЕРТИФИКАТА ЦЕЛИКОМ ИЛИ НИКАК.
  *
