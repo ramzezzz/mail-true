@@ -186,6 +186,10 @@
   font-size: var(--mt-font-paragraph-size, 15px);
   line-height: 22px;
   overflow-x: auto;
+  /* Тот же слой, что и на экране письма: position:fixed из чужого письма
+     не должен ложиться поверх интерфейса. Разбор — в MessagePage.module.css. */
+  contain: layout paint style;
+  isolation: isolate;
 }
 
 .body :global(img) {

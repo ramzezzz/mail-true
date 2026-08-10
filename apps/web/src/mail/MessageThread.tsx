@@ -13,7 +13,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { MessageSummary } from '@mail-true/shared';
+import { MAIL_BODY_CLASS, type MessageSummary } from '@mail-true/shared';
 import { useMessage } from '../api/queries';
 import { useAccountAddress } from '../app/session';
 import { Spinner } from '../components';
@@ -186,7 +186,9 @@ function ThreadLetterBody({ id, folderId }: { id: string; folderId: string }) {
   return (
     <div className={styles.body}>
       {data.bodyHtml ? (
-        <div dangerouslySetInnerHTML={{ __html: data.bodyHtml }} />
+        /* Класс тот же, что и на экране письма: к нему сервер привязал
+           стили самого письма (MAIL_BODY_CLASS). */
+        <div className={MAIL_BODY_CLASS} dangerouslySetInnerHTML={{ __html: data.bodyHtml }} />
       ) : (
         <pre className={styles.bodyText}>{data.bodyText}</pre>
       )}

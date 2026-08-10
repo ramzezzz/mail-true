@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import type { Message, MessageListQuery } from '@mail-true/shared';
+import { MAIL_BODY_CLASS, type Message, type MessageListQuery } from '@mail-true/shared';
 import {
   AiMessageBanners,
   AiSummaryButton,
@@ -1180,7 +1180,11 @@ export function MessagePage() {
         ) : message.bodyHtml ? (
           <div
             ref={bodyRef}
-            className={styles.body}
+            /* MAIL_BODY_CLASS обязателен: к нему сервер приписывает все
+               селекторы из блока <style> письма (mail/sanitize.ts). Без
+               этого класса стили письма просто не найдут своей области —
+               а раньше они находили всю страницу почты. */
+            className={`${styles.body} ${MAIL_BODY_CLASS}`}
             dangerouslySetInnerHTML={{ __html: message.bodyHtml }}
           />
         ) : hasBodyText(message) ? (

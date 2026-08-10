@@ -10,6 +10,7 @@
  *   может показать их по кнопке «Показать картинки».
  */
 import createDOMPurify from 'dompurify';
+import { MAIL_BODY_CLASS } from '@mail-true/shared';
 import { JSDOM } from 'jsdom';
 
 const jsdomInstance = new JSDOM('<!doctype html><html><body></body></html>');
@@ -198,12 +199,139 @@ function rewriteImageSource(el: Element, attr: 'src' | 'background'): void {
   // Прочие схемы, прошедшие ALLOWED_URI (data:image и т. п.), оставляем как есть
 }
 
+/** Селекторы, означающие «весь документ»: их заменяем на контейнер письма. */
+const ROOT_SELECTOR = /^(?::root|html|body|\*)$/i;
+
+/**
+ * Приписывает каждому селектору письма контейнер, в котором оно показано.
+ *
+ * ЗАЧЕМ. Блок `<style>` письма разрешён намеренно — без него разъезжается
+ * вёрстка рассылок (разбор — у ADD_TAGS ниже). Но правила из него до сих
+ * пор действовали на ВЕСЬ документ почты, потому что тело письма
+ * вставляется прямо в разметку приложения. То есть письмо могло
+ * перекрасить интерфейс (`:root{--mt-color-…}`), спрятать его элементы
+ * (`button{display:none}`) и — самое неприятное — накрыть страницу своим
+ * слоем: `body::before{position:fixed;inset:0;background:#fff;z-index:9}`
+ * с собственной ссылкой поверх. Это готовая подделка окна входа, и от
+ * политики страницы она не зависит: стили встроенные, `unsafe-inline` для
+ * них разрешён.
+ *
+ * Ровно этот довод уже записан для шаблонов (templates/sanitize.ts), где
+ * `style` просто запрещён. Здесь запретить нельзя — вёрстка чужих писем
+ * на этом теге и держится, — поэтому область сужается до контейнера.
+ *
+ * Разбор без полноценного парсера CSS: идём по тексту, отделяя «прелюдию»
+ * (селекторы или @-правило) от блока в фигурных скобках. Вложенные
+ * @-правила (`@media`, `@supports`) обрабатываются рекурсивно; правила,
+ * внутри которых селекторов нет вовсе (`@font-face`, `@keyframes`,
+ * `@page`), остаются как есть.
+ */
+export function scopeCss(css: string, scope = `.${MAIL_BODY_CLASS}`): string {
+  const scopeSelector = (raw: string): string => {
+    const selector = raw.trim();
+    if (selector === '') return '';
+    // Селектор «весь документ» становится самим контейнером, иначе
+    // `body{background:#000}` красило бы страницу почты.
+    if (ROOT_SELECTOR.test(selector)) return scope;
+    /*
+     * Корень отбрасываем, остальное приписываем контейнеру. Пробел после
+     * корня решает, как именно: `body table` — потомок контейнера
+     * (`.scope table`), а `body::before`, `body.dark`, `body>div` — сам
+     * контейнер (`.scope::before`). Без этой разницы псевдоэлемент письма
+     * достался бы каждому его потомку сразу.
+     */
+    const stripped = selector.replace(/^(?::root|html|body|\*)\b/i, '');
+    if (stripped.trim() === '') return scope;
+    // Корень не сняли — это обычный селектор письма.
+    if (stripped === selector) return `${scope} ${selector}`;
+    return /^\s/.test(stripped) ? `${scope} ${stripped.trim()}` : `${scope}${stripped}`;
+  };
+
+  const scopePrelude = (prelude: string): string =>
+    prelude
+      .split(',')
+      .map((part) => scopeSelector(part))
+      .filter((part) => part !== '')
+      .join(', ');
+
+  let out = '';
+  let prelude = '';
+  let i = 0;
+  while (i < css.length) {
+    const ch = css[i] as string;
+    if (ch === '{') {
+      // Нашли блок: собираем его целиком, считая вложенные скобки.
+      let depth = 1;
+      let j = i + 1;
+      while (j < css.length && depth > 0) {
+        const c = css[j] as string;
+        if (c === '{') depth += 1;
+        else if (c === '}') depth -= 1;
+        j += 1;
+      }
+      const body = css.slice(i + 1, depth === 0 ? j - 1 : j);
+      const head = prelude.trim();
+      if (head.startsWith('@')) {
+        const name = /^@([a-z-]+)/i.exec(head)?.[1]?.toLowerCase() ?? '';
+        // Внутри этих правил не селекторы, а кадры и дескрипторы.
+        const opaque = name === 'font-face' || name === 'keyframes' || name === 'page';
+        out += `${head}{${opaque ? body : scopeCss(body, scope)}}`;
+      } else {
+        const scoped = scopePrelude(head);
+        // Селекторов не осталось — выбрасываем и блок: правило без
+        // селектора применить всё равно не к чему.
+        if (scoped !== '') out += `${scoped}{${body}}`;
+      }
+      prelude = '';
+      i = depth === 0 ? j : css.length;
+      continue;
+    }
+    if (ch === '}') {
+      // Лишняя закрывающая скобка — мусор, на который не стоит падать.
+      prelude = '';
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      // Строка в селекторе (`[title="{"]`) — копируем целиком, иначе
+      // скобка или точка с запятой внутри неё разорвали бы разбор.
+      const end = css.indexOf(ch, i + 1);
+      const stop = end === -1 ? css.length : end + 1;
+      prelude += css.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    if (ch === '@' && prelude.trim() === '') {
+      /*
+       * @-правило БЕЗ блока (@charset, @namespace; @import вырезает
+       * scrubCss) заканчивается точкой с запятой. Отличаем его от
+       * @media/@font-face по тому, что встретится раньше: точка с запятой
+       * или открывающая скобка. Без этой проверки `@media …{ … }` c любой
+       * точкой с запятой внутри — а она там есть всегда — резался по
+       * первой же из них, и остаток правила вываливался наружу мусором.
+       */
+      const brace = css.indexOf('{', i);
+      const semi = css.indexOf(';', i);
+      if (semi !== -1 && (brace === -1 || semi < brace)) {
+        out += css.slice(i, semi + 1);
+        i = semi + 1;
+        continue;
+      }
+    }
+    prelude += ch;
+    i += 1;
+  }
+  return out;
+}
+
 purifier.addHook('uponSanitizeElement', (node, data) => {
   if (data.tagName === 'style') {
     const el = node as Element;
     const { css, blocked } = scrubCss(el.textContent ?? '', ctx.allowRemote);
     ctx.blocked += blocked;
-    el.textContent = css;
+    // Область действия — только контейнер письма. Без этого правила письма
+    // применялись ко всей странице почты; разбор — у scopeCss.
+    el.textContent = scopeCss(css);
   }
 });
 

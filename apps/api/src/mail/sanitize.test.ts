@@ -199,3 +199,32 @@ test('фон без схемы возвращается вместе с оста
   });
   assert.match(allowed.html, /cdn\.example\/f\.png/, 'после «Показать» фон так и не вернулся');
 });
+
+test('стиль письма действует только внутри письма', () => {
+  const { html } = sanitizeEmailHtml(
+    '<style>body{background:#000}:root{--mt-color-bg:red}' +
+      'body::before{position:fixed;inset:0;z-index:9}' +
+      '.wrap{color:blue}@media (max-width:600px){body{font-size:9px}}</style><p>текст</p>',
+    { allowRemote: false },
+  );
+  // Ни одного селектора, действующего на страницу почты, остаться не должно:
+  // письмо не может ни перекрасить интерфейс, ни накрыть его своим слоем.
+  assert.ok(!/(^|[{}])\s*body\s*[{,]/.test(html), 'селектор body должен быть сужен');
+  assert.ok(!html.includes(':root{'), 'селектор :root должен быть сужен');
+  assert.match(html, /\.mt-mail-html\{background:#000\}/);
+  assert.match(html, /\.mt-mail-html::before\{/);
+  assert.match(html, /\.mt-mail-html \.wrap\{color:blue\}/);
+  // Вложенные @-правила тоже сужаются, иначе через @media проходило бы всё.
+  assert.match(html, /@media \(max-width:600px\)\{\.mt-mail-html\{font-size:9px\}\}/);
+});
+
+test('@font-face и @keyframes остаются нетронутыми', () => {
+  const { html } = sanitizeEmailHtml(
+    '<style>@keyframes go{from{opacity:0}to{opacity:1}}' +
+      '@font-face{font-family:X;src:url(data:font/woff2;base64,AA)}</style><p>x</p>',
+    { allowRemote: false },
+  );
+  // Внутри них не селекторы, а кадры и дескрипторы: сужать нечего и нельзя.
+  assert.match(html, /@keyframes go\{from\{opacity:0\}to\{opacity:1\}\}/);
+  assert.ok(html.includes('@font-face{font-family:X;'));
+});
