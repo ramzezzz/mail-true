@@ -31,7 +31,12 @@ import {
   IconTrash,
 } from '../../mail/icons';
 import { fileSizeText, templatePreview } from '../../compose/TemplateMenu';
-import { moveTemplate, TEMPLATE_PLACEHOLDERS, type MailTemplate } from '../../mail/templatesApi';
+import {
+  moveTemplate,
+  templatesApi,
+  TEMPLATE_PLACEHOLDERS,
+  type MailTemplate,
+} from '../../mail/templatesApi';
 import {
   useCreateTemplate,
   useDeleteTemplate,
@@ -62,6 +67,29 @@ export function TemplatesPage() {
   const reorder = useReorderTemplates();
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const showNotice = useUiStore.getState().showNotice;
+
+  /**
+   * Открыть правку.
+   *
+   * Длинный шаблон приходит в списке ОБРЕЗАННЫМ, и правка обрезанного
+   * текста означала бы, что сохранение отрежет остальное — молча и
+   * необратимо. Поэтому сначала дочитываем полный, и только потом
+   * открываем окно.
+   */
+  const openEdit = (template: MailTemplate): void => {
+    if (template.bodyTruncated !== true) {
+      setDialog({ kind: 'edit', template });
+      return;
+    }
+    void templatesApi
+      .getTemplate(template.id)
+      .then((full) => setDialog({ kind: 'edit', template: full }))
+      .catch(() =>
+        showNotice(
+          'Не удалось прочитать шаблон целиком — правка отменена, чтобы не потерять текст',
+        ),
+      );
+  };
 
   const applyOrder = (id: number, direction: 'up' | 'down') => {
     reorder.mutate(moveTemplate(items, id, direction).map((t) => t.id));
@@ -122,11 +150,7 @@ export function TemplatesPage() {
                   </IconButton>
                 </div>
 
-                <button
-                  type="button"
-                  className={styles.body}
-                  onClick={() => setDialog({ kind: 'edit', template })}
-                >
+                <button type="button" className={styles.body} onClick={() => openEdit(template)}>
                   <span className={styles.name}>{template.name}</span>
                   {template.subject !== '' && (
                     <span className={styles.subject}>Тема: {template.subject}</span>
@@ -146,10 +170,7 @@ export function TemplatesPage() {
 
                 <div className={styles.actions}>
                   <Tooltip text="Изменить шаблон">
-                    <IconButton
-                      label="Изменить шаблон"
-                      onClick={() => setDialog({ kind: 'edit', template })}
-                    >
+                    <IconButton label="Изменить шаблон" onClick={() => openEdit(template)}>
                       <IconPencil />
                     </IconButton>
                   </Tooltip>

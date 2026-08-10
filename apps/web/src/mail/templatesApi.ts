@@ -26,6 +26,16 @@ export interface MailTemplate {
   name: string;
   subject: string;
   bodyHtml: string;
+  /**
+   * Тело в СПИСКЕ обрезано — полное дочитывается по номеру
+   * (`templatesApi.getTemplate`).
+   *
+   * Список приходит при открытии окна написания и на каждой странице
+   * настроек, а тело шаблона допускается до полумегабайта при сотне
+   * шаблонов на ящик. В меню при этом видно первые полсотни символов, и
+   * тащить туда всё остальное незачем.
+   */
+  bodyTruncated?: boolean;
   position: number;
   attachments: TemplateAttachment[];
 }
@@ -85,6 +95,15 @@ export const templatesApi = {
     if (useMocks) return Promise.resolve(TEMPLATES_ON_MOCKS);
     return apiFetch('/api/templates');
   },
+
+  /**
+   * Один шаблон целиком.
+   *
+   * Нужен там, где важен весь текст: вставка в письмо и правка. Список
+   * отдаёт тело обрезанным (см. bodyTruncated), и работа с ним напрямую
+   * вставила бы в письмо половину шаблона.
+   */
+  getTemplate: (id: number): Promise<MailTemplate> => apiFetch(`/api/templates/${String(id)}`),
 
   createTemplate: (draft: TemplateDraft): Promise<MailTemplate> =>
     apiFetch('/api/templates', { method: 'POST', body: JSON.stringify(draft) }),

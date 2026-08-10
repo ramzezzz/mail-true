@@ -21,12 +21,15 @@ import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js'
 import {
   MAX_SAVED_SEARCH_NAME_LENGTH,
   MAX_SAVED_SEARCH_QUERY_LENGTH,
-  MAX_SAVED_SEARCHES,
   normalizeSavedSearchName,
   normalizeSavedSearchQuery,
   type SavedSearch,
 } from './saved-searches.js';
-import { isUndefinedTable, type SavedSearchStore } from './saved-searches-db.js';
+import {
+  isUndefinedTable,
+  SavedSearchLimitError,
+  type SavedSearchStore,
+} from './saved-searches-db.js';
 import type { MailSession } from '../types.js';
 
 /** Подсказка, если миграцию 0027 ещё не применили. */
@@ -107,19 +110,28 @@ export async function savedSearchRoutes(
      */
     if (query === '') throw new BadRequestError('Нечего сохранять: запрос пуст');
 
-    const existing = await listOf(session);
-    if (existing.length >= MAX_SAVED_SEARCHES) {
-      throw new BadRequestError(
-        `Сохранённых запросов уже ${String(MAX_SAVED_SEARCHES)} — больше не поместится в колонку. ` +
-          'Уберите ненужные.',
-      );
+    /*
+     * Предел считает ХРАНИЛИЩЕ — одной командой со вставкой. Прежняя
+     * проверка стояла здесь: «прочитали список, решили, вставили», и два
+     * нажатия подряд или повтор при обрыве связи проходили её оба. Тем
+     * же доводом закрыто занятое имя (saved-searches-db.ts).
+     */
+    let created: SavedSearch | null = null;
+    try {
+      created = await requireStore().create(session.email, {
+        name,
+        query,
+        includeJunk: body.includeJunk,
+      });
+    } catch (err) {
+      if (err instanceof SavedSearchLimitError) {
+        throw new BadRequestError(
+          `Сохранённых запросов уже ${String(err.limit)} — больше не поместится в колонку. ` +
+            'Уберите ненужные.',
+        );
+      }
+      throw err;
     }
-
-    const created = await requireStore().create(session.email, {
-      name,
-      query,
-      includeJunk: body.includeJunk,
-    });
     /*
      * `null` — имя занято. Отвечаем отказом, а не молча вторым таким же
      * именем: два одинаковых имени в колонке человек различить не сможет

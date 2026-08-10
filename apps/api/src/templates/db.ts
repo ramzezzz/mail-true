@@ -14,7 +14,12 @@
 import { Pool, type PoolClient, type QueryResultRow } from 'pg';
 import type { Logger } from 'pino';
 import { errorInfo } from '../log.js';
-import type { MailTemplate, TemplateAttachment } from './types.js';
+import {
+  MAX_TEMPLATES_PER_ACCOUNT,
+  TEMPLATE_LIST_BODY_CHARS,
+  type MailTemplate,
+  type TemplateAttachment,
+} from './types.js';
 
 /** Вложение вместе с байтами — так оно кладётся в базу и достаётся оттуда. */
 export interface StoredAttachment extends Omit<TemplateAttachment, 'id'> {
@@ -33,8 +38,14 @@ export type TemplateFieldsPatch = Partial<TemplateFields>;
 export interface TemplateStore {
   /** Применена ли миграция 0026. */
   schemaReady(): Promise<boolean>;
-  /** Шаблоны ящика в порядке показа. Байты вложений НЕ читаются. */
+  /**
+   * Шаблоны ящика в порядке показа. Байты вложений НЕ читаются, а тело
+   * обрезается до TEMPLATE_LIST_BODY_CHARS — длинное помечается
+   * `bodyTruncated`, и за ним ходят в full().
+   */
   list(accountEmail: string): Promise<MailTemplate[]>;
+  /** Один шаблон целиком — с полным телом. */
+  full(accountEmail: string, id: number): Promise<MailTemplate | null>;
   create(
     accountEmail: string,
     fields: TemplateFields,
@@ -101,6 +112,21 @@ export interface TemplatesDbOptions {
   connectionString: string;
   logger: Logger;
   max?: number;
+}
+
+/**
+ * Шаблонов уже столько, сколько разрешено.
+ *
+ * Отдельная ошибка, а не проверка в маршруте: считать до вставки — это
+ * «прочитали список, решили, вставили», и между чтением и вставкой
+ * пролезает второй такой же запрос. Повтор при обрыве связи или два
+ * сохранения из разных вкладок пробивали потолок молча.
+ */
+export class TemplateLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`Шаблонов уже ${String(limit)} — больше не помещается`);
+    this.name = 'TemplateLimitError';
+  }
 }
 
 export class TemplatesDb implements TemplateStore {
@@ -192,19 +218,70 @@ export class TemplatesDb implements TemplateStore {
       byTemplate.set(key, bucket);
     }
 
-    return rows.map((row) => ({
+    return rows.map((row) => {
+      /*
+       * Тело в списке ОБРЕЗАЕТСЯ.
+       *
+       * Список запрашивается при открытии окна написания и на каждой
+       * странице настроек, а тело допускается до 512 КБ при сотне
+       * шаблонов на ящик — до полусотни мегабайт в одном ответе. В меню
+       * при этом видно первые полсотни символов.
+       *
+       * Целое тело нужно вставке в письмо и правке; обе умеют дочитать
+       * шаблон по номеру, увидев признак `bodyTruncated`.
+       */
+      const body = row.body_html;
+      const cut = body.length > TEMPLATE_LIST_BODY_CHARS;
+      return {
+        id: toId(row.id),
+        name: row.name,
+        subject: row.subject,
+        bodyHtml: cut ? body.slice(0, TEMPLATE_LIST_BODY_CHARS) : body,
+        ...(cut ? { bodyTruncated: true } : {}),
+        position: row.position,
+        attachments: byTemplate.get(toId(row.id)) ?? [],
+      };
+    });
+  }
+
+  /**
+   * Один шаблон ЦЕЛИКОМ.
+   *
+   * Отдельным запросом, а не выборкой из list(): список обрезает тело, и
+   * вставка шаблона в письмо получила бы половину текста. Раньше этот
+   * метод и правда брал шаблон из списка — тогда список был полным.
+   */
+  async full(accountEmail: string, id: number): Promise<MailTemplate | null> {
+    const rows = await this.#query<TemplateRow>(
+      `SELECT id, name, subject, body_html, position FROM mail_templates
+        WHERE id = $1 AND lower(account_email) = lower($2)`,
+      [id, accountEmail],
+    );
+    const row = rows[0];
+    if (!row) return null;
+
+    const files = await this.#query<AttachmentRow>(
+      `SELECT id, template_id, filename, mime_type, size FROM mail_template_attachments
+        WHERE template_id = $1 ORDER BY position, id`,
+      [id],
+    );
+    return {
       id: toId(row.id),
       name: row.name,
       subject: row.subject,
       bodyHtml: row.body_html,
       position: row.position,
-      attachments: byTemplate.get(toId(row.id)) ?? [],
-    }));
+      attachments: files.map((file) => ({
+        id: toId(file.id),
+        filename: file.filename,
+        mimeType: file.mime_type,
+        size: file.size,
+      })),
+    };
   }
 
   async #one(accountEmail: string, id: number): Promise<MailTemplate | null> {
-    const all = await this.list(accountEmail);
-    return all.find((t) => t.id === id) ?? null;
+    return this.full(accountEmail, id);
   }
 
   async #putAttachments(
@@ -233,6 +310,25 @@ export class TemplatesDb implements TemplateStore {
     attachments: readonly StoredAttachment[],
   ): Promise<MailTemplate> {
     const id = await this.#tx(async (client) => {
+      /*
+       * Предел проверяется ЗДЕСЬ, внутри той же транзакции, что и
+       * вставка, и под блокировкой по ящику.
+       *
+       * Блокировка нужна потому, что блокировать нечего: строки-владельца
+       * у ящика нет, а `count(*) ... FOR UPDATE` Postgres не разрешает
+       * (с агрегатом нельзя). Советующая блокировка по хешу адреса
+       * выстраивает создание шаблонов одного ящика в очередь и
+       * отпускается сама вместе с транзакцией.
+       */
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext(lower($1)))`, [accountEmail]);
+      const counted = await client.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM mail_templates WHERE lower(account_email) = lower($1)`,
+        [accountEmail],
+      );
+      if (Number(counted.rows[0]?.n ?? '0') >= MAX_TEMPLATES_PER_ACCOUNT) {
+        throw new TemplateLimitError(MAX_TEMPLATES_PER_ACCOUNT);
+      }
+
       const inserted = await client.query<TemplateRow>(
         `INSERT INTO mail_templates (account_email, name, subject, body_html, position)
          VALUES (lower($1), $2, $3, $4,
@@ -404,10 +500,25 @@ export class MemoryTemplateStore implements TemplateStore {
   }
 
   async list(accountEmail: string): Promise<MailTemplate[]> {
+    // Обрезаем так же, как настоящее хранилище: иначе проверки не
+    // поймали бы код, который забыл дочитать длинный шаблон.
     return this.#bucket(accountEmail)
       .slice()
       .sort((a, b) => a.position - b.position || a.id - b.id)
-      .map((item) => this.#visible(item));
+      .map((item) => {
+        const visible = this.#visible(item);
+        if (visible.bodyHtml.length <= TEMPLATE_LIST_BODY_CHARS) return visible;
+        return {
+          ...visible,
+          bodyHtml: visible.bodyHtml.slice(0, TEMPLATE_LIST_BODY_CHARS),
+          bodyTruncated: true,
+        };
+      });
+  }
+
+  async full(accountEmail: string, id: number): Promise<MailTemplate | null> {
+    const found = this.#bucket(accountEmail).find((item) => item.id === id);
+    return found ? this.#visible(found) : null;
   }
 
   async create(
@@ -416,6 +527,11 @@ export class MemoryTemplateStore implements TemplateStore {
     attachments: readonly StoredAttachment[],
   ): Promise<MailTemplate> {
     const bucket = this.#bucket(accountEmail);
+    // Предел — как в настоящем хранилище: он часть договора, а не
+    // проверка маршрута.
+    if (bucket.length >= MAX_TEMPLATES_PER_ACCOUNT) {
+      throw new TemplateLimitError(MAX_TEMPLATES_PER_ACCOUNT);
+    }
     if (bucket.some((t) => t.name.toLowerCase() === fields.name.toLowerCase())) {
       // Тот же отказ, что даёт уникальный индекс в базе, — с тем же кодом,
       // иначе маршрут проверялся бы против поведения, которого нет.

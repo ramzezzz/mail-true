@@ -41,6 +41,7 @@ import { UploadQuotaError, type UploadMeta } from '../uploads.js';
 import {
   isUndefinedTable,
   isUniqueViolation,
+  TemplateLimitError,
   type StoredAttachment,
   type TemplateStore,
 } from './db.js';
@@ -147,6 +148,12 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
     } catch (err) {
       if (isUndefinedTable(err)) throw new BadRequestError(TEMPLATES_MIGRATION_HINT);
       if (isUniqueViolation(err)) throw new BadRequestError('Шаблон с таким названием уже есть');
+      if (err instanceof TemplateLimitError) {
+        throw new BadRequestError(
+          `Шаблонов уже ${String(err.limit)} — больше не помещается. ` +
+            'Удалите ненужные в настройках почты.',
+        );
+      }
       throw err;
     }
   };
@@ -210,6 +217,28 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
     },
   );
 
+  /**
+   * Один шаблон целиком.
+   *
+   * Список отдаёт тело обрезанным (см. TEMPLATE_LIST_BODY_CHARS), потому
+   * что запрашивается при каждом открытии окна написания и на каждой
+   * странице настроек. Полный текст нужен ровно двум действиям —
+   * вставке в письмо и правке, — и обе ходят сюда, увидев признак
+   * `bodyTruncated`.
+   */
+  app.get<{ Params: { id: string } }>(
+    '/templates/:id',
+    { preHandler: app.requireSession },
+    async (request) => {
+      const session = requireMailSession(request.mailSession);
+      const store = requireStore();
+      const { id } = idParamSchema.parse(request.params);
+      const found = await store.full(session.email, Number(id));
+      if (!found) throw new NotFoundError('Шаблон не найден');
+      return found;
+    },
+  );
+
   app.post('/templates', { preHandler: app.requireSession }, async (request) => {
     const session = requireMailSession(request.mailSession);
     const body = draftSchema.parse(request.body);
@@ -230,16 +259,16 @@ export async function templateRoutes(app: FastifyInstance, deps: TemplatesDeps):
       throw new BadRequestError('Шаблон пустой: в нём нет ни темы, ни текста, ни вложений');
     }
 
-    return guard(async () => {
-      const existing = await store.list(session.email);
-      if (existing.length >= MAX_TEMPLATES_PER_ACCOUNT) {
-        throw new BadRequestError(
-          `Шаблонов уже ${String(MAX_TEMPLATES_PER_ACCOUNT)} — больше не помещается. ` +
-            'Удалите ненужные в настройках почты.',
-        );
-      }
-      return store.create(session.email, { name, subject: body.subject, bodyHtml }, files);
-    });
+    /*
+     * Предел проверяет ХРАНИЛИЩЕ, внутри той же транзакции, что и
+     * вставка. Прежняя проверка стояла здесь — «прочитали список,
+     * решили, вставили», — и между чтением и вставкой пролезал второй
+     * такой же запрос: повтор при обрыве связи или два сохранения из
+     * разных вкладок пробивали потолок молча.
+     */
+    return guard(() =>
+      store.create(session.email, { name, subject: body.subject, bodyHtml }, files),
+    );
   });
 
   app.put('/templates/:id', { preHandler: app.requireSession }, async (request) => {

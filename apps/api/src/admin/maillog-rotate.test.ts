@@ -111,9 +111,18 @@ test('самопроверка смотрит все обязательные п
   const required = listed.split(/\s+/).filter((token) => /^\d+$/.test(token));
   assert.ok(required.length >= 8, 'список обязательных портов не разобрался');
 
+  /*
+   * Порты в самопроверке теперь берутся ИЗ НАСТРОЕК: `check_port
+   * "${SMTP_PORT:-25}"`. Литералы там больше не стоят — на сервере с
+   * нестандартными портами самопроверка печатала «порт 25 никто не
+   * слушает» при исправной почте. Сверяем с умолчаниями подстановок:
+   * они и есть обязательные порты обычной установки.
+   */
   const selfcheck = script('install/selfcheck.sh');
   const checked = new Set(
-    [...selfcheck.matchAll(/^\s*check_port\s+(\d+)/gm)].map((match) => match[1] ?? ''),
+    [...selfcheck.matchAll(/^\s*check_port\s+(?:"\$\{[A-Z_0-9]+:-(\d+)\}"|(\d+))/gm)].map(
+      (match) => match[1] ?? match[2] ?? '',
+    ),
   );
   const missing = required.filter((port) => !checked.has(port));
   assert.deepEqual(

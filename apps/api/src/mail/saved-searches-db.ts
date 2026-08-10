@@ -14,7 +14,7 @@
 import { Pool, type QueryResultRow } from 'pg';
 import type { Logger } from 'pino';
 import { errorInfo } from '../log.js';
-import type { SavedSearch } from './saved-searches.js';
+import { MAX_SAVED_SEARCHES, type SavedSearch } from './saved-searches.js';
 
 export interface SavedSearchDraft {
   name: string;
@@ -66,6 +66,18 @@ export interface SavedSearchesDbOptions {
   max?: number;
 }
 
+/**
+ * Сохранённых запросов уже столько, сколько разрешено.
+ *
+ * Отдельная ошибка, а не проверка в маршруте: считать до вставки — гонка.
+ */
+export class SavedSearchLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`Сохранённых запросов уже ${String(limit)}`);
+    this.name = 'SavedSearchLimitError';
+  }
+}
+
 export class SavedSearchesDb implements SavedSearchStore {
   readonly #pool: Pool;
 
@@ -107,18 +119,35 @@ export class SavedSearchesDb implements SavedSearchStore {
     return rows.map(toSaved);
   }
 
+  /**
+   * Заводит запрос. `null` — имя занято, LIMIT_REACHED — упёрлись в предел.
+   *
+   * Предел считается ЗДЕСЬ, одной командой со вставкой: проверка в
+   * маршруте («прочитали список, решили, вставили») — это гонка, и два
+   * нажатия подряд или повтор при обрыве связи её проходят оба. Тот же
+   * довод уже записан ниже про занятое имя.
+   *
+   * Приём — вставка с условием: строка появляется, только если счётчик
+   * ещё не дошёл до предела. Считает и вставляет одна команда, между
+   * ними влезть нечему.
+   */
   async create(accountEmail: string, draft: SavedSearchDraft): Promise<SavedSearch | null> {
     try {
       const rows = await this.#query<SavedSearchRow>(
         `INSERT INTO mail_saved_searches (account_email, name, query, include_junk, position)
-         VALUES (lower($1), $2, $3, $4,
-                 coalesce((SELECT max(position) + 1 FROM mail_saved_searches
-                            WHERE lower(account_email) = lower($1)), 0))
+         SELECT lower($1), $2, $3, $4,
+                coalesce((SELECT max(position) + 1 FROM mail_saved_searches
+                           WHERE lower(account_email) = lower($1)), 0)
+          WHERE (SELECT count(*) FROM mail_saved_searches
+                  WHERE lower(account_email) = lower($1)) < $5
          RETURNING id, name, query, include_junk, position`,
-        [accountEmail, draft.name, draft.query, draft.includeJunk],
+        [accountEmail, draft.name, draft.query, draft.includeJunk, MAX_SAVED_SEARCHES],
       );
       const row = rows[0];
-      if (!row) throw new Error('Не удалось сохранить запрос');
+      // Пусто без ошибки — сработало условие предела: строк уже столько,
+      // сколько разрешено. Это не сбой, а отказ, и маршрут скажет об этом
+      // словами.
+      if (!row) throw new SavedSearchLimitError(MAX_SAVED_SEARCHES);
       return toSaved(row);
     } catch (err) {
       /*
@@ -180,6 +209,8 @@ export class MemorySavedSearchStore implements SavedSearchStore {
 
   async create(accountEmail: string, draft: SavedSearchDraft): Promise<SavedSearch | null> {
     const bucket = this.#bucket(accountEmail);
+    // Предел — часть договора хранилища, а не проверка маршрута.
+    if (bucket.length >= MAX_SAVED_SEARCHES) throw new SavedSearchLimitError(MAX_SAVED_SEARCHES);
     if (bucket.some((s) => s.name.toLowerCase() === draft.name.toLowerCase())) return null;
     const position = bucket.reduce((max, s) => Math.max(max, s.position + 1), 0);
     const saved: SavedSearch = {

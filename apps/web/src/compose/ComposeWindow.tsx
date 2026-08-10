@@ -498,7 +498,25 @@ export function ComposeWindow({
     };
   };
 
-  const insertTemplate = (template: MailTemplate) => {
+  const insertTemplate = async (picked: MailTemplate) => {
+    /*
+     * Длинный шаблон приходит в списке ОБРЕЗАННЫМ — список запрашивается
+     * при каждом открытии окна, и тащить в него полмегабайта текста
+     * незачем. Здесь текст нужен весь, поэтому дочитываем по номеру.
+     *
+     * Не удалось дочитать (сеть, сессия) — вставляем то, что есть, но
+     * говорим об этом: половина шаблона в письме, вставленная молча,
+     * уедет получателю обрывком.
+     */
+    let template = picked;
+    if (picked.bodyTruncated === true) {
+      try {
+        template = await templatesApi.getTemplate(picked.id);
+      } catch {
+        showNotice('Шаблон вставлен не полностью: не удалось дочитать текст с сервера');
+      }
+    }
+
     const ctx = substitutionContext();
 
     /*
@@ -1642,7 +1660,7 @@ export function ComposeWindow({
               >
                 <TemplateMenu
                   items={templates.items}
-                  onPick={insertTemplate}
+                  onPick={(template) => void insertTemplate(template)}
                   onSaveCurrent={() => setSaveTemplateOpen(true)}
                 />
               </Dropdown>
