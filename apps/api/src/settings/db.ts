@@ -336,6 +336,38 @@ export class SettingsDb {
   }
 
   /**
+   * Путь корзины ящика, замеченный при последнем обращении к списку папок.
+   *
+   * Пустая строка — не видели ни разу; правило «удалить в корзину» тогда
+   * пишет умолчание (DEFAULT_TRASH_FOLDER). Разбор — в миграции
+   * 0042_mail_settings_trash_folder.sql.
+   */
+  async getTrashFolder(email: string): Promise<string> {
+    const row = await this.one<{ trash_folder: string }>(
+      `SELECT trash_folder FROM mail_user_settings WHERE lower(account_email) = lower($1)`,
+      [email],
+    );
+    return row?.trash_folder ?? '';
+  }
+
+  /**
+   * Запоминает путь корзины. Зовётся оттуда, где список папок и так перед
+   * глазами, и ничего не ждёт: не запомнили — не беда, правило возьмёт
+   * умолчание, как брало раньше.
+   */
+  async rememberTrashFolder(email: string, path: string): Promise<void> {
+    const value = path.trim().slice(0, 512);
+    if (value === '') return;
+    await this.query(
+      `INSERT INTO mail_user_settings (account_email, trash_folder)
+       VALUES (lower($1), $2)
+       ON CONFLICT (account_email) DO UPDATE SET trash_folder = EXCLUDED.trash_folder
+       WHERE mail_user_settings.trash_folder IS DISTINCT FROM EXCLUDED.trash_folder`,
+      [email, value],
+    );
+  }
+
+  /**
    * Сохраняет общие настройки. Неупомянутые поля не трогаются: смена
    * имени отправителя не должна стирать текст автоответчика.
    */
@@ -662,6 +694,34 @@ export class SettingsDb {
           [i, ids[i], email],
         );
       }
+      /*
+       * Правила, которых в присланном списке НЕ БЫЛО, дописываются следом.
+       *
+       * Список приходит таким, каким его видел человек на экране, а за это
+       * время правило могло появиться: вторая вкладка, панель
+       * администратора, восстановление копии. Раньше такие правила
+       * сохраняли старые позиции и сталкивались с новыми — два правила с
+       * position = 3, — а при равных позициях порядок решает уже id
+       * (settings/sieve.ts). То есть порядок применения переставал
+       * совпадать с тем, что нарисовано в списке, и поправить это стрелками
+       * было нельзя: каждая перестановка воспроизводила столкновение снова.
+       *
+       * Позиции им выдаются после присланных и в прежнем порядке между
+       * собой: «мы про них не знали» — не повод перемешивать.
+       */
+      await client.query(
+        `WITH rest AS (
+             SELECT id, row_number() OVER (ORDER BY position, id) - 1 AS rn
+               FROM mail_filters
+              WHERE lower(account_email) = lower($1)
+                AND NOT (id = ANY($2::bigint[]))
+           )
+         UPDATE mail_filters f
+            SET position = $3 + rest.rn, updated_at = now()
+           FROM rest
+          WHERE f.id = rest.id`,
+        [email, ids, ids.length],
+      );
       await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK').catch(() => undefined);

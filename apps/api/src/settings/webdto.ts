@@ -184,8 +184,28 @@ export function folderIdOfPath(folders: readonly Folder[], path: string | null):
 export type WebFilterField =
   'from' | 'to' | 'subject' | 'cc' | 'size' | 'body' | 'attachment' | 'resent-from' | 'resent-to';
 
+/**
+ * Оператор условия в контракте интерфейса.
+ *
+ * Список повторяет внутренний один в один. Так было не всегда: 'not-equals',
+ * 'matches' и 'not-matches' сюда не выпускались, и обратный перевод сводил
+ * их к «содержит»/«не содержит». Правила с такими операторами попадают в
+ * базу — их пишет восстановление из резервной копии, — и первое же
+ * сохранение из формы (достаточно щёлкнуть тумблер «включено», он шлёт
+ * правило целиком) незаметно меняло смысл: «совпадает точно» превращалось
+ * в «содержит», и правило начинало ловить другие письма.
+ */
 export type WebFilterOperator =
-  'contains' | 'not-contains' | 'equals' | 'greater' | 'less' | 'has' | 'has-not';
+  | 'contains'
+  | 'not-contains'
+  | 'equals'
+  | 'not-equals'
+  | 'matches'
+  | 'not-matches'
+  | 'greater'
+  | 'less'
+  | 'has'
+  | 'has-not';
 
 export interface WebFilterCondition {
   field: WebFilterField;
@@ -221,15 +241,25 @@ export interface WebFilterRule {
   conditions: WebFilterCondition[];
   actions: WebFilterActions;
   auto: boolean;
+  /**
+   * Как соединять условия: 'all' — все сразу, 'any' — достаточно одного.
+   *
+   * Необязательное: форма правил его не показывает и не присылает, и
+   * тогда режим остаётся прежним. Раньше поля не было вовсе, а сохранение
+   * жёстко ставило 'all' — правило «любое из условий», пришедшее из
+   * резервной копии, после первого же сохранения начинало требовать все
+   * условия сразу и переставало ловить почти всё, что ловило.
+   */
+  matchMode?: 'all' | 'any';
 }
 
 const OP_TO_WEB: Record<FilterOperator, WebFilterOperator> = {
   contains: 'contains',
   'not-contains': 'not-contains',
   is: 'equals',
-  'not-is': 'not-contains',
-  matches: 'contains',
-  'not-matches': 'not-contains',
+  'not-is': 'not-equals',
+  matches: 'matches',
+  'not-matches': 'not-matches',
   greater: 'greater',
   less: 'less',
   has: 'has',
@@ -240,6 +270,9 @@ const OP_FROM_WEB: Record<WebFilterOperator, FilterOperator> = {
   contains: 'contains',
   'not-contains': 'not-contains',
   equals: 'is',
+  'not-equals': 'not-is',
+  matches: 'matches',
+  'not-matches': 'not-matches',
   greater: 'greater',
   less: 'less',
   has: 'has',
@@ -297,6 +330,7 @@ export function toWebRule(rule: FilterRule, folders: readonly Folder[]): WebFilt
     id: String(rule.id),
     enabled: rule.enabled,
     auto: rule.auto,
+    matchMode: rule.matchMode,
     conditions: rule.conditions.map((c) => ({
       field: c.field as WebFilterField,
       operator: OP_TO_WEB[c.op],
@@ -346,6 +380,36 @@ export function ruleNameFrom(conditions: FilterCondition[]): string {
 }
 
 /**
+ * Папка-приёмник при сохранении правила.
+ *
+ * Со СПИСКОМ ПАПОК всё просто: идентификатор переводится в путь, «— не
+ * перекладывать —» даёт null. Тонкость — в пустом списке.
+ *
+ * Пустой список приходит из панели администратора, когда служебный доступ
+ * к Dovecot не настроен или сорвался (foldersOf в admin/routes/user-settings.ts
+ * намеренно отдаёт `[]` вместо ошибки, чтобы остальные настройки читались).
+ * Тогда в форме у правила «переложить в Счета» приёмник показывается как
+ * «— не перекладывать —» — перевести путь в идентификатор без списка тоже
+ * нечем, — и первое же сохранение ЛЮБОГО другого поля стирало папку у
+ * чужого правила: syncSieve переписывал личный файл без fileinto, почта
+ * человека переставала раскладываться, и никто этого не замечал. Причём
+ * баннер в панели в этот момент обещает ровно обратное: «остальные
+ * настройки работают».
+ *
+ * Поэтому без списка папок приёмник не трогается вовсе — остаётся тот,
+ * что был. Ровно тот же приём уже применён рядом для меток и удаления:
+ * чего нельзя показать, того нельзя и снять.
+ */
+function folderFor(
+  folders: readonly Folder[],
+  moveToFolderId: string | null,
+  previous?: FilterRule | null,
+): string | null {
+  if (folders.length === 0) return previous?.actions.folder ?? null;
+  return pathOfFolderId(folders, moveToFolderId);
+}
+
+/**
  * DTO интерфейса -> внутреннее правило для сохранения.
  *
  * `previous` — правило, каким оно лежит сейчас. Нужен ради полей, которых
@@ -380,14 +444,14 @@ export function fromWebRule(
     name: ruleNameFrom(conditions),
     enabled: dto.enabled,
     auto: dto.auto,
-    matchMode: 'all',
+    matchMode: dto.matchMode ?? previous?.matchMode ?? 'all',
     conditions,
     actions: {
       ...DEFAULT_ACTIONS,
       // Удаление и папка-приёмник взаимно исключают друг друга: письмо
       // нельзя одновременно положить в «Счета» и выбросить. Сохраняем то,
       // что человек выбрал последним осознанным действием, — удаление.
-      folder: deleteMode ? null : pathOfFolderId(folders, dto.actions.moveToFolderId),
+      folder: deleteMode ? null : folderFor(folders, dto.actions.moveToFolderId, previous),
       markRead: dto.actions.markRead,
       flag: dto.actions.markFlagged,
       labels: [...new Set(labelKeys)],

@@ -165,13 +165,14 @@ test('actionsToCommands: порядок команд — флаги, перес�
     'redirect :copy "copy@example.com";',
     'vacation :days 3 :subject "Меня нет" "Вернусь в понедельник";',
     'fileinto :create "Работа";',
+    'set "mt_filed" "1";',
     'stop;',
   ]);
 });
 
 test('actionsToCommands: «продолжать другие фильтры» означает отсутствие stop', () => {
   const cmds = actionsToCommands(actions({ folder: 'Счета', continueFiltering: true }));
-  assert.deepEqual(cmds, ['fileinto :create "Счета";']);
+  assert.deepEqual(cmds, ['fileinto :create "Счета";', 'set "mt_filed" "1";']);
 });
 
 test('requiredExtensions: используемое правилами плюс обязательные fileinto/mailbox/include', () => {
@@ -184,17 +185,19 @@ test('requiredExtensions: используемое правилами плюс �
   assert.deepEqual(requiredExtensions([rule({ id: 1, actions: actions({ folder: 'X' }) })]), [
     'fileinto',
     'mailbox',
+    'variables',
     'include',
   ]);
   assert.deepEqual(
     requiredExtensions([rule({ id: 1, actions: actions({ markRead: true, forwardTo: ['a@b'] }) })]),
-    ['fileinto', 'mailbox', 'include', 'imap4flags', 'copy'],
+    ['fileinto', 'mailbox', 'variables', 'include', 'imap4flags', 'copy'],
   );
   const settings = defaultMailSettings('u@mail.local');
   settings.autoReply = { ...settings.autoReply, enabled: true, until: '2026-09-01T00:00:00Z' };
   assert.deepEqual(requiredExtensions([], settings), [
     'fileinto',
     'mailbox',
+    'variables',
     'include',
     'vacation',
     'date',
@@ -317,7 +320,10 @@ test('buildSieveScript: require перечисляет расширения од
   ]);
   const requires = script.match(/^require \[.*\];$/m);
   assert.ok(requires);
-  assert.equal(requires[0], 'require ["fileinto", "mailbox", "include", "imap4flags"];');
+  assert.equal(
+    requires[0],
+    'require ["fileinto", "mailbox", "variables", "include", "imap4flags"];',
+  );
 });
 
 test('buildSieveScript: одинаковые правила дают побайтово одинаковый файл', () => {
@@ -530,14 +536,20 @@ test('в require попадает regex — и только когда он ну
     conditions: [{ field: 'subject', op: 'contains', value: 'ОТЧЁТ' }],
     actions: actions({ folder: 'Отчёты' }),
   });
-  assert.deepEqual(requiredExtensions([cyr]), ['fileinto', 'mailbox', 'include', 'regex']);
+  assert.deepEqual(requiredExtensions([cyr]), [
+    'fileinto',
+    'mailbox',
+    'variables',
+    'include',
+    'regex',
+  ]);
 
   const latin = rule({
     id: 2,
     conditions: [{ field: 'subject', op: 'contains', value: 'report' }],
     actions: actions({ folder: 'Reports' }),
   });
-  assert.deepEqual(requiredExtensions([latin]), ['fileinto', 'mailbox', 'include']);
+  assert.deepEqual(requiredExtensions([latin]), ['fileinto', 'mailbox', 'variables', 'include']);
   assert.match(buildSieveScript([cyr]), /require \[.*"regex"\];/);
 });
 
@@ -657,7 +669,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox', 'include', 'body'],
+    ['fileinto', 'mailbox', 'variables', 'include', 'body'],
   );
   assert.deepEqual(
     requiredExtensions([
@@ -667,7 +679,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox', 'include', 'mime'],
+    ['fileinto', 'mailbox', 'variables', 'include', 'mime'],
   );
   // Правило без этих условий остаётся ровно таким, каким было раньше.
   assert.deepEqual(
@@ -678,7 +690,7 @@ test('requiredExtensions: body и mime объявляются только ко�
         actions: actions({ folder: 'X' }),
       }),
     ]),
-    ['fileinto', 'mailbox', 'include'],
+    ['fileinto', 'mailbox', 'variables', 'include'],
   );
 });
 
@@ -692,6 +704,9 @@ test('actionsToCommands: метка ставится тем же addflag и до
     'addflag "mt-scheta";',
     'addflag "mt-srochno";',
     'fileinto :create "Счета";',
+    // Отметка «письмо уже разложено» — её читает блок раскладки спама,
+    // чтобы не положить то же письмо ещё и в «Спам».
+    'set "mt_filed" "1";',
   ]);
 });
 
@@ -737,12 +752,12 @@ test('actionsToCommands: удаление отменяет папку-приём
 test('requiredExtensions: метка требует imap4flags так же, как «прочитано»', () => {
   assert.deepEqual(
     requiredExtensions([rule({ id: 1, actions: actions({ labels: ['mt-scheta'] }) })]),
-    ['fileinto', 'mailbox', 'include', 'imap4flags'],
+    ['fileinto', 'mailbox', 'variables', 'include', 'imap4flags'],
   );
   // Слово, которое меткой быть не может, расширения за собой не тянет.
   assert.deepEqual(
     requiredExtensions([rule({ id: 1, actions: actions({ labels: ['$Snoozed'] }) })]),
-    ['fileinto', 'mailbox', 'include'],
+    ['fileinto', 'mailbox', 'variables', 'include'],
   );
 });
 
@@ -775,7 +790,7 @@ test('buildSieveScript: старое правило даёт ровно преж
   ]);
   assert.equal(
     script.match(/^require \[.*\];$/m)?.[0],
-    'require ["fileinto", "mailbox", "include", "imap4flags"];',
+    'require ["fileinto", "mailbox", "variables", "include", "imap4flags"];',
   );
   assert.ok(
     script.includes(
@@ -883,4 +898,40 @@ if header :contains "from" "a@b" {
   assert.equal(parsed.length, 2);
   assert.equal(parsed[1]?.name, 'Наше');
   assert.equal(parsed[1]?.actions.folder, 'Наша');
+});
+
+test('«удалить безвозвратно» не выбрасывает пересылку копии и автоответ', () => {
+  // Форма разрешает выбрать их вместе с удалением, и пересылка копии —
+  // единственный способ узнать, что правило что-то удалило. Раньше блок
+  // discard стоял выше и обе команды молча пропадали.
+  const cmds = actionsToCommands(
+    actions({
+      deleteMessage: 'purge',
+      forwardTo: ['audit@example.com'],
+      autoReply: { subject: null, text: 'Получено', days: 1 },
+    }),
+  );
+  assert.deepEqual(cmds, [
+    'redirect :copy "audit@example.com";',
+    'vacation :days 1 "Получено";',
+    'discard;',
+    'stop;',
+  ]);
+});
+
+test('правило со спамом и папкой не раскладывает письмо в две папки', () => {
+  const spam = rule({
+    id: 11,
+    actions: actions({ folder: 'Счета', applyToSpam: true, continueFiltering: true }),
+  });
+  const script = buildSieveScript([spam]);
+  // Правило кладёт письмо к себе и отмечает это переменной...
+  assert.match(script, /fileinto :create "Счета";\s+set "mt_filed" "1";/);
+  // ...а запасной блок спама эту отметку проверяет, иначе была бы вторая
+  // доставка: stop правило не пишет — человек просил применять и остальные.
+  assert.match(
+    script,
+    /if allof \(header :is "X-Spam" "Yes", not string :is "\$\{mt_filed\}" "1"\)/,
+  );
+  assert.ok(script.includes('"variables"'), 'variables объявлено в require');
 });

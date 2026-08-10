@@ -258,6 +258,9 @@ test('правило переживает оборот DTO -> внутренне
     id: '5',
     enabled: false,
     auto: true,
+    // Режим соединения условий тоже переживает оборот: без него правило
+    // «любое из условий» после первого сохранения требовало бы все сразу.
+    matchMode: 'all',
     conditions: [{ field: 'from', operator: 'contains', value: 'a@b' }],
     actions: {
       moveToFolderId: 'f-0YHRh9C10YLQsA',
@@ -535,4 +538,75 @@ test('правило: условие по тексту письма доезжа
   assert.deepEqual(input.conditions, [{ field: 'body', op: 'contains', value: 'счёт' }]);
   const back = toWebRule({ id: 9, position: 0, ...input, name: input.name }, FOLDERS);
   assert.deepEqual(back.conditions, [{ field: 'body', operator: 'contains', value: 'счёт' }]);
+});
+
+test('операторы «не совпадает» и «по шаблону» переживают оборот без подмены', () => {
+  for (const operator of ['not-equals', 'matches', 'not-matches'] as const) {
+    const dto: WebFilterRule = {
+      id: '7',
+      enabled: true,
+      auto: false,
+      matchMode: 'any',
+      conditions: [{ field: 'subject', operator, value: 'счёт*' }],
+      actions: {
+        moveToFolderId: null,
+        markRead: false,
+        markFlagged: false,
+        labelKeys: [],
+        deleteMode: null,
+        applyToExistingFolderIds: [],
+        forwardTo: null,
+        autoReply: null,
+        continueOtherFilters: true,
+        applyToSpam: false,
+      },
+    };
+    const input = fromWebRule(dto, FOLDERS);
+    const back = toWebRule({ id: 7, position: 0, ...input, name: input.name }, FOLDERS);
+    assert.deepEqual(back, dto, `оператор ${operator} подменён`);
+  }
+});
+
+test('без списка папок приёмник чужого правила не стирается', () => {
+  // Так выглядит сохранение из панели, когда служебный доступ к Dovecot не
+  // настроен: список папок пуст, форма показала «— не перекладывать —».
+  const previous = {
+    id: 9,
+    position: 0,
+    name: 'Счета',
+    enabled: true,
+    auto: false,
+    matchMode: 'all' as const,
+    conditions: [{ field: 'from' as const, op: 'contains' as const, value: 'bank@' }],
+    actions: {
+      folder: 'Счета',
+      markRead: false,
+      flag: false,
+      labels: [],
+      deleteMessage: null,
+      forwardTo: [],
+      autoReply: null,
+      applyToSpam: false,
+      continueFiltering: true,
+    },
+  };
+  const dto: WebFilterRule = {
+    id: '9',
+    enabled: false,
+    auto: false,
+    conditions: [{ field: 'from', operator: 'contains', value: 'bank@' }],
+    actions: {
+      moveToFolderId: null,
+      markRead: false,
+      markFlagged: false,
+      applyToExistingFolderIds: [],
+      forwardTo: null,
+      autoReply: null,
+      continueOtherFilters: true,
+      applyToSpam: false,
+    },
+  };
+  assert.equal(fromWebRule(dto, [], previous).actions.folder, 'Счета');
+  // А со списком папок «— не перекладывать —» означает именно это.
+  assert.equal(fromWebRule(dto, FOLDERS, previous).actions.folder, null);
 });

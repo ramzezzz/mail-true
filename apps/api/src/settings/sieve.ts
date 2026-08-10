@@ -33,6 +33,13 @@ import {
 
 /** Заголовок, которым rspamd помечает спам (см. infra/rspamd/local.d). */
 export const SPAM_HEADER = 'X-Spam';
+
+/**
+ * Имя переменной Sieve, которой правило отмечает «письмо уже разложено».
+ * Читает её только запасной блок раскладки спама в конце файла — чтобы не
+ * положить в «Спам» письмо, которое правило уже забрало себе в папку.
+ */
+const FILED_VARIABLE = 'mt_filed';
 export const SPAM_HEADER_VALUE = 'Yes';
 
 /**
@@ -163,6 +170,9 @@ export const MUTED_INCLUDE_NAME = 'mt-muted';
 
 /** Расширение Sieve, которым подключается этот файл (RFC 6609). */
 export const INCLUDE_EXTENSION = 'include';
+
+/** Расширение Sieve с переменными (RFC 5229) — нужно для отметки FILED_VARIABLE. */
+export const VARIABLES_EXTENSION = 'variables';
 
 /** Символы, особые для POSIX ERE. */
 function escapeRegexChar(ch: string): string {
@@ -441,24 +451,6 @@ export function actionsToCommands(
   // (mail/labels.ts), поэтому ставится тем же addflag и там же по порядку.
   for (const key of labelFlags(actions)) out.push(`addflag ${quoteSieveString(key)};`);
 
-  if (actions.deleteMessage === 'purge') {
-    /*
-     * Безвозвратное удаление. `discard` отменяет доставку целиком: письма
-     * не будет ни в корзине, ни в ящике вообще — его туда не положат.
-     *
-     * Всё, что стоит выше (метки, пересылка), уже отработало намеренно:
-     * пересылка копии — единственный способ узнать, что правило вообще
-     * что-то удалило. Всё, что ниже (папка), теряет смысл и не пишется.
-     *
-     * `stop` обязателен: без него следующие правила продолжали бы
-     * разбираться с письмом, которого уже нет, и, например, блок раскладки
-     * спама попытался бы положить его в «Спам».
-     */
-    out.push('discard;');
-    out.push('stop;');
-    return out;
-  }
-
   for (const address of actions.forwardTo) {
     // :copy — переслать копию, оставив письмо себе. Без :copy Sieve
     // считает redirect доставкой и отменяет сохранение в ящик.
@@ -472,6 +464,27 @@ export function actionsToCommands(
     out.push(
       `vacation :days ${String(days)}${subject} ${quoteSieveString(actions.autoReply.text)};`,
     );
+  }
+
+  if (actions.deleteMessage === 'purge') {
+    /*
+     * Безвозвратное удаление. `discard` отменяет доставку целиком: письма
+     * не будет ни в корзине, ни в ящике вообще — его туда не положат.
+     *
+     * Пересылка копии и автоответ стоят ВЫШЕ намеренно: форма разрешает
+     * выбрать их вместе с удалением, и пересылка копии — единственный
+     * способ узнать, что правило вообще что-то удалило. Раньше этот блок
+     * стоял раньше них, и обе команды молча выбрасывались: письмо
+     * пропадало, копия никуда не уходила, а человек был уверен, что копии
+     * приходят. Всё, что ниже (папка), теряет смысл и не пишется.
+     *
+     * `stop` обязателен: без него следующие правила продолжали бы
+     * разбираться с письмом, которого уже нет, и, например, блок раскладки
+     * спама попытался бы положить его в «Спам».
+     */
+    out.push('discard;');
+    out.push('stop;');
+    return out;
   }
 
   if (actions.deleteMessage === 'trash') {
@@ -490,6 +503,21 @@ export function actionsToCommands(
   if (actions.folder) {
     // :create — папку могли ещё не завести; без него письмо потерялось бы.
     out.push(`fileinto :create ${quoteSieveString(actions.folder)};`);
+    /*
+     * Отметка «письмо уже разложено» — для запасного блока раскладки спама
+     * в конце файла (spamFallbackBlock).
+     *
+     * Без неё правило с галочкой «применять к спаму», которое кладёт
+     * письмо в свою папку, давало ДВЕ доставки: `stop` пишется только при
+     * снятой галочке «применять остальные правила», а она по умолчанию
+     * стоит, и запасной блок безусловно делал ещё один `fileinto "Spam"`.
+     * Человек включал галочку, чтобы спам от нужного отправителя лёг в
+     * «Счета», и получал копию и там, и в «Спаме».
+     *
+     * Именно переменная, а не `stop`: `stop` оборвал бы и остальные
+     * правила — то самое, чего человек просил не делать.
+     */
+    out.push(`set ${quoteSieveString(FILED_VARIABLE)} "1";`);
   }
   if (!actions.continueFiltering) out.push('stop;');
   return out;
@@ -547,6 +575,14 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
   need.add('fileinto');
   need.add('mailbox');
   /*
+   * variables — тоже всегда и по той же причине: блок раскладки спама
+   * читает переменную «письмо уже разложено», а команда `set` без этого
+   * расширения делает файл нерабочим целиком (Pigeonhole отказывается от
+   * скрипта, и вместе с ним отваливаются правила, автоответчик и раскладка
+   * спама сразу).
+   */
+  need.add(VARIABLES_EXTENSION);
+  /*
    * include — тоже всегда, по той же причине и с той же ценой ошибки.
    *
    * Личный скрипт подключает файл заглушённых цепочек строкой
@@ -574,6 +610,7 @@ export function requiredExtensions(rules: FilterRule[], settings?: MailSettings 
   const order = [
     'fileinto',
     'mailbox',
+    VARIABLES_EXTENSION,
     INCLUDE_EXTENSION,
     'imap4flags',
     'copy',
@@ -638,7 +675,10 @@ function spamFallbackBlock(): string[] {
     '# === Спам ===',
     '# Правила с пометкой «применять к спаму» уже отработали выше.',
     '# Всё, что они не забрали, раскладывается как обычный спам.',
-    `if header :is ${quoteSieveString(SPAM_HEADER)} ${quoteSieveString(SPAM_HEADER_VALUE)} {`,
+    '# Проверка переменной обязательна: правило могло положить письмо в свою',
+    '# папку и разрешить остальным правилам работать дальше — тогда без этой',
+    '# проверки письмо легло бы сразу в две папки.',
+    `if allof (header :is ${quoteSieveString(SPAM_HEADER)} ${quoteSieveString(SPAM_HEADER_VALUE)}, not string :is ${quoteSieveString('${' + FILED_VARIABLE + '}')} "1") {`,
     '	fileinto :create "Spam";',
     '	stop;',
     '}',

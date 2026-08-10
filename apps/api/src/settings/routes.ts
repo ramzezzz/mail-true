@@ -124,7 +124,20 @@ const conditionSchema = z
       'resent-to',
     ]),
     operator: z
-      .enum(['contains', 'not-contains', 'equals', 'greater', 'less', 'has', 'has-not'])
+      .enum([
+        'contains',
+        'not-contains',
+        'equals',
+        // «совпадает точно» с отрицанием и оба «по шаблону»: форма их
+        // показывает, а восстановление копии умеет принести и такие.
+        'not-equals',
+        'matches',
+        'not-matches',
+        'greater',
+        'less',
+        'has',
+        'has-not',
+      ])
       .default('contains'),
     /*
      * Значение больше не обязательно, и это не послабление проверки.
@@ -180,11 +193,32 @@ export const ruleSchema = z.object({
   id: z.string().max(64).default(''),
   enabled: z.boolean().default(true),
   auto: z.boolean().default(false),
+  /*
+   * Как соединять условия. Без `.default()` — по той же причине, что у
+   * меток и удаления выше: форма правил режим не показывает и не шлёт, а
+   * с умолчанием 'all' каждое сохранение молча превращало бы «любое из
+   * условий» во «все условия сразу». `undefined` означает «не трогать».
+   */
+  matchMode: z.enum(['all', 'any']).optional(),
   conditions: z.array(conditionSchema).max(20).default([]),
   actions: actionsSchema,
 });
 
-export const orderSchema = z.object({ ids: z.array(z.string().min(1).max(64)).max(200) });
+/*
+ * Потолок числа правил у ящика.
+ *
+ * Ровно столько же, сколько принимает перестановка (orderSchema ниже), и
+ * это главная причина числа: интерфейс при перестановке шлёт ВЕСЬ список
+ * (FiltersPage.tsx), поэтому ящик, у которого правил больше, чем влезает
+ * в тот запрос, терял бы стрелки порядка навсегда — а порядок правил и
+ * есть порядок их применения. Заодно это потолок длины личного файла
+ * Sieve: его читает Dovecot на каждое письмо.
+ */
+const MAX_FILTERS = 200;
+
+export const orderSchema = z.object({
+  ids: z.array(z.string().min(1).max(64)).max(MAX_FILTERS),
+});
 
 const idParam = z.object({ id: z.string().min(1).max(64) });
 
@@ -247,9 +281,30 @@ export async function settingsUserRoutes(
     }
   };
 
-  /** Список папок ящика: нужен для перевода id папки в путь IMAP и обратно. */
-  const foldersOf = (session: MailSession): Promise<Folder[]> =>
-    pool.withClient(session.email, session.password, (client) => listFolders(client));
+  /**
+   * Список папок ящика: нужен для перевода id папки в путь IMAP и обратно.
+   *
+   * Заодно запоминает путь корзины. Это единственное место, где он
+   * доподлинно известен: у сборки личного файла Sieve пароля владельца
+   * нет (её зовут и панель, и заглушение цепочки, и восстановление
+   * копии), а правило «удалить в корзину» без этого пути писало
+   * умолчание «Trash» и заводило у ящика с корзиной «Корзина»
+   * папку-призрак. Запись ничего не ждёт и никогда не мешает ответу:
+   * не запомнили — правило возьмёт умолчание, как брало раньше.
+   */
+  const foldersOf = async (session: MailSession): Promise<Folder[]> => {
+    const folders = await pool.withClient(session.email, session.password, (client) =>
+      listFolders(client),
+    );
+    const trash = folders.find((f) => f.role === 'trash')?.path;
+    if (trash && service.available) {
+      void service
+        .requireDb()
+        .rememberTrashFolder(session.email, trash)
+        .catch(() => undefined);
+    }
+    return folders;
+  };
 
   /**
    * Запись в историю ящика — раздел «Вход и действия» у владельца.
@@ -424,6 +479,22 @@ export async function settingsUserRoutes(
     const session = sessionOf(request);
     const dto = ruleSchema.parse(request.body) as WebFilterRule;
     const db = service.requireDb();
+    /*
+     * Потолок числа правил — до создания и до похода за папками.
+     *
+     * Причина не в бережливости: интерфейс при перестановке шлёт весь
+     * список целиком, а он ограничен теми же двумя сотнями (orderSchema).
+     * Ящик, переваливший за предел, потерял бы стрелки порядка навсегда, а
+     * порядок правил — это порядок их применения.
+     */
+    const existing = await guard(() => db.listFilters(session.email));
+    if (existing.length >= MAX_FILTERS) {
+      throw new BadRequestError(
+        `Правил уже ${String(existing.length)} — это предел. ` +
+          'Удалите ненужные: порядок правил задаётся списком целиком, ' +
+          'и список длиннее двухсот строк переставлять нечем.',
+      );
+    }
     const folders = await foldersOf(session);
     const created = await guard(() => db.createFilter(session.email, fromWebRule(dto, folders)));
     noteAccess(request, session, 'filters', `Создано правило «${created.name}»${forwardNote(dto)}`);

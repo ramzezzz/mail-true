@@ -62,6 +62,9 @@ export const LABELS_MIGRATION_HINT =
 
 const messageIdSchema = z.string().min(3).max(MAX_ENTITY_ID_LENGTH);
 
+/** Сколько меток может завести один ящик. Разбор — у проверки в POST /labels. */
+const MAX_LABELS = 100;
+
 const labelDraftSchema = z.object({
   name: z.string().min(1).max(MAX_LABEL_NAME_LENGTH),
   color: z.enum(LABEL_COLORS).default('blue'),
@@ -289,6 +292,21 @@ export async function labelRoutes(app: FastifyInstance, deps: LabelsDeps): Promi
     const existing = await dictionaryOf(session);
     if (existing.some((l) => l.name.toLowerCase() === name.toLowerCase())) {
       throw new BadRequestError(`Метка «${name}» уже есть`);
+    }
+    /*
+     * Потолок числа меток.
+     *
+     * Метка — это ключевое слово IMAP на письме, и стоит она недёшево:
+     * список меток целиком уходит в каждый ответ со списком писем, а
+     * снять ключевое слово с прежних писем после удаления метки нечем
+     * (ключ занимается навсегда — mail/labels-db.ts). Сотня — заведомо
+     * больше, чем человек способен различать глазами в списке, и заведомо
+     * меньше, чем начнёт мешать почте.
+     */
+    if (existing.length >= MAX_LABELS) {
+      throw new BadRequestError(
+        `Меток уже ${String(existing.length)} — это предел. Удалите ненужные.`,
+      );
     }
     return requireStore().create(session.email, { name, color: body.color });
   });

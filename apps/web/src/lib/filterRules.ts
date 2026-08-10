@@ -16,7 +16,19 @@
 import type { Folder } from '@mail-true/shared';
 import { folderTitle } from './folderNames';
 
-export type FilterField = 'from' | 'to' | 'subject' | 'cc' | 'size' | 'body' | 'attachment';
+/*
+ * Поля условия. 'resent-from' и 'resent-to' — заголовки переадресованного
+ * письма (Resent-From/Resent-To).
+ *
+ * Их принимает и возвращает сервер (apps/api/src/settings/webdto.ts), а
+ * здесь их не было вовсе: в списке правил условие печаталось как
+ * «undefined содержит …», а в форме `<select>` без такой опции показывал
+ * первый пункт — «Поле „От“». То есть человек видел одно условие, а
+ * правило фильтровало по другому, и стоило открыть форму и сохранить, как
+ * условие подменялось.
+ */
+export type FilterField =
+  'from' | 'to' | 'subject' | 'cc' | 'size' | 'body' | 'attachment' | 'resent-from' | 'resent-to';
 
 export const FIELD_TITLES: Record<FilterField, string> = {
   from: 'Поле «От»',
@@ -26,15 +38,36 @@ export const FIELD_TITLES: Record<FilterField, string> = {
   size: 'Размер, Кб',
   body: 'Текст письма',
   attachment: 'Вложение',
+  'resent-from': 'Переадресовано от',
+  'resent-to': 'Переадресовано для',
 };
 
+/*
+ * Операторы условия. 'not-equals', 'matches' и 'not-matches' сервер умел
+ * всегда, а форма их не знала — и обратный перевод сводил их к
+ * «содержит»/«не содержит». Правила с такими операторами приносит
+ * восстановление из резервной копии; открыв такое правило, человек видел
+ * не тот оператор, что работает, и первое же сохранение подменяло смысл.
+ */
 export type FilterOperator =
-  'contains' | 'not-contains' | 'equals' | 'greater' | 'less' | 'has' | 'has-not';
+  | 'contains'
+  | 'not-contains'
+  | 'equals'
+  | 'not-equals'
+  | 'matches'
+  | 'not-matches'
+  | 'greater'
+  | 'less'
+  | 'has'
+  | 'has-not';
 
 export const OPERATOR_TITLES: Record<FilterOperator, string> = {
   contains: 'содержит',
   'not-contains': 'не содержит',
   equals: 'совпадает с',
+  'not-equals': 'не совпадает с',
+  matches: 'подходит под шаблон',
+  'not-matches': 'не подходит под шаблон',
   greater: 'больше чем',
   less: 'меньше чем',
   has: 'есть',
@@ -42,7 +75,15 @@ export const OPERATOR_TITLES: Record<FilterOperator, string> = {
 };
 
 /** Размер сравнивается числом, вложение — наличием, остальные поля — текстом. */
-export const TEXT_OPERATORS: readonly FilterOperator[] = ['contains', 'not-contains', 'equals'];
+export const TEXT_OPERATORS: readonly FilterOperator[] = [
+  'contains',
+  'not-contains',
+  'equals',
+  'not-equals',
+  // «Шаблон» — это `*` и `?` в Sieve (:matches), а не регулярное выражение.
+  'matches',
+  'not-matches',
+];
 /*
  * У размера ровно два оператора, и «совпадает с» среди них НЕТ.
  *

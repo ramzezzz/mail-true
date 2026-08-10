@@ -157,7 +157,22 @@ export class SettingsService {
         state.written = true;
         return state;
       }
-      const script = buildSieveScript(rules, { accountEmail: email, settings });
+      /*
+       * Путь корзины ящика — из его настроек, а не из умолчания.
+       *
+       * Спросить IMAP здесь нельзя: скрипт пересобирается и без пароля
+       * владельца — из панели, при заглушении цепочки, после
+       * восстановления копии. Поэтому путь запоминается там, где список
+       * папок и так перед глазами (см. rememberTrashFolder), а сюда
+       * приходит из базы. Пусто — правило возьмёт умолчание, как раньше:
+       * это не отказ, а «ещё не видели».
+       */
+      const trashFolder = await db.getTrashFolder(email).catch(() => '');
+      const script = buildSieveScript(rules, {
+        accountEmail: email,
+        settings,
+        ...(trashFolder ? { trashFolder } : {}),
+      });
       const result = await this.#store.write(email, script);
       state.ok = result.compiled;
       state.written = result.written;
