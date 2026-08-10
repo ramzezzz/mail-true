@@ -251,6 +251,13 @@ export interface WebFilterRule {
    * условия сразу и переставало ловить почти всё, что ловило.
    */
   matchMode?: 'all' | 'any';
+  /**
+   * Путь папки-приёмника, которой в ящике больше нет.
+   *
+   * Есть только у сломанных правил — интерфейс по нему и показывает
+   * предупреждение. Разбор, откуда такое берётся, — у missingFolder.
+   */
+  missingFolder?: string;
 }
 
 const OP_TO_WEB: Record<FilterOperator, WebFilterOperator> = {
@@ -350,7 +357,34 @@ export function toWebRule(rule: FilterRule, folders: readonly Folder[]): WebFilt
       continueOtherFilters: rule.actions.continueFiltering,
       applyToSpam: rule.actions.applyToSpam,
     },
+    ...(missingFolder(rule, folders) ? { missingFolder: rule.actions.folder ?? '' } : {}),
   };
+}
+
+/**
+ * Папка-приёмник правила исчезла из ящика.
+ *
+ * Правила переезжают за папкой, только когда её переименовывают ЧЕРЕЗ НАС
+ * (settings/folders.ts, moveFilters). По IMAP переименование разрешено и
+ * из почтовой программы на телефоне — узнать о нём нам неоткуда, и правило
+ * остаётся указывать на старый путь. Дальше `fileinto :create` при первом
+ * же письме заводит папку со старым именем заново, рядом с
+ * переименованной: человек видит две похожие папки и не понимает, откуда
+ * взялась вторая, а почта раскладывается в обе.
+ *
+ * Переносить правило молча нельзя — «Счета» могли не переименовать, а
+ * удалить, и тогда любая догадка о новом месте будет выдумкой. Поэтому
+ * говорим прямо, а решает человек.
+ *
+ * Пустой список папок — это НЕ «папок нет»: так выглядит ненастроенный
+ * служебный доступ в панели администратора (admin/routes/user-settings.ts).
+ * Поднимать по нему тревогу на каждое правило значило бы кричать «папка
+ * пропала» там, где мы просто не смотрели.
+ */
+function missingFolder(rule: FilterRule, folders: readonly Folder[]): boolean {
+  const path = rule.actions.folder;
+  if (!path || folders.length === 0) return false;
+  return !folders.some((f) => f.path === path);
 }
 
 /**
@@ -406,7 +440,24 @@ function folderFor(
   previous?: FilterRule | null,
 ): string | null {
   if (folders.length === 0) return previous?.actions.folder ?? null;
-  return pathOfFolderId(folders, moveToFolderId);
+  const chosen = pathOfFolderId(folders, moveToFolderId);
+  if (chosen !== null) return chosen;
+  /*
+   * Приёмник не выбран — но это может значить и «папка пропала».
+   *
+   * Папку могли переименовать мимо нас (по IMAP это разрешено из любой
+   * почтовой программы), и тогда её пути нет в списке: форма показывает
+   * «— не перекладывать —», хотя человек ничего не снимал. Сохранение
+   * любого другого поля стирало бы приёмник молча — ровно та же беда,
+   * что и с пустым списком папок выше. Прежний путь остаётся, а о самой
+   * поломке человеку сказано отдельной строкой (см. missingFolder).
+   *
+   * Снять приёмник это не мешает: чтобы перестать перекладывать, есть
+   * выбор другой папки и переключатель удаления.
+   */
+  const kept = previous?.actions.folder ?? null;
+  if (kept && !folders.some((f) => f.path === kept)) return kept;
+  return null;
 }
 
 /**

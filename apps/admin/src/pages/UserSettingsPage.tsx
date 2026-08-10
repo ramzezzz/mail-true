@@ -88,6 +88,11 @@ function ruleSummary(rule: UserFilterRule, folders: UserMailFolder[]): string {
   if (rule.actions.markFlagged) actions.push('поставить флажок');
   if (rule.actions.forwardTo) actions.push(`переслать на ${rule.actions.forwardTo}`);
   if (rule.actions.autoReply) actions.push('ответить автоматически');
+  // Папку переименовали или удалили мимо нас — правило указывает в пустоту
+  // и при первом же письме заведёт её заново со старым именем.
+  if (rule.missingFolder) {
+    actions.push(`папки «${rule.missingFolder}» в ящике нет`);
+  }
   return `${conditions || 'все письма'} → ${actions.join(', ') || 'ничего не делать'}`;
 }
 

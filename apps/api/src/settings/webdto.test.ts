@@ -610,3 +610,72 @@ test('без списка папок приёмник чужого правил�
   // А со списком папок «— не перекладывать —» означает именно это.
   assert.equal(fromWebRule(dto, FOLDERS, previous).actions.folder, null);
 });
+
+test('правило с пропавшей папкой помечено, и приёмник у него не стирается', () => {
+  const rule = {
+    id: 3,
+    position: 0,
+    name: 'Счета',
+    enabled: true,
+    auto: false,
+    matchMode: 'all' as const,
+    conditions: [{ field: 'from' as const, op: 'contains' as const, value: 'bank@' }],
+    actions: {
+      // Такой папки в ящике больше нет: её переименовали из почтовой
+      // программы, минуя нас.
+      folder: 'Счета 2024',
+      markRead: false,
+      flag: false,
+      labels: [],
+      deleteMessage: null,
+      forwardTo: [],
+      autoReply: null,
+      applyToSpam: false,
+      continueFiltering: true,
+    },
+  };
+
+  const web = toWebRule(rule, FOLDERS);
+  assert.equal(web.missingFolder, 'Счета 2024', 'о пропавшей папке надо сказать прямо');
+  assert.equal(web.actions.moveToFolderId, null, 'выбрать нечего — папки нет');
+
+  // Человек правит другое поле и сохраняет: приёмник обязан уцелеть,
+  // иначе правило молча перестанет раскладывать почту.
+  const saved = fromWebRule({ ...web, enabled: false }, FOLDERS, rule);
+  assert.equal(saved.actions.folder, 'Счета 2024');
+
+  // А выбор настоящей папки по-прежнему заменяет приёмник.
+  const moved = fromWebRule(
+    { ...web, actions: { ...web.actions, moveToFolderId: FOLDERS[0]?.id ?? null } },
+    FOLDERS,
+    rule,
+  );
+  assert.equal(moved.actions.folder, FOLDERS[0]?.path);
+});
+
+test('живая папка не помечается пропавшей, и без списка папок тревоги нет', () => {
+  const rule = {
+    id: 4,
+    position: 0,
+    name: 'Работа',
+    enabled: true,
+    auto: false,
+    matchMode: 'all' as const,
+    conditions: [],
+    actions: {
+      folder: FOLDERS[0]?.path ?? '',
+      markRead: false,
+      flag: false,
+      labels: [],
+      deleteMessage: null,
+      forwardTo: [],
+      autoReply: null,
+      applyToSpam: false,
+      continueFiltering: true,
+    },
+  };
+  assert.equal(toWebRule(rule, FOLDERS).missingFolder, undefined);
+  // Пустой список — это «мы не смотрели» (панель без служебного доступа),
+  // а не «папок нет»: кричать о пропаже здесь нельзя.
+  assert.equal(toWebRule(rule, []).missingFolder, undefined);
+});

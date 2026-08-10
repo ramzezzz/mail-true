@@ -168,6 +168,19 @@ export function FiltersPage() {
               {describeActions(rule, folders ?? [], labels).map((line) => (
                 <li key={line}>{line}</li>
               ))}
+              {rule.missingFolder && (
+                /*
+                 * Папку переименовали или удалили мимо нас — по IMAP это
+                 * разрешено из любой почтовой программы. Правило про это
+                 * не знает и при первом же письме заведёт папку со старым
+                 * именем заново, рядом с настоящей. Сказать об этом
+                 * обязаны здесь: сам человек увидит только две похожие
+                 * папки и почту, разложенную в обе.
+                 */
+                <li className={styles.missingFolder}>
+                  Папки «{rule.missingFolder}» в ящике нет — выберите новую
+                </li>
+              )}
             </ul>
 
             <IconButton
