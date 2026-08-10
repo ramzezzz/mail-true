@@ -68,7 +68,13 @@ test('числа и флаги приходят числами и флагами
   );
   assert.equal(answers.clamav, true);
   assert.equal(answers.messageMaxBytes, 52_428_800);
-  assert.equal(answers.smtp, 2525);
+  /*
+   * Имя поля формы — `port.<ключ>`, и раньше здесь клался голый ключ:
+   * заданный в .env порт в форму НЕ ПОПАДАЛ, а повторный проход мастера
+   * возвращал нестандартные порты к 25/587/993 — стек падал с «port is
+   * already allocated».
+   */
+  assert.equal(answers['port.smtp'], 2525);
 });
 
 test('значения-заглушки «change-me» ответами не считаются', () => {

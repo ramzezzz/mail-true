@@ -277,10 +277,23 @@ export function answersFromEnv(
     if (value !== null) out[field] = /^(true|yes|1|on)$/i.test(value);
   }
 
-  // Порты: ключи в .env те же, что мастер отдаёт установщику.
+  /*
+   * Порты.
+   *
+   * Имя поля в форме — `port.<ключ>` (см. fields.ts), а сюда клался
+   * голый `<ключ>`. Из-за этого уже заданные порты В ФОРМУ НЕ ПОПАДАЛИ
+   * НИКОГДА, зато в объект значений уезжали лишние ключи.
+   *
+   * Последствие тихое и злое: buildAnswersFile всегда отдаёт
+   * MAILTRUE_*_PORT, а env_port при явном значении пишет безусловно —
+   * повторный проход мастера на машине с нестандартными портами (тот
+   * единственный случай, ради которого шаг «Порты» и существует)
+   * возвращал всё к 25/587/993, и стек падал с «port is already
+   * allocated».
+   */
   for (const field of PORT_FIELDS) {
     const value = changed(field.envKey);
-    if (value !== null && /^\d+$/.test(value)) out[field.key] = Number(value);
+    if (value !== null && /^\d+$/.test(value)) out[`port.${field.key}`] = Number(value);
   }
 
   return out;

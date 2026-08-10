@@ -31,6 +31,48 @@ CERT_DIR="$INFRA_DIR/data/certs"
 # «port is already allocated» при подъёме стека.
 MT_REQUIRED_PORTS=(25 80 443 143 993 110 995 587 465)
 
+# mt_required_ports — те же порты, но С УЧЁТОМ настроек.
+#
+# Список выше — умолчания, и проверять по нему на установке с
+# нестандартными портами бессмысленно вдвойне: он ругается на занятый 25,
+# который мы и не публикуем, и молчит про 2525, который займём. Проверка
+# при этом идёт ДО того, как install.sh прочитает MAILTRUE_*_PORT, —
+# поэтому берём значения из окружения и infra/.env, а к умолчаниям
+# откатываемся только там, где ничего не задано.
+#
+# 8081 добавлен: резервный вход в панель публикует nginx, и занятый порт
+# роняет ВЕСЬ контейнер nginx — то есть и почту в браузере, и панель,
+# после полностью зелёной установки.
+mt_required_ports() {
+    local -a ports=()
+    local key def value
+    for pair in         "SMTP_PORT:25" "SUBMISSION_PORT:587" "SUBMISSIONS_PORT:465"         "IMAP_PORT:143" "IMAPS_PORT:993" "POP3_PORT:110" "POP3S_PORT:995"         "NGINX_HTTP_PORT:80" "NGINX_HTTPS_PORT:443" "ADMIN_LOCAL_PORT:8081"; do
+        key="${pair%%:*}"
+        def="${pair##*:}"
+        # Порядок: явно заданное окружением, потом infra/.env, потом
+        # умолчание. Тот же порядок, по которому потом пишется .env.
+        value="$(eval "printf '%s' \"\${MAILTRUE_${key}:-}\"")"
+        [ -n "$value" ] || value="$(env_get "$key" 2>/dev/null || true)"
+        [ -n "$value" ] || value="$def"
+        case "$value" in
+            ''|*[!0-9]*) value="$def" ;;
+        esac
+        # Порты nginx особые: в образце стоят 8080/8443 (для машины
+        # разработчика), а установщик заменяет их боевыми 80/443 — если
+        # человек не задал свои. Значит и проверять надо то, что БУДЕТ
+        # опубликовано, иначе занятый 443 обнаружится подъёмом стека.
+        case "$key" in
+            NGINX_HTTP_PORT)
+                env_is_from_example "$key" 2>/dev/null && value=80 ;;
+            NGINX_HTTPS_PORT)
+                env_is_from_example "$key" 2>/dev/null && value=443 ;;
+        esac
+        ports+=("$value")
+    done
+    printf '%s
+' "${ports[@]}" | sort -un
+}
+
 # Нижние границы, при которых установка имеет смысл. Живут здесь, а не в
 # install.sh: те же проверки делает мастер первого запуска в браузере.
 MT_MIN_RAM_MB=1800
@@ -414,9 +456,19 @@ env_set() {
     esac
     tmp="$(mktemp)"
     if [ -f "$file" ] && grep -q "^${key}=" "$file"; then
-        # Значение подставляем через awk, чтобы не экранировать спецсимволы sed
+        # Значение подставляем через awk, чтобы не экранировать спецсимволы sed.
+        #
+        # ДУБЛИКАТЫ КЛЮЧА УБИРАЕМ. Раньше правилось первое вхождение, а
+        # читают все — env_get, load_env и сам docker compose — ПОСЛЕДНЕЕ.
+        # Стоило ключу попасть в файл дважды (правка руками, склейка при
+        # переносе), и установщик с панелью «сохраняли» значение, а
+        # действовало прежнее: без единого сообщения, при внешне успешной
+        # записи.
         awk -v k="$key" -v v="$value" '
-            index($0, k "=") == 1 && !done { print k "=" v; done = 1; next }
+            index($0, k "=") == 1 {
+                if (!done) { print k "=" v; done = 1 }
+                next
+            }
             { print }
         ' "$file" > "$tmp"
     else
@@ -1733,7 +1785,10 @@ preflight_ports() {
         return 0
     fi
 
-    for port in "${MT_REQUIRED_PORTS[@]}"; do
+    local -a required=()
+    mapfile -t required < <(mt_required_ports)
+    [ "${#required[@]}" -gt 0 ] || required=("${MT_REQUIRED_PORTS[@]}")
+    for port in "${required[@]}"; do
         listener="$(port_listener "$port")"
         if [ -z "$listener" ]; then
             ok "порт $port свободен"

@@ -277,7 +277,12 @@ if want config && [ -d "$WORK/config" ]; then
             warn "$key=$bound_value — такого адреса на этой машине нет, заменён на $new_value"
             hint "адрес из копии принадлежал прежнему серверу; с ним docker не поднял бы стек вовсе"
             bound_port="$(env_get ADMIN_LOCAL_PORT)"
-            hint "резервный вход в панель теперь на http://$new_value:${bound_port:-8081}/"
+            # Схема именно https: nginx слушает этот порт с TLS
+            # (infra/nginx/templates/app.conf.template), и install.sh
+            # печатает https. Подсказка выдаётся при восстановлении на
+            # новую машину — то есть тогда, когда других путей входа как
+            # раз нет, и нерабочая ссылка здесь дороже всего.
+            hint "резервный вход в панель теперь на https://$new_value:${bound_port:-8081}/"
         done
         ok "infra/.env восстановлен (прежний — в .env.before-restore)"
         if [ "${#CHANGED[@]}" -gt 0 ]; then

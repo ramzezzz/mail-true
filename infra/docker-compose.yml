@@ -766,6 +766,8 @@ services:
       PUSH_TTL_SECONDS: ${PUSH_TTL_SECONDS:-86400}
       PUSH_PENDING_MAX: ${PUSH_PENDING_MAX:-50}
       PUSH_PENDING_TTL_MS: ${PUSH_PENDING_TTL_MS:-21600000}
+      # Через сколько дней подряд отказывающая подписка убирается.
+      PUSH_DEAD_AFTER_DAYS: ${PUSH_DEAD_AFTER_DAYS:-14}
 
       # --- Логотипы отправителей (BIMI и favicon) ---
       # Единственная часть продукта, которая по своей работе ходит в

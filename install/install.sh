@@ -202,11 +202,30 @@ PREV_ADMIN=''
 if [ -f "$STATE_FILE" ]; then PREV_ADMIN="$(sed -n 's/^ADMIN_EMAIL=//p' "$STATE_FILE" | tail -1)"; fi
 
 DOMAIN="${MAILTRUE_DOMAIN:-$PREV_DOMAIN}"
-if [ -z "$DOMAIN" ] || [ "$DOMAIN" = "mail.local" ]; then
-    DOMAIN="${MAILTRUE_DOMAIN:-}"
+#
+# Домен-заглушка «mail.local» ответом не считается.
+#
+# Обнулялась только переменная DOMAIN, а `ask` ниже подставлял тот же
+# mail.local умолчанием из PREV_DOMAIN — и в неинтерактивном режиме
+# молча его принимал. Путь настоящий: web-install.sh кладёт infra/.env из
+# образца ещё до мастера, после этого `install.sh --non-interactive` без
+# MAILTRUE_DOMAIN ставил сервер на домен mail.local и хост
+# mail.mail.local вместо того, чтобы отказать.
+#
+DOMAIN_DEFAULT="${PREV_DOMAIN:-}"
+if [ "$DOMAIN" = "mail.local" ]; then DOMAIN="${MAILTRUE_DOMAIN:-}"; fi
+if [ "$DOMAIN_DEFAULT" = "mail.local" ]; then DOMAIN_DEFAULT=''; fi
+if [ -z "$DOMAIN" ] && [ -z "$DOMAIN_DEFAULT" ] && [ "$MT_NONINTERACTIVE" = "1" ]; then
+    die "не задана переменная MAILTRUE_DOMAIN — на каком домене ставить сервер, неизвестно"
 fi
 while :; do
-    ask DOMAIN "Почтовый домен (то, что после @ в адресах)" "${PREV_DOMAIN:-}"
+    ask DOMAIN "Почтовый домен (то, что после @ в адресах)" "$DOMAIN_DEFAULT"
+    if [ "$DOMAIN" = "mail.local" ]; then
+        fail "«mail.local» — это заглушка из образца настроек, а не домен"
+        if [ "$MT_NONINTERACTIVE" = "1" ]; then die "задайте MAILTRUE_DOMAIN"; fi
+        DOMAIN=''
+        continue
+    fi
     is_fqdn "$DOMAIN" && break
     fail "«$DOMAIN» не похоже на доменное имя"
     if [ "$MT_NONINTERACTIVE" = "1" ]; then die "поправьте MAILTRUE_DOMAIN"; fi
@@ -439,6 +458,21 @@ env_ensure DOVECOT_MASTER_USER  mtadmin    || true
 # той поломкой, которую она обязана поймать.
 # ------------------------------------------------------------------
 
+#
+# env_default — «поставить, если человек не выбрал своё».
+#
+# env_ensure пишет только при ПУСТОМ значении, а свежий infra/.env —
+# дословная копия образца, и пустых значений в нём нет. Значит для этих
+# четырёх ключей она не сработала бы вовсе. Пишем, когда ключа нет или
+# он остался из образца, — и молчим, если значение поставили руками или
+# из панели.
+env_default() {
+    local key="$1" value="$2"
+    if [ -z "$(env_get "$key")" ] || env_is_from_example "$key"; then
+        env_set "$key" "$value"
+    fi
+}
+
 env_port POSTGRES_PORT    "${MAILTRUE_POSTGRES_PORT:-}"    5432
 env_port REDIS_PORT       "${MAILTRUE_REDIS_PORT:-}"       6379
 env_port SMTP_PORT        "${MAILTRUE_SMTP_PORT:-}"        25
@@ -451,6 +485,27 @@ env_port POP3S_PORT       "${MAILTRUE_POP3S_PORT:-}"       995
 env_port AUTOCONFIG_PORT  "${MAILTRUE_AUTOCONFIG_PORT:-}"  8025
 env_port NGINX_HTTP_PORT  "${MAILTRUE_NGINX_HTTP_PORT:-}"  80
 env_port NGINX_HTTPS_PORT "${MAILTRUE_NGINX_HTTPS_PORT:-}" 443
+
+# ------------------------------------------------------------------
+# Что автонастройка называет почтовым программам.
+#
+# Это ОТДЕЛЬНЫЕ ключи (AUTOCONFIG_*): они говорят, куда клиенту
+# подключаться, тогда как публикуемые порты выше — где сервер слушает.
+# Раньше их не задавал ни установщик, ни мастер, и умолчания в
+# docker-compose.yml были стандартными — 993/587/465. Пока боевой
+# compose.prod.yml публиковал только стандартные, это совпадало; теперь
+# он берёт порты из .env, и на установке с нестандартными портами Outlook
+# и почта Apple получали от нашей же выдачи адреса, которых на сервере
+# нет, — «соединение отклонено» без единой подсказки, где искать.
+#
+# Приравниваем к публикуемым: клиенту называется ровно тот порт, который
+# сервер и слушает снаружи.
+env_default AUTOCONFIG_IMAPS_PORT         "$(env_get IMAPS_PORT)"
+env_default AUTOCONFIG_IMAP_STARTTLS_PORT "$(env_get IMAP_PORT)"
+env_default AUTOCONFIG_POP3S_PORT         "$(env_get POP3S_PORT)"
+env_default AUTOCONFIG_POP3_STARTTLS_PORT "$(env_get POP3_PORT)"
+env_default AUTOCONFIG_SUBMISSION_PORT    "$(env_get SUBMISSION_PORT)"
+env_default AUTOCONFIG_SUBMISSIONS_PORT   "$(env_get SUBMISSIONS_PORT)"
 
 # ------------------------------------------------------------------
 # Резервный вход в панель: адрес, на котором его слушать.
@@ -481,17 +536,40 @@ ADMIN_LOCAL_BIND="${MAILTRUE_ADMIN_LOCAL_BIND:-}"
 if [ -n "$ADMIN_LOCAL_BIND" ]; then
     # Задано явно при запуске — это осознанный ввод, пишем.
     env_set ADMIN_LOCAL_BIND "$ADMIN_LOCAL_BIND"
-elif [ -z "$(env_get ADMIN_LOCAL_BIND)" ]; then
+elif [ -z "$(env_get ADMIN_LOCAL_BIND)" ] || env_is_from_example ADMIN_LOCAL_BIND; then
+    #
+    # Условие «пусто» сюда не попадало НИКОГДА: свежий infra/.env — копия
+    # образца, а в образце стоит ADMIN_LOCAL_BIND=127.0.0.1. Значит и
+    # определение адреса в сети, и весь вывод «Панель без DNS:
+    # https://<адрес в локальной сети>» были недостижимы — резервный вход
+    # молча оставался на петле, то есть был доступен только с самого
+    # сервера.
+    #
+    # Различить «поставил человек» и «осталось от образца» умеет
+    # env_is_from_example — она для этого и написана.
+    #
     ADMIN_LOCAL_BIND="$(private_ip)"
     env_set ADMIN_LOCAL_BIND "${ADMIN_LOCAL_BIND:-127.0.0.1}"
 fi
 env_port ADMIN_LOCAL_PORT "${MAILTRUE_ADMIN_LOCAL_PORT:-}" 8081
-env_set API_LOG_LEVEL info
+#
+# ЭТИ ЧЕТЫРЕ КЛЮЧА УСТАНОВЩИК БОЛЬШЕ НЕ ПЕРЕПИСЫВАЕТ БЕЗУСЛОВНО.
+#
+# `env_set` пишет всегда, и запуск install.sh ради обновления возвращал
+# их к своим значениям. Для UNBOUND_LOG_QUERIES это особенно заметно: им
+# управляет панель (группа recreate), она пишет и в infra/.env, и в
+# таблицу настроек — а база в споре с окружением побеждает. Получалось,
+# что панель показывает журнал запросов включённым, а он выключен, и
+# ничьей ошибки в этом не видно.
+#
+# `env_ensure` ставит значение, только если ключа нет или он остался из
+# образца.
+env_default API_LOG_LEVEL info
 # Веб-интерфейс: cookie сессии отдаётся только по HTTPS. Отладочный порт
 # сервера приложения наружу не публикуется (install/compose.prod.yml).
-env_set COOKIE_SECURE true
-env_set TLS_REJECT_UNAUTHORIZED false
-env_set UNBOUND_LOG_QUERIES no
+env_default COOKIE_SECURE true
+env_default TLS_REJECT_UNAUTHORIZED false
+env_default UNBOUND_LOG_QUERIES no
 
 # ------------------------------------------------------------------
 # Подсеть стека и фиксированные адреса в ней.
@@ -787,12 +865,28 @@ psql_run() {
     dc exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA
 }
 
+# ------------------------------------------------------------------
+# ЧТО СЧИТАЕТСЯ ПРОВАЛОМ УСТАНОВКИ
+# ------------------------------------------------------------------
+# `fail` — это красная строка и счётчик, не более: он стоит и там, где
+# следом идёт переспрос, и там, где отказ означает лишь самоподписанный
+# сертификат вместо Let's Encrypt. Поэтому отдельно считаем то, без чего
+# сервером пользоваться нельзя: домен, ящик администратора, учётная
+# запись панели.
+#
+# Раньше не проверялось НИЧЕГО: после любого из этих отказов установка
+# доходила до конца, ставила отметку «установлено», печатала «Установка
+# завершена» и выходила с кодом 0. Веб-мастер по нулевому коду показывал
+# экран успеха с логином и паролем, которых не существует.
+MT_CRITICAL=0
+
 # Домен
 if printf "INSERT INTO virtual_domains (name) VALUES ('%s') ON CONFLICT (name) DO NOTHING;\n" "$DOMAIN" \
         | psql_run >/dev/null; then
     ok "домен $DOMAIN есть в базе"
 else
     fail "не удалось добавить домен $DOMAIN в базу"
+    MT_CRITICAL=$((MT_CRITICAL + 1))
 fi
 
 # Ящик администратора.
@@ -811,14 +905,19 @@ MAILBOX_EXISTS="$(dc exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 if [ "$MAILBOX_EXISTS" = "1" ]; then
     ok "ящик $ADMIN_EMAIL уже есть — пароль не трогаем"
     hint "сменить пароль ящика: в панели, раздел «Ящики»"
-elif printf '%s\n' "$MAILBOX_PASSWORD" |
-        bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" - >/dev/null 2>&1; then
+elif MAILBOX_OUT="$(printf '%s\n' "$MAILBOX_PASSWORD" |
+        bash "$INFRA_DIR/scripts/create-mailbox.sh" "$ADMIN_EMAIL" - 2>&1)"; then
     # Пароль подаётся на ВВОД, а не вторым аргументом: аргументы видны в
     # /proc любому пользователю машины, и пароль ящика администратора
     # светился там всё время установки.
     ok "ящик $ADMIN_EMAIL создан"
 else
     fail "не удалось создать ящик $ADMIN_EMAIL"
+    # Вывод скрипта раньше подавлялся целиком (>/dev/null 2>&1), и причина
+    # отказа не была видна ВООБЩЕ: красная строка без единого слова о том,
+    # что случилось.
+    printf '%s\n' "${MAILBOX_OUT:-}" | tail -5 | sed 's/^/      /'
+    MT_CRITICAL=$((MT_CRITICAL + 1))
 fi
 
 # Служебные адреса по RFC 2142: postmaster обязателен, abuse ожидают все
@@ -852,21 +951,35 @@ if [ -z "$ADMIN_HASH" ]; then
     # недостижимо, и человек получал молчаливый обрыв ровно на шаге
     # создания администратора — самом непонятном месте для обрыва.
     fail "не удалось посчитать хэш пароля администратора"
+    MT_CRITICAL=$((MT_CRITICAL + 1))
 else
     # Переменные раскрываются внутри контейнера, поэтому кавычки одинарные.
     # shellcheck disable=SC2016
+    #
+    # Код возврата psql здесь ВАЖНЕЕ вывода: пустой вывод даёт и
+    # `ON CONFLICT DO NOTHING` (учётная запись уже была), и любая ошибка —
+    # нет таблицы, база не отвечает, не применена миграция. Раньше
+    # «|| true» стирал код, оба случая давали одну и ту же ЗЕЛЁНУЮ строку
+    # «уже существовал», и сервер вовсе без учётной записи панели считался
+    # установленным.
+    ADMIN_RC=0
     CREATED="$(dc exec -T -e A_LOGIN="$ADMIN_LOGIN" -e A_HASH="$ADMIN_HASH" -e A_NAME="$ADMIN_EMAIL" postgres \
         sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -qtA \
-               -v login="$A_LOGIN" -v hash="$A_HASH" -v name="$A_NAME"' <<'SQL' || true
+               -v login="$A_LOGIN" -v hash="$A_HASH" -v name="$A_NAME"' <<'SQL' || ADMIN_RC=$?
 INSERT INTO admin_users (login, password_hash, display_name, role)
 VALUES (:'login', :'hash', :'name', 'owner')
 ON CONFLICT (login) DO NOTHING
 RETURNING login;
 SQL
 )"
-    if [ -n "$CREATED" ]; then
+    if [ "$ADMIN_RC" -ne 0 ]; then
+        fail "не удалось завести администратора «$ADMIN_LOGIN» — база отказала"
+        hint "проверьте миграции и состояние базы: bash install/selfcheck.sh"
+        MT_CRITICAL=$((MT_CRITICAL + 1))
+    elif [ -n "$CREATED" ]; then
         ok "администратор «$ADMIN_LOGIN» создан (роль owner)"
     else
+        # Пустой вывод при НУЛЕВОМ коде — это именно «уже был».
         ok "администратор «$ADMIN_LOGIN» уже существовал — пароль не менялся"
         hint "сменить пароль: см. docs/install.md, раздел «Обслуживание»"
     fi
@@ -1033,6 +1146,21 @@ step "Отметка «установлено»"
 # нашёл ЛЮБУЮ из них.
 #
 # Снимаются обе одной осознанной командой: install/allow-reinstall.sh
+#
+# Провал важного — не повод ставить отметку.
+#
+# Отметка «установлено» на сервере без ящика или без учётной записи
+# панели — прямая ложь: веб-мастер по ней покажет экран успеха с логином
+# и паролем, которых не существует, а повторную установку запретит как
+# уже сделанную.
+if [ "${MT_CRITICAL:-0}" -gt 0 ]; then
+    step "Установка НЕ завершена"
+    fail "не сделано важное (пунктов: $MT_CRITICAL) — отметка «установлено» не ставится"
+    hint "разберите красные строки выше и повторите: sudo bash install/install.sh"
+    hint "установка идемпотентна: сделанное повторно не делается"
+    exit 1
+fi
+
 env_set INSTALL_COMPLETED_AT "$(date -Iseconds)"
 
 if printf "INSERT INTO install_state (id, completed_at, installed_by, mail_domain, mail_hostname, admin_login)
