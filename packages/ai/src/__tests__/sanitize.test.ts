@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_MAX_BODY_CHARS,
+  describeBodyOnly,
   describeOutbound,
   prepareMessage,
   renderPrepared,
@@ -250,5 +251,40 @@ describe('урезание длинных писем', () => {
 
   it('предел по умолчанию задан и положителен', () => {
     assert.ok(DEFAULT_MAX_BODY_CHARS > 1000);
+  });
+});
+
+describe('describeBodyOnly (опись перевода)', () => {
+  it('перечисляет вырезанное, а не рапортует «ничего»', () => {
+    /*
+     * Перевод ЗАМЕНЯЕТ письмо на экране, поэтому опись под ним обязана
+     * назвать всё, чего в переводе нет. Раньше она строилась через
+     * describePlainText, у которой removed пуст по определению, — и
+     * человек читал «вырезано: ничего», хотя из письма убрали и цитату,
+     * и подпись.
+     */
+    const message = sampleMessage({
+      bodyText:
+        'Добрый день! Отчёт готов.\n\nС уважением,\nПётр Петров\n+7 900 000-00-00\n\n' +
+        '10 августа 2026, Иван Иванов <ivan@example.org> написал(а):\n> Пришлите отчёт',
+    });
+    const prepared = prepareMessage(message);
+    const disclosure = describeBodyOnly('Текст письма', prepared, context);
+
+    assert.ok(disclosure.removed.length > 0, 'вырезанное должно быть перечислено');
+    // Наружу уходит РОВНО тело: ни темы, ни адресов в запросе перевода нет.
+    assert.equal(disclosure.fields.length, 1);
+    assert.equal(disclosure.fields[0]?.value, prepared.body);
+    assert.equal(disclosure.totalChars, prepared.body.length);
+  });
+
+  it('вложения перечисляются как не отправленные', () => {
+    const prepared = prepareMessage(
+      sampleMessage({
+        attachments: [{ filename: 'dogovor.pdf', mimeType: 'application/pdf', size: 1000 }],
+      }),
+    );
+    const disclosure = describeBodyOnly('Текст письма', prepared, context);
+    assert.deepEqual(disclosure.attachmentsExcluded, prepared.attachmentsExcluded);
   });
 });

@@ -50,6 +50,8 @@ export interface MessageAiController {
   openSettings(): void;
 
   summaryVisible: boolean;
+  /** Включено ли «Извлечение полезного» — у него общая кнопка с резюме. */
+  extractVisible: boolean;
   summaryOpen: boolean;
   summaryPending: boolean;
   summary: AiSummary | null;
@@ -142,12 +144,21 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
       return;
     }
     setSummaryOpen(true);
-    if (summarize.data || summarize.isPending) return;
 
-    const request: AiSummarizeRequest = isThread ? { messageIds: ids } : { messageId };
-    summarize.mutate(request);
-    // Извлечение полезного считаем заодно с резюме: пользователь нажал
-    // одну кнопку, и оба ответа относятся к одному и тому же письму.
+    /*
+     * Запускаем ровно то, что человек оставил себе включённым.
+     *
+     * Раньше извлечение шло безусловным «прицепом» к резюме, а показ его
+     * плашки зависел от summaryOpen. Из этого выходило вот что: человек,
+     * выключивший «Краткое резюме» и оставивший «Извлечение полезного»,
+     * не получал извлечение НИКОГДА — кнопка ему не показывалась вовсе.
+     * Возможность была на экране согласия, отвечала «включено» и не
+     * делала ничего.
+     */
+    if (summaryVisible && !summarize.data && !summarize.isPending) {
+      const request: AiSummarizeRequest = isThread ? { messageIds: ids } : { messageId };
+      summarize.mutate(request);
+    }
     if (extractVisible && !extract.data && !extract.isPending) extract.mutate(messageId);
   }, [
     messageId,
@@ -155,6 +166,7 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
     openSettings,
     summaryOpen,
     summarize,
+    summaryVisible,
     isThread,
     ids,
     extractVisible,
@@ -195,6 +207,7 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
     openSettings,
 
     summaryVisible,
+    extractVisible,
     summaryOpen,
     summaryPending: summarize.isPending,
     summary: summarize.data?.value ?? null,
@@ -229,16 +242,31 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
 /* ------------------------------------------------------------------ */
 
 export function AiSummaryButton({ controller }: { controller: MessageAiController }) {
-  if (!controller.summaryVisible) return null;
+  /*
+   * Кнопка есть и тогда, когда включено ОДНО извлечение полезного: у него
+   * своей кнопки нет, а без этой оно не запускалось вовсе. Тогда и
+   * называется она по делу — «Извлечь», а не «Кратко».
+   */
+  // Помощник выключен целиком — кнопки нет вовсе, какие бы возможности
+  // ни оставались отмеченными в настройках.
+  if (!controller.enabled) return null;
+  if (!controller.summaryVisible && !controller.extractVisible) return null;
+  const onlyExtract = !controller.summaryVisible;
   return (
     <Button
       mode="tertiary"
       before={<IconSparkles />}
       onClick={controller.toggleSummary}
       aria-expanded={controller.summaryOpen}
-      title={controller.summaryIsThread ? 'Кратко о всей переписке' : 'Кратко о письме'}
+      title={
+        onlyExtract
+          ? 'Даты, суммы, реквизиты и задачи из письма'
+          : controller.summaryIsThread
+            ? 'Кратко о всей переписке'
+            : 'Кратко о письме'
+      }
     >
-      Кратко
+      {onlyExtract ? 'Извлечь' : 'Кратко'}
     </Button>
   );
 }
@@ -268,8 +296,12 @@ export function AiMessageBanners({ controller }: { controller: MessageAiControll
   if (!controller.enabled) return null;
   return (
     <>
-      {controller.summaryOpen && <SummaryBanner controller={controller} />}
-      {controller.summaryOpen && <ExtractionBanner controller={controller} />}
+      {controller.summaryOpen && controller.summaryVisible && (
+        <SummaryBanner controller={controller} />
+      )}
+      {controller.summaryOpen && controller.extractVisible && (
+        <ExtractionBanner controller={controller} />
+      )}
       {controller.translatePending && (
         <div className={styles.banner}>
           <div className={styles.pending}>
@@ -492,6 +524,20 @@ function CopyItem({ value, label }: { value: string; label: string }) {
 /* Перевод вместо тела письма                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Чего нет в переводе — одной строкой.
+ *
+ * Опись под переводом перечисляет вырезанное подробно, но её ещё надо
+ * раскрыть. Перевод при этом стоит ВМЕСТО письма, и человек, не увидевший
+ * в нём подписи отправителя или процитированной переписки, решит, что их
+ * не было вовсе.
+ */
+export function translationLoss(disclosure: AiOutboundDisclosure | null): string {
+  if (!disclosure || disclosure.removed.length === 0) return '';
+  const names = disclosure.removed.map((part) => part.note.toLowerCase());
+  return `Переведено без некоторых частей письма: ${names.join(', ')}.`;
+}
+
 export function AiTranslatedBody({ controller }: { controller: MessageAiController }) {
   if (!controller.enabled || !controller.translationShown || !controller.translation) return null;
   return (
@@ -507,6 +553,17 @@ export function AiTranslatedBody({ controller }: { controller: MessageAiControll
           Показать оригинал
         </button>
       </div>
+      {/*
+        Перевод ЗАМЕНЯЕТ письмо на экране, поэтому о неполноте говорим
+        прямо в полосе, а не только в описи под ней: из письма вырезаны
+        цитируемая переписка, подпись и хвост длиннее предела, и без этой
+        строки они просто исчезают из виду.
+      */}
+      {translationLoss(controller.translationDisclosure) && (
+        <p className={styles.translationNote}>
+          {translationLoss(controller.translationDisclosure)} Полный текст — в оригинале письма.
+        </p>
+      )}
       <div className={styles.translationOutbound}>
         <OutboundDetails disclosure={controller.translationDisclosure} />
       </div>

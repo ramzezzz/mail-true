@@ -259,6 +259,44 @@ export function describeOutbound(
   };
 }
 
+/**
+ * Опись для запроса, где наружу уходит ТОЛЬКО тело письма.
+ *
+ * Так работает перевод: модели отдаётся один текст, без темы и адресов.
+ * Раньше опись для него строилась через describePlainText, у которой
+ * `removed` пуст по определению, — и человек читал «вырезано: ничего»,
+ * тогда как из письма уже убрали цитаты, подпись и хвост длиннее предела.
+ * Для перевода это особенно чувствительно: он ЗАМЕНЯЕТ письмо на экране,
+ * и вырезанное просто исчезает из виду.
+ *
+ * Поля берутся не из parts (там ещё тема и отправитель, которых в запросе
+ * нет), а ровно одно — тело. Всё остальное переносится из подготовки как
+ * есть: что вырезано, какие вложения не поехали.
+ */
+export function describeBodyOnly(
+  label: string,
+  prepared: PreparedMessage,
+  context: DisclosureContext,
+): OutboundDisclosure {
+  const field: OutboundField = {
+    field: 'body',
+    label,
+    value: prepared.body,
+    chars: prepared.body.length,
+  };
+  return {
+    endpoint: context.endpoint,
+    model: context.model,
+    providerLabel: context.providerLabel,
+    local: context.local,
+    fields: [field],
+    removed: [...prepared.removed],
+    attachmentsExcluded: [...prepared.attachmentsExcluded],
+    totalChars: prepared.body.length,
+    approxTokens: estimateTokens(prepared.body),
+  };
+}
+
 /** Опись для запроса, в котором письма нет вообще (например, разбор поисковой фразы). */
 export function describePlainText(
   label: string,

@@ -105,6 +105,13 @@ function controller(patch: Partial<MessageAiController> = {}): MessageAiControll
     openSettings: () => {},
 
     summaryVisible: true,
+    /*
+     * Извлечение полезного — своя возможность со своим переключателем.
+     * Её плашка теперь показывается по нему, а не заодно с резюме: иначе
+     * человек, выключивший «Кратко» и оставивший «Извлечение», не
+     * получал извлечение никогда.
+     */
+    extractVisible: true,
     summaryOpen: true,
     summaryPending: false,
     summary,

@@ -17,6 +17,7 @@ import { PROMPT_VERSIONS, isInsidePerimeter, type AiFeature } from '@mail-true/a
 import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
+import { publicStreamEvent } from './routes.js';
 import { keyHint } from './secret.js';
 import {
   describeNetworkFailure,
@@ -549,7 +550,20 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
            * пустую плашку «что ушло наружу».
            */
           if (event.type === 'disclosure') continue;
-          reply.raw.write(`data: ${JSON.stringify(event)}
+          /*
+           * Событие чистится тем же отбором, что и в пользовательском
+           * потоке (publicStreamEvent).
+           *
+           * У отказа поставщика в `details` лежит сырое тело ответа до 500
+           * символов — в том числе для 401/403, где в нём оказывается
+           * кусок ключа доступа и внутренние имена организации. Здесь
+           * событие писалось как есть, и это ровно тот дефект, который в
+           * соседнем файле объявлен закрытым и закреплён тестом
+           * (ai/stream-events.test.ts). Право `serversettings.read` есть
+           * только у владельца — но ключ и не предназначен для показа
+           * даже ему: он вводится один раз и больше нигде не отдаётся.
+           */
+          reply.raw.write(`data: ${JSON.stringify(publicStreamEvent(event))}
 
 `);
         }

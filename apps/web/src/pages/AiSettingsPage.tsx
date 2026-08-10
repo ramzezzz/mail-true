@@ -188,6 +188,12 @@ export function AiSettingsView({
                   <span className={styles.featureTitle}>{feature.title}</span>
                 </div>
                 <p className={styles.featureText}>{feature.description}</p>
+                {feature.notInUi === true && (
+                  <p className={styles.featureText}>
+                    Кнопки в почте у этой возможности пока нет — она доступна только через API
+                    сервера. Включать её сейчас незачем.
+                  </p>
+                )}
                 <p className={styles.featureSends}>
                   <span className={styles.featureSendsLabel}>Отправляется: </span>
                   {feature.sends}
@@ -303,7 +309,13 @@ function BudgetBlock({ budget }: { budget: AiBudget }) {
         </div>
       </div>
       <p className={`${styles.text} ${styles.muted} ${styles.spacedNote}`}>
-        Период учёта — {formatPeriod(budget.periodMs)}, отсчёт с{' '}
+        {/*
+          Счётчик ОБЩИЙ НА ВЕСЬ ДОМЕН, а выглядел как личный: человек
+          видел «осталось три обращения», израсходованных коллегами, и
+          не понимал, куда делись его. Говорим прямо.
+        */}
+        Расход общий на весь домен: сюда попадают обращения всех, кто пользуется помощником. Период
+        учёта — {formatPeriod(budget.periodMs)}, отсчёт с{' '}
         {formatDate(new Date(budget.windowStartedAt).toISOString())}.
         {budget.tokensLeft !== null
           ? ` Осталось токенов: ${budget.tokensLeft.toLocaleString('ru-RU')}.`

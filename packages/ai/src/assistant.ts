@@ -72,6 +72,7 @@ import {
 } from './schemas.js';
 import {
   describeOutbound,
+  describeBodyOnly,
   describePlainText,
   prepareMessage,
   renderPrepared,
@@ -525,7 +526,15 @@ export class MailAssistant {
       messageId: message.id,
       system: translatePrompt(targetLanguage),
       user: prepared.body,
-      disclosure: describePlainText('Текст письма', prepared.body, this.#disclosureContext()),
+      /*
+       * Опись перечисляет и ВЫРЕЗАННОЕ: цитаты, подпись, хвост письма
+       * длиннее предела. Раньше здесь стояла describePlainText, у которой
+       * `removed` пуст по определению, — и панель «Что ушло наружу»
+       * говорила «вырезано: ничего». Для перевода это хуже, чем для
+       * пересказа: перевод ЗАМЕНЯЕТ письмо на экране, и не попавшая в
+       * него часть просто исчезает из виду.
+       */
+      disclosure: describeBodyOnly('Текст письма', prepared, this.#disclosureContext()),
       schema: translationSchema,
       variant: { targetLanguage },
       ctx,

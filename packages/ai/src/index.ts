@@ -116,6 +116,7 @@ export type {
 
 export {
   DEFAULT_MAX_BODY_CHARS,
+  describeBodyOnly,
   describeOutbound,
   describePlainText,
   prepareMessage,

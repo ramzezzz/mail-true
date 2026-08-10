@@ -56,6 +56,8 @@ export class SenderLogoService {
   readonly #store: LogoStore;
   readonly #ai: AiService | null;
   readonly #budget: MinuteBudget;
+  /** Отдельный, меньший предел на обращения к ИИ — см. конфигурацию. */
+  readonly #aiBudget: MinuteBudget;
   /** Идущие прямо сейчас поиски: ключ — домен. Ровно одно на домен. */
   readonly #inflight = new Map<string, Promise<CachedLogo | null>>();
   #running = 0;
@@ -78,6 +80,7 @@ export class SenderLogoService {
     this.#overrides = init.overrides;
     this.#ai = init.ai ?? null;
     this.#budget = new MinuteBudget(init.config.SENDER_LOGO_LOOKUPS_PER_MINUTE);
+    this.#aiBudget = new MinuteBudget(init.config.SENDER_LOGO_AI_PER_MINUTE);
   }
 
   get overrides(): LogoOverrideStore {
@@ -294,9 +297,23 @@ export class SenderLogoService {
 
     await this.#acquire();
     try {
-      const ai: LogoHintProvider | undefined = this.#ai
-        ? new AiLogoHints({ ai: this.#ai, email, logger: this.#logger })
-        : undefined;
+      /*
+       * ИИ привлекается, только пока есть свой минутный запас.
+       *
+       * Домены приходят от клиента и с почтой спрашивающего не
+       * сверяются, а для выдуманного домена молчат и BIMI, и значок
+       * сайта — то есть каждый такой домен доходил до модели и списывался
+       * с общего дневного предела ДОМЕНА. Кончился запас — ищем без ИИ:
+       * так работает продукт с выключенной подсказкой.
+       */
+      const aiAllowed = this.#ai !== null && this.#aiBudget.take();
+      const ai: LogoHintProvider | undefined =
+        this.#ai && aiAllowed
+          ? new AiLogoHints({ ai: this.#ai, email, logger: this.#logger })
+          : undefined;
+      if (this.#ai && !aiAllowed) {
+        this.#logger.debug({ domain }, 'Подсказка ИИ пропущена: исчерпан минутный запас');
+      }
 
       const startedAt = Date.now();
       const outcome = await findLogo(domain, { config: this.#config, logger: this.#logger, ai });
