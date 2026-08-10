@@ -45,7 +45,11 @@ interface WsLike {
 const WS_OPEN = 1;
 
 interface Watcher {
-  client: ImapFlow;
+  /**
+   * Текущее IDLE-соединение. `null` — соединения сейчас нет: либо ещё не
+   * открыли, либо оборвалось и мы его поднимаем заново.
+   */
+  client: ImapFlow | null;
   sockets: Set<WsLike>;
   closed: boolean;
   /** Адрес и пароль ящика: нужны, чтобы собрать содержимое уведомления. */
@@ -65,7 +69,47 @@ interface Watcher {
    * 0 — не живёт вовсе (подписок на доставку у ящика нет).
    */
   keepAliveUntil: number;
+  /**
+   * Номер соединения. Растёт при каждом открытии.
+   *
+   * Обработчики событий вешаются на КОНКРЕТНЫЙ клиент и переживают его
+   * смерть: без этого номера событие 'close' от старого, уже заменённого
+   * соединения тут же гасило бы свежее.
+   */
+  generation: number;
+  /** Таймер попытки поднять оборвавшееся соединение. */
+  rearm: NodeJS.Timeout | null;
+  /** Сколько попыток восстановления уже сделано подряд. */
+  rearmAttempt: number;
+  /**
+   * Наблюдение закрыто НАМЕРЕННО (выход, смена пароля, блокировка).
+   * Такое не восстанавливаем: за ним стоит решение человека.
+   */
+  dropped: boolean;
 }
+
+/**
+ * Через сколько пробовать поднять оборвавшееся IDLE-соединение, мс.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Обрыв IDLE (перезапуск Dovecot, сетевой сбой, предел времени на
+ * соединение) снимал наблюдателя и рассылал сокетам 'idle-lost'. И всё:
+ * поднимать наблюдение было некому. Сам WebSocket оставался открытым,
+ * значит браузер не переподключался и второй подписки не случалось, а
+ * `ensureWatcher` зовётся только из `subscribe`.
+ *
+ * С этого момента у ящика не оставалось НИ ОДНОГО источника событий:
+ * новые письма переставали появляться в списке сами, уведомления на
+ * открытой вкладке не показывались, и push тоже не уходил — вся рассылка
+ * висит на этих же событиях. Ошибки при этом не было нигде: почта просто
+ * «зависала» до перезагрузки страницы.
+ *
+ * Растущие промежутки — чтобы недоступный Dovecot не долбить в цикле, а
+ * обычный обрыв чинился за секунду.
+ */
+const REARM_DELAYS_MS = [1_000, 5_000, 15_000, 60_000, 5 * 60_000] as const;
 
 /**
  * Сколько наблюдение живёт после закрытия последней вкладки.
@@ -145,34 +189,65 @@ export class MailNotifier {
   /** Открывает (или переиспользует) IDLE-наблюдателя для пользователя. */
   private async ensureWatcher(email: string, password: string): Promise<Watcher> {
     const existing = this.watchers.get(email);
-    if (existing && !existing.closed && existing.client.usable) return existing;
+    if (existing && !existing.closed && existing.client?.usable === true) return existing;
 
-    const client = new ImapFlow({
-      host: this.config.IMAP_HOST,
-      port: this.config.IMAP_PORT,
-      secure: this.config.IMAP_SECURE,
-      auth: { user: email, pass: password },
-      tls: { rejectUnauthorized: this.config.TLS_REJECT_UNAUTHORIZED },
-      logger: false,
-      clientInfo: { name: 'Mail.True-IDLE', version: '0.1.0' },
-    });
+    /*
+     * Наблюдатель, у которого оборвалось соединение, поднимается НА
+     * МЕСТЕ — тот же объект, те же сокеты. Завести рядом второй значило
+     * бы осиротить уже подписанные сокеты: обработчик их закрытия
+     * ссылается на старый объект, и новый жил бы с вечно непустым
+     * списком подписчиков.
+     */
+    if (existing && !existing.dropped) {
+      existing.password = password;
+      await this.openClient(existing);
+      return existing;
+    }
+
     const watcher: Watcher = {
-      client,
+      client: null,
       sockets: new Set(),
       closed: false,
       email,
       password,
       clients: new Map(),
       keepAliveUntil: 0,
+      generation: 0,
+      rearm: null,
+      rearmAttempt: 0,
+      dropped: false,
     };
+    await this.openClient(watcher);
+    this.watchers.set(email, watcher);
+    return watcher;
+  }
 
-    // Слушатели вешаются ДО подключения: необработанное событие 'error'
-    // на источнике событий убивает процесс Node целиком, а рвётся
-    // соединение чаще всего именно на подключении
+  /**
+   * Открывает новое IDLE-соединение для наблюдателя.
+   *
+   * Слушатели вешаются ДО подключения: необработанное событие 'error' на
+   * источнике событий убивает процесс Node целиком, а рвётся соединение
+   * чаще всего именно на подключении.
+   */
+  private async openClient(watcher: Watcher): Promise<void> {
+    const email = watcher.email;
+    const client = new ImapFlow({
+      host: this.config.IMAP_HOST,
+      port: this.config.IMAP_PORT,
+      secure: this.config.IMAP_SECURE,
+      auth: { user: email, pass: watcher.password },
+      tls: { rejectUnauthorized: this.config.TLS_REJECT_UNAUTHORIZED },
+      logger: false,
+      clientInfo: { name: 'Mail.True-IDLE', version: '0.1.0' },
+    });
+    watcher.generation += 1;
+    const gen = watcher.generation;
+    /** Событие от уже заменённого соединения не должно гасить свежее. */
+    const mine = (): boolean => watcher.generation === gen;
+
     client.on('error', (err: unknown) => {
+      if (!mine()) return;
       this.logger.warn(errorInfo(err, { email }), 'Ошибка IDLE-соединения');
-      watcher.closed = true;
-      if (this.watchers.get(email) === watcher) this.watchers.delete(email);
       try {
         client.close();
       } catch {
@@ -180,11 +255,13 @@ export class MailNotifier {
       }
     });
     client.on('close', () => {
+      if (!mine()) return;
       watcher.closed = true;
-      if (this.watchers.get(email) === watcher) this.watchers.delete(email);
       this.broadcast(watcher, { type: 'idle-lost' });
+      this.scheduleRearm(watcher);
     });
     client.on('exists', (event: { path: string; count: number; prevCount: number }) => {
+      if (!mine()) return;
       void this.onNewMessages(watcher, event).catch((err) => {
         this.logger.warn(
           errorInfo(err, { email }),
@@ -206,8 +283,77 @@ export class MailNotifier {
       throw err;
     }
 
-    this.watchers.set(email, watcher);
-    return watcher;
+    watcher.client = client;
+    watcher.closed = false;
+    watcher.rearmAttempt = 0;
+  }
+
+  /**
+   * Планирует попытку поднять оборвавшееся наблюдение.
+   *
+   * Не поднимаем в двух случаях: наблюдение закрыли намеренно (выход,
+   * смена пароля, блокировка) и наблюдать больше не для кого — вкладок
+   * нет и срок жизни ради уведомлений вышел.
+   */
+  private scheduleRearm(watcher: Watcher): void {
+    if (watcher.dropped || watcher.rearm) return;
+    if (this.watchers.get(watcher.email) !== watcher) return;
+    if (watchExpired(watcher, Date.now())) return;
+
+    const delay = REARM_DELAYS_MS[Math.min(watcher.rearmAttempt, REARM_DELAYS_MS.length - 1)];
+    watcher.rearmAttempt += 1;
+    if (watcher.rearmAttempt > REARM_DELAYS_MS.length * 2) {
+      /*
+       * Сдаёмся — но не молча. Закрываем сокеты: браузер переподключит
+       * их сам и подпишется заново, уже с паролем из живого сеанса. Это
+       * последний способ починиться там, где пароль в памяти устарел.
+       */
+      this.logger.warn(
+        { email: watcher.email },
+        'Наблюдение за ящиком поднять не удалось, закрываем сокеты — браузер переподключится сам',
+      );
+      for (const socket of watcher.sockets) {
+        try {
+          socket.close();
+        } catch {
+          /* уже закрыт */
+        }
+      }
+      this.closeWatcher(watcher.email, watcher);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      watcher.rearm = null;
+      void this.rearm(watcher);
+    }, delay ?? 60_000);
+    timer.unref?.();
+    watcher.rearm = timer;
+  }
+
+  /**
+   * Поднимает оборвавшееся наблюдение.
+   *
+   * Письма, пришедшие ПОКА соединения не было, событием 'exists' не
+   * придут — поэтому открытым вкладкам уходит 'idle-restored': по нему
+   * страница перечитывает список и пропуск закрывается. Уведомления о
+   * тех письмах не уйдут, и это честно: узнать о них было неоткуда.
+   */
+  private async rearm(watcher: Watcher): Promise<void> {
+    if (watcher.dropped) return;
+    if (this.watchers.get(watcher.email) !== watcher) return;
+    if (watchExpired(watcher, Date.now())) return;
+    try {
+      await this.openClient(watcher);
+      this.broadcast(watcher, { type: 'idle-restored' });
+      this.logger.info({ email: watcher.email }, 'Наблюдение за ящиком восстановлено после обрыва');
+    } catch (err) {
+      this.logger.warn(
+        errorInfo(err, { email: watcher.email }),
+        'Не удалось восстановить наблюдение после обрыва, попробуем ещё раз',
+      );
+      this.scheduleRearm(watcher);
+    }
   }
 
   private async onNewMessages(
@@ -215,8 +361,10 @@ export class MailNotifier {
     event: { count: number; prevCount: number },
   ): Promise<void> {
     if (event.count <= event.prevCount) return;
+    const client = watcher.client;
+    if (!client) return;
     const range = `${event.prevCount + 1}:${event.count}`;
-    const fetched = await watcher.client.fetchAll(range, {
+    const fetched = await client.fetchAll(range, {
       uid: true,
       envelope: true,
       flags: true,
@@ -342,8 +490,16 @@ export class MailNotifier {
 
   private closeWatcher(email: string, watcher: Watcher): void {
     watcher.closed = true;
+    // Намеренное закрытие: поднимать это наблюдение обратно не нужно.
+    watcher.dropped = true;
+    if (watcher.rearm) {
+      clearTimeout(watcher.rearm);
+      watcher.rearm = null;
+    }
     if (this.watchers.get(email) === watcher) this.watchers.delete(email);
-    watcher.client.logout().catch(() => watcher.client.close());
+    const client = watcher.client;
+    watcher.client = null;
+    if (client) client.logout().catch(() => client.close());
     if (this.watchers.size === 0) this.stopSweeper();
   }
 
@@ -379,7 +535,14 @@ export class MailNotifier {
     for (const [email, watcher] of this.watchers) {
       this.watchers.delete(email);
       watcher.closed = true;
-      await watcher.client.logout().catch(() => watcher.client.close());
+      watcher.dropped = true;
+      if (watcher.rearm) {
+        clearTimeout(watcher.rearm);
+        watcher.rearm = null;
+      }
+      const client = watcher.client;
+      watcher.client = null;
+      if (client) await client.logout().catch(() => client.close());
     }
   }
 }

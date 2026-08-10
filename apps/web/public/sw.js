@@ -356,6 +356,55 @@ async function markSeen(ids) {
   }).catch(() => undefined);
 }
 
+/**
+ * Действие по кнопке в уведомлении — и ЧЕСТНЫЙ ответ, получилось ли.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Запрос уходил с `.catch(() => undefined)`, а код ответа не смотрел
+ * никто. Только `fetch` не отклоняется на 401, 403 и 500 — он их
+ * возвращает. То есть истёкшая сессия (штатное состояние: подписка живёт
+ * отдельно от сессии, и этот же файл её прямо моделирует) выглядела ровно
+ * как успех: окно уже закрыто, письмо осталось во «Входящих»
+ * непрочитанным, и сказать об этом было нечем.
+ */
+async function callApi(url, payload) {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Сказать, что действие не прошло.
+ *
+ * Отдельным окном, а не молчанием: другого пути сообщить у работника
+ * нет — то окно, на кнопку которого нажали, браузер уже закрыл. Окно
+ * без кнопок и с постоянным ярлыком: второе такое же его заменит, а не
+ * положит рядом.
+ */
+async function sayFailed(text) {
+  try {
+    await self.registration.showNotification(text, {
+      tag: 'mt-action-failed',
+      body: 'Откройте почту и повторите — возможно, закончился сеанс.',
+      icon: FALLBACK.icon,
+      badge: FALLBACK.badge,
+      data: { url: FALLBACK.url, ids: [] },
+    });
+  } catch {
+    /* Показать не дали — сделать больше нечего. */
+  }
+}
+
 self.addEventListener('notificationclick', (event) => {
   const data = (event.notification && event.notification.data) || {};
   const ids = Array.isArray(data.ids) ? data.ids : [];
@@ -369,23 +418,15 @@ self.addEventListener('notificationclick', (event) => {
        * нет намеренно: он означал бы второй набор проверок прав.
        */
       if (event.action === 'read' && ids.length > 0) {
-        await fetch(API.flags, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids, seen: true }),
-        }).catch(() => undefined);
-        await markSeen(ids);
+        const ok = await callApi(API.flags, { ids, seen: true });
+        if (ok) await markSeen(ids);
+        else await sayFailed('Отметить прочитанным не удалось');
         return;
       }
       if (event.action === 'archive' && ids.length > 0) {
-        await fetch(API.move, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids, targetFolderId: 'archive' }),
-        }).catch(() => undefined);
-        await markSeen(ids);
+        const ok = await callApi(API.move, { ids, targetFolderId: 'archive' });
+        if (ok) await markSeen(ids);
+        else await sayFailed('Убрать в архив не удалось');
         return;
       }
 

@@ -236,6 +236,27 @@ export class PushService {
    */
   async init(): Promise<void> {
     if (!this.#config.PUSH_ENABLED) return;
+    await this.#loadKeys();
+    /*
+     * Уборщик запускается ВСЕГДА, откуда бы ни взялись ключи.
+     *
+     * ------------------------------------------------------------------
+     * ЧТО БЫЛО
+     * ------------------------------------------------------------------
+     * Он стоял последней строкой `init`, а ветка «ключи заданы в
+     * окружении» выходила раньше — то есть на установке с
+     * PUSH_VAPID_PUBLIC_KEY/PUSH_VAPID_PRIVATE_KEY в окружении (их
+     * задают из панели и при переносе установки) уборка не выполнялась
+     * ни разу. Подписки, отвечающие отказом, копились вечно, а рассылка
+     * обходит их последовательно с пределом ожидания в десять секунд на
+     * каждую: десяток мёртвых строк растягивает уведомление о письме на
+     * минуты. Со временем — только хуже.
+     */
+    this.#startJanitor();
+  }
+
+  /** Ключи сервера: из окружения, если заданы, иначе из базы. */
+  async #loadKeys(): Promise<void> {
     const fromEnv = this.#config.PUSH_VAPID_PUBLIC_KEY;
     const privateFromEnv = this.#config.PUSH_VAPID_PRIVATE_KEY;
     if (fromEnv && privateFromEnv) {
@@ -256,7 +277,6 @@ export class PushService {
       this.#keysReason = 'Не удалось прочитать ключи уведомлений из базы (миграция 0012?)';
       this.#logger.warn(errorInfo(err), this.#keysReason);
     }
-    this.#startJanitor();
   }
 
   /**

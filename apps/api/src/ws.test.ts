@@ -11,7 +11,17 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { clientIdOf, watchExpired, WATCH_KEEP_ALIVE_MS } from './ws.js';
+
+const SOURCE = readFileSync(
+  fileURLToPath(new URL('./ws.ts', import.meta.url).href.replace('/dist/', '/src/')),
+  'utf8',
+);
+
+/** Код без комментариев: разбор рядом не должен изображать правку. */
+const CODE = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 test('отпечаток браузера читается из строки запроса и обрезается', () => {
   assert.equal(clientIdOf({ client: 'abc-123' }), 'abc-123');
@@ -62,4 +72,40 @@ test('срок жизни наблюдения — сутки, а не «поб�
   // Соединение занимает место в Dovecot, а пароль ящика всё это время
   // лежит в памяти процесса. Число здесь — сделка, и менять её молча нельзя.
   assert.equal(WATCH_KEEP_ALIVE_MS, 24 * 3600 * 1000);
+});
+
+/* ------------------------------------------------------------------ */
+/* Обрыв IDLE                                                           */
+/* ------------------------------------------------------------------ */
+
+test('оборвавшееся наблюдение поднимается заново, а не остаётся мёртвым', () => {
+  /*
+   * ЧТО БЫЛО. Обрыв IDLE снимал наблюдателя и рассылал сокетам
+   * 'idle-lost'. Поднять наблюдение было некому: сам WebSocket оставался
+   * открытым, значит браузер не переподключался, а ensureWatcher зовётся
+   * только из subscribe. С этого момента у ящика не оставалось ни одного
+   * источника событий — ни списка, ни уведомлений на вкладке, ни push, —
+   * и лечилось это только перезагрузкой страницы.
+   */
+  assert.match(CODE, /this\.scheduleRearm\(watcher\)/u, 'после обрыва нужна попытка поднять');
+  assert.match(CODE, /private async rearm\(watcher: Watcher\)/u);
+  assert.match(CODE, /type: 'idle-restored'/u, 'вкладкам нужно сказать, что связь вернулась');
+});
+
+test('намеренно закрытое наблюдение обратно не поднимается', () => {
+  // Выход, смена пароля и блокировка ящика закрывают наблюдение
+  // осознанно. Поднять его обратно значило бы продолжить читать чужую
+  // почту с паролем, которого у человека уже нет.
+  const closer = CODE.slice(CODE.indexOf('private closeWatcher'));
+  assert.match(closer, /watcher\.dropped = true/u);
+  const rearm = CODE.slice(CODE.indexOf('private scheduleRearm'));
+  assert.match(rearm, /if \(watcher\.dropped/u);
+});
+
+test('поднимать нечего, если вкладок нет и срок наблюдения вышел', () => {
+  const rearm = CODE.slice(
+    CODE.indexOf('private scheduleRearm'),
+    CODE.indexOf('private async rearm'),
+  );
+  assert.match(rearm, /watchExpired\(watcher, Date\.now\(\)\)/u);
 });

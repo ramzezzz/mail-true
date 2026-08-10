@@ -24,6 +24,7 @@ import { accountsKeys } from '../api/accountsQueries';
 import { setUnauthorizedHandler } from '../api/http';
 import type { SessionInfo } from '../api/types';
 import { forgetAppearance, syncAppearance } from '../appearance/sync';
+import { announceOwnKey } from '../notifications/ownKey';
 import { disablePush } from '../notifications/subscribe';
 import { publishMailEvent } from './mailEvents';
 import { useUiStore } from './store';
@@ -79,9 +80,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
        * тема из кэша уже применена в main.tsx.
        */
       if (info.authenticated) void syncAppearance(info.email);
+      /*
+       * Отпечаток ящика для Service Worker — ЗДЕСЬ, а не только в
+       * разделе «Уведомления».
+       *
+       * По нему работник решает, показывать ли содержимое, приехавшее
+       * внутри push. Раньше отпечаток сообщался единственным местом —
+       * запросом состояния раздела «Уведомления», — то есть менялся
+       * только у того, кто в этот раздел заходил. Вход, выход и смена
+       * ящика его не трогали, и на общем компьютере вошедший следующим
+       * видел отправителя и тему письма, адресованного предыдущему.
+       * Refresh — общая точка всех трёх путей, поэтому отпечаток
+       * обновляется тут.
+       */
+      void announceOwnKey(info.authenticated ? info.email : null);
     } catch {
       // 401 здесь — обычное дело: просто ещё не вошли
       setSession(null);
+      void announceOwnKey(null);
     } finally {
       setLoading(false);
     }
@@ -169,6 +185,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
      * сервер.
      */
     await disablePush().catch(() => undefined);
+    // Работнику — «ящика здесь больше нет»: содержимое из push, пришедшее
+    // вдогонку, он покажет безымянным окном, а не с чужой темой.
+    await announceOwnKey(null).catch(() => undefined);
     await api.logout().catch(() => undefined);
     setSession(null);
     queryClient.clear();

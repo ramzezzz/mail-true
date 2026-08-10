@@ -598,3 +598,44 @@ test('проверочное уведомление уходит только в
   assert.equal(missing.sent, 0);
   assert.match(missing.error ?? '', /подписки нет/u);
 });
+
+/* ------------------------------------------------------------------ */
+/* Уборка мёртвых подписок                                              */
+/* ------------------------------------------------------------------ */
+
+test('уборщик мёртвых подписок работает и с ключами из окружения', async () => {
+  /*
+   * Он стоял последней строкой init(), а ветка «ключи заданы в
+   * окружении» выходила раньше. На установке, где VAPID-ключи заданы
+   * переменными (их задают из панели и при переносе установки), уборка
+   * не выполнялась ни разу: подписки, отвечающие отказом, копились
+   * вечно. Рассылка обходит их последовательно с пределом ожидания в
+   * десять секунд на каждую — десяток мёртвых строк растягивает
+   * уведомление о письме на минуты.
+   */
+  const keys = generateVapidKeys();
+  const purged: Date[] = [];
+  const service = new PushService({
+    config: loadPushConfig({
+      PUSH_ENABLED: 'true',
+      DATABASE_URL: 'postgres://x',
+      PUSH_VAPID_PUBLIC_KEY: keys.publicKey,
+      PUSH_VAPID_PRIVATE_KEY: keys.privateKey,
+    }),
+    db: {
+      purgeDeadSubscriptions: async (edge: Date) => {
+        purged.push(edge);
+        return 0;
+      },
+      schemaReady: async () => true,
+      close: async () => undefined,
+    } as never,
+    logger,
+    env: environment(),
+  });
+  await service.init();
+  // Первый проход — сразу: сервер перезапускают чаще, чем раз в сутки.
+  await new Promise((resolve) => setImmediate(resolve));
+  service.stop();
+  assert.equal(purged.length, 1, 'уборка обязана начаться, откуда бы ни взялись ключи');
+});

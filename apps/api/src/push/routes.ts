@@ -220,11 +220,22 @@ export async function pushRoutes(app: FastifyInstance, service: PushService): Pr
         ?.split(',')
         .map((id) => id.trim())
         .filter((id) => id !== '');
-      const view = await service.buildView(
-        session,
-        undefined,
-        ids && ids.length > 0 ? { ids } : {},
-      );
+      /*
+       * Пустой `ids` — это НЕ «отдай всё».
+       *
+       * Работник спрашивает этим адресом ещё и «чей это браузер»: бьёт с
+       * `?ids=` и читает из ответа только отпечаток. Пустая строка после
+       * разбора давала пустой список, а пустой список считался
+       * отсутствием запроса — и сервер собирал вид по ВСЕЙ очереди:
+       * открывал ящик, читал каждое письмо по IMAP, а на уровне «сводка
+       * от ИИ» ещё и звал платного поставщика. Результат выбрасывался
+       * целиком, и всё это — внутри обработчика push, в критическом пути
+       * показа окна.
+       */
+      const view =
+        query.ids !== undefined && (!ids || ids.length === 0)
+          ? null
+          : await service.buildView(session, undefined, ids && ids.length > 0 ? { ids } : {});
       /*
        * Отпечаток открытого ящика отдаём всегда.
        *
