@@ -7,10 +7,12 @@
  * действительно освобождается — не «когда-нибудь», а проходом уборщика.
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { pino } from 'pino';
 import type { AdminDb } from './db.js';
 import { AdminJanitor } from './janitor.js';
@@ -436,4 +438,28 @@ void test('застрявшие удаления не молчат: уборщи
   const second = await janitor.runOnce();
   assert.equal(second.stuckDeletions, 3);
   assert.equal(said.length, 1);
+});
+
+void test('уборка журналов панели спрашивает существующие колонки', () => {
+  /*
+   * Тест по исходнику, а не по живой базе: имя колонки — единственное,
+   * что здесь можно перепутать, и цена ошибки велика. Проход уборщика
+   * падал целиком на «column "created_at" does not exist», то есть
+   * вместе с журналами переставали убираться и карантины, и следы
+   * подбора паролей — они идут тем же проходом. Поймано живой проверкой
+   * на стенде, в журнале сервера.
+   */
+  const source = readFileSync(
+    fileURLToPath(new URL('./db.ts', import.meta.url).href.replace('/dist/', '/src/')),
+    'utf8',
+  );
+  const sweep = source.slice(
+    source.indexOf('async sweepAdminLogs'),
+    source.indexOf('markAdminLoginFailure'),
+  );
+  // Ищем именно ОТБОР по колонке, а не слово в объяснении рядом.
+  assert.ok(!/created_at\s*</.test(sweep), 'колонки created_at в этих таблицах нет');
+  assert.match(sweep, /FROM admin_audit_log[\s\S]*?WHERE at </, 'у журнала действий колонка at');
+  assert.match(sweep, /FROM ai_audit_log[\s\S]*?WHERE at </, 'у журнала ИИ колонка at');
+  assert.match(sweep, /last_success </, 'у справочника адресов — last_success');
 });
