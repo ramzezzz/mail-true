@@ -944,6 +944,17 @@ function BulkModal({
 
   /** Сколько уже сделано — длинная правка не должна выглядеть зависанием. */
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /**
+   * Режим, с которым работа НАЧАЛАСЬ.
+   *
+   * Список «Что сделать» не заперт, и подпись кнопки с порогом показа
+   * хода читали живой `mode`. Выходило так: идёт удаление ста пятидесяти
+   * ящиков (это минуты), человек от нечего делать переключает список на
+   * «Сменить квоту» — строка «Обработано 37 из 150» ИСЧЕЗАЕТ (у не-
+   * удаления порог двести), а кнопка пишет «Применяем…». Во время
+   * необратимой операции экран называет другую операцию и прячет ход.
+   */
+  const [runningMode, setRunningMode] = useState<BulkMode | null>(null);
   /** Первые причины отказов: без них «не удалось — 7» ничего не объясняет. */
   const [reasons, setReasons] = useState<string[]>([]);
   /**
@@ -972,6 +983,7 @@ function BulkModal({
       setReasons([]);
       setSummary(null);
       stopRef.current = false;
+      setRunningMode(mode);
       /*
        * Режим запоминаем ЗДЕСЬ, а не читаем при выводе итога.
        *
@@ -1118,7 +1130,7 @@ function BulkModal({
               disabled={stopRef.current}
               onClick={() => {
                 stopRef.current = true;
-                setSummary('Останавливаем: текущий запрос доработает, следующие не пойдут.');
+                setSummary('Останавливаем: текущий запрос доработает, следующие не пойдут');
               }}
             >
               Остановить
@@ -1130,7 +1142,7 @@ function BulkModal({
           )}
           <Button disabled={blocked} onClick={() => run.mutate()}>
             {run.isPending
-              ? mode === 'delete'
+              ? (runningMode ?? mode) === 'delete'
                 ? 'Удаляем…'
                 : 'Применяем…'
               : mode === 'delete'
@@ -1157,12 +1169,17 @@ function BulkModal({
       */}
       {run.isPending &&
         progress !== null &&
-        (mode === 'delete' ? progress.total > 1 : progress.total > BULK_CHUNK) && (
+        ((runningMode ?? mode) === 'delete' ? progress.total > 1 : progress.total > BULK_CHUNK) && (
           <Notice tone="info">
-            Обработано {progress.done} из {progress.total}. Окно закроется само.
+            Обработано {progress.done} из {progress.total}. Не закрывайте окно.
           </Notice>
         )}
-      {summary !== null && <Notice tone="error">{summary}</Notice>}
+      {/*
+        Итог показываем красным только когда он и есть плохой. «Останавливаем…»
+        — это ответ на нажатие, а не отказ, и красным он читается как
+        поломка.
+      */}
+      {summary !== null && <Notice tone={run.isPending ? 'info' : 'error'}>{summary}</Notice>}
       {reasons.length > 0 && (
         <Notice tone="error">
           Не удалось изменить часть ящиков. Причины (первые {reasons.length}):

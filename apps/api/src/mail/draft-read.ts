@@ -17,6 +17,16 @@ import type { AddressObject } from 'mailparser';
 import type { MailAddress } from '@mail-true/shared';
 import { sanitizeEmailHtml } from './sanitize.js';
 
+/**
+ * Сколько байт картинок можно вшить в тело черновика.
+ *
+ * Считается по ИСХОДНЫМ байтам; в теле они вырастут на треть (base64) и
+ * поедут в каждом автосохранении. Предел тела письма в запросе — 10 МБ,
+ * всего запроса — 12 МБ, поэтому два мегабайта картинок (около 2,7 МБ
+ * разметки) оставляют запас и на сам текст, и на цитату.
+ */
+const MAX_INLINED_BYTES = 2 * 1024 * 1024;
+
 /** Вложение черновика, вынутое из письма. */
 export interface DraftAttachmentPart {
   filename: string;
@@ -104,10 +114,33 @@ export async function parseDraftSource(source: Buffer): Promise<ParsedDraft> {
    */
   const placed = new Set<string>();
   const inlined = new Map<string, string>();
+  let inlinedBytes = 0;
   for (const part of parsed.attachments) {
     const cid = typeof part.cid === 'string' ? part.cid.replace(/[<>]/g, '') : '';
     if (cid === '' || !part.related) continue;
     if (!/^image\//i.test(part.contentType || '')) continue;
+    /*
+     * ВШИВАЕМ, ПОКА ЭТО ПОМЕЩАЕТСЯ В ЗАПРОС.
+     *
+     * Вшитая картинка растёт на треть (base64) и ездит в теле КАЖДОГО
+     * автосохранения. Предел тела письма в запросе — 10 МБ, предел всего
+     * запроса — 12 МБ, а предел самого письма 25 МБ: то есть черновик с
+     * тремя картинками по три мегабайта законно существует, но вшитым
+     * телом в запрос уже не влезает. Без этого порога такой черновик
+     * открывался, показывался целиком — и его нельзя было ни сохранить,
+     * ни отправить: и автосохранение, и кнопка, и «Отправить» получали
+     * «Некорректные данные запроса». Раньше он отправлялся.
+     *
+     * Что происходит после порога: картинка не вшивается, а остаётся
+     * обычным вложением (ниже её подхватывает разбор вложений, потому
+     * что в тело она не встала). Человек увидит её файлом, а не в теле —
+     * это хуже, чем было, но это НЕ потеря: письмо сохраняется и уходит
+     * вместе с ней. Настоящее решение — держать картинки черновика во
+     * временном хранилище загрузок и ссылаться на них по номеру
+     * загрузки, а не возить байты туда-сюда.
+     */
+    if (inlinedBytes + part.content.length > MAX_INLINED_BYTES) continue;
+    inlinedBytes += part.content.length;
     inlined.set(cid, `data:${part.contentType};base64,${part.content.toString('base64')}`);
   }
 

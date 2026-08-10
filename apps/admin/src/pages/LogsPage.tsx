@@ -198,6 +198,8 @@ export function LogsPage() {
   const [olderPending, setOlderPending] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [rotated, setRotated] = useState(false);
+  /** Короткое пояснение к последнему действию с лентой. */
+  const [note, setNote] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const [pinned, setPinned] = useState(true);
 
@@ -260,6 +262,7 @@ export function LogsPage() {
     const before = loaded.olderBefore;
     if (before === null) return;
     setOlderPending(true);
+    setNote(null);
     try {
       const page = await api.logs({
         source,
@@ -287,7 +290,17 @@ export function LogsPage() {
          * Проще и честнее ничего не приписывать: курсор уже указывает на
          * новую кромку, и повторное нажатие дочитает ровно оттуда.
          */
-        if (prev.olderBefore !== before) return prev;
+        if (prev.olderBefore !== before) {
+          /*
+           * Молчать здесь нельзя. Кнопка сменилась на «Подгружаем
+           * старое…», вернулась обратно — и НИ ОДНОЙ строки не
+           * добавилось: со стороны это сломанная кнопка. А случается это
+           * ровно при разборе аварии, когда записи идут потоком и лента
+           * обрезается на каждом опросе.
+           */
+          setNote('Пока читали старое, пришли новые записи — нажмите ещё раз.');
+          return prev;
+        }
         return {
           ...prev,
           lines: [...[...page.items].reverse(), ...prev.lines],
@@ -544,6 +557,7 @@ export function LogsPage() {
       </p>
 
       <ErrorNotice error={error} />
+      {note !== null && <Notice tone="info">{note}</Notice>}
       {rotated && (
         <Notice tone="info">
           Журнал провернулся, пока вы его читали: прежнее место в файле больше ничего не значит.
@@ -592,11 +606,25 @@ export function LogsPage() {
               кнопка работала ровно один раз подряд.
             */}
             {loaded.olderBefore !== null ? (
+              /*
+               * `aria-disabled`, а НЕ `disabled`.
+               *
+               * Выключенный элемент во всех основных браузерах теряет
+               * фокус — он уходит на body. То есть прошлая правка задачу
+               * не решила: нажав Enter на кнопке, клавиатурный человек
+               * снова оставался без фокуса, а лента не фокусируема, и
+               * добраться до кнопки можно было только протабившись через
+               * всю панель инструментов. Здесь узел остаётся доступным,
+               * а повторное нажатие гасится в самом обработчике.
+               */
               <button
                 type="button"
                 className={styles.olderButton}
-                disabled={olderPending}
-                onClick={() => void loadOlder()}
+                aria-disabled={olderPending}
+                onClick={() => {
+                  if (olderPending) return;
+                  void loadOlder();
+                }}
               >
                 {olderPending ? 'Подгружаем старое…' : 'Показать более старые записи'}
               </button>

@@ -22,6 +22,17 @@ export class ApiError extends Error {
     readonly url: string,
     message: string,
     readonly code: string | null = null,
+    /**
+     * Подробности отказа — то, что сервер положил в поле `details`.
+     *
+     * Нужны там, где отказ несёт не только текст, но и ФАКТ: например,
+     * неудачная отправка кладёт письмо в «Черновики» и возвращает номер
+     * нового черновика. Без этих подробностей окно написания не знало о
+     * нём вовсе и потом пыталось убрать уже несуществующий черновик, а
+     * спасённый оставался лежать — при том что человеку сказали
+     * «написанное будет потеряно».
+     */
+    readonly details: unknown = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -234,8 +245,14 @@ export async function apiFetch<T>(path: string, init?: ApiRequestInit): Promise<
   if (!response.ok) {
     let detail = response.statusText;
     let code: string | null = null;
+    let details: unknown = null;
     try {
-      const body = (await response.json()) as { error?: string; message?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+        details?: unknown;
+      };
+      details = body.details ?? null;
       if (typeof body.error === 'string' && body.error) code = body.error;
       // Человеческий текст важнее кода: именно он показывается пользователю.
       if (typeof body.message === 'string' && body.message) detail = body.message;
@@ -244,7 +261,7 @@ export async function apiFetch<T>(path: string, init?: ApiRequestInit): Promise<
       /* тело не JSON — оставляем statusText */
     }
     if (response.status === 401 && isSessionExpiry(path, code)) unauthorizedHandler?.();
-    throw new ApiError(response.status, path, detail, code);
+    throw new ApiError(response.status, path, detail, code, details);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -268,8 +285,14 @@ export async function apiFetchBlob(path: string, init?: ApiRequestInit): Promise
   if (!response.ok) {
     let detail = response.statusText;
     let code: string | null = null;
+    let details: unknown = null;
     try {
-      const body = (await response.json()) as { error?: string; message?: string };
+      const body = (await response.json()) as {
+        error?: string;
+        message?: string;
+        details?: unknown;
+      };
+      details = body.details ?? null;
       if (typeof body.error === 'string' && body.error) code = body.error;
       if (typeof body.message === 'string' && body.message) detail = body.message;
       else if (code) detail = code;
@@ -277,7 +300,7 @@ export async function apiFetchBlob(path: string, init?: ApiRequestInit): Promise
       /* тело не JSON — оставляем statusText */
     }
     if (response.status === 401 && isSessionExpiry(path, code)) unauthorizedHandler?.();
-    throw new ApiError(response.status, path, detail, code);
+    throw new ApiError(response.status, path, detail, code, details);
   }
   return await response.blob();
 }

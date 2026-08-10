@@ -59,14 +59,12 @@ export function ScheduledPanel() {
    * его тут действительно было можно — ровно это и чинится задачей.
    */
   const showNotice = useUiStore((state) => state.showNotice);
-  const [done, setDone] = useState<string | null>(null);
   const items = data ?? [];
 
   if (items.length === 0) return null;
 
   const cancel = (id: string): void => {
     setError(null);
-    setDone(null);
     /*
      * `heldByWindow` здесь НЕ шлётся, и это главное отличие от полосы
      * «Отменить отправку» в окне написания: окна к этому времени нет —
@@ -159,7 +157,6 @@ export function ScheduledPanel() {
       )}
 
       {error && <p className={styles.error}>{error}</p>}
-      {done && <p className={styles.done}>{done}</p>}
     </div>
   );
 }
