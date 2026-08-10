@@ -30,8 +30,13 @@ import { MemoryAdminSessionStore, type AdminSessionStore } from './session.js';
 const TTL = 8 * 3600;
 
 /** База с одним администратором; запоминает, что ей записали. */
-function fakeDb(): { db: AdminDb; written: () => string | null } {
+function fakeDb(): {
+  db: AdminDb;
+  written: () => string | null;
+  clearedLocks: () => string[];
+} {
   let hash: string | null = null;
+  const cleared: string[] = [];
   const db = {
     findAdminByLogin: async (login: string): Promise<AdminUserRow | null> =>
       login === 'vladelec'
@@ -41,8 +46,12 @@ function fakeDb(): { db: AdminDb; written: () => string | null } {
       hash = String(values[1] ?? '');
       return [];
     },
+    clearAdminLoginFailures: async (login: string): Promise<number> => {
+      cleared.push(login);
+      return 1;
+    },
   } as unknown as AdminDb;
-  return { db, written: () => hash };
+  return { db, written: () => hash, clearedLocks: () => cleared };
 }
 
 const sessionOf = (adminId: number) => ({
@@ -118,4 +127,23 @@ void test('нет такого администратора — ничего н�
   );
   assert.equal(result, null);
   assert.equal(written(), null);
+});
+
+void test('смена пароля снимает и поадресный замок, а не только счётчик учётки', async () => {
+  /*
+   * ЧТО БЫЛО. Чистился только admin_users, а ОСНОВНОЙ замок с миграции
+   * 0037 живёт в admin_login_failures — пять промахов против тридцати. И
+   * проверяется он РАНЬШЕ пароля, поэтому новый, правильный пароль не
+   * помогал. Ломалось это ровно в том сценарии, ради которого сброс и
+   * написан: человек забыл пароль, промахнулся пять раз со своего адреса
+   * и пошёл на сервер сбрасывать. Скрипт печатал «блокировка снята»,
+   * форма отвечала «вход заблокирован ещё на 15 мин».
+   */
+  const { db, clearedLocks } = fakeDb();
+  const sessions = new MemoryAdminSessionStore();
+
+  const result = await changeAdminPassword({ db, sessions }, 'vladelec', 'novyy-parol-ochen');
+
+  assert.ok(result);
+  assert.deepEqual(clearedLocks(), ['vladelec']);
 });

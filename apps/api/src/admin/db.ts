@@ -409,7 +409,30 @@ export class AdminDb {
     return row?.locked_until ?? null;
   }
 
-  /** Промах с этого адреса. Возвращает счётчик и срок блокировки адреса. */
+  /**
+   * Промах с этого адреса. Возвращает счётчик и срок блокировки адреса.
+   *
+   * ------------------------------------------------------------------
+   * ОТСИДЕВШАЯ БЛОКИРОВКА ОБНУЛЯЕТ СЧЁТ
+   * ------------------------------------------------------------------
+   * Счётчик рос монотонно и обнулялся ТОЛЬКО удачным входом. Значит
+   * после первой же блокировки бюджет попыток молча становился равен
+   * одной: отсидел пятнадцать минут, ошибся ещё раз — снова пятнадцать.
+   * Человек, честно забывший пароль, получал одну попытку в четверть
+   * часа, а сообщение обещало ему пять.
+   *
+   * На пару с таким же счётчиком учётной записи это давало кое-что
+   * похуже: после того как счёт учётки один раз перевалил за порог, ОДИН
+   * неверный пароль раз в пятнадцать минут держал её запертой вечно.
+   * Четыре запроса в час с одного адреса — и панель заперта бессрочно,
+   * причём войти можно было только со «знакомого» адреса, то есть
+   * администратор в командировке или после смены провайдера не входил
+   * уже никогда. Ровно та беда, которую миграция 0037 объявила
+   * вылеченной («перебирающий запирает сам себя»), вернувшаяся с другой
+   * стороны.
+   *
+   * Отсидел — начинай сначала: срок блокировки и есть цена промахов.
+   */
   async markAdminAddressFailure(
     login: string,
     ip: string,
@@ -420,15 +443,44 @@ export class AdminDb {
       `INSERT INTO admin_login_failures (login, ip, attempts)
             VALUES ($1, $2, 1)
        ON CONFLICT (login, ip) DO UPDATE
-          SET attempts = admin_login_failures.attempts + 1,
-              locked_until = CASE WHEN admin_login_failures.attempts + 1 >= $3
-                                  THEN now() + ($4 || ' minutes')::interval
-                                  ELSE admin_login_failures.locked_until END,
+          SET attempts = CASE
+                           WHEN admin_login_failures.locked_until IS NOT NULL
+                            AND admin_login_failures.locked_until <= now()
+                           THEN 1
+                           ELSE admin_login_failures.attempts + 1
+                         END,
+              locked_until = CASE
+                               WHEN admin_login_failures.locked_until IS NOT NULL
+                                AND admin_login_failures.locked_until <= now()
+                               THEN CASE WHEN 1 >= $3
+                                         THEN now() + ($4 || ' minutes')::interval
+                                         ELSE NULL END
+                               WHEN admin_login_failures.attempts + 1 >= $3
+                               THEN now() + ($4 || ' minutes')::interval
+                               ELSE admin_login_failures.locked_until
+                             END,
               updated_at = now()
         RETURNING attempts, locked_until`,
       [login, ip, maxFailures, String(lockMinutes)],
     );
     return row ?? { attempts: 0, locked_until: null };
+  }
+
+  /**
+   * Снимает поадресные замки учётной записи — все, с любых адресов.
+   *
+   * Нужен смене пароля. Основной замок с миграции 0037 живёт здесь, а не
+   * в admin_users, и проверяется РАНЬШЕ пароля: пока он держит, новый,
+   * правильный пароль не помогает. Сброс пароля при этом уверенно писал
+   * «блокировка снята» — и человек, пришедший на сервер именно потому,
+   * что не может войти, получал ровно тот же отказ.
+   */
+  async clearAdminLoginFailures(login: string): Promise<number> {
+    const rows = await this.query<{ login: string }>(
+      `DELETE FROM admin_login_failures WHERE login = $1 RETURNING login`,
+      [login],
+    );
+    return rows.length;
   }
 
   /** Удачный вход — счётчик этого адреса обнуляется. */
@@ -566,7 +618,14 @@ export class AdminDb {
    * Настоящий вопрос, ради которого в неё смотрят, — «сколько пересылок
    * ведёт В этот ящик»: их и уничтожает удаление ящика (purgeMailboxData).
    */
-  /** Увеличивает счётчик неудач и при переполнении ставит блокировку. */
+  /**
+   * Увеличивает счётчик неудач и при переполнении ставит блокировку.
+   *
+   * Отсидевшая блокировка обнуляет счёт — по той же причине, что и у
+   * поадресного счётчика выше, только здесь цена ошибки больше: пока
+   * счёт не обнулялся, ОДИН неверный пароль раз в пятнадцать минут
+   * держал учётную запись запертой бесконечно.
+   */
   async markAdminLoginFailure(
     id: number,
     maxFailures: number,
@@ -574,10 +633,20 @@ export class AdminDb {
   ): Promise<{ failed_attempts: number; locked_until: Date | null } | null> {
     return this.one<{ failed_attempts: number; locked_until: Date | null }>(
       `UPDATE admin_users
-          SET failed_attempts = failed_attempts + 1,
-              locked_until = CASE WHEN failed_attempts + 1 >= $2
-                                  THEN now() + ($3 || ' minutes')::interval
-                                  ELSE locked_until END,
+          SET failed_attempts = CASE
+                                  WHEN locked_until IS NOT NULL AND locked_until <= now()
+                                  THEN 1
+                                  ELSE failed_attempts + 1
+                                END,
+              locked_until = CASE
+                               WHEN locked_until IS NOT NULL AND locked_until <= now()
+                               THEN CASE WHEN 1 >= $2
+                                         THEN now() + ($3 || ' minutes')::interval
+                                         ELSE NULL END
+                               WHEN failed_attempts + 1 >= $2
+                               THEN now() + ($3 || ' minutes')::interval
+                               ELSE locked_until
+                             END,
               updated_at = now()
         WHERE id = $1
         RETURNING failed_attempts, locked_until`,

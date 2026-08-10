@@ -86,6 +86,14 @@ function isSessionExpiry(path: string, code: string | null): boolean {
 export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
   const status = isApiError(error) ? error.status : undefined;
   if (status === 401 || status === 403 || status === 404) return false;
+  /*
+   * 429 — «слишком много запросов». Повторять его значит тратить то же
+   * самое окно ещё дважды: предел считается по адресу клиента, а за одним
+   * внешним адресом сидит вся контора. Упёршись в потолок, офис начинал
+   * давить на него втрое сильнее — и выбирался тем дольше, чем больше
+   * людей в нём работает.
+   */
+  if (status === 429) return false;
   return failureCount < 2;
 }
 

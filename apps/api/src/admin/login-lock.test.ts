@@ -21,6 +21,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import cookiePlugin from '@fastify/cookie';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { pino } from 'pino';
@@ -84,7 +86,11 @@ class FakeDb {
   ): Promise<{ attempts: number; locked_until: Date | null }> {
     const key = `${login}|${ip}`;
     const row = this.byAddress.get(key) ?? { attempts: 0, locked_until: null };
-    row.attempts += 1;
+    // Отсидевшая блокировка обнуляет счёт — так же, как настоящий запрос
+    // (см. AdminDb.markAdminAddressFailure).
+    const served = row.locked_until !== null && row.locked_until.getTime() <= Date.now();
+    row.attempts = served ? 1 : row.attempts + 1;
+    if (served) row.locked_until = null;
     if (row.attempts >= maxFailures) {
       row.locked_until = new Date(Date.now() + lockMinutes * 60_000);
     }
@@ -109,7 +115,10 @@ class FakeDb {
     maxFailures: number,
     lockMinutes: number,
   ): Promise<{ failed_attempts: number; locked_until: Date | null }> {
-    this.admin.failed_attempts += 1;
+    const served =
+      this.admin.locked_until !== null && this.admin.locked_until.getTime() <= Date.now();
+    this.admin.failed_attempts = served ? 1 : this.admin.failed_attempts + 1;
+    if (served) this.admin.locked_until = null;
     if (this.admin.failed_attempts >= maxFailures) {
       this.admin.locked_until = new Date(Date.now() + lockMinutes * 60_000);
     }
@@ -249,4 +258,72 @@ test('запертая учётная запись не мешает своем�
   } finally {
     await app.close();
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* Отсидевшая блокировка обнуляет счёт                                  */
+/* ------------------------------------------------------------------ */
+
+void test('после отсиженной блокировки бюджет попыток возвращается целиком', async () => {
+  /*
+   * ЧТО БЫЛО. Счётчик рос монотонно и обнулялся ТОЛЬКО удачным входом.
+   * Значит после первой блокировки бюджет молча становился равен одной
+   * попытке: отсидел пятнадцать минут, ошибся ещё раз — снова пятнадцать.
+   * Человеку, честно забывшему пароль, сообщение при этом обещало пять.
+   */
+  const db = new FakeDb();
+  const key = 'admin|203.0.113.5';
+  // Блокировка была и уже отсижена.
+  db.byAddress.set(key, {
+    attempts: 5,
+    locked_until: new Date(Date.now() - 60_000),
+  });
+
+  const after = await db.markAdminAddressFailure('admin', '203.0.113.5', 5, 15);
+
+  assert.equal(after.attempts, 1, 'счёт начинается заново');
+  assert.equal(after.locked_until, null, 'и запирать снова не за что');
+});
+
+void test('учётную запись нельзя держать запертой одним промахом в четверть часа', async () => {
+  /*
+   * Тот же счётчик у самой учётной записи. Пока он не обнулялся, ОДИН
+   * неверный пароль раз в пятнадцать минут держал панель запертой вечно —
+   * четыре запроса в час с одного адреса. Спастись можно было только со
+   * «знакомого» адреса, то есть администратор в командировке не входил
+   * уже никогда.
+   */
+  const db = new FakeDb();
+  db.admin.failed_attempts = 30;
+  db.admin.locked_until = new Date(Date.now() - 60_000);
+
+  const after = await db.markAdminLoginFailure(db.admin.id, 30, 15);
+
+  assert.equal(after.failed_attempts, 1);
+  assert.equal(after.locked_until, null, 'один промах после отсидки не запирает снова');
+});
+
+void test('в запросе к базе обнуление счёта действительно есть', () => {
+  /*
+   * Подделка выше повторяет поведение настоящего запроса. Чтобы они не
+   * разъехались молча, сверяем сам текст: без этой ветки проверки выше
+   * зеленели бы на сломанном сервере.
+   */
+  const source = readFileSync(
+    fileURLToPath(new URL('./db.ts', import.meta.url).href.replace('/dist/', '/src/')),
+    'utf8',
+  );
+  const address = source.slice(
+    source.indexOf('async markAdminAddressFailure'),
+    source.indexOf('async clearAdminLoginFailures'),
+  );
+  assert.match(address, /locked_until <= now\(\)\s*\n\s*THEN 1/u);
+  const account = source.slice(
+    source.indexOf('async markAdminLoginFailure'),
+    source.indexOf(
+      '/* ---------------------------------------------------------------- */',
+      source.indexOf('async markAdminLoginFailure'),
+    ),
+  );
+  assert.match(account, /locked_until <= now\(\)\s*\n\s*THEN 1/u);
 });

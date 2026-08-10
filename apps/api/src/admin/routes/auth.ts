@@ -72,13 +72,6 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       const { login, password } = loginSchema.parse(request.body);
       const row = await ctx.db.findAdminByLogin(login);
 
-      // Пароль сверяем даже для несуществующего логина — чтобы по времени
-      // ответа нельзя было перебрать имена администраторов
-      const stored =
-        row?.password_hash ??
-        'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
-      const passwordOk = verifyAdminPassword(password, stored);
-
       const origin = originOf(request);
       const ip = origin.ip ?? '';
       const settings = settingsOf(ctx);
@@ -153,6 +146,29 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
           );
         }
       }
+
+      /*
+       * ПАРОЛЬ СЧИТАЕТСЯ ПОСЛЕ ЗАМКОВ, А НЕ ДО.
+       *
+       * Сверка пароля — это scrypt (N=16384, r=8), десятки миллисекунд, и
+       * она СИНХРОННАЯ: на это время останавливается единственный цикл
+       * событий Node — тот самый, который обслуживает и всю веб-почту.
+       *
+       * Раньше она стояла первой строкой обработчика. То есть замок не
+       * удешевлял отказ ни на грамм: запертый перебирающий продолжал
+       * покупать полный scrypt за один HTTP-запрос, а маршрутный предел
+       * частоты (десять в минуту на адрес) ЗАМЕНЯЕТ общий, а не
+       * складывается с ним — других потолков на этом пути нет. Полторы
+       * тысячи запросов в минуту с полутора сотен адресов клали цикл
+       * событий, и вместе с панелью вставала почта у всех.
+       *
+       * Пустышка для несуществующего логина остаётся: без неё время
+       * ответа выдавало бы, какие имена администраторов существуют.
+       */
+      const stored =
+        row?.password_hash ??
+        'scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+      const passwordOk = verifyAdminPassword(password, stored);
 
       if (!row || !passwordOk || !row.active) {
         // Порог и срок блокировки — настройки «действуют сразу»:
