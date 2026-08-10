@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { Folder } from '@mail-true/shared';
-import { decodeLabel, encodeLabel, toWebCollector } from './collectorRoutes.js';
+import { collectorNote, decodeLabel, encodeLabel, toWebCollector } from './collectorRoutes.js';
 import type { ExternalAccount } from './types.js';
 
 const FOLDERS: Folder[] = [
@@ -153,4 +153,48 @@ test('идущий сбор и ошибка видны в состоянии', (
   );
   assert.equal(failed.status, 'error');
   assert.equal(failed.error, 'Чужой сервер недоступен');
+});
+
+/* ------------------------------------------------------------------ */
+/* Незаконченный сбор                                                   */
+/* ------------------------------------------------------------------ */
+
+test('сбор, не уложившийся в отведённое время, не выдаётся за поломку', () => {
+  const dto = toWebCollector(
+    account({
+      state: {
+        ...account().state,
+        status: 'partial',
+        error: null,
+        lastCopied: 1240,
+        lastFailed: 0,
+        lastOkAt: null,
+      },
+    }),
+    FOLDERS,
+  );
+  assert.equal(dto.status, 'ok', 'ящик исправен, письма едут — красить красным нечего');
+  assert.equal(dto.error, null);
+  assert.match(dto.note ?? '', /1240/u, 'сколько уже перенесено — обязано быть видно');
+  assert.equal(dto.lastSyncAt, '2026-08-05T10:00:00.000Z', 'время последнего захода не теряется');
+});
+
+test('часть писем не перенеслась — это ошибка, и она названа', () => {
+  const acc = account({
+    state: {
+      ...account().state,
+      status: 'partial',
+      error: 'Не удалось перенести писем: 7',
+      lastCopied: 30,
+      lastFailed: 7,
+    },
+  });
+  const dto = toWebCollector(acc, FOLDERS);
+  assert.equal(dto.status, 'error');
+  assert.equal(dto.error, 'Не удалось перенести писем: 7');
+  assert.equal(collectorNote(acc), null, 'вторая строка про «ещё едет» тут только запутает');
+});
+
+test('у законченного сбора никакой второй строки нет', () => {
+  assert.equal(collectorNote(account()), null);
 });

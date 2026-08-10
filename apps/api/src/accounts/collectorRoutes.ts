@@ -119,6 +119,23 @@ export function decodeLabel(raw: string | null): LabelFlags {
   };
 }
 
+/**
+ * Строка про незаконченный сбор — или ничего.
+ *
+ * Состояние 'partial' без единого непереехавшего письма означает ровно
+ * одно: сбор не уложился в отведённое время и продолжится с курсора.
+ * Молчать об этом нельзя (человек решит, что приехало всё), но и красить
+ * красным незачем — ломаться тут нечему.
+ */
+export function collectorNote(account: ExternalAccount): string | null {
+  const state = account.state;
+  if (state.status !== 'partial' || state.lastFailed > 0) return null;
+  return (
+    `Перенесено писем: ${String(state.lastCopied)}. Ящик большой — ` +
+    'остальное приедет следующими заходами.'
+  );
+}
+
 /** Внутреннее подключение -> DTO интерфейса. */
 export function toWebCollector(account: ExternalAccount, folders: readonly Folder[]): WebCollector {
   const flags = decodeLabel(account.label);
@@ -134,11 +151,33 @@ export function toWebCollector(account: ExternalAccount, folders: readonly Folde
     leaveOnServer: flags.leaveOnServer,
     applyFilters: flags.applyFilters,
     enabled: account.enabled,
-    status: toWebStatus(account.state.status),
+    status: toWebStatus(account.state.status, account.state.lastFailed),
     lastSyncAt: account.state.lastOkAt ?? account.state.lastRunAt,
     error: account.state.error,
+    note: collectorNote(account),
   };
 }
+
+/**
+ * Сколько ждать ручной сбор в самом запросе.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Кнопка «Проверить» ждала ВЕСЬ сбор: маршрут держал запрос до конца
+ * работы. Предел на сбор — до десяти минут (COLLECTOR_TIMEOUT_MS), у
+ * nginx на этот путь 120 с, а у браузерного клиента вообще 30 с
+ * (TIMEOUT_DEFAULT_MS). То есть любая первая синхронизация — и любой
+ * медленный чужой сервер — заканчивались для человека сообщением об
+ * ошибке при полностью исправном и ИДУЩЕМ сборе. Он жал ещё раз, и
+ * второй заход упирался в замок «уже идёт» — то есть кнопка выглядела
+ * сломанной.
+ *
+ * Ждём столько, чтобы маленький ящик успел ответить готовым итогом, а
+ * дальше отвечаем «идёт» и оставляем работу в фоне: страница дождётся
+ * её опросом.
+ */
+const SYNC_WAIT_MS = 5_000;
 
 export async function collectorRoutes(
   app: FastifyInstance,
@@ -288,6 +327,8 @@ export async function collectorRoutes(
    *
    * Пароль владельца берётся из сессии: это позволяет собирать вручную
    * даже там, где служебный доступ Dovecot не настроен.
+   *
+   * Ответ не ждёт конца работы дольше SYNC_WAIT_MS — см. комментарий там.
    */
   app.post('/:id/sync', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
@@ -304,10 +345,39 @@ export async function collectorRoutes(
       throw new BadRequestError('Это подключение работает в режиме прямого доступа, сбор не нужен');
     }
 
-    await service.collect(session.email, found.account, found.passwordEnc, session.password);
+    /*
+     * Ключ шифрования проверяем ЗДЕСЬ, до фонового запуска: без него
+     * сбор не начнётся вовсе, и отказ обязан доехать до человека
+     * ответом на нажатие, а не молчанием и вечным «идёт».
+     */
+    service.requireSecretBox();
+
+    /*
+     * Работа запускается в фоне и переживает ответ. Отказ ловим прямо
+     * тут: `collect` сам записывает итог в базу, но не пойманное
+     * обещание уронило бы процесс.
+     */
+    const work = service
+      .collect(session.email, found.account, found.passwordEnc, session.password)
+      .catch(() => null);
+    const finished = await Promise.race([
+      work.then(() => true),
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), SYNC_WAIT_MS);
+        timer.unref?.();
+      }),
+    ]);
+
     const after = await db.findExternal(session.email, numericId(id));
     const folders = await foldersOf(session);
     if (!after) throw new NotFoundError('Подключение не найдено');
-    return toWebCollector(after.account, folders);
+    const dto = toWebCollector(after.account, folders);
+    /*
+     * Не дождались — значит сбор идёт. Состояние в базе к этому моменту
+     * уже 'running', но полагаться на это нельзя: между `markCollectorStart`
+     * и нашим чтением могло не хватить одного оборота, и человек увидел бы
+     * состояние ДО нажатия. Отвечаем тем, что знаем наверняка.
+     */
+    return finished ? dto : { ...dto, status: 'syncing' as const, error: null, note: null };
   });
 }

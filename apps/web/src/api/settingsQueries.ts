@@ -156,6 +156,16 @@ export function useCollectors(): UseQueryResult<CollectorAccount[]> {
   return useQuery({
     queryKey: settingsKeys.collectors,
     queryFn: () => settingsApi.getCollectors(),
+    /*
+     * Пока хоть один ящик синхронизируется — перечитываем список.
+     *
+     * Сбор идёт на сервере и переживает ответ на нажатие «Проверить»
+     * (первая синхронизация большого ящика длится минуты). Без опроса
+     * «Идёт синхронизация…» висело бы до перезагрузки страницы, а итог
+     * — и число собранных писем, и отказ — человек не увидел бы вовсе.
+     */
+    refetchInterval: (query) =>
+      query.state.data?.some((c) => c.status === 'syncing') === true ? 5_000 : false,
   });
 }
 

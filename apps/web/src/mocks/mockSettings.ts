@@ -147,6 +147,7 @@ let collectors: CollectorAccount[] = [
     status: 'ok',
     lastSyncAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
     error: null,
+    note: null,
   },
   {
     id: 'c2',
@@ -163,6 +164,7 @@ let collectors: CollectorAccount[] = [
     status: 'error',
     lastSyncAt: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
     error: 'Сервер отклонил пароль. Проверьте логин и пароль ящика.',
+    note: null,
   },
 ];
 
@@ -289,6 +291,7 @@ export const mockSettingsApi: SettingsApi = {
       status: 'syncing',
       lastSyncAt: null,
       error: null,
+      note: null,
     };
     collectors = [...collectors, created];
     return created;
@@ -315,6 +318,7 @@ export const mockSettingsApi: SettingsApi = {
     if (!collector) throw new Error('Ящик не найден');
     collector.status = 'ok';
     collector.error = null;
+    collector.note = null;
     collector.lastSyncAt = new Date().toISOString();
     return structuredClone(collector);
   },

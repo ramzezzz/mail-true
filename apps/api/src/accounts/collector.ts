@@ -290,25 +290,43 @@ export async function collectOnce(options: CollectOptions): Promise<CollectResul
       cancel,
     );
 
+    /*
+     * Остановка по времени — это НЕ ошибка подключения.
+     *
+     * Письма перенесены, ящик исправен, а следующий заход продолжит с
+     * курсора. Сказать здесь «ошибка» значит послать человека чинить
+     * то, что работает, и заодно соврать счётчиком «собрано: 0».
+     *
+     * Поэтому `stopped` и `partial` — РАЗНЫЕ случаи, хотя внутреннее
+     * состояние у них одно ('partial'):
+     *
+     *   - `stopped` — не успели за отведённое время. Ошибки нет, и текст
+     *     ошибки здесь тоже не нужен: пакет переноса кладёт в `error`
+     *     свою фразу «перенос остановлен: продолжить можно тем же
+     *     заданием», написанную для раздела миграции. В разделе «Почта с
+     *     других ящиков» она читается как поломка, которой нет;
+     *   - `partial` — часть писем ДЕЙСТВИТЕЛЬНО не перенеслась. Вот об
+     *     этом молчать нельзя, а `report.error` в этом случае как раз
+     *     пуст (migrator.ts заполняет его только у `stopped` и
+     *     `failed`) — раньше это давало красное «Ошибка сбора» вообще
+     *     без причины. Причину составляем сами, из чисел отчёта.
+     */
+    const unfinished = report.status === 'stopped';
+    const damaged = report.status === 'partial';
     return {
-      /*
-       * Остановка по времени — это НЕ ошибка подключения.
-       *
-       * Письма перенесены, ящик исправен, а следующий заход продолжит с
-       * курсора. Сказать здесь «ошибка» значит послать человека чинить
-       * то, что работает, и заодно соврать счётчиком «собрано: 0».
-       */
-      status:
-        report.status === 'ok'
-          ? 'ok'
-          : report.status === 'partial' || report.status === 'stopped'
-            ? 'partial'
-            : 'error',
+      status: report.status === 'ok' ? 'ok' : unfinished || damaged ? 'partial' : 'error',
       copied: report.copied,
       skipped: report.skipped,
       failed: report.failed,
       durationMs: Date.now() - started,
-      error: report.error ?? null,
+      error: unfinished
+        ? null
+        : damaged
+          ? (report.error ??
+            (report.failed > 0
+              ? `Не удалось перенести писем: ${String(report.failed)}`
+              : 'Часть папок перенести не удалось'))
+          : (report.error ?? null),
       report,
     };
   } catch (err) {

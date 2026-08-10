@@ -92,6 +92,17 @@
   color: var(--mt-color-text-accent);
 }
 
+/*
+ * Незаконченный сбор. Тот же приглушённый цвет, что и у обычного
+ * состояния: ошибки здесь нет, и красить это красным значило бы гнать
+ * человека чинить исправное.
+ */
+.itemNote {
+  font-size: var(--mt-font-caption1-size, 12px);
+  line-height: var(--mt-font-caption1-line-height, 16px);
+  color: var(--mt-color-text-secondary);
+}
+
 .itemActions {
   flex: none;
   display: flex;

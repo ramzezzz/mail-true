@@ -134,12 +134,18 @@ export function CollectorPage() {
                   )}
                 >
                   {collector.status === 'error' && (collector.error ?? 'Ошибка сбора')}
-                  {collector.status === 'syncing' && 'Идёт первая синхронизация…'}
+                  {collector.status === 'syncing' && 'Идёт синхронизация…'}
                   {collector.status === 'ok' &&
                     (collector.lastSyncAt
                       ? `Обновлено: ${formatMessageDate(collector.lastSyncAt)}`
                       : 'Ещё не синхронизировался')}
                 </div>
+                {/*
+                  Незаконченный сбор — отдельной строкой и обычным цветом:
+                  ошибки нет, но и «обновлено» без оговорки было бы
+                  неправдой. Красным здесь красить нечего.
+                */}
+                {collector.note !== null && <div className={styles.itemNote}>{collector.note}</div>}
               </div>
 
               <div className={styles.itemActions}>
