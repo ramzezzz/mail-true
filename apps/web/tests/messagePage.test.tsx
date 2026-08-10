@@ -472,3 +472,75 @@ describe('переписка при включённой группировке'
     expect(next!.disabled, 'следующая строка списка есть — стрелка обязана работать').toBe(false);
   });
 });
+
+describe('цепочка переписки на странице письма', () => {
+  /**
+   * Строка списка при группировке — это ПОСЛЕДНЕЕ письмо разговора,
+   * а `threadId` считается как «ссылка на родителя или свой Message-ID».
+   * Для переписки A→B→C→D это даёт разные значения у открытого письма и
+   * у представителя строки — и прежний отбор по равенству `threadId`
+   * оставлял блок «Ещё писем в переписке» ПУСТЫМ, хотя сервер прислал
+   * правильный состав в `thread.messageIds`.
+   */
+  function summary(id: string, threadId: string, subject: string): MessageSummary {
+    return {
+      id,
+      folderId: 'inbox',
+      uid: Number(id.split(':')[1] ?? '0'),
+      threadId,
+      from: { name: 'Пётр', address: 'petr@example.org' },
+      to: [{ name: null, address: 'ivan@mail.local' }],
+      subject,
+      date: `2026-08-0${id.slice(-1)}T10:00:00.000Z`,
+      // Поля флагов — как их отдаёт сервер: отдельным объектом.
+      flags: { seen: true, flagged: false, answered: false, draft: false },
+      hasAttachments: false,
+      size: 100,
+      preview: subject,
+      labels: [],
+    } as unknown as MessageSummary;
+  }
+
+  it('показывает остальные письма разговора длиннее двух', async () => {
+    const opened = serverMessage({
+      id: 'inbox:4',
+      uid: 4,
+      threadId: 't-3',
+      subject: 'Re: договор',
+      headers: {},
+      blockedRemote: 0,
+    });
+    vi.spyOn(api, 'getMessage').mockResolvedValue(opened);
+
+    /*
+     * Сгруппированный список: одна строка на разговор, представитель —
+     * последнее письмо, и у него свой threadId. Состав разговора лежит
+     * в thread.messageIds.
+     */
+    const row = {
+      ...summary('inbox:4', 't-3', 'Re: договор'),
+      thread: { messageIds: ['inbox:1', 'inbox:2', 'inbox:3', 'inbox:4'], count: 4 },
+    } as unknown as MessageSummary;
+
+    vi.spyOn(api, 'getMessages').mockImplementation(async (query: MessageListQuery) => {
+      const items = query.threaded
+        ? [row]
+        : [
+            summary('inbox:1', 't-1', 'договор'),
+            summary('inbox:2', 't-1', 'Re: договор'),
+            summary('inbox:3', 't-2', 'Re: договор'),
+            summary('inbox:4', 't-3', 'Re: договор'),
+          ];
+      return { items, total: items.length, offset: 0, limit: 100 } as never;
+    });
+
+    // Вид списка — с группировкой и для этой же папки.
+    useUiStore
+      .getState()
+      .setListView({ folderId: 'inbox', threaded: true, filter: 'all', labelFilter: null });
+
+    render('/inbox/inbox%3A4');
+    await waitFor(() => host.textContent?.includes('переписке') === true, 'блок переписки');
+    expect(host.textContent).toContain('переписке');
+  });
+});

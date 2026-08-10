@@ -136,6 +136,22 @@ export const EMPTY_SELECTION: SearchFacetSelection = {
   label: null,
 };
 
+/**
+ * Выбран ли хоть один фасет.
+ *
+ * Нужно там, где число найденного берётся у сервера: с выбранным фасетом
+ * серверное число к показанному не относится вовсе — сервер о фасетах не
+ * знает, отбор идёт по загруженной сотне.
+ */
+export function hasFacetSelection(selection: SearchFacetSelection): boolean {
+  return (
+    selection.flags.length > 0 ||
+    selection.folderId !== null ||
+    selection.period !== null ||
+    selection.label !== null
+  );
+}
+
 /** Отбор писем по выбранным фасетам. */
 export function applyFacets(
   messages: readonly MessageSummary[],

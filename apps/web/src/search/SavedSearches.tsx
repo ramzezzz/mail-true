@@ -19,7 +19,7 @@
  */
 
 import { useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { Button, Modal } from '../components';
 import { cx } from '../lib/cx';
 import { IconSearch, IconTrash } from '../mail/icons';
@@ -41,6 +41,9 @@ export function savedSearchUrl(saved: SavedSearch): string {
 
 export function SavedSearches() {
   const { available, items } = useSavedSearches();
+  const location = useLocation();
+  /** Текущий адрес целиком: путь и строка запроса. */
+  const activeUrl = `${location.pathname}${location.search}`;
   const remove = useDeleteSavedSearch();
   /** Запрос, который собираются убрать: показываем подтверждение. */
   const [pending, setPending] = useState<SavedSearch | null>(null);
@@ -54,7 +57,15 @@ export function SavedSearches() {
         <div key={saved.id} className={styles.row}>
           <NavLink
             to={savedSearchUrl(saved)}
-            className={({ isActive }) => cx(styles.item, isActive && styles.active)}
+            /*
+             * Активность считаем по АДРЕСУ ЦЕЛИКОМ, а не по совпадению
+             * пути. Все сохранённые запросы ведут на один и тот же
+             * `/search/` и различаются строкой запроса, а `isActive` у
+             * NavLink сравнивает только путь — поэтому на любой странице
+             * поиска подсвечивались сразу ВСЕ, и понять, какой открыт,
+             * по колонке было нельзя.
+             */
+            className={() => cx(styles.item, activeUrl === savedSearchUrl(saved) && styles.active)}
             /* Подсказка показывает строку целиком: в колонке 232px длинный
                запрос обрезается, а знать, что именно откроется, надо. */
             title={saved.query}

@@ -72,13 +72,15 @@ interface FakeOptions {
   uids?: number[];
   /** search отвечает отказом — imapflow возвращает не массив */
   searchFails?: boolean;
+  /** STORE отвечает отказом: imapflow возвращает false, а не бросает. */
+  storeFails?: boolean;
   withAttachments?: (uid: number) => boolean;
 }
 
 class FakeMailbox {
   /** Все аргументы-наборы, ушедшие в FETCH: по ним видно длину команды. */
   readonly fetchRanges: string[] = [];
-  readonly flagsAdded: Array<{ uids: number[]; flags: string[] }> = [];
+  readonly flagsAdded: Array<{ uids: number[] | string; flags: string[] }> = [];
 
   constructor(private readonly options: FakeOptions = {}) {}
 
@@ -133,9 +135,10 @@ class FakeMailbox {
     }));
   }
 
-  async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
+  async messageFlagsAdd(uids: number[] | string, flags: string[]): Promise<boolean> {
     this.flagsAdded.push({ uids, flags });
-    return true;
+    // `false` — так imapflow сообщает об отказе STORE: он не бросает.
+    return this.options.storeFails !== true;
   }
 
   async list(): Promise<unknown[]> {
@@ -380,10 +383,23 @@ test('фильтр «с вложениями» на 20 000 писем не шл�
 /* ------------------------------------------------------------------ */
 
 test('markAnswered ставит флаг «отвечено» на письме с этим Message-ID', async () => {
+  /*
+   * Флаг ставится общим путём (storeFlags): он сворачивает номера в
+   * набор-строку и — главное — проверяет ответ сервера. Прежний прямой
+   * вызов messageFlagsAdd результат не смотрел вовсе, а imapflow при
+   * отказе STORE возвращает false, а не бросает.
+   */
   const mailbox = new FakeMailbox({ uids: [42] });
   const done = await markAnswered(mailbox.client, '<abc@mail.local>');
   assert.equal(done, true);
-  assert.deepEqual(mailbox.flagsAdded, [{ uids: [42], flags: ['\\Answered'] }]);
+  assert.deepEqual(mailbox.flagsAdded, [{ uids: '42', flags: ['\\Answered'] }]);
+});
+
+test('отказ STORE не превращается в «отвечено»', async () => {
+  // Стрелки «отвечено» не появится ни в одной почтовой программе, и
+  // молчаливое «да» означало бы, что об этом никто не узнает.
+  const mailbox = new FakeMailbox({ uids: [42], storeFails: true });
+  await assert.rejects(() => markAnswered(mailbox.client, '<abc@mail.local>'));
 });
 
 test('markAnswered молчит, если исходного письма в ящике нет', async () => {

@@ -164,7 +164,20 @@ export function MessagePage() {
    * уводила в прочитанное письмо, которого в списке человека не было, а
    * возврат «К списку» приводил не туда, где он остановился.
    */
-  const listView = useUiStore((s) => s.listView);
+  const storedView = useUiStore((s) => s.listView);
+  /*
+   * Вид применяем ТОЛЬКО к той папке, для которой он снят.
+   *
+   * Пришли в письмо из поиска, по прямой ссылке или из уведомления —
+   * вида этой папки у нас нет, и брать чужой нельзя: отбор
+   * «Непрочитанные» от «Входящих» превращал бы список соседей для
+   * «Спама» в чужой (а с меткой, которой в этой папке нет, — в пустой,
+   * с мёртвыми стрелками). Тогда берём обычный список папки.
+   */
+  const listView =
+    storedView.folderId === folderId
+      ? storedView
+      : { threaded: false, filter: 'all' as const, labelFilter: null };
   const listQuery: MessageListQuery = {
     folderId,
     offset: 0,
@@ -340,10 +353,34 @@ export function MessagePage() {
     const add = (value: string) => {
       if (!ids.includes(value)) ids.push(value);
     };
-    const row = (page?.items ?? []).find((m) => m.threadId === message.threadId);
-    for (const mid of row?.thread?.messageIds ?? []) add(mid);
+    /*
+     * СТРОКУ СПИСКА ИЩЕМ ПО СОСТАВУ ЦЕПОЧКИ, А НЕ ПО threadId.
+     *
+     * Строку представляет ПОСЛЕДНЕЕ письмо разговора, а `threadId`
+     * считается как «ссылка на родителя или свой Message-ID»
+     * (mail/summary.ts). Для переписки A→B→C→D это даёт разные значения
+     * у открытого письма и у представителя строки, и совпадения почти
+     * никогда нет: сводка от сервера, где лежит ВЕСЬ состав цепочки,
+     * не находилась, и «Кратко» резюмировало одну реплику вместо
+     * переписки.
+     *
+     * Соседние стрелки в этом же файле ищут строку правильно — через
+     * `thread.messageIds`; здесь было по-другому, и работал только один
+     * из двух поисков.
+     */
+    const row = (page?.items ?? []).find(
+      (m) => m.id === message.id || (m.thread?.messageIds ?? []).some((mid) => mid === message.id),
+    );
+    const inThread = new Set(row?.thread?.messageIds ?? []);
+    for (const mid of inThread) add(mid);
+    /*
+     * Плоский список добавляет то, чего нет в сводке. Отбираем по
+     * СОСТАВУ цепочки, а не по равенству threadId: по нему один
+     * разговор распадается на «звёзды» вокруг каждого родителя, и в
+     * подборку попадала бы только пара писем.
+     */
     for (const m of flatPage?.items ?? []) {
-      if (m.threadId === message.threadId) add(m.id);
+      if (inThread.has(m.id) || m.threadId === message.threadId) add(m.id);
     }
     return ids;
   }, [page, flatPage, message]);
@@ -356,10 +393,22 @@ export function MessagePage() {
    */
   const threadRest = useMemo(() => {
     if (!message) return [];
+    /*
+     * Состав цепочки берётся из threadIds — он собран из сводки сервера
+     * (IMAP THREAD=REFS знает про всю папку) и из плоского списка.
+     *
+     * Раньше здесь стояло равенство `threadId`, и блок «Ещё писем в
+     * переписке» был ПУСТ для любого разговора длиннее двух писем:
+     * threadId у A и B совпадает, у C он уже указывает на B, у D — на C.
+     * Сервер при этом присылал правильный состав, а страница им не
+     * пользовалась — человек видел одну реплику там, где разговор из
+     * четырёх.
+     */
+    const inThread = new Set(threadIds);
     return (flatPage?.items ?? [])
-      .filter((m) => m.threadId === message.threadId && m.id !== message.id)
+      .filter((m) => m.id !== message.id && (inThread.has(m.id) || m.threadId === message.threadId))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [flatPage, message]);
+  }, [flatPage, message, threadIds]);
 
   const ai = useMessageAi({ messageId: message?.id, threadIds });
 

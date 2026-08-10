@@ -117,8 +117,8 @@ export function FolderPage() {
    */
   const setListView = useUiStore((s) => s.setListView);
   useEffect(() => {
-    setListView({ threaded, filter, labelFilter });
-  }, [setListView, threaded, filter, labelFilter]);
+    setListView({ folderId, threaded, filter, labelFilter });
+  }, [setListView, folderId, threaded, filter, labelFilter]);
   const setFlags = useSetFlags();
   const moveMessages = useMoveMessages();
 

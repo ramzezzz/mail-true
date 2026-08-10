@@ -957,7 +957,19 @@ export async function markAnswered(client: ImapFlow, messageId: string): Promise
     try {
       const found = await searchUids(client, { header: { 'message-id': needle } });
       if (found.length === 0) continue;
-      await client.messageFlagsAdd(found, ['\\Answered'], { uid: true });
+      /*
+       * Через storeFlags, а не голым messageFlagsAdd.
+       *
+       * imapflow при отказе STORE возвращает `false`, а не бросает —
+       * результат здесь не проверялся вовсе, и функция отвечала «да».
+       * Стрелки «отвечено» при этом не появлялось ни в одной почтовой
+       * программе, а узнать об этом было неоткуда: свой журнал imapflow
+       * выключен.
+       *
+       * storeFlags написан ровно для такого случая и уже объясняет, чем
+       * молчаливый отказ STORE стоил меткам.
+       */
+      await storeFlags(client, found, ['\\Answered'], 'add');
       return true;
     } finally {
       lock.release();

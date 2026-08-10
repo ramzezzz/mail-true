@@ -12,7 +12,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { parseSearch, type Folder, type SearchChip } from '@mail-true/shared';
 import { useFolders } from '../api/queries';
 import { Button } from '../components';
-import { applyFacets } from '../lib/searchFacets';
+import { applyFacets, hasFacetSelection } from '../lib/searchFacets';
 import { splitQueryParts } from '../lib/searchQuery';
 import { IconSearch } from '../mail/icons';
 import { ListSkeleton } from '../mail/ListSkeleton';
@@ -111,6 +111,7 @@ export function SearchPage() {
   };
 
   const visible = applyFacets(search.items, state.facets);
+  const facetsChosen = hasFacetSelection(state.facets);
 
   if (search.isEmptyQuery) {
     return (
@@ -129,8 +130,17 @@ export function SearchPage() {
   return (
     <div className={styles.page}>
       <div className={styles.toolbar}>
-        {/* Спам и Корзина исключены по умолчанию — их не индексируют в фоне */}
-        {!state.includeJunk ? (
+        {/*
+          Спам и Корзина исключены по умолчанию — их не индексируют в фоне.
+
+          Кнопки НЕТ, когда область поиска — одна папка: там флаг не
+          применяется вовсе (searchParams.ts, searchTargets), и нажатие
+          меняло адрес, не меняя выдачи. Кнопка без поведения — то же, что
+          сломанная: человек жмёт и не понимает, почему ничего не
+          произошло. В этом же интерфейсе «Отложить» и «Заглушить»
+          появляются вместе со своим действием.
+        */}
+        {state.scope.kind !== 'folder' && !state.includeJunk ? (
           <Button
             mode="secondary"
             before={<IconSearch />}
@@ -138,14 +148,14 @@ export function SearchPage() {
           >
             Искать в спаме и корзине
           </Button>
-        ) : (
+        ) : state.scope.kind !== 'folder' ? (
           <Button
             mode="secondary"
             onClick={() => void navigate(buildSearchUrl({ ...state, includeJunk: false }))}
           >
             Не искать в спаме и корзине
           </Button>
-        )}
+        ) : null}
 
         {savedSearches.available && (
           <Button mode="secondary" onClick={() => setSaveOpen(true)}>
@@ -171,12 +181,35 @@ export function SearchPage() {
               Раньше здесь стояла длина загруженного куска, и «Найдено: 100»
               на папке с тысячей подходящих писем читалось как итог поиска.
             */}
-            Найдено: {search.total > visible.length ? search.total : visible.length}
-            {search.truncated && (
-              <span className={styles.totalNote}>
-                {' '}
-                · показаны первые {visible.length}, уточните запрос
-              </span>
+            {/*
+              С ВЫБРАННЫМ ФАСЕТОМ СЕРВЕРНОЕ ЧИСЛО НЕ ГОДИТСЯ.
+              Сервер о фасетах не знает: его `total` — это результат
+              запроса без них, а отбор идёт по загруженной сотне. Раньше
+              при выбранных «Непрочитанных» на экране было три строки, а
+              в шапке «Найдено: 1200» — число, не относящееся ни к
+              запросу, ни к показанному.
+            */}
+            {facetsChosen ? (
+              <>
+                Отобрано: {visible.length}
+                <span className={styles.totalNote}>
+                  {' '}
+                  · из {search.total > search.items.length
+                    ? search.total
+                    : search.items.length}{' '}
+                  найденных загружено {search.items.length}
+                </span>
+              </>
+            ) : (
+              <>
+                Найдено: {search.total > visible.length ? search.total : visible.length}
+                {search.truncated && (
+                  <span className={styles.totalNote}>
+                    {' '}
+                    · показаны первые {visible.length}, уточните запрос
+                  </span>
+                )}
+              </>
             )}
           </span>
         )}

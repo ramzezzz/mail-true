@@ -338,8 +338,28 @@ interface UiState {
    * которого в его списке не было, — а вернувшись «К списку», он не
    * находил места, где остановился.
    */
-  listView: { threaded: boolean; filter: MessageFilter; labelFilter: string | null };
-  setListView(view: { threaded: boolean; filter: MessageFilter; labelFilter: string | null }): void;
+  /*
+   * Вид хранится ВМЕСТЕ С ПАПКОЙ, для которой он снят.
+   *
+   * Без папки он применялся к любому письму, откуда бы его ни открыли:
+   * из поиска, по прямой ссылке, из уведомления. Отбор «Непрочитанные»
+   * или метка «Оплатить», оставшиеся от «Входящих», уезжали в запрос
+   * соседей для «Спама» — стрелки листали список, которого человек не
+   * видел, а если метки в этой папке нет, обе стрелки мертвы. Соседний
+   * `visitedMessage` папку хранит и сверяет; здесь этого не было.
+   */
+  listView: {
+    folderId: string | null;
+    threaded: boolean;
+    filter: MessageFilter;
+    labelFilter: string | null;
+  };
+  setListView(view: {
+    folderId: string;
+    threaded: boolean;
+    filter: MessageFilter;
+    labelFilter: string | null;
+  }): void;
   setVisitedMessage(folderId: string, messageId: string): void;
   clearVisitedMessage(): void;
 
@@ -435,7 +455,7 @@ export const useUiStore = create<UiState>((set) => ({
     }),
 
   visitedMessage: null,
-  listView: { threaded: false, filter: 'all', labelFilter: null },
+  listView: { folderId: null, threaded: false, filter: 'all', labelFilter: null },
   setListView: (view) => set({ listView: view }),
   setVisitedMessage: (folderId, messageId) => set({ visitedMessage: { folderId, messageId } }),
   clearVisitedMessage: () => set({ visitedMessage: null }),

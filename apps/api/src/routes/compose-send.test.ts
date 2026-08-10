@@ -111,7 +111,7 @@ interface FakeClientOptions {
 class FakeClient {
   readonly drafts = new Set<number>();
   readonly sent = new Set<number>();
-  readonly flagsAdded: Array<{ uids: number[]; flags: string[] }> = [];
+  readonly flagsAdded: Array<{ uids: number[] | string; flags: string[] }> = [];
   /** Что именно легло в ящик — по нему видно, какой текст спасён. */
   readonly sources = new Map<number, Buffer>();
   private nextUid = 100;
@@ -219,7 +219,7 @@ class FakeClient {
     return this.options.answerable ?? [];
   }
 
-  async messageFlagsAdd(uids: number[], flags: string[]): Promise<boolean> {
+  async messageFlagsAdd(uids: number[] | string, flags: string[]): Promise<boolean> {
     this.flagsAdded.push({ uids, flags });
     return true;
   }
@@ -474,7 +474,10 @@ test('после ответа исходное письмо получает ф�
       payload: sendPayload({ inReplyTo: '<исходное@mail.local>' }),
     });
     assert.equal(res.statusCode, 200, `тело ответа: ${res.body.slice(0, 300)}`);
-    assert.deepEqual(client.flagsAdded, [{ uids: [17], flags: ['\\Answered'] }]);
+    // Номера сворачиваются в набор-строку: флаг ставится общим путём
+    // storeFlags, который заодно проверяет ответ сервера, — прямой вызов
+    // messageFlagsAdd отказ STORE не замечал.
+    assert.deepEqual(client.flagsAdded, [{ uids: '17', flags: ['\\Answered'] }]);
   } finally {
     await app.close();
     await smtp.close();
