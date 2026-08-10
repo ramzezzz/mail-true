@@ -297,6 +297,26 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
           spamOnly: queryFlag,
         })
         .parse(request.query);
+      /*
+       * ЗАПИСЬ В ЖУРНАЛ — ДО ПОКАЗА, А НЕ ПОСЛЕ И НЕ «КОГДА-НИБУДЬ».
+       *
+       * Здесь видно отправителя, получателей и ТЕМУ письма, то есть чужую
+       * переписку. Право поднято до mailbox.impersonate именно поэтому —
+       * а следа не оставалось никакого: администратор мог читать, о чём
+       * переписывается любой сотрудник, и по журналу это было не отличить
+       * от бездействия. Соседний маршрут (письмо из очереди) пишет запись
+       * с самого начала, и она закреплена проверкой; здесь её просто
+       * забыли.
+       *
+       * Пишем ДО обращения к rspamd: отказ сервиса не повод потерять
+       * запись о самом обращении.
+       */
+      await audit(ctx, request, {
+        action: 'spam.history',
+        targetType: 'antispam',
+        targetLabel: 'Последние письма',
+        after: { limit: q.limit, spamOnly: q.spamOnly },
+      });
       try {
         const rows = await rspamd.history();
         const filtered = q.spamOnly
@@ -316,8 +336,13 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
             requiredScore: row.requiredScore,
             subject: row.subject,
             sender: row.sender,
-            recipients: row.recipients,
-            ip: row.ip,
+            /*
+             * Получателей и адрес отправителя экран не показывает — и
+             * отдавать их незачем: это чужая переписка, а лишнее поле в
+             * ответе однажды окажется в чьём-то журнале доступа или в
+             * снимке экрана. Понадобятся — вернутся вместе с колонкой,
+             * которая их показывает.
+             */
             user: row.user,
             sizeBytes: row.sizeBytes,
             // Пять самых весомых: полный список у иного письма — сорок

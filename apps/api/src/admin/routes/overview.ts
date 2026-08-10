@@ -99,6 +99,17 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
         port: ctx.config.RSPAMD_CONTROLLER_PORT,
         password: ctx.config.RSPAMD_PASSWORD,
         domain: ctx.config.MAIL_DOMAIN,
+        /*
+         * Ответ о подписи берём готовым до пяти минут.
+         *
+         * Проверка подписи — настоящее сканирование письма, и оно
+         * попадает в счётчик проверенных писем rspamd. Сводка
+         * опрашивается раз в пятнадцать секунд: без кэша это двести
+         * сорок фиктивных сканирований в час на вкладку, а раздел «Спам»
+         * показывает тот же счётчик — и доля спама занижалась кратно.
+         * Настройка подписи так часто не меняется.
+         */
+        cacheMs: 5 * 60_000,
       }),
       checkResolver({ address: ctx.config.RESOLVER_IP }),
       // Redis спрашиваем через общую пробу состояния: у неё уже открыто
@@ -183,8 +194,15 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
       .filter((d) => d.dns_checked_at !== null && (d.dns_overall ?? 'unknown') === 'unknown')
       .map((d) => ({ id: d.id, name: d.name }));
 
+    /*
+     * Общее число записей журнала сводке не нужно: она показывает
+     * последние десять строк и число не выводит нигде. А считался полный
+     * count(*) по admin_audit_log — при каждом опросе, то есть раз в
+     * пятнадцать секунд, по таблице, которая растёт всё время работы
+     * сервера.
+     */
     const audit = await ctx.db
-      .listAudit({ limit: 10, offset: 0 })
+      .listAudit({ limit: 10, offset: 0, withTotal: false })
       .catch(() => ({ rows: [], total: 0 }));
 
     const problems: string[] = [];

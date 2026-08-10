@@ -270,7 +270,8 @@ export const api = {
     limit?: number | undefined;
     offset?: number | undefined;
   }) => get<MailUserPage>(`/users${query(params)}`),
-  user: (id: number) => get<MailUser & { aliases: Alias[] }>(`/users/${id}`),
+  user: (id: number) =>
+    get<MailUser & { aliases: Alias[]; aliasesTruncated?: boolean }>(`/users/${id}`),
   userUsage: (id: number) =>
     get<{ available: boolean; messages: number; bytes: number }>(`/users/${id}/usage`),
   createUser: (body: {

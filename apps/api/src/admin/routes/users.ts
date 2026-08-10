@@ -166,17 +166,36 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       const id = pathId(request.params.id, 'ящика');
       const row = await ctx.db.findMailUserById(id);
       if (!row) throw new NotFoundError('Ящик не найден');
-      const aliases = await ctx.db.listAliases({ search: row.email, limit: 100, offset: 0 });
+      /*
+       * СПИСОК АДРЕСОВ МОЖЕТ БЫТЬ НЕПОЛНЫМ — И ОБ ЭТОМ ГОВОРИТСЯ.
+       *
+       * Берётся сотня записей, а у активного человека одноразовых адресов
+       * легко больше: их заводят по одному на каждый сайт. Признака
+       * усечения не было, зато в списке ящиков рядом стоит колонка
+       * «Алиасов» с полным числом — и карточка показывала девяносто с
+       * лишним строк там, где в колонке значилось двести. Понять, каких
+       * именно не хватает, было нельзя никак.
+       */
+      const ALIAS_LIMIT = 100;
+      const aliases = await ctx.db.listAliases({
+        search: row.email,
+        limit: ALIAS_LIMIT + 1,
+        offset: 0,
+      });
+      const mine = aliases.rows.filter(
+        (a) => a.source === row.email || a.destination === row.email,
+      );
+      const truncated = mine.length > ALIAS_LIMIT;
       return {
         ...toDto(row),
-        aliases: aliases.rows
-          .filter((a) => a.source === row.email || a.destination === row.email)
-          .map((a) => ({
-            id: a.id,
-            source: a.source,
-            destination: a.destination,
-            active: a.active,
-          })),
+        /** Показаны не все адреса — их больше, чем помещается в карточку. */
+        aliasesTruncated: truncated,
+        aliases: mine.slice(0, ALIAS_LIMIT).map((a) => ({
+          id: a.id,
+          source: a.source,
+          destination: a.destination,
+          active: a.active,
+        })),
       };
     },
   );

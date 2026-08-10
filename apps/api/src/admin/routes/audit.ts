@@ -11,6 +11,15 @@ import { requireAdmin } from '../guard.js';
 const querySchema = z.object({
   action: z.string().trim().max(64).optional(),
   adminLogin: z.string().trim().max(128).optional(),
+  /*
+   * Перечисление обязано совпадать с тем, что РЕАЛЬНО пишется в журнал.
+   *
+   * Не совпадало: пункты «Перезапуски служб» и «Обновления сервера» есть
+   * в выпадающем списке панели, записи такого вида есть в базе, а здесь
+   * их не было — и выбор пункта отвечал «Некорректные данные запроса».
+   * Отбор по настройкам сервера (в том числе замена сертификата) не был
+   * возможен вовсе.
+   */
   targetType: z
     .enum([
       'user',
@@ -19,6 +28,9 @@ const querySchema = z.object({
       'admin',
       'mailbox',
       'settings',
+      'serversettings',
+      'service',
+      'server',
       'branding',
       'backup',
       'migration',

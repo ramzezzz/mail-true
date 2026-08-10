@@ -92,6 +92,13 @@ export interface AntispamProbeOptions {
   domain: string;
   timeoutMs?: number;
   fetchImpl?: FetchImpl;
+  /**
+   * Сколько миллисекунд разрешено отдавать ПРЕЖНИЙ ответ о подписи.
+   *
+   * Ноль (умолчание) — не кэшировать вовсе: живая проверка обязана быть
+   * живой. Разбор — у dkimProbeCache ниже.
+   */
+  cacheMs?: number;
 }
 
 /**
@@ -99,6 +106,29 @@ export interface AntispamProbeOptions {
  * исходящие. Второе — не косметика: антиспам и подпись живут в одном
  * процессе, и «жив» ещё не значит «подписывает».
  */
+/**
+ * Готовый ответ о подписи — чтобы не сканировать по письму на каждый опрос.
+ *
+ * ------------------------------------------------------------------
+ * ЗАЧЕМ КЭШ И ПОЧЕМУ ЕГО НЕ БЫЛО ВИДНО
+ * ------------------------------------------------------------------
+ * Проверка подписи — это НАСТОЯЩЕЕ сканирование: письмо уходит в rspamd
+ * через /checkv2 и попадает в его счётчик проверенных писем. Сводка же
+ * опрашивается раз в пятнадцать секунд, то есть двести сорок фиктивных
+ * сканирований в час на каждую открытую вкладку.
+ *
+ * Тот же счётчик показывает раздел «Спам», и доля спама считается как
+ * «спам / проверено». Открытая на ночь сводка занижала её кратно: письма
+ * не приходили, а знаменатель рос. Настройка подписи при этом не меняется
+ * по пятнадцать секунд — на неё влияет правка ключей DKIM, а это событие
+ * редкое и заметное.
+ *
+ * Кэш ВЫКЛЮЧЕН по умолчанию (`cacheMs` не задан): «Живая проверка» на
+ * странице наблюдения должна сканировать по-настоящему, на то она и
+ * живая. Кэшем пользуется только сводка.
+ */
+let dkimProbeCache: { key: string; at: number; value: ServiceCheck } | null = null;
+
 export async function checkAntispam(
   options: AntispamProbeOptions,
 ): Promise<{ antispam: ServiceCheck; dkim: ServiceCheck }> {
@@ -149,6 +179,19 @@ export async function checkAntispam(
     };
   }
 
+  const cacheKey = `${base}|${options.domain}`;
+  const cacheMs = options.cacheMs ?? 0;
+  if (cacheMs > 0 && dkimProbeCache && dkimProbeCache.key === cacheKey) {
+    if (Date.now() - dkimProbeCache.at < cacheMs) {
+      return { antispam, dkim: dkimProbeCache.value };
+    }
+  }
+
+  const remember = (dkim: ServiceCheck): { antispam: ServiceCheck; dkim: ServiceCheck } => {
+    if (cacheMs > 0) dkimProbeCache = { key: cacheKey, at: Date.now(), value: dkim };
+    return { antispam, dkim };
+  };
+
   try {
     const response = await doFetch(`${base}/checkv2`, {
       method: 'POST',
@@ -173,7 +216,7 @@ export async function checkAntispam(
         },
       };
     }
-    return { antispam, dkim: readSigningVerdict(await response.json(), options.domain) };
+    return remember(readSigningVerdict(await response.json(), options.domain));
   } catch (err) {
     return {
       antispam,

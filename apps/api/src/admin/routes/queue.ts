@@ -174,10 +174,34 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin(app, 'users.delete') },
     async (request) => {
       const { id } = idSchema.parse(request.params);
-      // Сведения о письме забираем ДО удаления: после него их взять неоткуда.
-      const snapshot = await agent.snapshot();
+      /*
+       * Сведения о письме забираем ДО удаления: после него их взять
+       * неоткуда. Снимок берём СВЕЖИЙ (fresh), а не из кэша: кэш живёт
+       * три секунды, но страница открыта минутами, и как раз здесь
+       * устаревший снимок оборачивался записью в журнале с одним номером
+       * вместо отправителя, получателей и размера.
+       */
+      const snapshot = await agent.snapshot(true);
       const doomed = snapshot.messages.find((m) => m.queueId === id);
-      await agent.remove(id);
+      const deleted = await agent.remove(id);
+      /*
+       * УДАЛЯТЬ БЫЛО НЕЧЕГО — И ГОВОРИМ ОБ ЭТОМ ПРЯМО.
+       *
+       * Письмо могло уйти само, пока страница была открыта. Прежний код
+       * отвечал «готово» и писал в журнал, что администратор удалил
+       * письмо: запись о действии, которого не было, — это хуже, чем
+       * отсутствие записи, потому что по журналу потом разбирают спорные
+       * случаи.
+       */
+      if (deleted === 0) {
+        return {
+          ok: false as const,
+          reason: 'gone' as const,
+          message:
+            'Письма уже нет в очереди — скорее всего, оно ушло, пока страница была открыта. ' +
+            'Обновите список.',
+        };
+      }
       await audit(ctx, request, {
         action: 'queue.delete',
         targetType: 'settings',
@@ -193,7 +217,7 @@ export async function adminQueueRoutes(app: FastifyInstance): Promise<void> {
           : { queueId: id },
         after: null,
       });
-      return { ok: true };
+      return { ok: true as const };
     },
   );
 

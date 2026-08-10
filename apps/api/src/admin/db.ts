@@ -1439,6 +1439,17 @@ export class AdminDb {
     search?: string | undefined;
     limit: number;
     offset: number;
+    /**
+     * Считать ли общее число записей.
+     *
+     * `false` — не считать: сводка берёт из журнала последние десять
+     * строк и общее число НЕ ПОКАЗЫВАЕТ вовсе, а полный count(*) по
+     * admin_audit_log уходил при каждом её опросе — раз в пятнадцать
+     * секунд, на таблице, которая растёт всё время работы сервера.
+     * Пейджеру журнала число по-прежнему нужно, поэтому умолчание
+     * прежнее.
+     */
+    withTotal?: boolean | undefined;
   }): Promise<{ rows: AuditRow[]; total: number }> {
     const where: string[] = [];
     const values: unknown[] = [];
@@ -1459,10 +1470,13 @@ export class AdminDb {
       where.push(`lower(coalesce(target_label,'')) LIKE $${values.length}`);
     }
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
-    const totalRow = await this.one<{ count: string }>(
-      `SELECT count(*)::text AS count FROM admin_audit_log ${whereSql}`,
-      values,
-    );
+    const totalRow =
+      filters.withTotal === false
+        ? null
+        : await this.one<{ count: string }>(
+            `SELECT count(*)::text AS count FROM admin_audit_log ${whereSql}`,
+            values,
+          );
     values.push(filters.limit, filters.offset);
     const rows = await this.query<AuditRow>(
       `SELECT id::text, admin_login, action, target_type, target_id, target_label,
