@@ -292,7 +292,6 @@ method: "one-click"}`. Запрос идёт с сервера намеренн�
 | Метод  | Путь                   | Описание                                                                                                      |
 | ------ | ---------------------- | ------------------------------------------------------------------------------------------------------------- |
 | GET    | `/api/ai/state`        | Главный маршрут. `{enabled, provider, consent, features[], neverSent[], budget}`                              |
-| GET    | `/api/ai/outbound/:id` | Опись того, что уйдёт наружу для письма, **без отправки**                                                     |
 | POST   | `/api/ai/consent`      | `{accept: true, features?}` -> состояние. Согласие пишется вместе с адресом и моделью, на которые соглашались |
 | DELETE | `/api/ai/consent`      | Отзыв + удаление всех созданных резюме и меток -> состояние + `{removedCacheEntries}`                         |
 | PUT    | `/api/ai/features`     | `{features[]}` — что пользователь оставляет включённым                                                        |
@@ -306,7 +305,6 @@ method: "one-click"}`. Запрос идёт с сервера намеренн�
 | POST   | `/api/ai/extract`      | `{messageId}` -> даты, суммы, реквизиты, задачи, номера отслеживания                                          |
 | POST   | `/api/ai/translate`    | `{messageId\|text, targetLanguage}` -> перевод                                                                |
 | POST   | `/api/ai/search-query` | `{query}` -> параметры поиска и `explanation` (её обязательно показать)                                       |
-| POST   | `/api/ai/reply/stream` | SSE: сначала `disclosure`, затем `delta`, в конце `done`/`error`                                              |
 
 Ответ любой возможности — конверт `{value, cached, usage, disclosure, durationMs}`.
 `disclosure` — опись того, что реально ушло наружу: поля с их значениями,

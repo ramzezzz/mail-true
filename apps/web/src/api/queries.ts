@@ -54,7 +54,6 @@ export const queryKeys = {
   /** Состояние помощника на основе ИИ — с него начинается весь его интерфейс. */
   aiState: ['ai', 'state'] as const,
   aiUsage: ['ai', 'usage'] as const,
-  aiOutbound: (messageId: string) => ['ai', 'outbound', messageId] as const,
   /** Версия работающего сервера — для нижней строки состояния. */
   version: ['version'] as const,
 };

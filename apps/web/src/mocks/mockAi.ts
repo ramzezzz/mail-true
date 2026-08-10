@@ -273,7 +273,14 @@ function envelope<T>(key: string, value: T): AiEnvelope<T> {
       totalTokens: cached ? 0 : 640,
       estimated: true,
     },
-    disclosure: cached ? null : mockAiOutbound(key),
+    /*
+     * Опись приходит и с ответом из памяти — так теперь отвечает сервер
+     * (packages/ai: она описывает текст, а не сетевой вызов). Заглушка,
+     * подставлявшая здесь null, показывала экран, которого больше не
+     * бывает, и прятала как раз тот случай, ради которого признак
+     * `cached` и заведён.
+     */
+    disclosure: mockAiOutbound(key),
     durationMs: cached ? 4 : 1180,
   };
 }

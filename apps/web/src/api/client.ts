@@ -15,7 +15,6 @@ import type {
   AiEnvelope,
   AiExtraction,
   AiFeatureKey,
-  AiOutboundDisclosure,
   AiParsedSearchQuery,
   AiRepliesRequest,
   AiReplyVariants,
@@ -149,7 +148,6 @@ export interface MailApi {
   aiSearchQuery(query: string): Promise<AiEnvelope<AiParsedSearchQuery>>;
 
   /** Что уйдёт наружу по этому письму — БЕЗ отправки (для экрана согласия). */
-  aiOutbound(messageId: string): Promise<AiOutboundDisclosure>;
   aiUsage(): Promise<AiUsageReport>;
   /** Забыть всё, что помощник насчитал по одному письму. */
   aiForgetMessage(messageId: string): Promise<{ removed: number }>;
@@ -340,8 +338,6 @@ export const httpApi: MailApi = {
 
   aiSearchQuery: (query) =>
     apiFetch('/api/ai/search-query', { method: 'POST', body: JSON.stringify({ query }) }),
-
-  aiOutbound: (messageId) => apiFetch(`/api/ai/outbound/${encodeURIComponent(messageId)}`),
 
   aiUsage: () => apiFetch('/api/ai/usage'),
 

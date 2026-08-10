@@ -24,7 +24,6 @@ import {
   mockAiExtract,
   mockAiForget,
   mockAiGiveConsent,
-  mockAiOutbound,
   mockAiReplies,
   mockAiRevokeConsent,
   mockAiRewrite,
@@ -481,11 +480,6 @@ export const mockApi: MailApi = {
   async aiSearchQuery(query) {
     await delay(600);
     return mockAiSearchQuery(query);
-  },
-
-  async aiOutbound(messageId) {
-    await delay(200);
-    return mockAiOutbound(messageId);
   },
 
   async aiUsage() {

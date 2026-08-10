@@ -24,7 +24,6 @@ import type {
   AiEnvelope,
   AiExtraction,
   AiFeatureKey,
-  AiOutboundDisclosure,
   AiParsedSearchQuery,
   AiRepliesRequest,
   AiReplyVariants,
@@ -58,19 +57,6 @@ export function useAiUsage(enabled: boolean): UseQueryResult<AiUsageReport> {
     queryKey: queryKeys.aiUsage,
     queryFn: () => api.aiUsage(),
     enabled,
-    retry: false,
-  });
-}
-
-/** Что именно уйдёт наружу по конкретному письму — без отправки. */
-export function useAiOutbound(
-  messageId: string | undefined,
-  enabled: boolean,
-): UseQueryResult<AiOutboundDisclosure> {
-  return useQuery({
-    queryKey: queryKeys.aiOutbound(messageId ?? ''),
-    queryFn: () => api.aiOutbound(messageId!),
-    enabled: enabled && Boolean(messageId),
     retry: false,
   });
 }
