@@ -1023,19 +1023,20 @@ export function ComposeWindow({
     if (typeof details !== 'object' || details === null) return 0;
     const ids = (details as { missingUploads?: unknown }).missingUploads;
     if (!Array.isArray(ids) || ids.length === 0) return 0;
-    const box = editorRef.current;
-    if (!box) return 0;
-    let removed = 0;
-    for (const id of ids) {
-      if (typeof id !== 'string') continue;
-      for (const image of [...box.querySelectorAll('img')]) {
-        if (!image.getAttribute('src')?.includes(`/api/uploads/${id}/content`)) continue;
-        image.remove();
-        removed += 1;
+    // Через editBody — свёрнутое окно правится наравне с развёрнутым:
+    // отправить письмо можно и из плашки, а редактора в DOM там нет
+    return editBody((root) => {
+      let removed = 0;
+      for (const id of ids) {
+        if (typeof id !== 'string') continue;
+        for (const image of [...root.querySelectorAll('img')]) {
+          if (!image.getAttribute('src')?.includes(`/api/uploads/${id}/content`)) continue;
+          image.remove();
+          removed += 1;
+        }
       }
-    }
-    if (removed > 0) rememberBody();
-    return removed;
+      return removed;
+    });
   };
 
   /**
@@ -1512,22 +1513,51 @@ export function ComposeWindow({
   };
 
   /** Ставит картинку в запомненное место, а если его уже нет — в конец. */
-  const insertImage = (url: string, at: Range | null) => {
+  /**
+   * Правка тела письма, работающая и у СВЁРНУТОГО окна.
+   *
+   * У свёрнутого окна редактора в DOM нет вовсе — свёрнутая плашка
+   * рисуется отдельной веткой. Поэтому правки «через редактор» у него
+   * молча не делались: свернул окно, пока грузилась вставленная
+   * картинка, — картинка пропала; отправил письмо с мёртвой картинкой из
+   * свёрнутого окна — убирать её было некому.
+   *
+   * Когда редактора нет, правим сохранённое тело: разбираем его в
+   * документ, меняем и кладём обратно. Разбором, а не выражением по
+   * строке: тело — это разметка, и вырезать из неё теги поиском значит
+   * рано или поздно вырезать не то.
+   */
+  const editBody = (edit: (root: ParentNode) => number): number => {
     const box = editorRef.current;
-    if (!box) return;
-    const image = document.createElement('img');
-    image.setAttribute('src', url);
-    if (at && box.contains(at.commonAncestorContainer)) {
-      at.deleteContents();
-      at.insertNode(image);
-      at.setStartAfter(image);
-      at.collapse(true);
-    } else {
-      box.append(image);
+    if (box) {
+      const changed = edit(box);
+      // Тем же событием, что и набор с клавиатуры: на нём висит и
+      // автосохранение, и слепок тела письма
+      if (changed > 0) box.dispatchEvent(new Event('input', { bubbles: true }));
+      return changed;
     }
-    // Тем же событием, что и набор с клавиатуры: на нём висит и
-    // автосохранение, и слепок тела письма
-    box.dispatchEvent(new Event('input', { bubbles: true }));
+    const parsed = new DOMParser().parseFromString(currentBodyHtml(), 'text/html');
+    const changed = edit(parsed.body);
+    if (changed > 0) patch({ bodyHtml: parsed.body.innerHTML });
+    return changed;
+  };
+
+  const insertImage = (url: string, at: Range | null) => {
+    editBody((root) => {
+      const image = root.ownerDocument?.createElement('img') ?? document.createElement('img');
+      image.setAttribute('src', url);
+      // Место вставки живёт только у настоящего редактора: у свёрнутого
+      // окна выделения нет, и картинка дописывается в конец письма
+      if (at && root instanceof Node && root.contains(at.commonAncestorContainer)) {
+        at.deleteContents();
+        at.insertNode(image);
+        at.setStartAfter(image);
+        at.collapse(true);
+      } else {
+        (root as Element).append(image);
+      }
+      return 1;
+    });
   };
 
   const attachFile = async (file: File | undefined) => {

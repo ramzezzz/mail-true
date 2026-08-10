@@ -257,3 +257,41 @@ describe('слишком большое вложение', () => {
     expect(host.textContent ?? '').toContain('предел одного вложения');
   });
 });
+
+describe('свёрнутое окно', () => {
+  /*
+   * У свёрнутого окна редактора в DOM нет вовсе — плашка рисуется
+   * отдельной веткой. Правки «через редактор» у него молча не делались:
+   * свернул окно, пока грузилась вставленная картинка, — картинка
+   * пропадала без следа.
+   */
+  it('картинка, доехавшая после сворачивания, попадает в письмо', async () => {
+    vi.spyOn(api, 'uploadAttachment').mockImplementation(async () => {
+      // Пока файл едет, человек сворачивает окно
+      const id = useUiStore.getState().composeWindows[0]?.id;
+      if (id !== undefined) act(() => useUiStore.getState().toggleComposeMinimized(id));
+      return { id: 'b2c3d4e5-0000-4000-8000-000000000002', filename: 'снимок.png', size: 70 };
+    });
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'irina@mail.local' }));
+
+    const box = editor();
+    if (!box) throw new Error('нет тела письма');
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'снимок.png', { type: 'image/png' });
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & {
+      clipboardData: unknown;
+    };
+    event.clipboardData = { items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }] };
+    act(() => {
+      box.dispatchEvent(event);
+    });
+    await settle();
+
+    // Окно свёрнуто, редактора нет — но письмо картинку получило
+    const draft = useUiStore.getState().composeWindows[0]?.draft;
+    expect(useUiStore.getState().composeWindows[0]?.minimized).toBe(true);
+    expect(draft?.bodyHtml ?? '').toContain(
+      '/api/uploads/b2c3d4e5-0000-4000-8000-000000000002/content',
+    );
+  });
+});
