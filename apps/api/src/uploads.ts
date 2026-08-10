@@ -3,7 +3,7 @@
  * Файлы лежат в UPLOAD_DIR: <id>.bin + <id>.json (метаданные).
  */
 import { createWriteStream } from 'node:fs';
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -177,8 +177,43 @@ export class UploadStore {
   async touch(id: string): Promise<void> {
     const found = await this.read(id);
     if (!found) return;
+    /*
+     * Сам файл обязан быть на месте. Между чтением меты и её записью
+     * мог пройти уборщик, и запись ВОСКРЕСИЛА БЫ мету без файла: такую
+     * пару уборщик потом не разбирает вовсе (сироту `.bin` он ищет по
+     * отсутствию `.json`, а мету со свежим `usedAt` ждёт ещё сутки), а
+     * место в пределе на ящик она занимает как настоящая.
+     */
+    try {
+      await stat(this.binPath(id));
+    } catch {
+      return;
+    }
+
+    /*
+     * Запись через временный файл с переименованием. Мета переписывается
+     * теперь при КАЖДОМ сохранении письма с картинкой, и обрыв посреди
+     * записи оставил бы битый JSON: разбор такой меты падает, а уборщик
+     * не сносит ни её, ни файл — сирота остаётся навсегда.
+     */
     const meta: UploadMeta = { ...found.meta, usedAt: Date.now() };
-    await writeFile(this.metaPath(id), JSON.stringify(meta), 'utf8').catch(() => undefined);
+    const target = this.metaPath(id);
+    const temp = `${target}.tmp`;
+    try {
+      await writeFile(temp, JSON.stringify(meta), 'utf8');
+      await rename(temp, target);
+    } catch {
+      await unlink(temp).catch(() => undefined);
+      return;
+    }
+
+    // Файл могли снести уже после проверки — тогда убираем и мету, чтобы
+    // не оставлять за собой ровно ту пару, от которой уводили выше.
+    try {
+      await stat(this.binPath(id));
+    } catch {
+      await unlink(target).catch(() => undefined);
+    }
   }
 
   async delete(id: string): Promise<void> {
@@ -204,14 +239,31 @@ export class UploadStore {
 
     const withMeta = new Set<string>();
     for (const name of names) {
+      if (name.endsWith('.json.tmp')) {
+        // Недописанная мета от оборванного продления срока (см. touch)
+        await unlink(join(this.dir, name)).catch(() => undefined);
+        continue;
+      }
       if (!name.endsWith('.json')) continue;
       const id = name.slice(0, -5);
       withMeta.add(id);
       const found = await this.read(id);
+      /*
+       * Мету, которую не удалось прочитать, сносим вместе с файлом.
+       * Прежде такая пара не убиралась НИКОГДА: обход мет её пропускал
+       * (разбор вернул null), а обход файлов-сирот — тоже, потому что
+       * `.json` рядом лежит. Место в пределе на ящик она при этом не
+       * занимает — размер берётся из меты, — но диск ест.
+       */
+      if (!found) {
+        await this.delete(id);
+        removed += 1;
+        continue;
+      }
       // Срок считается от последнего использования, а не от создания:
       // иначе картинка открытого черновика умирает под пишущим человеком
-      const since = found ? Math.max(found.meta.createdAt, found.meta.usedAt ?? 0) : 0;
-      if (found && now - since > maxAgeMs) {
+      const since = Math.max(found.meta.createdAt, found.meta.usedAt ?? 0);
+      if (now - since > maxAgeMs) {
         await this.delete(id);
         removed += 1;
       }

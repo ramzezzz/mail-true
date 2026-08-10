@@ -44,8 +44,15 @@ export interface UploadSource {
  * Поиск идёт от литерала `/api/uploads/`, а не от тега: разбор от `<img`
  * с ленивым просмотром до атрибута стоит квадрат от длины письма и уже
  * однажды останавливал сервер на минуты (см. mail/inline-data.ts).
+ *
+ * Номер обязан быть НАШЕГО вида (UUID), а перед адресом не должно стоять
+ * ни буквы, ни двоеточия, ни косой черты. Иначе под образец попадала
+ * любая чужая ссылка вида `https://mail.example/api/uploads/foo/content`,
+ * написанная человеком в письме: загрузки с таким номером нет, письмо
+ * считалось потерявшим картинку, и отправка отказывала совсем — с
+ * советом «вставьте картинки заново», хотя картинок в письме нет вовсе.
  */
-const UPLOAD_URL = /\/api\/uploads\/([A-Za-z0-9._-]{1,100})\/content/g;
+const UPLOAD_URL = /(?<![\w:/])\/api\/uploads\/([0-9a-fA-F-]{36})\/content/g;
 
 export interface InlineUploadsResult {
   html: string;
@@ -87,6 +94,8 @@ export async function inlineUploadImages(
   const attachments: Attachment[] = [];
   /** Одна и та же загрузка в теле дважды — вкладываем один раз. */
   const seen = new Map<string, string>();
+  /** Загрузки, которых уже не нашлось: чтобы не считать одну дважды. */
+  const gone = new Set<string>();
   const replacements: Array<{ from: string; to: string }> = [];
   let total = 0;
   let skipped = 0;
@@ -103,8 +112,16 @@ export async function inlineUploadImages(
 
     // Владелец — тот, от чьего имени письмо: чужая загрузка для него не
     // существует и в письмо попасть не может.
+    /*
+     * Пропажа считается ПО КАРТИНКЕ, а не по ссылке. Одна и та же
+     * картинка в теле дважды — обычное дело (подпись, шапка), и человек,
+     * прочитав «картинок не осталось — 2», пошёл бы искать вторую.
+     */
+    if (gone.has(id)) continue;
+
     const found = await uploads.get(id, owner).catch(() => null);
     if (!found) {
+      gone.add(id);
       missing += 1;
       continue;
     }
@@ -114,13 +131,26 @@ export async function inlineUploadImages(
       continue;
     }
 
+    /*
+     * Мета есть, а файла нет или он пуст — это тоже пропажа, и молчать о
+     * ней нельзя. Случай достижимый: удаление загрузки снимает `.bin` и
+     * `.json` двумя разными действиями, и между ними мета ещё читается.
+     * Прежде оба этих пути оставляли в письме ссылку, которая у
+     * получателя не разрешается ни во что.
+     */
     let content: Buffer;
     try {
       content = await readFile(found.path);
     } catch {
+      gone.add(id);
+      missing += 1;
       continue;
     }
-    if (content.length === 0) continue;
+    if (content.length === 0) {
+      gone.add(id);
+      missing += 1;
+      continue;
+    }
     total += content.length;
 
     const cid = `mtu-${String(attachments.length + 1)}.${Date.now().toString(36)}@mail.true`;

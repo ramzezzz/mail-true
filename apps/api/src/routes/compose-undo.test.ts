@@ -208,6 +208,12 @@ class FakeUploads {
     this.deleted.push(id);
     this.files.delete(id);
   }
+
+  /** Продление срока жизни: сборка письма зовёт его на каждое вложение. */
+  readonly touched: string[] = [];
+  async touch(id: string): Promise<void> {
+    this.touched.push(id);
+  }
 }
 
 /* ------------------------------------------------------------------ */

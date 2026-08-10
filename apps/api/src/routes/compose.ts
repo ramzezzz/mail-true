@@ -229,6 +229,13 @@ async function composeRaw(
     // него не существует, и в письмо попасть не может.
     const found = await uploads.get(id, from);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
+    /*
+     * Срок жизни продлевается и ВЛОЖЕНИЮ, не только картинке тела.
+     * Иначе выходила несуразица: окно, открытое сутки, картинку в теле
+     * сохраняло (её продлевает inlineUploadImages), а прикреплённый в
+     * начале файл терялся — и отправка отвечала «Вложение не найдено».
+     */
+    await uploads.touch(id).catch(() => undefined);
     attachedBytes += found.meta.size;
     attachments.push({
       filename: found.meta.filename,
@@ -655,23 +662,54 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
    */
   async function materializeDraft(
     session: MailSession,
-    uid: number,
     parts: readonly DraftAttachmentPart[],
     inline: readonly DraftInlinePart[],
   ): Promise<{ attachments: DraftContent['attachments']; inlineIds: string[] }> {
     if (parts.length === 0 && inline.length === 0) return { attachments: [], inlineIds: [] };
-    const key = `${session.email}:${String(uid)}`;
     const fingerprint = partsFingerprint(parts, inline);
+    /*
+     * Ключ — ОТПЕЧАТОК ЧАСТЕЙ, а не номер черновика. Номер меняется при
+     * каждом сохранении, поэтому память по номеру не покрывала как раз
+     * тот случай, ради которого заводилась: дописал, сохранил (номер
+     * стал другой), открыл снова — и всё выкладывалось заново. Части
+     * при этом те же самые, отпечаток тот же, и загрузки годятся.
+     */
+    const key = `${session.email}:${fingerprint}`;
     const remembered = materializedDrafts.get(key);
-    if (remembered && remembered.fingerprint === fingerprint) {
-      const reused = await reuseUploads(session.email, remembered.ids);
-      const reusedInline = await reuseUploads(session.email, remembered.inlineIds);
-      if (reused && reusedInline) {
-        return { attachments: reused, inlineIds: reusedInline.map((u) => u.id) };
-      }
+
+    /*
+     * Списки переиспользуются ПОРОЗНЬ. Прежде хватало одной истёкшей
+     * картинки, чтобы выложить заново и вложение на двадцать мегабайт —
+     * причём прежняя копия оставалась на диске навсегда и с первой же
+     * секунды считалась в предел на ящик. Через десяток таких заходов
+     * человек переставал открывать собственный черновик: маршрут отдавал
+     * 413, а совет «удалите начатые письма» не помогал — мусор ему не
+     * виден.
+     */
+    let saved = remembered ? await reuseUploads(session.email, remembered.ids) : null;
+    let inlineSaved = remembered ? await reuseUploads(session.email, remembered.inlineIds) : null;
+    if (saved && saved.length !== parts.length) saved = null;
+    if (inlineSaved && inlineSaved.length !== inline.length) inlineSaved = null;
+    if (saved && inlineSaved) {
+      return { attachments: saved, inlineIds: inlineSaved.map((u) => u.id) };
     }
 
-    const incoming = [...parts, ...inline].reduce((sum, part) => sum + part.content.length, 0);
+    // Уцелевшие копии негодного набора уносим сами: иначе они лежат до
+    // конца суток и всё это время занимают место в пределе на ящик.
+    if (remembered) {
+      const stale = [
+        ...(saved ? [] : remembered.ids),
+        ...(inlineSaved ? [] : remembered.inlineIds),
+      ];
+      for (const id of stale) await uploads.delete(id).catch(() => undefined);
+    }
+
+    const incomingParts = saved ? [] : parts;
+    const incomingInline = inlineSaved ? [] : inline;
+    const incoming = [...incomingParts, ...incomingInline].reduce(
+      (sum, part) => sum + part.content.length,
+      0,
+    );
     const used = await uploads.usedBy(session.email);
     if (used + incoming > config.UPLOAD_MAILBOX_MAX_BYTES) {
       throw new UploadQuotaError(
@@ -681,33 +719,44 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       );
     }
 
-    const saved: DraftContent['attachments'] = [];
-    for (const part of parts) {
-      const meta = await uploads.save(
-        session.email,
-        part.filename,
-        part.mimeType,
-        Readable.from(part.content),
-      );
-      saved.push({ id: meta.id, filename: meta.filename, size: meta.size });
+    if (!saved) {
+      const fresh: DraftContent['attachments'] = [];
+      for (const part of parts) {
+        const meta = await uploads.save(
+          session.email,
+          part.filename,
+          part.mimeType,
+          Readable.from(part.content),
+        );
+        fresh.push({ id: meta.id, filename: meta.filename, size: meta.size });
+      }
+      saved = fresh;
     }
-    const inlineIds: string[] = [];
-    for (const image of inline) {
-      const meta = await uploads.save(
-        session.email,
-        image.filename,
-        image.mimeType,
-        Readable.from(image.content),
-      );
-      inlineIds.push(meta.id);
+    if (!inlineSaved) {
+      const fresh: DraftContent['attachments'] = [];
+      for (const image of inline) {
+        const meta = await uploads.save(
+          session.email,
+          image.filename,
+          image.mimeType,
+          Readable.from(image.content),
+        );
+        fresh.push({ id: meta.id, filename: meta.filename, size: meta.size });
+      }
+      inlineSaved = fresh;
     }
-    materializedDrafts.set(key, { fingerprint, ids: saved.map((a) => a.id), inlineIds });
+
+    materializedDrafts.set(key, {
+      fingerprint,
+      ids: saved.map((a) => a.id),
+      inlineIds: inlineSaved.map((a) => a.id),
+    });
     if (materializedDrafts.size > MATERIALIZED_MAX) {
       // Map помнит порядок вставки — уходит самый старый черновик
       const oldest = materializedDrafts.keys().next().value;
       if (oldest !== undefined) materializedDrafts.delete(oldest);
     }
-    return { attachments: saved, inlineIds };
+    return { attachments: saved, inlineIds: inlineSaved.map((a) => a.id) };
   }
 
   /**
@@ -1924,6 +1973,19 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       composeRaw(payload, session.email, uploads, config.MESSAGE_MAX_BYTES, forwarded, {
         keepBcc: true,
         inlineSource: imapPartSource(client, requireFolder, splitMessageId),
+        /*
+         * СОХРАНЕНИЕ ЧЕРНОВИКА НЕ ОТКАЗЫВАЕТ ИЗ-ЗА КАРТИНОК.
+         *
+         * Отказ здесь забирает не картинку, а ВСЁ НАБРАННОЕ ПИСЬМО: сохранять
+         * нечего, и так при каждой попытке. Ровно это и случилось, когда
+         * появился отказ по пропавшей картинке: он был задуман для отправки,
+         * а достался и автосохранению, потому что этот флаг здесь не стоял.
+         *
+         * Отправка (`POST /messages/send`) флага не ставит и по-прежнему
+         * отказывает: там письмо уходит наружу, и потеря картинки
+         * необратима, а черновик человек ещё может починить.
+         */
+        inlineBestEffort: true,
       }),
     );
     const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
@@ -1996,7 +2058,6 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      */
     const { attachments, inlineIds } = await materializeDraft(
       session,
-      uid,
       parsed.attachments,
       parsed.inlineImages,
     );
@@ -2015,7 +2076,20 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
        * черновики кладёт в ящик не наше окно, а обычная почтовая
        * программа по тому же ящику — для сервера это норма.
        */
-      const link = new RegExp(`cid:<?${image.cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}>?`, 'gi');
+      /*
+       * Справа ссылка ОГРАНИЧЕНА, и это не придирка. Без границы `cid:logo`
+       * совпадал внутри `cid:logo2`: второй картинке доставался адрес
+       * первой плюс мусорный хвост («…/content2»), в письмо она не
+       * попадала вовсе, а счётчик пропаж оставался нулевым. Числовые
+       * Content-ID (`1` и `11`) ставит Thunderbird — случай житейский.
+       *
+       * Два вида ссылки разбираются отдельно: `cid:<foo>` однозначен
+       * скобками, а голый `cid:foo` кончается там, где кончаются знаки,
+       * из которых бывает собран Content-ID. Прежнее `>?` вдобавок
+       * съедало закрывающую скобку тега у неквотированного атрибута.
+       */
+      const cid = image.cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const link = new RegExp(`cid:(?:<${cid}>|${cid}(?![A-Za-z0-9._%+\\-@]))`, 'gi');
       bodyHtml = bodyHtml.replace(link, () => url);
     });
 

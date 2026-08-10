@@ -285,7 +285,7 @@ async function withApp(options: SmtpOptions, run: (ctx: Ctx) => Promise<void>): 
   await writeFile(pngPath, PNG_BYTES);
   const uploads = {
     get: async (id: string, owner: string) =>
-      id === 'kartinka' && owner === 'test@mail.local'
+      id === '77777777-7777-4777-8777-777777777777' && owner === 'test@mail.local'
         ? {
             meta: {
               id,
@@ -394,7 +394,8 @@ test('картинка черновика уезжает с внешнего а�
       method: 'POST',
       url: '/api/accounts/external/7/send',
       payload: sendBody({
-        bodyHtml: '<p>Смотрите: <img src="/api/uploads/kartinka/content"></p>',
+        bodyHtml:
+          '<p>Смотрите: <img src="/api/uploads/77777777-7777-4777-8777-777777777777/content"></p>',
       }),
     });
     assert.equal(res.statusCode, 200, res.body);
@@ -415,7 +416,7 @@ test('картинка, которой уже нет, останавливает
       method: 'POST',
       url: '/api/accounts/external/7/send',
       payload: sendBody({
-        bodyHtml: '<p><img src="/api/uploads/unesli-uborshikom/content"></p>',
+        bodyHtml: '<p><img src="/api/uploads/88888888-8888-4888-8888-888888888888/content"></p>',
       }),
     });
     assert.equal(res.statusCode, 400, res.body);

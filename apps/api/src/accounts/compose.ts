@@ -222,7 +222,9 @@ export async function composeExternalRaw(
     bcc: toMailAddresses(draft.bcc),
     subject: draft.subject,
     html: cleanHtml,
-    text: htmlToText(bodyHtml),
+    // От ГОТОВОГО тела, как и на своём пути (routes/compose.ts): иначе в
+    // текстовую часть уезжает то, что санитайзер из письма убрал.
+    text: htmlToText(cleanHtml),
     attachments,
     date: new Date(),
   };

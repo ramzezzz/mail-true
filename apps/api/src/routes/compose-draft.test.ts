@@ -417,6 +417,10 @@ test('в ОТПРАВЛЕННОМ письме заголовка Bcc нет —
 const PNG_DATA_URL =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
+/** Вторая картинка — другие байты, иначе обе части неразличимы. */
+const PNG_DATA_URL2 =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 /** Номера загрузок, на которые ссылается тело черновика. */
 function uploadIdsIn(html: string): string[] {
   return [...html.matchAll(/\/api\/uploads\/([^/"']+)\/content/gu)].map((m) => m[1] ?? '');
@@ -454,6 +458,58 @@ test('картинка тела кладётся в хранилище один 
 
     // И вложением та же картинка не показывается: человек её не прикреплял.
     assert.deepEqual(second.attachments, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test('пропавшая картинка не мешает сохранить черновик — текст дороже', async () => {
+  /*
+   * ЭТА ПРОВЕРКА СТОИТ ЗДЕСЬ ИЗ-ЗА ПОЧИНКИ, КОТОРАЯ СЛОМАЛА ДРУГОЕ.
+   *
+   * Отказ по пропавшей картинке задумывался для ОТПРАВКИ: письмо уходит
+   * наружу, и потеря необратима. Но флаг щадящего режима на маршруте
+   * сохранения не стоял, и отказ достался автосохранению: сохранить
+   * черновик стало нельзя вовсе, и так при каждом нажатии клавиши.
+   * Человек терял не картинку, а всё набранное письмо.
+   */
+  const h = await buildHarness();
+  try {
+    const gone = '/api/uploads/99999999-9999-4999-8999-999999999999/content';
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Черновик с мёртвой картинкой',
+      bodyHtml: `<p>Важный текст, который нельзя терять</p><img src="${gone}">`,
+    });
+
+    const draft = await readDraft(h.app, uid);
+    assert.match(draft.bodyHtml, /Важный текст/u, 'текст письма не сохранился');
+  } finally {
+    await h.close();
+  }
+});
+
+test('две картинки с похожими номерами не путаются местами', async () => {
+  /*
+   * Content-ID вида `1` и `11` ставит Thunderbird. Подстановка искала
+   * `cid:1` подстрокой и находила его внутри `cid:11`: второй картинке
+   * доставался адрес первой плюс мусорный хвост, в письмо она не
+   * попадала, и никакого предупреждения при этом не было.
+   */
+  const h = await buildHarness();
+  try {
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Две картинки',
+      bodyHtml: `<p>Раз <img src="${PNG_DATA_URL}"> и два <img src="${PNG_DATA_URL2}"></p>`,
+    });
+
+    const draft = await readDraft(h.app, uid);
+    const ids = uploadIdsIn(draft.bodyHtml);
+    assert.equal(ids.length, 2, 'в теле осталось не две ссылки на загрузки');
+    assert.notEqual(ids[0], ids[1], 'обе картинки указывают на один и тот же файл');
+    assert.doesNotMatch(draft.bodyHtml, /cid:/u, 'ссылка cid: осталась неподставленной');
+    assert.doesNotMatch(draft.bodyHtml, /content\d/u, 'к адресу прилип мусорный хвост');
   } finally {
     await h.close();
   }
