@@ -457,9 +457,12 @@ void test('уборка журналов панели спрашивает су�
     source.indexOf('async sweepAdminLogs'),
     source.indexOf('markAdminLoginFailure'),
   );
-  // Ищем именно ОТБОР по колонке, а не слово в объяснении рядом.
-  assert.ok(!/created_at\s*</.test(sweep), 'колонки created_at в этих таблицах нет');
-  assert.match(sweep, /FROM admin_audit_log[\s\S]*?WHERE at </, 'у журнала действий колонка at');
+  // У каждой таблицы своё имя колонки, и именно это здесь и проверяется.
+  assert.match(
+    sweep,
+    /FROM admin_audit_log[\s\S]*?WHERE created_at </,
+    'у журнала действий колонка created_at',
+  );
   assert.match(sweep, /FROM ai_audit_log[\s\S]*?WHERE at </, 'у журнала ИИ колонка at');
   assert.match(sweep, /last_success </, 'у справочника адресов — last_success');
 });

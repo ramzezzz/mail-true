@@ -475,20 +475,20 @@ export class AdminDb {
       }
     };
     /*
-     * Колонка со временем в обеих таблицах называется `at`, а не
-     * `created_at`.
+     * КОЛОНКИ СО ВРЕМЕНЕМ В ЭТИХ ТАБЛИЦАХ НАЗЫВАЮТСЯ ПО-РАЗНОМУ.
      *
-     * Здесь стояло `created_at`, и весь проход уборщика падал на первом
-     * же запросе: «column "created_at" does not exist». Уборка журналов
-     * не делала ничего, а вместе с ней срывались и остальные её задачи —
-     * они идут в том же проходе. Найдено живой проверкой на стенде, в
-     * журнале сервера.
+     * `admin_audit_log.created_at`, `ai_audit_log.at`,
+     * `admin_known_ips.last_success` — и перепутать их стоит дорого:
+     * проход уборщика падает на первом же запросе целиком, вместе с
+     * уборкой карантинов и следов подбора паролей, потому что они идут
+     * тем же проходом. Живая проверка на стенде поймала обе ошибки
+     * подряд: сперва `created_at` там, где `at`, потом наоборот.
      */
     const audit = await sweep(
       `DELETE FROM admin_audit_log
         WHERE id IN (
           SELECT id FROM admin_audit_log
-           WHERE at < now() - ($1 || ' days')::interval
+           WHERE created_at < now() - ($1 || ' days')::interval
            ORDER BY id
            LIMIT $2
         )
