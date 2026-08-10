@@ -473,3 +473,95 @@ void test('уборка журналов панели спрашивает су�
   assert.match(sweep, /FROM ai_audit_log[\s\S]*?WHERE at </, 'у журнала ИИ колонка at');
   assert.match(sweep, /last_success </, 'у справочника адресов — last_success');
 });
+
+/* ------------------------------------------------------------------ */
+/* Сроки хранения журналов                                              */
+/* ------------------------------------------------------------------ */
+
+void test('срок хранения журналов перечитывается на каждом проходе, а не при старте', async () => {
+  /*
+   * ЧТО БЫЛО. Все четыре срока объявлены в реестре группой `live` —
+   * панель обещает, что новое значение действует со следующего
+   * обращения. А уборщик брал их ОДИН раз, при создании, из окружения
+   * контейнера. То есть правка в панели не делала ничего до перезапуска
+   * контейнера, и узнать об этом можно было только через год — когда
+   * журнал не почистился.
+   */
+  const swept: Array<Record<string, unknown>> = [];
+  const failureDays: number[] = [];
+  const db = {
+    listDeletionsToPurge: async () => [],
+    updateMailboxDeletion: async () => undefined,
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
+    sweepAdminLoginFailures: async (days: number) => {
+      failureDays.push(days);
+      return 0;
+    },
+    countStuckDeletions: async () => 0,
+    listEmailsIn: async () => [],
+    listAllMailboxEmails: async () => [],
+    sweepAdminLogs: async (opts: Record<string, unknown>) => {
+      swept.push(opts);
+      return { audit: 0, ai: 0, knownIps: 0 };
+    },
+  };
+
+  // Человек поменял срок в панели между двумя проходами.
+  let days = 365;
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger,
+    mailRoot: await mkdtemp(path.join(tmpdir(), 'mt-retention-')),
+    intervalSeconds: 0,
+    retention: async () => ({
+      auditDays: days,
+      aiDays: 180,
+      knownIpDays: 30,
+      loginFailureDays: days,
+    }),
+  });
+
+  await janitor.runOnce();
+  days = 7;
+  await janitor.runOnce();
+
+  assert.equal(swept.length, 2);
+  assert.equal(swept[0]?.['auditDays'], 365);
+  assert.equal(swept[1]?.['auditDays'], 7, 'новое значение обязано подействовать сразу');
+  assert.deepEqual(failureDays, [365, 7]);
+});
+
+void test('отказ чтения настроек не останавливает уборку, а откатывает к умолчаниям', async () => {
+  // Уборщик — последняя линия против бесконечного роста таблиц. Молча
+  // пропустить проход из-за недоступной базы настроек нельзя.
+  const failureDays: number[] = [];
+  const db = {
+    listDeletionsToPurge: async () => [],
+    updateMailboxDeletion: async () => undefined,
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
+    sweepAdminLoginFailures: async (days: number) => {
+      failureDays.push(days);
+      return 0;
+    },
+    countStuckDeletions: async () => 0,
+    listEmailsIn: async () => [],
+    listAllMailboxEmails: async () => [],
+    sweepAdminLogs: async () => ({ audit: 0, ai: 0, knownIps: 0 }),
+  };
+
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger,
+    mailRoot: await mkdtemp(path.join(tmpdir(), 'mt-retention-')),
+    intervalSeconds: 0,
+    retention: () => Promise.reject(new Error('база настроек недоступна')),
+  });
+
+  const result = await janitor.runOnce();
+  assert.ok(result, 'проход обязан состояться');
+  assert.deepEqual(failureDays, [30], 'взято умолчание, а не пропуск уборки');
+});

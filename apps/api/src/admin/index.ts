@@ -327,12 +327,25 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     logger,
     mailRoot: adminConfig.ADMIN_MAIL_ROOT,
     intervalSeconds: adminConfig.ADMIN_JANITOR_INTERVAL_SECONDS,
-    retention: {
-      auditDays: adminConfig.ADMIN_AUDIT_RETENTION_DAYS,
-      aiDays: adminConfig.AI_AUDIT_RETENTION_DAYS,
-      knownIpDays: adminConfig.ADMIN_KNOWN_IP_DAYS,
-      loginFailureDays: adminConfig.ADMIN_LOGIN_FAILURE_DAYS,
-    },
+    /*
+     * Сроки хранения читаются у службы настроек, а не из окружения.
+     *
+     * Все четыре объявлены группой `live` — панель обещает, что новое
+     * значение действует со следующего обращения. Пока здесь стояли числа
+     * из adminConfig, уборщик держал значение, прочитанное при старте
+     * контейнера: правка в панели не делала НИЧЕГО, а разубедиться в этом
+     * можно было только через год — когда журнал не почистился.
+     *
+     * `int()` сам спускается по цепочке база → окружение → умолчание, так
+     * что установка, где настройку задают в infra/.env, работает как
+     * прежде.
+     */
+    retention: async () => ({
+      auditDays: await serverSettings.int('ADMIN_AUDIT_RETENTION_DAYS'),
+      aiDays: await serverSettings.int('AI_AUDIT_RETENTION_DAYS'),
+      knownIpDays: await serverSettings.int('ADMIN_KNOWN_IP_DAYS'),
+      loginFailureDays: await serverSettings.int('ADMIN_LOGIN_FAILURE_DAYS'),
+    }),
   });
 
   // Ранняя диагностика: скажем в лог, применена ли миграция

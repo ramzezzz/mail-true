@@ -713,6 +713,14 @@ services:
       ADMIN_DEFAULT_QUOTA_BYTES: ${ADMIN_DEFAULT_QUOTA_BYTES:-1073741824}
       ADMIN_MAILBOX_PURGE_DELAY_MINUTES: ${ADMIN_MAILBOX_PURGE_DELAY_MINUTES:-0}
       ADMIN_JANITOR_INTERVAL_SECONDS: ${ADMIN_JANITOR_INTERVAL_SECONDS:-60}
+      # Сроки хранения журналов панели. Читаются кодом (admin/config.ts) и
+      # предлагаются в разделе «Настройки сервера», описаны в .env.example —
+      # а сюда их не выносили, то есть задать их в infra/.env было НЕЛЬЗЯ:
+      # переменная не доходила до контейнера, и работало умолчание из кода.
+      # Тот же недосмотр, что был у ADMIN_ACCOUNT_LOCK_FAILURES выше.
+      ADMIN_AUDIT_RETENTION_DAYS: ${ADMIN_AUDIT_RETENTION_DAYS:-365}
+      AI_AUDIT_RETENTION_DAYS: ${AI_AUDIT_RETENTION_DAYS:-180}
+      ADMIN_LOGIN_FAILURE_DAYS: ${ADMIN_LOGIN_FAILURE_DAYS:-30}
       # Каталоги внутри контейнера, из .env не выносятся: это точки
       # монтирования томов выше, а не настройка.
       ADMIN_MAIL_ROOT: /var/mail/vhosts
@@ -749,6 +757,11 @@ services:
       # (NODE_OPTIONS выше): разбор запроса держит в памяти несколько
       # его копий.
       COMPOSE_BODY_MAX_BYTES: ${COMPOSE_BODY_MAX_BYTES:-12582912}
+      # Сколько писем один ящик отправляет в минуту. Предел заведён против
+      # рассылки с украденного пароля: угнанный ящик уводит домен в чёрные
+      # списки за час. Код его читает с первого дня, а задать было негде —
+      # ни в compose, ни в .env.example.
+      SEND_RATE_PER_MINUTE: ${SEND_RATE_PER_MINUTE:-30}
       IMAP_POOL_IDLE_MS: ${IMAP_POOL_IDLE_MS:-300000}
       # Двадцать секунд, а не две. Здесь стояли две — и умолчание из кода
       # (20 000, поставленное с подробным разбором) не действовало НИ НА
@@ -788,6 +801,10 @@ services:
       SENDER_LOGO_WAIT_MS: ${SENDER_LOGO_WAIT_MS:-3500}
       SENDER_LOGO_CONCURRENCY: ${SENDER_LOGO_CONCURRENCY:-4}
       SENDER_LOGO_LOOKUPS_PER_MINUTE: ${SENDER_LOGO_LOOKUPS_PER_MINUTE:-60}
+      # Отдельный, меньший предел на обращения к ИИ ради логотипа: каждое
+      # списывается с дневного предела расходов домена. Панель его
+      # предлагает, .env.example описывает — а до контейнера он не доходил.
+      SENDER_LOGO_AI_PER_MINUTE: ${SENDER_LOGO_AI_PER_MINUTE:-10}
       SENDER_LOGO_TTL_HOURS: ${SENDER_LOGO_TTL_HOURS:-720}
       SENDER_LOGO_MISS_TTL_HOURS: ${SENDER_LOGO_MISS_TTL_HOURS:-168}
       SENDER_LOGO_ERROR_TTL_HOURS: ${SENDER_LOGO_ERROR_TTL_HOURS:-6}
