@@ -206,3 +206,73 @@ test('занятое место считается по ящику, а не по
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test('одновременные продления срока не портят метаданные друг другу', async () => {
+  /*
+   * Временный файл записи был ОДИН на все продления сразу. Два вызова на
+   * одну картинку — соседняя вкладка сохраняет тот же черновик,
+   * автосохранение налезает на отправку — и второй обрезал недописанный
+   * файл первого, а неудачник в довершение сносил чужой временный файл.
+   * Итог: битая мета, которую разбор не читает.
+   */
+  const { store, dir } = await tempStore();
+  try {
+    const meta = await store.save(
+      'test@mail.local',
+      'фото.png',
+      'image/png',
+      Readable.from('байты'),
+    );
+
+    await Promise.all(Array.from({ length: 12 }, () => store.touch(meta.id)));
+
+    const found = await store.get(meta.id, 'test@mail.local');
+    assert.notEqual(found, null, 'метаданные не читаются — запись побилась');
+    assert.equal(found?.meta.filename, 'фото.png');
+    assert.ok((found?.meta.usedAt ?? 0) >= meta.createdAt, 'срок не продлён');
+
+    // И ни одного временного файла за собой
+    const left = (await readdir(dir)).filter((n) => n.endsWith('.tmp'));
+    assert.deepEqual(left, [], 'временные файлы остались лежать');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('уборщик не трогает временный файл, который пишется прямо сейчас', async () => {
+  /*
+   * Уборщик ходит раз в час и запросто попадёт в середину чужой записи.
+   * Снеся свежий временный файл, он ломает продление срока: rename
+   * упирается в исчезнувший файл, и картинка умирает на сутки раньше.
+   */
+  const { store, dir } = await tempStore();
+  try {
+    const meta = await store.save(
+      'test@mail.local',
+      'фото.png',
+      'image/png',
+      Readable.from('байты'),
+    );
+    const fresh = join(dir, `${meta.id}.json.${'0'.repeat(8)}.tmp`);
+    await writeFile(fresh, '{}', 'utf8');
+
+    await store.sweep();
+    const after = await readdir(dir);
+    assert.ok(
+      after.some((n) => n.endsWith('.tmp')),
+      'свежий временный файл унесли; в каталоге: ' + after.join(', '),
+    );
+
+    // А старый — уносит
+    const old = Date.now() / 1000 - 3 * 3600;
+    await utimes(fresh, old, old);
+    await store.sweep();
+    const swept = await readdir(dir);
+    assert.ok(
+      !swept.some((n) => n.endsWith('.tmp')),
+      'старый временный файл остался лежать: ' + swept.join(', '),
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

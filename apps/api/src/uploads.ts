@@ -198,7 +198,16 @@ export class UploadStore {
      */
     const meta: UploadMeta = { ...found.meta, usedAt: Date.now() };
     const target = this.metaPath(id);
-    const temp = `${target}.tmp`;
+    /*
+     * У каждой записи СВОЙ временный файл.
+     *
+     * Общий на всех означал бы: два продления одной картинки идут разом
+     * (соседняя вкладка сохраняет тот же черновик, автосохранение
+     * налезает на отправку), второе обрезает недописанный файл первого,
+     * а неудачник в довершение сносит временный файл третьего. Своё имя
+     * убирает это целиком — и стоит один вызов randomUUID.
+     */
+    const temp = `${target}.${randomUUID()}.tmp`;
     try {
       await writeFile(temp, JSON.stringify(meta), 'utf8');
       await rename(temp, target);
@@ -239,9 +248,23 @@ export class UploadStore {
 
     const withMeta = new Set<string>();
     for (const name of names) {
-      if (name.endsWith('.json.tmp')) {
-        // Недописанная мета от оборванного продления срока (см. touch)
-        await unlink(join(this.dir, name)).catch(() => undefined);
+      if (name.endsWith('.tmp')) {
+        /*
+         * Недописанная мета от оборванного продления срока (см. touch).
+         *
+         * Сносим только СТАРЫЕ: свежий такой файл может писаться прямо
+         * сейчас — уборщик ходит раз в час и запросто попадёт в середину
+         * чужой записи. Продление после этого тихо не сработает (rename
+         * упрётся в исчезнувший файл), и картинка умрёт на сутки раньше
+         * срока. Час — с тем же запасом, что и у файлов-сирот ниже.
+         */
+        const path = join(this.dir, name);
+        try {
+          const info = await stat(path);
+          if (now - info.mtimeMs > Math.min(maxAgeMs, 3600 * 1000)) await unlink(path);
+        } catch {
+          /* уже унесли */
+        }
         continue;
       }
       if (!name.endsWith('.json')) continue;
