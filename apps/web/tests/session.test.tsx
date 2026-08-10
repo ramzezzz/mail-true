@@ -173,6 +173,8 @@ describe('выход', () => {
       email: 'test@mail.local',
     });
     vi.spyOn(api, 'logout').mockResolvedValue(undefined);
+    // Выход спрашивает про начатое письмо — здесь человек соглашается
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     useUiStore.getState().openCompose();
     useUiStore.getState().updateComposeDraft(useUiStore.getState().composeWindows[0]!.id, {
@@ -226,5 +228,43 @@ describe('истёкшая сессия', () => {
     });
 
     await waitFor(() => text().includes('Вход в почту'), 'экран входа после 401');
+  });
+});
+
+describe('выход при начатом письме', () => {
+  /*
+   * Выход закрывает все окна написания — иначе следующий вошедший на
+   * общем компьютере увидел бы чужое письмо. Но делал он это молча:
+   * нажал «Выйти» — и начатое письмо исчезло. Автосохранение спасает
+   * лишь то, что старше трёх секунд, да и то не всегда: у письма без
+   * единой буквы текста черновика нет вовсе.
+   */
+  it('отказ на вопрос оставляет и сессию, и письмо', async () => {
+    vi.spyOn(api, 'getSession').mockResolvedValue({
+      authenticated: true,
+      email: 'test@mail.local',
+    });
+    const logout = vi.spyOn(api, 'logout').mockResolvedValue(undefined);
+    const ask = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    useUiStore.getState().openCompose();
+    useUiStore.getState().updateComposeDraft(useUiStore.getState().composeWindows[0]!.id, {
+      bodyHtml: '<p>важное недописанное письмо</p>',
+    });
+
+    render(
+      <>
+        <Gate />
+        <LogoutButton />
+      </>,
+    );
+    await waitFor(() => text().includes('Выйти'), 'кнопка выхода');
+    const button = [...host.querySelectorAll('button')].find((b) => b.textContent === 'Выйти');
+    act(() => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await waitFor(() => ask.mock.calls.length > 0, 'вопрос о начатом письме');
+
+    // Человек передумал: и письмо на месте, и из почты его не выкинуло
+    expect(useUiStore.getState().composeWindows.length).toBe(1);
+    expect(logout).not.toHaveBeenCalled();
   });
 });
