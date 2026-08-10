@@ -596,7 +596,14 @@ test('назначенное «завтра в девять» отменой н�
 
     assert.equal(body.scheduled, true);
     assert.equal(body.sendAt, sendAt, 'срок отмены не должен обрезать отложенную отправку');
-    assert.equal(body.pendingId, undefined);
+    /*
+     * Номер письма в очереди теперь возвращается и для отложенной
+     * отправки — им же его и отменяют. Раньше здесь стояло `undefined`, и
+     * это было не свойство, а дефект: отменить письмо, назначенное на
+     * завтра, было нечем — номер знал только сервер, а списка очереди
+     * интерфейс не спрашивал.
+     */
+    assert.equal(typeof body.pendingId, 'string');
     assert.equal(smtp.messages.length, 0);
     assert.equal((await new DeferredSpool(spoolDir).all())[0]?.sendAt, sendAt);
   });

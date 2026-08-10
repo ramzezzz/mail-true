@@ -39,6 +39,7 @@ import type {
   ReadReceiptResponse,
   SendRequest,
   SendResponse,
+  ScheduledMessage,
   SendFailureNotice,
   UndoSendResponse,
   SessionInfo,
@@ -87,6 +88,15 @@ export interface MailApi {
   getSendFailures(): Promise<SendFailureNotice[]>;
   /** «Понятно»: человек прочитал извещение, убрать его. */
   ackSendFailure(id: string): Promise<void>;
+  /**
+   * Письма, отложенные на будущее («Отправить позже»).
+   *
+   * Пока этого запроса не было, письмо между нажатием и сроком не
+   * показывалось нигде: из «Черновиков» оно уходит при постановке в
+   * очередь, в «Отправленные» ещё не попало. Ни посмотреть, ни отменить —
+   * при том что сервер список отдавал давно.
+   */
+  getScheduled(): Promise<ScheduledMessage[]>;
   saveDraft(request: SendRequest): Promise<DraftSaveResponse>;
   /**
    * Сохранённый черновик обратно в окно написания. Без этого дописать своё
@@ -217,6 +227,9 @@ export const httpApi: MailApi = {
 
   getSendFailures: async () =>
     (await apiFetch<{ items: SendFailureNotice[] }>('/api/messages/send/failures')).items,
+
+  getScheduled: async () =>
+    (await apiFetch<{ items: ScheduledMessage[] }>('/api/messages/scheduled')).items,
 
   ackSendFailure: async (id) => {
     await apiFetch('/api/messages/send/failures/ack', {

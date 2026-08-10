@@ -35,6 +35,7 @@ import {
   DeferredSpool,
   normalizeUndoSeconds,
   readFailureFromRaw,
+  withBccHeader,
   withFailureHeader,
   type DeferredEntry,
   type DeliveryOutcome,
@@ -144,7 +145,21 @@ async function composeRaw(
   /** Предел письма целиком: проверяется ДО сборки, по размерам вложений. */
   messageMaxBytes: number,
   forwarded: readonly ForwardedMessage[] = [],
-  settings?: { keepBcc?: boolean },
+  settings?: {
+    keepBcc?: boolean;
+    /**
+     * Имя отправителя из настроек ящика — то, что получатель видит в поле
+     * «От кого» вместо голого адреса.
+     *
+     * Настройка была объявлена (settings/types.ts), показывалась в форме и
+     * прямо обещала «имя видит получатель», но не читалась НИКЕМ: письмо
+     * собиралось с `from` = адрес. Причём окно написания показывало
+     * человеку имя — вычисленное из адреса (routes/account.ts), а не то,
+     * что он вписал, — так что расхождение было незаметно до тех пор, пока
+     * получатель не спросит, почему письма приходят «от ivan.petrov@».
+     */
+    fromName?: string;
+  },
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
   /*
@@ -205,7 +220,9 @@ async function composeRaw(
   const cleanHtml = sanitizeEmailHtml(payload.bodyHtml, { allowRemote: true }).html;
 
   const options: Mail.Options = {
-    from,
+    // Имя ставится объектом, а не строкой: экранирование кавычек и
+    // кодирование кириллицы в заголовке делает сам сборщик письма.
+    from: settings?.fromName ? { name: settings.fromName, address: from } : from,
     to: formatAddresses(payload.to),
     cc: formatAddresses(payload.cc),
     bcc: formatAddresses(payload.bcc),
@@ -495,6 +512,29 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     bodyLimit: config.COMPOSE_BODY_MAX_BYTES,
   };
 
+  /**
+   * Отправка вдобавок ограничена ПО ЯЩИКУ, а не по адресу клиента.
+   *
+   * Общий предел частоты считает запросы с одного адреса, и для отправки
+   * это неверно с обеих сторон: захваченный ящик получал три сотни писем
+   * в минуту (столько же, сколько весь остальной API), а контора за одним
+   * внешним адресом делила предел между всеми сотрудниками сразу.
+   *
+   * Ключ — адрес ящика из сессии; без сессии до сюда не доходят
+   * (preHandler выше), но на всякий случай остаётся адрес клиента.
+   */
+  const sendRoute = {
+    ...composeRoute,
+    config: {
+      rateLimit: {
+        max: config.SEND_RATE_PER_MINUTE,
+        timeWindow: 60_000,
+        keyGenerator: (request: { mailSession?: MailSession | null; ip: string }): string =>
+          request.mailSession?.email ?? request.ip,
+      },
+    },
+  };
+
   /** Кладёт новую версию черновика и убирает предыдущую. */
   async function saveDraftVersion(
     session: MailSession,
@@ -591,6 +631,26 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       auth: { user: email, pass: password },
       // В dev-стеке сертификаты самоподписанные (см. TLS_REJECT_UNAUTHORIZED)
       tls: { rejectUnauthorized: config.TLS_REJECT_UNAUTHORIZED },
+      /*
+       * СВОИ СРОКИ ОЖИДАНИЯ — ВМЕСТО БИБЛИОТЕЧНЫХ.
+       *
+       * У nodemailer умолчания рассчитаны на чужой сервер в интернете:
+       * две минуты на соединение, полминуты на приветствие и ДЕСЯТЬ МИНУТ
+       * молчания сокета. Наш submission стоит в соседнем контейнере, и
+       * такие сроки означают вот что: одно зависшее соединение держит
+       * очередь целиком — она обходится строго по одному письму
+       * (deferred-send.ts), — то есть пятисекундная «отмена отправки» у
+       * всех остальных ящиков превращается в десятиминутную. Письма при
+       * этом не теряются, повтор отработает; ломается обещание «уйдёт
+       * через пять секунд», причём сразу у всех.
+       *
+       * Числа с запасом на настоящую работу: приветствие и соединение —
+       * секунды даже на нагруженном сервере, а молчание сокета должно
+       * пережить передачу тяжёлого вложения на медленном канале.
+       */
+      connectionTimeout: 15_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 120_000,
     });
   }
 
@@ -887,6 +947,14 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           true,
         );
       }
+      /*
+       * Письмо своё отжило — причину последней неудачи держать больше не
+       * за чем. Раньше запись удалялась только в onGiveUp, то есть у
+       * письма, которое сорвалось однажды и потом ушло, она оставалась в
+       * памяти процесса навсегда. Не авария, но растёт бесконечно.
+       */
+      lastFailure.delete(entry.id);
+      noticed.delete(entry.id);
       return 'sent';
     },
     onGiveUp: async (entry, raw) => {
@@ -1041,8 +1109,28 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     }
   }
 
+  /**
+   * Имя отправителя этого ящика — то, что увидит получатель в «От кого».
+   *
+   * Спрашивается при запросе по той же причине, что и срок отмены
+   * отправки: раздел настроек подключается позже маршрутов письма.
+   * Настроек нет или база молчит — письмо уходит с голым адресом, как
+   * уходило раньше: имя это удобство, а не условие доставки.
+   */
+  async function senderDisplayName(email: string): Promise<string> {
+    const settings = app.settingsService as typeof app.settingsService | undefined;
+    if (!settings?.available) return '';
+    try {
+      const name = (await settings.requireDb().getSettings(email)).senderName ?? '';
+      return name.trim().slice(0, 255);
+    } catch (err) {
+      app.log.warn(errorInfo(err), 'Не удалось прочитать имя отправителя — письмо уйдёт без него');
+      return '';
+    }
+  }
+
   // Отправка письма
-  app.post('/messages/send', composeRoute, async (request) => {
+  app.post('/messages/send', sendRoute, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
     const payload = draftPayloadSchema.parse(request.body);
@@ -1058,12 +1146,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     checkSendableAddresses(payload);
 
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
+    const fromName = await senderDisplayName(session.email);
     const raw = await composeRaw(
       payload,
       session.email,
       uploads,
       config.MESSAGE_MAX_BYTES,
       forwarded,
+      {
+        ...(fromName ? { fromName } : {}),
+      },
     );
 
     // Предел письма известен заранее — незачем узнавать его от SMTP отказом
@@ -1117,6 +1209,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
           // они едут отдельно, чтобы вернуться в письмо, если оно уедет
           // в «Черновики» (см. DeferredEntry.bcc).
           bcc: payload.bcc.map((a) => a.address),
+          // Отложено человеком: при отмене письмо возвращается в
+          // «Черновики», а не стирается (см. DeferredEntry.scheduled).
+          scheduled: true,
         },
         raw,
       );
@@ -1130,6 +1225,14 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
         ok: true,
         scheduled: true,
         sendAt: entry.sendAt,
+        /**
+         * Номер письма в очереди — им же его и отменяют.
+         *
+         * Раньше здесь стоял только `sendAt`, и отменить отложенное
+         * письмо было нечем: номер знал лишь сервер, а список очереди
+         * интерфейс не спрашивал. Письмо исчезало из виду до самого срока.
+         */
+        pendingId: entry.id,
         sentMessageId: null,
         accepted: [],
         rejected: [],
@@ -1345,22 +1448,89 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       .object({ pendingId: z.string().min(1).max(100) })
       .parse(request.body ?? {});
 
-    const gone = { ok: true, cancelled: false as const };
-    if (!deferred.claim(pendingId)) return gone;
+    const gone = { ok: true, cancelled: false as const, reason: 'gone' as const };
+    /*
+     * Замок занят — письмо прямо сейчас в работе у очереди. Это НЕ то же
+     * самое, что «письмо ушло»: работник держит замок и на неудачной
+     * попытке, и на всей укладке в черновики, а интерфейс на прежний
+     * ответ говорил «письмо уже ушло» и закрывал окно вместе с текстом.
+     * Отдаём отдельную причину, чтобы можно было сказать правду и
+     * предложить повторить.
+     */
+    if (!deferred.claim(pendingId)) {
+      return { ok: true, cancelled: false as const, reason: 'sending' as const };
+    }
     try {
       const entry = await spool.get(pendingId);
       // Чужое письмо для нас неотличимо от несуществующего — и отвечаем
       // одинаково: сказать «это письмо не ваше» значило бы подтвердить,
       // что такое письмо есть.
       if (!entry || entry.owner !== session.email) return gone;
-      await spool.remove(pendingId);
-      request.log.info({ pendingId }, 'Отправка отменена, письмо снято с очереди');
-      /**
-       * Следов не остаётся никаких: копия в «Отправленные» кладётся только
-       * после успешной отправки (см. deliver), черновик человеку возвращает
-       * не ящик, а само окно написания — оно его и не теряло.
+
+      /*
+       * ПИСЬМО, ОТЛОЖЕННОЕ ЧЕЛОВЕКОМ, ВОЗВРАЩАЕТСЯ В «ЧЕРНОВИКИ».
+       *
+       * Для пятисекундной отмены следов действительно не нужно: письмо
+       * держит открытое окно написания, оно его и вернёт. Но у «отправить
+       * в понедельник» окна давно нет — черновик удалён при постановке в
+       * очередь, вложения тоже, — и прежнее «просто стереть» означало,
+       * что единственная кнопка «Отменить» уничтожает письмо целиком,
+       * вместе с текстом и вложениями. Именно поэтому в конверте есть
+       * признак scheduled.
+       *
+       * Скрытая копия возвращается заголовком: в отправляемых байтах её
+       * нет, а в черновике она нужна — иначе дописанное письмо уйдёт без
+       * части получателей.
        */
-      return { ok: true, cancelled: true as const };
+      let draftUid: number | null = null;
+      if (entry.scheduled) {
+        try {
+          const raw = await spool.raw(pendingId);
+          if (raw) {
+            draftUid = await pool.withClient(session.email, session.password, async (client) => {
+              const folder = await requireDraftsFolder(client);
+              const appended = await client.append(
+                folder.path,
+                withBccHeader(raw, entry.bcc ?? []),
+                ['\\Draft'],
+              );
+              return appended && appended.uid ? appended.uid : null;
+            });
+          }
+        } catch (err) {
+          /*
+           * Не легло — письмо НЕ снимаем с очереди и честно говорим об
+           * этом. Стереть его сейчас значило бы потерять текст: другого
+           * места, где он есть, не осталось.
+           */
+          request.log.error(
+            errorInfo(err, { pendingId }),
+            'Отложенное письмо не удалось вернуть в черновики — оставляем в очереди',
+          );
+          return {
+            ok: false as const,
+            cancelled: false as const,
+            reason: 'draft-failed' as const,
+            message:
+              'Письмо не удалось вернуть в «Черновики», поэтому оно осталось в очереди. ' +
+              'Проверьте, есть ли место в ящике, и попробуйте ещё раз.',
+          };
+        }
+      }
+
+      await spool.remove(pendingId);
+      request.log.info({ pendingId, draftUid }, 'Отправка отменена, письмо снято с очереди');
+      /**
+       * Копии в «Отправленных» не остаётся: она кладётся только после
+       * успешной отправки (см. deliver). Всё остальное зависит от того,
+       * кто держал письмо: окно написания или очередь на сутки.
+       */
+      return {
+        ok: true,
+        cancelled: true as const,
+        draftUid,
+        draftId: draftUid ? `drafts:${String(draftUid)}` : null,
+      };
     } finally {
       deferred.release(pendingId);
     }

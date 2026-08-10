@@ -1,0 +1,133 @@
+/*
+ * Панель «Уйдут позже».
+ *
+ * Внизу слева, а не наверху по центру: наверху стоит плашка отказа
+ * отправки — там сообщение, которое нельзя пропустить, и второе такое же
+ * место обесценило бы первое. Здесь же спокойное напоминание о том, что
+ * письмо ждёт своего часа: свёрнутая строка ничего не закрывает, а
+ * развернуть её человек может сам.
+ *
+ * Свёрнутое состояние по умолчанию: у панели нет срочности, а очередь из
+ * десятка писем в развёрнутом виде заняла бы пол-экрана.
+ */
+
+.panel {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: var(--mt-z-index-popover, 60);
+  box-sizing: border-box;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  border-radius: 10px;
+  background: var(--mt-color-bg-primary-elevated, #fff);
+  box-shadow: var(--mt-elevation-2, 0 4px 24px rgba(0, 16, 61, 0.24));
+  overflow: hidden;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--mt-color-text-primary, #24292f);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.title {
+  font-weight: 500;
+}
+
+.chevron {
+  color: var(--mt-color-text-secondary, #6b7280);
+}
+
+.list {
+  margin: 0;
+  padding: 0 0 6px;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--mt-color-separator-primary, rgba(0, 16, 61, 0.08));
+}
+
+.text {
+  min-width: 0;
+  flex: 1;
+}
+
+.subject {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  overflow: hidden;
+  color: var(--mt-color-text-secondary, #6b7280);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attempts {
+  color: var(--mt-mail-color-icon-favorite, #fc2c38);
+}
+
+.cancel {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--mt-color-separator-primary, rgba(0, 16, 61, 0.12));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mt-color-text-primary, #24292f);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cancel:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.error {
+  margin: 0;
+  padding: 8px 14px;
+  border-top: 1px solid var(--mt-color-separator-primary, rgba(0, 16, 61, 0.08));
+  color: var(--mt-mail-color-icon-favorite, #fc2c38);
+  font-size: 13px;
+}
+
+/*
+ * Наведение — только там, где есть мышь.
+ *
+ * На телефоне :hover «залипает» после касания: подсветка остаётся на
+ * кнопке, которую человек уже отпустил, и выглядит выбранной. Ровно этот
+ * приём применён у остальных плашек почты, и проверка mobileMail следит,
+ * чтобы правил наведения снаружи не осталось.
+ */
+@media (hover: hover) {
+  .head:hover {
+    background: var(--mt-color-bg-secondary, rgba(0, 16, 61, 0.04));
+  }
+
+  .cancel:hover:not(:disabled) {
+    background: var(--mt-color-bg-secondary, rgba(0, 16, 61, 0.04));
+  }
+}

@@ -269,6 +269,12 @@ export const mockApi: MailApi = {
     sendFailures = sendFailures.filter((n) => n.id !== id);
   },
 
+  /** Очередь отложенных писем: на стенде она всегда пуста. */
+  async getScheduled() {
+    await delay(60);
+    return [];
+  },
+
   async saveDraft(request) {
     await delay(200);
     const draftUid = request.draftUid ?? Math.floor(Math.random() * 10_000);

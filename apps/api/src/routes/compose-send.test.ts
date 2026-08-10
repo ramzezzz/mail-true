@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { ImapFlow } from 'imapflow';
 import type { AppConfig } from '../config.js';
+import { SecretBox } from '../crypto.js';
 import { registerErrorHandling } from '../http-errors.js';
 import type { AppDeps } from '../types.js';
 import type { UploadStore } from '../uploads.js';
@@ -240,8 +241,17 @@ function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   } as unknown as AppConfig;
 }
 
-async function buildTestApp(client: FakeClient, config: AppConfig): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false }) as unknown as FastifyInstance;
+async function buildTestApp(
+  client: FakeClient,
+  config: AppConfig,
+  /**
+   * Настройки ящика. Их читает отправка ради имени отправителя и срока
+   * отмены; в большинстве проверок раздела настроек нет вовсе — ровно как
+   * на установке без базы, где письмо обязано уходить как раньше.
+   */
+  settings?: { senderName?: string | null; undoSendSeconds?: number },
+): Promise<FastifyInstance> {
+  const app = Fastify({ logger: process.env.MT_TEST_LOG === '1' }) as unknown as FastifyInstance;
   const pool = {
     withClient: async <T>(_e: string, _p: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> =>
       fn(client as unknown as ImapFlow),
@@ -250,11 +260,29 @@ async function buildTestApp(client: FakeClient, config: AppConfig): Promise<Fast
     get: async () => null,
     delete: async () => undefined,
   } as unknown as UploadStore;
-  app.decorate('deps', { pool, uploads, config } as unknown as AppDeps);
+  /*
+   * Пароль ящика в очереди хранится зашифрованным, поэтому подставляем
+   * настоящий SecretBox: подделка «туда-обратно без шифрования» скрыла бы
+   * ровно ту ошибку, из-за которой отложенное письмо не отправлялось бы
+   * вовсе — расшифровку в работнике очереди.
+   */
+  const secretBox = new SecretBox('proverochnyy-sekret-dlya-testov-32b');
+  app.decorate('deps', { pool, uploads, config, secretBox } as unknown as AppDeps);
   app.decorateRequest('mailSession', null);
   app.decorate('requireSession', async function (request) {
     request.mailSession = { id: 'сессия', email: 'test@mail.local', password: 'test12345' };
   });
+  if (settings) {
+    app.decorate('settingsService', {
+      available: true,
+      requireDb: () => ({
+        getSettings: async () => ({
+          senderName: settings.senderName ?? null,
+          undoSendSeconds: settings.undoSendSeconds ?? 0,
+        }),
+      }),
+    } as never);
+  }
   registerErrorHandling(app);
   await app.register(composeRoutes, { prefix: '/api' });
   await app.ready();
@@ -496,6 +524,85 @@ test('обычное письмо (не ответ) флагов никому н
     });
     assert.equal(res.statusCode, 200);
     assert.deepEqual(client.flagsAdded, []);
+  } finally {
+    await app.close();
+    await smtp.close();
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Имя отправителя и очередь «Отправить позже»                          */
+/* ------------------------------------------------------------------ */
+
+test('имя отправителя из настроек попадает в письмо', async () => {
+  const smtp = await startFakeSmtp();
+  const client = new FakeClient();
+  // Настройки ящика: имя задано человеком в разделе «Общие».
+  const app = await buildTestApp(client, testConfig({ SMTP_PORT: smtp.port }), {
+    senderName: 'Иван Петров',
+  });
+  try {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload(),
+    });
+    assert.equal(res.statusCode, 200, `тело ответа: ${res.body.slice(0, 300)}`);
+    // Смотрим копию в «Отправленных»: это те же байты, что ушли по SMTP.
+    const uid = [...client.sent][0];
+    assert.ok(uid !== undefined, 'копия письма обязана лечь в «Отправленные»');
+    const raw = client.sources.get(uid)?.toString('utf8') ?? '';
+    // Кириллица в заголовке едет кодированной, поэтому проверяем сам факт
+    // имени рядом с адресом, а не голый адрес, как было раньше.
+    assert.match(raw, /From: =\?[^?]+\?[BQ]\?[^?]+\?=\s*<test@mail\.local>/i);
+  } finally {
+    await app.close();
+    await smtp.close();
+  }
+});
+
+test('отмена отложенного письма возвращает его в «Черновики»', async () => {
+  const smtp = await startFakeSmtp();
+  const client = new FakeClient();
+  const app = await buildTestApp(client, testConfig({ SMTP_PORT: smtp.port }));
+  try {
+    const at = new Date(Date.now() + 3600_000).toISOString();
+    const sent = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send',
+      payload: sendPayload({ sendAt: at, bcc: [{ name: '', address: 'skrytyy@mail.local' }] }),
+    });
+    assert.equal(sent.statusCode, 200, `тело ответа: ${sent.body.slice(0, 300)}`);
+    const scheduled = sent.json() as { scheduled: boolean; pendingId: string };
+    assert.equal(scheduled.scheduled, true);
+    // Номер письма в очереди — им же его и отменяют. Без него отменить
+    // отложенное письмо было нечем.
+    assert.ok(scheduled.pendingId, 'сервер обязан вернуть номер письма в очереди');
+
+    // Оно и правда видно в очереди — до этого списка не было ни у кого.
+    const list = await app.inject({ method: 'GET', url: '/api/messages/scheduled' });
+    const items = (list.json() as { items: Array<{ id: string }> }).items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.id, scheduled.pendingId);
+
+    const undo = await app.inject({
+      method: 'POST',
+      url: '/api/messages/send/undo',
+      payload: { pendingId: scheduled.pendingId },
+    });
+    const result = undo.json() as { cancelled: boolean; draftUid: number | null };
+    assert.equal(result.cancelled, true);
+    // Письмо не стёрто, а возвращено: другого места, где остался текст,
+    // у отложенного письма нет — окно закрыто, черновик удалён при
+    // постановке в очередь.
+    assert.ok(result.draftUid, 'отменённое отложенное письмо обязано лечь в черновики');
+    assert.equal(client.drafts.size, 1);
+    // Скрытая копия возвращается заголовком, иначе дописанное письмо
+    // молча ушло бы без части получателей.
+    assert.match(client.draftText(), /skrytyy@mail\.local/);
+
+    const after = await app.inject({ method: 'GET', url: '/api/messages/scheduled' });
+    assert.equal((after.json() as { items: unknown[] }).items.length, 0);
   } finally {
     await app.close();
     await smtp.close();

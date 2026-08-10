@@ -12,6 +12,7 @@
 
 import { useUiStore, type ComposeWindowState } from '../app/store';
 import { ComposeWindow } from './ComposeWindow';
+import { ScheduledPanel } from './ScheduledPanel';
 import { SendFailureBanner } from './SendFailureBanner';
 
 /** Ширина свёрнутой плашки вместе с зазором — шаг раскладки внизу экрана. */
@@ -77,6 +78,12 @@ export function ComposeWindows() {
         то есть почти никому.
       */}
       <SendFailureBanner />
+      {/*
+        Панель отложенных писем — здесь же и по той же причине: письмо,
+        ждущее своего часа, должно быть видно независимо от того, открыто
+        ли сейчас окно написания. Пустая очередь ничего не рисует.
+      */}
+      <ScheduledPanel />
       {composeWindowPlaces(windows).map(({ win, offset, minimizedLeft, undoIndex }) => (
         <ComposeWindow
           key={win.id}

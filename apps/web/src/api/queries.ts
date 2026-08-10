@@ -20,6 +20,7 @@ import type {
   MessagesPage,
   MoveRequest,
   MoveResponse,
+  ScheduledMessage,
   SendFailureNotice,
   SendRequest,
 } from './types';
@@ -362,11 +363,34 @@ export function useAckSendFailure() {
   });
 }
 
+/**
+ * Письма, отложенные на будущее.
+ *
+ * Обновляется вместе с остальной почтой и раз в минуту сама: срок у
+ * письма наступает без участия человека, и строка «уйдёт сегодня в 18:00»
+ * должна исчезнуть, когда письмо действительно уйдёт, а не висеть до
+ * перезагрузки вкладки.
+ */
+export function useScheduledMessages(): UseQueryResult<ScheduledMessage[]> {
+  return useQuery({
+    queryKey: ['scheduled'],
+    queryFn: () => api.getScheduled(),
+    staleTime: 0,
+    refetchInterval: 60_000,
+  });
+}
+
 export function useUndoSend() {
   const invalidate = useInvalidateMail();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (pendingId: string) => api.undoSend(pendingId),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      // Очередь тоже перечитываем: отменённое письмо ушло из неё, а
+      // отменённое отложенное — ещё и появилось в «Черновиках».
+      void client.invalidateQueries({ queryKey: ['scheduled'] });
+      invalidate();
+    },
   });
 }
 

@@ -130,6 +130,32 @@ export interface SendResponse {
 export interface UndoSendResponse {
   ok: boolean;
   cancelled: boolean;
+  /**
+   * Почему не отменилось:
+   * `gone` — письмо уже ушло, `sending` — прямо сейчас в работе у очереди
+   * (можно повторить), `draft-failed` — письмо не удалось вернуть в
+   * «Черновики», поэтому оно осталось в очереди.
+   *
+   * Раньше поля не было, и интерфейс на любой отказ говорил «письмо уже
+   * ушло» и закрывал окно вместе с текстом — в том числе когда письмо
+   * всего лишь получило временный отказ и лежало в очереди дальше.
+   */
+  reason?: 'gone' | 'sending' | 'draft-failed';
+  message?: string;
+  /** Куда положено отменённое отложенное письмо. */
+  draftUid?: number | null;
+  draftId?: string | null;
+}
+
+/** Письмо, ожидающее своего часа (`GET /api/messages/scheduled`). */
+export interface ScheduledMessage {
+  id: string;
+  /** Когда уйдёт (ISO). */
+  sendAt: string;
+  subject: string;
+  to: string[];
+  /** Сколько раз отправка уже срывалась. Ноль — обычное ожидание. */
+  attempts: number;
 }
 
 /**
