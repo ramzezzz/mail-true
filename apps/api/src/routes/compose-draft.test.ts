@@ -536,6 +536,54 @@ test('картинка тела не проходит мимо предела н
   }
 });
 
+test('назначенное время отправки переживает закрытие окна', async () => {
+  /*
+   * Человек назначил «уйдёт 10 августа в 09:00», закрыл окно, открыл
+   * черновик — и времени нет. Хранить его было негде: черновик это
+   * обычное письмо RFC822, а поля для такой пометки в нём нет. При этом
+   * в подвале окна время написано, так что заметить пропажу можно было
+   * только по тому, что письмо ушло сразу.
+   */
+  const h = await buildHarness();
+  try {
+    const at = '2026-08-10T09:00:00.000Z';
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Уйдёт утром',
+      bodyHtml: '<div>Доброе утро!</div>',
+      sendAt: at,
+    });
+
+    const draft = await readDraft(h.app, uid);
+    assert.equal(draft.sendAt, at, 'назначенное время потерялось');
+  } finally {
+    await h.close();
+  }
+});
+
+test('в ОТПРАВЛЕННОМ письме пометки о времени нет — она не для получателя', async () => {
+  // Заголовок наш и служебный: получателю незачем знать, что письмо
+  // лежало в очереди и сколько именно.
+  const h = await buildHarness();
+  try {
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Уйдёт утром',
+      bodyHtml: '<div>Доброе утро!</div>',
+      sendAt: '2026-08-10T09:00:00.000Z',
+    });
+    const draft = await readDraft(h.app, uid);
+    assert.equal(draft.sendAt, '2026-08-10T09:00:00.000Z');
+
+    // А в самом черновике, лежащем в ящике, заголовок есть — иначе
+    // читать его было бы неоткуда
+    const raw = [...h.client.drafts.values()].map((b) => b.toString('utf8')).join('\n');
+    assert.match(raw, /X-Mail-True-Send-At:/u, 'черновик не несёт назначенного времени');
+  } finally {
+    await h.close();
+  }
+});
+
 test('несуществующий черновик — это 404, а не пустая форма', async () => {
   const h = await buildHarness();
   try {

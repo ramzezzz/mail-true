@@ -40,6 +40,8 @@ import {
   DeferredSpool,
   normalizeUndoSeconds,
   readFailureFromRaw,
+  readSendAtFromRaw,
+  SEND_AT_HEADER,
   withBccHeader,
   withFailureHeader,
   type DeferredEntry,
@@ -336,6 +338,10 @@ async function composeRaw(
     throw new BadRequestError(
       `Картинок в письме не осталось на сервере — ${String(uploadImages.missing)}: ` +
         'начатые письма хранятся сутки. Вставьте их в письмо заново и отправьте ещё раз.',
+      // Номера уходят окну: оно уберёт мёртвые картинки из тела само.
+      // Иначе отказ неисправим — на экране картинка ещё видна (её отдали
+      // с долгим кэшем), и убрать её нечем, кроме выделения и Delete.
+      { missingUploads: uploadImages.missingIds },
     );
   }
   if (uploadImages.skipped > 0 && settings?.inlineBestEffort !== true) {
@@ -427,9 +433,27 @@ async function composeRaw(
    * сообщать кому-то третьему интерфейс не предлагает и не должен, иначе
    * почта превращается в средство подтверждения чужих адресов.
    */
+  const headers: Record<string, string> = {};
   if (payload.requestReadReceipt) {
-    options.headers = { 'Disposition-Notification-To': `<${from}>` };
+    headers['Disposition-Notification-To'] = `<${from}>`;
   }
+
+  /*
+   * ОТЛОЖЕННОЕ ВРЕМЯ ДОЖИВАЕТ ДО ДОПИСЫВАНИЯ — только в черновике.
+   *
+   * Человек назначил «уйдёт 10 августа в 09:00», закрыл окно, открыл
+   * черновик — и время исчезало, потому что нигде не хранилось. В
+   * подвале окна оно при этом написано, так что заметить пропажу можно
+   * было только по тому, что письмо ушло сразу.
+   *
+   * Заголовок наш (как SEND_FAILURE_HEADER) и ставится ТОЛЬКО в
+   * черновике: у отправляемого письма он уехал бы получателю и рассказал
+   * ему, что письмо лежало в очереди — сведение не его.
+   */
+  if (settings?.keepBcc && payload.sendAt) {
+    headers[SEND_AT_HEADER] = payload.sendAt;
+  }
+  if (Object.keys(headers).length > 0) options.headers = headers;
 
   const composer = new MailComposer(options);
   const node = composer.compile();
@@ -2038,6 +2062,9 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      */
     const parsed = await parseDraftSource(source);
     const sendFailure = readFailureFromRaw(source);
+    // Назначенное время уйдёт обратно в окно: без этого оно пропадало
+    // при закрытии, хотя в подвале окна было написано
+    const sendAt = readSendAtFromRaw(source);
 
     /*
      * КАРТИНКИ ТЕЛА — ЧЕРЕЗ ХРАНИЛИЩЕ ЗАГРУЗОК.
@@ -2107,6 +2134,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       // Пусто у обычного черновика; заполнено — значит письмо уже пробовали
       // отправить и не смогли, и окно написания скажет об этом полосой
       sendFailure,
+      sendAt,
     };
     return content;
   });

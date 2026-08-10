@@ -732,6 +732,14 @@ export function ComposeWindow({
       payload.attachMessageIds = attachedMessages.map((m) => m.id);
     }
     if (draft.requestReadReceipt) payload.requestReadReceipt = true;
+    /*
+     * Назначенное время уходит и в СОХРАНЕНИЕ черновика — сервер положит
+     * его заголовком и вернёт при открытии. Прежде оно жило только в
+     * состоянии окна: закрыл окно, открыл черновик — времени нет, а в
+     * подвале окна оно было написано, и заметить пропажу человек мог
+     * только по тому, что письмо ушло сразу.
+     */
+    if (draft.sendAt) payload.sendAt = draft.sendAt;
     return payload;
   };
 
@@ -815,7 +823,13 @@ export function ComposeWindow({
         },
         onError: (err) => {
           noteRescuedDraft(err);
-          setError(actionErrorText('Не удалось отправить письмо', err));
+          const dropped = dropMissingImages(err);
+          setError(
+            dropped > 0
+              ? actionErrorText('Не удалось отправить письмо', err) +
+                  ' Убрали их из письма — можно отправлять.'
+              : actionErrorText('Не удалось отправить письмо', err),
+          );
         },
       },
     );
@@ -944,7 +958,13 @@ export function ComposeWindow({
       // Не отправилось — окно остаётся с текстом, а причина видна
       onError: (err) => {
         noteRescuedDraft(err);
-        setError(actionErrorText('Не удалось отправить письмо', err));
+        const dropped = dropMissingImages(err);
+        setError(
+          dropped > 0
+            ? actionErrorText('Не удалось отправить письмо', err) +
+                ' Убрали их из письма — можно отправлять.'
+            : actionErrorText('Не удалось отправить письмо', err),
+        );
       },
     });
   };
@@ -978,6 +998,44 @@ export function ComposeWindow({
   };
 
   /**
+   * Убирает из тела картинки, которых на сервере уже нет.
+   *
+   * ------------------------------------------------------------------
+   * ИНАЧЕ ИЗ ОТКАЗА НЕТ ВЫХОДА
+   * ------------------------------------------------------------------
+   * Начатые письма живут сутки, и отправка честно отказывает: «картинок
+   * в письме не осталось на сервере». Но мёртвая ссылка остаётся в теле,
+   * а на экране картинка ПО-ПРЕЖНЕМУ видна — её отдали с долгим кэшем, и
+   * браузер не перезапрашивает. Человек читает «картинок не осталось»,
+   * глядя на картинку, и не понимает, о чём речь. Кнопка «вставить
+   * картинку» в панели не предусмотрена, а Ctrl+V добавит ВТОРУЮ, не
+   * убрав первую, — и следующее «Отправить» даст тот же отказ.
+   *
+   * Поэтому номера пропавших приходят в подробностях отказа, и окно
+   * убирает такие картинки само.
+   */
+  const dropMissingImages = (err: unknown): number => {
+    if (!(err instanceof ApiError)) return 0;
+    const details = err.details;
+    if (typeof details !== 'object' || details === null) return 0;
+    const ids = (details as { missingUploads?: unknown }).missingUploads;
+    if (!Array.isArray(ids) || ids.length === 0) return 0;
+    const box = editorRef.current;
+    if (!box) return 0;
+    let removed = 0;
+    for (const id of ids) {
+      if (typeof id !== 'string') continue;
+      for (const image of [...box.querySelectorAll('img')]) {
+        if (!image.getAttribute('src')?.includes(`/api/uploads/${id}/content`)) continue;
+        image.remove();
+        removed += 1;
+      }
+    }
+    if (removed > 0) rememberBody();
+    return removed;
+  };
+
+  /**
    * Слепок письма — по нему видно, изменилось ли хоть что-нибудь с прошлой
    * записи. Сравнение, а не «грязный» признак: правка, отменённая обратно
    * (набрал и стёр), не должна гонять запросы на сервер.
@@ -993,6 +1051,9 @@ export function ComposeWindow({
       attachedMessages.map((m) => m.id),
       draft.requestReadReceipt === true,
       draft.fromExternalId,
+      // Назначенное время — часть письма: сменил его и закрыл окно, а
+      // черновик остался с прежним, потому что сохранять было «нечего»
+      draft.sendAt,
     ]);
 
   /** Слепок последней УДАЧНОЙ записи; null — не сохраняли ни разу. */

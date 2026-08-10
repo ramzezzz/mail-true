@@ -77,6 +77,14 @@ export interface ComposeInit {
   attachments?: readonly ComposeAttachment[] | undefined;
   requestReadReceipt?: boolean | undefined;
   /**
+   * Когда письмо должно уйти — если человек уже назначил время.
+   *
+   * Хранится в самом черновике заголовком, иначе пропадало при закрытии
+   * окна: в подвале написано «Уйдёт 10 августа в 09:00», а открытый
+   * назавтра черновик уходил сразу.
+   */
+  sendAt?: string | undefined;
+  /**
    * Почему это письмо не ушло — у черновика, вернувшегося из очереди
    * отправки. Живёт в `init`, а не в черновике окна: это неизменный факт
    * о прошлом письма, а не то, что человек сейчас правит.
@@ -238,7 +246,7 @@ export function emptyDraft(init: ComposeInit): ComposeDraft {
     showCc: cc !== '',
     showBcc: bcc !== '',
     requestReadReceipt: init.requestReadReceipt ?? false,
-    sendAt: null,
+    sendAt: init.sendAt ?? null,
     pending: null,
     draftUid: init.draftUid ?? null,
     savedAt: null,

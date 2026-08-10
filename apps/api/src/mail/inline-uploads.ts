@@ -67,6 +67,16 @@ export interface InlineUploadsResult {
    * человека на экране есть.
    */
   missing: number;
+  /**
+   * Номера пропавших загрузок — их окно написания уберёт из тела.
+   *
+   * Без этого списка отказ был неисправим: мёртвая ссылка оставалась в
+   * письме, а на экране картинка ПО-ПРЕЖНЕМУ видна (ответ отдавался с
+   * долгим кэшем), и человек читал «картинок не осталось», глядя на
+   * картинку. Убрать её было нечем, кроме выделения и Delete, — и
+   * ничто на это не указывало.
+   */
+  missingIds: string[];
   /** Сколько байт заняли перенесённые картинки. */
   bytes: number;
 }
@@ -88,7 +98,7 @@ export async function inlineUploadImages(
   readFile: (path: string) => Promise<Buffer>,
 ): Promise<InlineUploadsResult> {
   if (!html.includes('/api/uploads/')) {
-    return { html, attachments: [], skipped: 0, missing: 0, bytes: 0 };
+    return { html, attachments: [], skipped: 0, missing: 0, missingIds: [], bytes: 0 };
   }
 
   const attachments: Attachment[] = [];
@@ -172,5 +182,5 @@ export async function inlineUploadImages(
 
   let out = html;
   for (const { from, to } of replacements) out = out.split(from).join(to);
-  return { html: out, attachments, skipped, missing, bytes: total };
+  return { html: out, attachments, skipped, missing, missingIds: [...gone], bytes: total };
 }

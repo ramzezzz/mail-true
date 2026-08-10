@@ -314,6 +314,9 @@ export const mockApi: MailApi = {
       inReplyTo: null,
       references: [],
       requestReadReceipt: false,
+      // Настоящий сервер отдаёт сюда время из заголовка черновика;
+      // заглушке взять его неоткуда — назначенного времени просто нет
+      sendAt: null,
     };
   },
 

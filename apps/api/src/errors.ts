@@ -33,8 +33,14 @@ export class NotFoundError extends ApiError {
 }
 
 export class BadRequestError extends ApiError {
-  constructor(message = 'Некорректный запрос') {
-    super(400, 'BAD_REQUEST', message);
+  /**
+   * `details` — не украшение. По ним окно написания чинит письмо само:
+   * так приезжают, например, номера картинок, которых уже нет на сервере,
+   * и окно убирает их из тела, а не оставляет человека с отказом, из
+   * которого нет выхода.
+   */
+  constructor(message = 'Некорректный запрос', details?: unknown) {
+    super(400, 'BAD_REQUEST', message, details);
   }
 }
 

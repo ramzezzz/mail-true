@@ -215,6 +215,26 @@ export interface SendFailureReason {
 export const SEND_FAILURE_HEADER = 'X-Mail-True-Send-Failure';
 
 /**
+ * Отложенное время, сохранённое ВМЕСТЕ С ЧЕРНОВИКОМ.
+ *
+ * Живёт рядом с заголовком отказа и по той же причине: черновик — это
+ * обычное письмо RFC822, и всё, что о нём надо помнить, приходится
+ * хранить его же заголовками. В отправляемых байтах этого заголовка нет:
+ * получателю незачем знать, что письмо лежало в очереди.
+ */
+export const SEND_AT_HEADER = 'X-Mail-True-Send-At';
+
+/** Отложенное время из исходника черновика (null — его там нет). */
+export function readSendAtFromRaw(raw: Buffer): string | null {
+  const value = readHeaderFromRaw(raw, SEND_AT_HEADER);
+  if (value === null) return null;
+  const at = new Date(value.trim());
+  // Мусор в заголовке не должен ронять открытие черновика: письмо
+  // человека важнее пометки о времени, и без неё оно откроется
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+/**
  * Приписывает заголовок к готовому письму.
  *
  * Заголовок ставится ПЕРВЫМ, до всех остальных: так не нужно ни искать
@@ -289,13 +309,19 @@ export function readFailureHeader(value: string | undefined | null): SendFailure
  * незачем.
  */
 export function readFailureFromRaw(raw: Buffer): SendFailureReason | null {
+  const value = readHeaderFromRaw(raw, SEND_FAILURE_HEADER);
+  return value === null ? null : readFailureHeader(value);
+}
+
+/** Значение своего заголовка из блока заголовков письма (null — нет такого). */
+function readHeaderFromRaw(raw: Buffer, name: string): string | null {
   // Блок заголовков кончается пустой строкой; 64 КБ с запасом хватает
   // на любой разумный набор, а читать всё письмо ради одной строки не нужно
   const head = raw.subarray(0, Math.min(raw.length, 64 * 1024)).toString('binary');
   const end = head.search(/\r?\n\r?\n/);
   const block = end < 0 ? head : head.slice(0, end);
   const lines = block.split(/\r?\n/);
-  const needle = `${SEND_FAILURE_HEADER.toLowerCase()}:`;
+  const needle = `${name.toLowerCase()}:`;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? '';
     if (!line.toLowerCase().startsWith(needle)) continue;
@@ -304,7 +330,7 @@ export function readFailureFromRaw(raw: Buffer): SendFailureReason | null {
     for (let j = i + 1; j < lines.length && /^[ \t]/.test(lines[j] ?? ''); j += 1) {
       value += lines[j];
     }
-    return readFailureHeader(value);
+    return value;
   }
   return null;
 }
