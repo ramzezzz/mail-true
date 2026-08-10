@@ -280,6 +280,28 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
           });
           ownerCtx.exportRunner = runner;
           runner.start();
+        } else if (exportReady && !config.MAILBOX_EXPORT_ENABLED && master) {
+          /*
+           * Выгрузка выключена — значит готовых архивов на диске быть не
+           * должно. Раньше выключатель просто не запускал работника, и
+           * копии всей переписки в открытом виде оставались лежать
+           * бессрочно: сроки им ставит тот самый работник, а маршрут
+           * «удалить архив» без работника отвечает отказом. То есть
+           * настройка, придуманная ради закрытого контура, делала ровно
+           * обратное обещанному.
+           */
+          const cleaner = new ExportRunner({
+            config: app.deps.config,
+            settings: config,
+            logger,
+            store: ownerDb,
+            master,
+          });
+          void cleaner
+            .purgeReady()
+            .catch((err: unknown) =>
+              logger.warn(errorInfo(err), 'Не удалось убрать готовые архивы выгрузки'),
+            );
         } else if (!exportReady) {
           logger.warn(
             'Выгрузка ящика недоступна: примените infra/postgres/migrations/' +

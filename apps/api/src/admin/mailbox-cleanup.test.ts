@@ -84,6 +84,8 @@ void test('уборщик удаляет карантин и записывае�
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -142,6 +144,8 @@ void test('карантин не удался — уборщик не смеет
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -187,6 +191,8 @@ void test('карантин не удался и не удаётся снова 
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     // Ящика с этим адресом больше нет — иначе уборщик обязан обойти
     // каталог стороной (см. проверку про заново заведённый ящик).
     listEmailsIn: async () => [],
@@ -225,6 +231,8 @@ void test('уборщик находит осиротевшие каталоги
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     listAllMailboxEmails: async () => ['alive@x.local'],
   };
   const janitor = new AdminJanitor({
@@ -268,6 +276,8 @@ void test('про осиротевшие каталоги уборщик соо�
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     listAllMailboxEmails: async () => known,
   };
   // Часы под управлением теста: иначе суточное напоминание не проверить.
@@ -368,6 +378,8 @@ void test('повторный карантин не трогает ящик, з�
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
+    // Застрявших удалений в этих проверках нет: они про обычный проход.
+    countStuckDeletions: async () => 0,
     listAllMailboxEmails: async () => ['ivan@x.local'],
   };
 
@@ -387,4 +399,41 @@ void test('повторный карантин не трогает ящик, з�
     'purged',
     'запись об удалении закрывается — убирать больше нечего',
   );
+});
+
+void test('застрявшие удаления не молчат: уборщик считает их и кричит в журнал', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'mt-stuck-'));
+  const said: string[] = [];
+  const db = {
+    // Записи, упёршиеся в предел попыток, из выборки уже не приходят —
+    // ровно поэтому раньше о них не говорил никто.
+    listDeletionsToPurge: async () => [],
+    updateMailboxDeletion: async () => undefined,
+    expireStaleMailboxAccess: async () => 0,
+    deleteExpiredImportJobs: async () => 0,
+    sweepAdminLoginFailures: async () => 0,
+    countStuckDeletions: async () => 3,
+    listEmailsIn: async () => [],
+    listAllMailboxEmails: async () => [],
+  };
+  const janitor = new AdminJanitor({
+    db: db as unknown as AdminDb,
+    logger: {
+      ...logger,
+      error: (_fields: unknown, msg: string) => said.push(msg),
+    } as unknown as typeof logger,
+    mailRoot: root,
+    intervalSeconds: 0,
+  });
+
+  const first = await janitor.runOnce();
+  assert.equal(first.stuckDeletions, 3);
+  assert.equal(said.length, 1, 'о застрявших записях сказано вслух');
+  assert.match(said[0] ?? '', /застряло/i);
+
+  // Второй проход в те же сутки молчит: иначе за сутки набралось бы
+  // полторы тысячи одинаковых строк и настоящие ошибки в них утонули бы.
+  const second = await janitor.runOnce();
+  assert.equal(second.stuckDeletions, 3);
+  assert.equal(said.length, 1);
 });

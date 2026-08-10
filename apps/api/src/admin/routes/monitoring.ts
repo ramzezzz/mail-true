@@ -28,6 +28,7 @@ import { loadAccountsConfig } from '../../accounts/config.js';
 import { ApiError } from '../../errors.js';
 import { audit, requireAdmin } from '../guard.js';
 import { runRoundtrip } from '../mail-roundtrip.js';
+import { MAX_PURGE_ATTEMPTS } from '../janitor.js';
 import { diskUsedPercent } from '../metrics-disk.js';
 import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
 import { RspamdClient } from '../rspamd.js';
@@ -319,6 +320,32 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
             'приём почты',
         });
       }
+    }
+
+    /*
+     * Застрявшая уборка удалённых ящиков.
+     *
+     * Уборщик пробует убрать карантинный каталог десять раз и отступает —
+     * причина может быть такой, что сама не пройдёт (том только на чтение,
+     * чужой владелец). Раньше на этом всё и заканчивалось: запись выпадала
+     * из выборки, предупреждения прекращались, каталог с чужой почтой
+     * оставался на диске навсегда, а вернуть его в работу было нечем.
+     * Здесь он виден, а кнопка «Попробовать снова» рядом обнуляет счётчик.
+     */
+    const stuckDeletions = await ctx.db.countStuckDeletions(MAX_PURGE_ATTEMPTS).catch(() => null);
+    if (stuckDeletions !== null && stuckDeletions > 0) {
+      checks.push({
+        id: 'deletions:stuck',
+        group: 'Место',
+        title: 'Уборка удалённых ящиков',
+        state: 'fail',
+        detail:
+          `Застряло записей: ${String(stuckDeletions)}. Каталоги с почтой удалённых ящиков ` +
+          `остаются на диске: убрать их не удалось ${String(MAX_PURGE_ATTEMPTS)} раз подряд`,
+        hint:
+          'Проверьте права на почтовый том (том не смонтирован только на чтение? владелец 5000?), ' +
+          'затем нажмите «Попробовать снова» — уборщик возьмёт записи в работу на следующем проходе',
+      });
     }
 
     /*
@@ -690,6 +717,38 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
       });
 
       return result;
+    },
+  );
+
+  /**
+   * Вернуть в работу застрявшие удаления ящиков.
+   *
+   * Право то же, что и на удаление ящика (`users.delete`): действие
+   * доводит до конца именно его. Само по себе оно ничего не удаляет —
+   * обнуляет счётчик неудачных попыток, чтобы уборщик взял записи на
+   * следующем проходе. Пока такой кнопки не было, застрявшая запись
+   * лежала вечно: она выпадала из выборки уборщика, и вернуть её было
+   * нечем, кроме правки таблицы руками.
+   */
+  app.post(
+    '/monitoring/deletions/retry',
+    { preHandler: requireAdmin(app, 'users.delete') },
+    async (request) => {
+      const revived = await ctx.db.retryStuckDeletions(MAX_PURGE_ATTEMPTS);
+      await audit(ctx, request, {
+        action: 'monitoring.deletions.retry',
+        targetType: 'mailbox',
+        targetLabel: `застрявших записей: ${String(revived)}`,
+        after: { revived },
+      });
+      return {
+        revived,
+        message:
+          revived === 0
+            ? 'Застрявших записей нет'
+            : `Записей возвращено в работу: ${String(revived)}. ` +
+              'Уборщик возьмёт их на следующем проходе',
+      };
     },
   );
 

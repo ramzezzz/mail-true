@@ -327,6 +327,12 @@ export async function adminRoutes(app: FastifyInstance): Promise<void> {
     logger,
     mailRoot: adminConfig.ADMIN_MAIL_ROOT,
     intervalSeconds: adminConfig.ADMIN_JANITOR_INTERVAL_SECONDS,
+    retention: {
+      auditDays: adminConfig.ADMIN_AUDIT_RETENTION_DAYS,
+      aiDays: adminConfig.AI_AUDIT_RETENTION_DAYS,
+      knownIpDays: adminConfig.ADMIN_KNOWN_IP_DAYS,
+      loginFailureDays: adminConfig.ADMIN_LOGIN_FAILURE_DAYS,
+    },
   });
 
   // Ранняя диагностика: скажем в лог, применена ли миграция

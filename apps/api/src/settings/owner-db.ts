@@ -289,6 +289,8 @@ export interface OwnerStore {
   finishExport(id: number, patch: ExportFinishPatch): Promise<void>;
   /** Готовые задания с вышедшим сроком — их файлы пора удалить. */
   listExpiredExports(now: Date, limit: number): Promise<ExportRow[]>;
+  /** Все готовые архивы — для уборки при выключенной выгрузке. */
+  listReadyExports(limit: number): Promise<ExportRow[]>;
   /** Сколько заданий сейчас в работе (по всем ящикам). */
   runningExports(): Promise<number>;
 
@@ -475,9 +477,14 @@ export class OwnerDb implements OwnerStore {
         `DELETE FROM trash_recovery_items WHERE state <> 'pending' AND purge_at < $1`,
       ],
       [
+        // Состояния выгрузки: queued | running | ready | failed | cancelled |
+        // expired. 'done' здесь стояло по недосмотру — такого состояния у
+        // выгрузок нет вовсе (оно из заданий переноса), и ветка была мёртвой.
+        // 'ready' не убираем намеренно: у готового архива есть срок, и
+        // снимает его работник выгрузки — он же удаляет файл с диска.
         'mailbox_export_jobs',
         `DELETE FROM mailbox_export_jobs
-          WHERE state IN ('done', 'failed', 'expired', 'cancelled')
+          WHERE state IN ('failed', 'expired', 'cancelled')
             AND coalesce(finished_at, created_at) < $1`,
       ],
     ];
@@ -655,6 +662,28 @@ export class OwnerDb implements OwnerStore {
     return rows.map(toExportRow);
   }
 
+  /**
+   * Все готовые архивы, независимо от срока.
+   *
+   * Нужно ровно для одного случая: выгрузку ящиков выключили в настройках
+   * сервера. Смысл этого выключателя — «копии всей переписки в открытом
+   * виде не должны лежать на диске», а раньше выключение просто не
+   * запускало работника: уже готовые архивы оставались лежать вечно и
+   * удалить их из продукта было нечем — маршрут удаления тоже требует
+   * работника. Теперь они убираются при первом же старте с выключенной
+   * выгрузкой.
+   */
+  async listReadyExports(limit: number): Promise<ExportRow[]> {
+    const rows = await this.#query<ExportRowRaw>(
+      `SELECT ${EXPORT_COLUMNS} FROM mailbox_export_jobs
+        WHERE state = 'ready'
+        ORDER BY id
+        LIMIT $1`,
+      [limit],
+    );
+    return rows.map(toExportRow);
+  }
+
   async runningExports(): Promise<number> {
     const rows = await this.#query<{ n: string }>(
       `SELECT count(*)::text AS n FROM mailbox_export_jobs WHERE state = 'running'`,
@@ -775,9 +804,29 @@ export class OwnerDb implements OwnerStore {
   }
 
   async listRecoveryDue(now: Date, limit: number): Promise<RecoveryRow[]> {
+    /*
+     * ОТСТУП ПОСЛЕ НЕУДАЧНОЙ ПОПЫТКИ — ЗАЩИТА ВСЕЙ ОЧЕРЕДИ.
+     *
+     * Тот же довод, что и у отложенных писем (snooze-db.ts, listDue), и
+     * та же цена ошибки. Отбор идёт по сроку и с пределом на проход,
+     * поэтому запись, которая падает КАЖДЫЙ раз (письма уже нет в
+     * хранилище, служебный доступ отозвали), всегда оказывается первой:
+     * она самая старая. Две сотни таких записей — а это одна очистка
+     * большой корзины — занимали весь проход целиком, и до остальных
+     * ящиков работник не доходил никогда. Счётчик попыток при этом
+     * исправно рос, но не читался ни здесь, ни в интерфейсе.
+     *
+     * Предела попыток нет намеренно: письмо не должно пропасть из-за
+     * временной поломки. Но и держать очередь ему нельзя — после каждой
+     * неудачи запись отходит в сторону на минуту за попытку, но не
+     * больше часа. Отметка времени — updated_at: для ожидающей записи он
+     * меняется только попытками (markRecoveryAttempt).
+     */
     const rows = await this.#query<RecoveryRowRaw>(
       `SELECT ${RECOVERY_COLUMNS} FROM trash_recovery_items
         WHERE state = 'pending' AND purge_at < $1::timestamptz
+          AND (attempts = 0
+               OR updated_at <= $1::timestamptz - make_interval(mins => least(attempts, 60)))
         ORDER BY purge_at
         LIMIT $2`,
       [now.toISOString(), limit],

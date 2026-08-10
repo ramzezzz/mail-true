@@ -141,6 +141,35 @@ export class ExportRunner {
     }
   }
 
+  /**
+   * Убрать все готовые архивы — при выключенной выгрузке.
+   *
+   * Зовётся один раз при старте, когда MAILBOX_EXPORT_ENABLED = false:
+   * работник в этом случае не запускается, и без этой уборки готовые
+   * копии переписки лежали бы на диске бессрочно, вопреки прямому
+   * обещанию настройки. Идёт пачками, чтобы не держать базу.
+   */
+  async purgeReady(): Promise<number> {
+    let removed = 0;
+    for (;;) {
+      const rows = await this.#opts.store.listReadyExports(EXPIRE_BATCH);
+      if (rows.length === 0) break;
+      for (const row of rows) {
+        if (row.filePath) await rm(row.filePath, { force: true }).catch(() => undefined);
+        await this.#opts.store.finishExport(row.id, { state: 'expired', filePath: null });
+        removed += 1;
+      }
+      if (rows.length < EXPIRE_BATCH) break;
+    }
+    if (removed > 0) {
+      this.#opts.logger.warn(
+        { removed },
+        'Выгрузка ящиков выключена: готовые архивы удалены с диска',
+      );
+    }
+    return removed;
+  }
+
   async #connect(email: string): Promise<ImapFlow> {
     if (this.#opts.connect) return this.#opts.connect(email);
     const master = this.#opts.master;

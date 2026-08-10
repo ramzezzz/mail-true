@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 /** Конверт отложенного письма. Тело лежит рядом, в файле `<id>.eml`. */
@@ -548,6 +548,20 @@ export class DeferredSpool {
     }
     const edge = olderThan.getTime();
     let removed = 0;
+    /*
+     * Сначала запомним, у каких писем метаданные есть: по ним отличается
+     * живое письмо от следа прерванной записи. Тело (`.eml`) пишется
+     * первым, `.json` — вторым, через временный файл; если процесс умер
+     * между этими двумя записями, тело оставалось на диске НАВСЕГДА —
+     * цикл ниже ходит только по `.json` и `.fail`, а тело письма со всеми
+     * вложениями он не видел вовсе. Тот же дефект в загрузках нашли и
+     * закрыли раньше (см. sweep в uploads.ts) — здесь второго цикла не
+     * было.
+     */
+    const withMeta = new Set<string>();
+    for (const name of names) {
+      if (name.endsWith('.json')) withMeta.add(name.slice(0, -5));
+    }
 
     for (const name of names) {
       try {
@@ -573,6 +587,26 @@ export class DeferredSpool {
         removed += 1;
       } catch {
         /* испорченный файл на уборке остальных не сказывается */
+      }
+    }
+
+    /*
+     * Следы прерванной записи: тело без метаданных и временные файлы.
+     * Порог тот же, что и у остальных: запись письма занимает доли
+     * секунды, поэтому всё, что старше общего срока, — точно мусор.
+     */
+    for (const name of names) {
+      const orphan =
+        (name.endsWith('.eml') && !withMeta.has(name.slice(0, -4))) || name.endsWith('.tmp');
+      if (!orphan) continue;
+      const path = join(this.dir, name);
+      try {
+        const info = await stat(path);
+        if (info.mtimeMs >= edge) continue;
+        await unlink(path);
+        removed += 1;
+      } catch {
+        /* файл уже убрали */
       }
     }
     return removed;

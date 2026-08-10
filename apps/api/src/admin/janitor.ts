@@ -39,6 +39,17 @@ export interface JanitorOptions {
   intervalSeconds: number;
   /** Сколько карантинов убирать за один проход. */
   batch?: number;
+  /**
+   * Сроки хранения журналов панели: аудит действий, обращения к ИИ,
+   * справочник знакомых адресов и следы подбора пароля. Разбор чисел — в
+   * admin/config.ts; здесь они только применяются.
+   */
+  retention?: {
+    auditDays: number;
+    aiDays: number;
+    knownIpDays: number;
+    loginFailureDays: number;
+  };
   /** Часы. Подменяется в тестах, чтобы не ждать сутки ради напоминания. */
   now?: () => number;
 }
@@ -50,9 +61,19 @@ export interface JanitorRunResult {
   removedImportJobs: number;
   /** Сколько строк неудачных входов в панель убрано по сроку. */
   removedLoginFailures: number;
+  /** Сколько строк журналов панели убрано по срокам: аудит, ИИ, адреса. */
+  removedAuditRows: number;
+  removedAiRows: number;
+  removedKnownIps: number;
   orphanMaildirs: number;
   /** Была ли на этом проходе запись в журнал про осиротевшие каталоги. */
   orphanReported: boolean;
+  /**
+   * Сколько удалений ящиков упёрлись в предел попыток и больше не берутся
+   * в работу. Ноль — норма; всё остальное означает чужую почту, лежащую
+   * на диске без срока.
+   */
+  stuckDeletions: number;
 }
 
 /**
@@ -70,6 +91,22 @@ export interface JanitorRunResult {
  * просто вес в базе и в резервных копиях.
  */
 const LOGIN_FAILURE_KEEP_DAYS = 30;
+
+/**
+ * Сколько раз пробуем убрать карантинный каталог, прежде чем отступить.
+ *
+ * Отступить приходится: каталог может не удаляться по причине, которая
+ * сама не пройдёт (том смонтирован только на чтение, чужой владелец), а
+ * долбиться в него каждую минуту вечно — значит забить журнал и мешать
+ * остальной уборке. Но и молча забыть о нём нельзя: там лежит чужая
+ * почта. Поэтому число вынесено сюда и о застрявших записях говорится
+ * вслух — в журнале уборщика и в самопроверке панели, где для них есть
+ * отдельная проверка и кнопка «попробовать снова».
+ */
+export const MAX_PURGE_ATTEMPTS = 10;
+
+/** Как часто напоминать о застрявших удалениях, если состав не меняется. */
+const STUCK_REMINDER_MS = 24 * 60 * 60 * 1000;
 
 const ORPHAN_REMINDER_MS = 24 * 60 * 60 * 1000;
 
@@ -89,6 +126,8 @@ export class AdminJanitor {
    */
   #orphansReported: ReadonlySet<string> = new Set();
   #orphansReportedAt = 0;
+  /** Когда в последний раз говорили про застрявшие удаления. */
+  #stuckReportedAt = 0;
 
   constructor(opts: JanitorOptions) {
     this.#opts = opts;
@@ -119,8 +158,12 @@ export class AdminJanitor {
       closedSessions: 0,
       removedImportJobs: 0,
       removedLoginFailures: 0,
+      removedAuditRows: 0,
+      removedAiRows: 0,
+      removedKnownIps: 0,
       orphanMaildirs: 0,
       orphanReported: false,
+      stuckDeletions: 0,
     };
     // Проходы не должны наезжать друг на друга: удаление большого ящика
     // может не уложиться в интервал.
@@ -130,7 +173,7 @@ export class AdminJanitor {
       const { db, logger } = this.#opts;
 
       /* --- 1. карантин -> диск свободен --- */
-      const pending = await db.listDeletionsToPurge(this.#opts.batch ?? 20);
+      const pending = await db.listDeletionsToPurge(this.#opts.batch ?? 20, MAX_PURGE_ATTEMPTS);
       for (const row of pending) {
         if (!row.quarantinePath) {
           /*
@@ -235,6 +278,29 @@ export class AdminJanitor {
         }
       }
 
+      /*
+       * Записи, упёршиеся в предел попыток, из выборки выше уже не
+       * приходят — а каталог с чужой почтой лежит на диске. Раньше это
+       * было полностью беззвучно: предупреждения пишутся только при
+       * обработке строки, а необработанная строка молчит. Говорим о них
+       * раз в сутки (чаще — значит утопить настоящие предупреждения) и
+       * отдаём число наружу: его показывает самопроверка панели.
+       */
+      result.stuckDeletions = await db.countStuckDeletions(MAX_PURGE_ATTEMPTS);
+      if (result.stuckDeletions > 0) {
+        const now = this.#opts.now?.() ?? Date.now();
+        if (now - this.#stuckReportedAt >= STUCK_REMINDER_MS) {
+          this.#stuckReportedAt = now;
+          logger.error(
+            { count: result.stuckDeletions, attempts: MAX_PURGE_ATTEMPTS },
+            'Удаление ящиков застряло: карантинные каталоги с почтой остаются на диске. ' +
+              'Проверьте права на почтовый том и нажмите «Попробовать снова» в разделе обслуживания',
+          );
+        }
+      } else {
+        this.#stuckReportedAt = 0;
+      }
+
       /* --- 2. брошенные сеансы входа в чужой ящик --- */
       result.closedSessions = await db.expireStaleMailboxAccess();
       if (result.closedSessions > 0) {
@@ -263,12 +329,37 @@ export class AdminJanitor {
        * Строки с действующей блокировкой метод не трогает: пока замок
        * держит, его основание должно лежать рядом.
        */
-      result.removedLoginFailures = await db.sweepAdminLoginFailures(LOGIN_FAILURE_KEEP_DAYS);
+      const retention = this.#opts.retention;
+      result.removedLoginFailures = await db.sweepAdminLoginFailures(
+        retention?.loginFailureDays ?? LOGIN_FAILURE_KEEP_DAYS,
+      );
       if (result.removedLoginFailures > 0) {
         logger.info(
           { removed: result.removedLoginFailures },
           'Уборщик: убраны старые записи о неудачных входах в панель',
         );
+      }
+
+      /*
+       * --- 3в. журналы панели по срокам ---
+       *
+       * Журнал действий администраторов, обращения к ИИ и справочник
+       * знакомых адресов входа: строка на каждое действие, срока не было
+       * ни у одного, а в резервную копию попадают все три.
+       */
+      if (retention) {
+        const swept = await db.sweepAdminLogs({
+          auditDays: retention.auditDays,
+          aiDays: retention.aiDays,
+          knownIpDays: retention.knownIpDays,
+        });
+        result.removedAuditRows = swept.audit;
+        result.removedAiRows = swept.ai;
+        result.removedKnownIps = swept.knownIps;
+        const total = swept.audit + swept.ai + swept.knownIps;
+        if (total > 0) {
+          logger.info(swept, 'Уборщик: журналы панели подчищены по срокам хранения');
+        }
       }
 
       /* --- 4. осиротевшие каталоги: только сообщаем, и не на каждом проходе --- */

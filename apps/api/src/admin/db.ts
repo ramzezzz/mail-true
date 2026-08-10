@@ -447,6 +447,68 @@ export class AdminDb {
     return rows.length;
   }
 
+  /**
+   * Уборка журналов панели по срокам.
+   *
+   * Три таблицы, у которых срока не было вовсе: журнал действий
+   * администраторов, справочник знакомых адресов входа и журнал обращений
+   * к ИИ. Все три росли строкой на каждое действие и попадали в каждую
+   * резервную копию. Пачками, чтобы длинная уборка не держала базу: за
+   * проход убирается не больше нескольких тысяч строк, остальное уйдёт на
+   * следующем — уборщик ходит каждую минуту.
+   */
+  async sweepAdminLogs(opts: {
+    auditDays: number;
+    aiDays: number;
+    knownIpDays: number;
+    batch?: number;
+  }): Promise<{ audit: number; ai: number; knownIps: number }> {
+    const batch = opts.batch ?? 5000;
+    const sweep = async (sql: string, days: number): Promise<number> => {
+      try {
+        const rows = await this.query<{ gone: number }>(sql, [String(days), batch]);
+        return rows.length;
+      } catch (err) {
+        // Таблицы может не быть на старой базе: уборка не повод падать.
+        if (isUndefinedTable(err)) return 0;
+        throw err;
+      }
+    };
+    const audit = await sweep(
+      `DELETE FROM admin_audit_log
+        WHERE id IN (
+          SELECT id FROM admin_audit_log
+           WHERE created_at < now() - ($1 || ' days')::interval
+           ORDER BY id
+           LIMIT $2
+        )
+       RETURNING 1 AS gone`,
+      opts.auditDays,
+    );
+    const ai = await sweep(
+      `DELETE FROM ai_audit_log
+        WHERE id IN (
+          SELECT id FROM ai_audit_log
+           WHERE created_at < now() - ($1 || ' days')::interval
+           ORDER BY id
+           LIMIT $2
+        )
+       RETURNING 1 AS gone`,
+      opts.aiDays,
+    );
+    const knownIps = await sweep(
+      `DELETE FROM admin_known_ips
+        WHERE ctid IN (
+          SELECT ctid FROM admin_known_ips
+           WHERE last_success < now() - ($1 || ' days')::interval
+           LIMIT $2
+        )
+       RETURNING 1 AS gone`,
+      opts.knownIpDays,
+    );
+    return { audit, ai, knownIps };
+  }
+
   /** Увеличивает счётчик неудач и при переполнении ставит блокировку. */
   async markAdminLoginFailure(
     id: number,
@@ -851,7 +913,10 @@ export class AdminDb {
    * Второй случай уборщик закрывал как успешно убранный, и каталог с чужой
    * перепиской доставался тому, кто заведёт ящик с этим же адресом заново.
    */
-  async listDeletionsToPurge(limit: number): Promise<
+  async listDeletionsToPurge(
+    limit: number,
+    maxAttempts = 10,
+  ): Promise<
     Array<{
       id: number;
       email: string;
@@ -869,10 +934,10 @@ export class AdminDb {
     }>(
       `SELECT id::text, email, quarantine_path, maildir_path, error
          FROM mailbox_deletions
-        WHERE state = 'pending' AND purge_after <= now() AND attempts < 10
+        WHERE state = 'pending' AND purge_after <= now() AND attempts < $2
         ORDER BY purge_after
         LIMIT $1`,
-      [limit],
+      [limit, maxAttempts],
     );
     return rows.map((r) => ({
       id: Number(r.id),
@@ -881,6 +946,43 @@ export class AdminDb {
       maildirPath: r.maildir_path,
       error: r.error,
     }));
+  }
+
+  /**
+   * Сколько удалений ящиков упёрлись в предел попыток.
+   *
+   * Такая запись из выборки уборщика выпадает (attempts < MAX), и без
+   * этого счётчика она пропадала МОЛЧА: карантинный каталог с чужой
+   * почтой остаётся на диске навсегда, предупреждений больше нет,
+   * сбросить счётчик нечем. Считаем их отдельно, чтобы сказать вслух —
+   * в журнал уборщика и в самопроверку панели.
+   */
+  async countStuckDeletions(maxAttempts: number): Promise<number> {
+    const row = await this.one<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM mailbox_deletions
+        WHERE state = 'pending' AND purge_after <= now() AND attempts >= $1`,
+      [maxAttempts],
+    );
+    return Number(row?.n ?? 0);
+  }
+
+  /**
+   * Возвращает застрявшие удаления в работу: обнуляет счётчик попыток.
+   *
+   * Нужен ровно для того случая, ради которого повторы и заведены: том
+   * был только на чтение, права чинили руками — после починки уборщику
+   * надо дать ещё один шанс, а другого способа не было вовсе.
+   */
+  async retryStuckDeletions(maxAttempts: number): Promise<number> {
+    const rows = await this.query<{ id: string }>(
+      `UPDATE mailbox_deletions
+          SET attempts = 0
+        WHERE state = 'pending' AND attempts >= $1
+        RETURNING id::text`,
+      [maxAttempts],
+    );
+    return rows.length;
   }
 
   async listMailboxDeletions(limit: number): Promise<

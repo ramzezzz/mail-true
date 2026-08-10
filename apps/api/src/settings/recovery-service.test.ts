@@ -97,6 +97,9 @@ class MemoryStore implements OwnerStore {
   listExpiredExports(): Promise<ExportRow[]> {
     return Promise.resolve([]);
   }
+  listReadyExports(): Promise<ExportRow[]> {
+    return Promise.resolve([]);
+  }
   runningExports(): Promise<number> {
     return Promise.resolve(0);
   }
