@@ -831,7 +831,13 @@ function SummaryTab() {
             />
             <Tile value={data.period.reject} label="отклонено при приёме" />
             <Tile value={data.period.addHeader} label="уехало в папку «Спам»" />
-            <Tile value={data.manualLearns.spam + data.manualLearns.ham} label="обучений вручную" />
+            {/* Неизвестно — не ноль: журнал мог не прочитаться. */}
+            <Tile
+              value={
+                data.manualLearns === null ? '—' : data.manualLearns.spam + data.manualLearns.ham
+              }
+              label="обучений вручную"
+            />
           </Tiles>
           <p className={styles.note}>
             {data.periodNote}
@@ -865,8 +871,11 @@ function SummaryTab() {
               {data.live.bayes
                 .map((file) => `${file.symbol} (${file.type}, версия ${String(file.revision)})`)
                 .join(', ')}
-              . Ручное обучение за период: спам — {data.manualLearns.spam}, не спам —{' '}
-              {data.manualLearns.ham}.
+              .{' '}
+              {data.manualLearns === null
+                ? 'Ручное обучение за период прочитать не удалось.'
+                : `Ручное обучение за период: спам — ${String(data.manualLearns.spam)}, ` +
+                  `не спам — ${String(data.manualLearns.ham)}.`}
             </p>
           )}
           {data.collectingSince && (

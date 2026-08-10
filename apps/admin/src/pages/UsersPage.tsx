@@ -388,8 +388,23 @@ export function UsersPage() {
                * шапке. Прибитая восьмёрка растягивала пустую строку шире
                * таблицы у роли «только чтение» — таблица уезжала вправо.
                */
+              /*
+                ПУСТО ПО-РАЗНОМУ — И ГОВОРИТСЯ ПО-РАЗНОМУ.
+                Раньше при любом отборе стояло «Ящиков пока нет»: человек,
+                отобравший заблокированные в одном домене, читал, что
+                ящиков на сервере нет вообще, и шёл заводить их заново.
+                Отдельно назван случай «сбор показателей выключен»: там
+                ответа не знает никто, и молчаливое «нет» — неправда.
+              */
               <EmptyRow colSpan={can('users.write') ? 8 : 7}>
-                {search ? 'По этому запросу ничего не нашлось' : 'Ящиков пока нет'}
+                {users.data?.metricsMissing === true
+                  ? 'Сбор показателей выключен, занятость ящиков неизвестна — ' +
+                    'отобрать почти заполненные нечем'
+                  : search
+                    ? 'По этому запросу ничего не нашлось'
+                    : status !== 'all' || domainId !== undefined
+                      ? 'По этому отбору ящиков нет'
+                      : 'Ящиков пока нет'}
               </EmptyRow>
             )}
           </tbody>
@@ -924,8 +939,36 @@ function BulkModal({
 
   const deleteReady = confirm.trim().toLowerCase() === 'удалить';
 
+  /** Сколько ящиков уходит на сервер за один запрос — см. BULK_MAX_IDS. */
+  const BULK_CHUNK = 200;
+
+  /** Сколько уже сделано — длинная правка не должна выглядеть зависанием. */
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /** Первые причины отказов: без них «не удалось — 7» ничего не объясняет. */
+  const [reasons, setReasons] = useState<string[]>([]);
+
   const run = useMutation({
     mutationFn: async () => {
+      setProgress({ done: 0, total: ids.length });
+      setReasons([]);
+      const failures: string[] = [];
+      const noteFailure = (id: number, err: unknown): void => {
+        /*
+         * ПРИЧИНЫ ОТКАЗОВ НАЗЫВАЮТСЯ, А НЕ СЧИТАЮТСЯ.
+         *
+         * Здесь стоял пустой catch: человек читал «не удалось — 7» и не
+         * мог ни понять, что случилось, ни повторить с толком. А причины
+         * бывают разные и требуют разного: у одного ящика есть
+         * незавершённое удаление, у другого не отвечает Dovecot, третий
+         * уже удалён из соседней вкладки. Показываем первые три — этого
+         * хватает, чтобы понять, общая беда или частная.
+         */
+        if (failures.length < 3) {
+          const text = err instanceof Error ? err.message : String(err);
+          failures.push(`${String(id)}: ${text}`);
+        }
+      };
+
       if (mode === 'delete') {
         /*
          * Массового удаления на сервере нет, и заводить его ради этого не
@@ -939,19 +982,47 @@ function BulkModal({
           try {
             await api.deleteUser(id, reason.trim() || undefined);
             removed += 1;
-          } catch {
+          } catch (err) {
             failed += 1;
+            noteFailure(id, err);
           }
+          setProgress({ done: removed + failed, total: ids.length });
         }
+        setReasons(failures);
         return { changed: removed, failed };
       }
-      const result = await api.bulkUsers({
-        ids,
-        ...(mode === 'quota' && quotaBytes !== null ? { quotaBytes } : {}),
-        ...(mode === 'block' ? { active: false } : {}),
-        ...(mode === 'unblock' ? { active: true } : {}),
-      });
-      return { changed: result.changed, failed: 0 };
+
+      /*
+       * ПРАВКА ИДЁТ ЧАСТЯМИ.
+       *
+       * Тысяча ящиков одним запросом не укладывалась в таймаут прокси
+       * (сто двадцать секунд): соединение рвалось, панель показывала
+       * «сервер не ответил», а правка на сервере продолжалась — и было
+       * непонятно ни сколько успело примениться, ни можно ли повторить.
+       * Сервер теперь принимает не больше двухсот за раз (BULK_MAX_IDS),
+       * а счётчик ниже показывает ход.
+       */
+      let changed = 0;
+      let failed = 0;
+      for (let from = 0; from < ids.length; from += BULK_CHUNK) {
+        const part = ids.slice(from, from + BULK_CHUNK);
+        try {
+          const result = await api.bulkUsers({
+            ids: part,
+            ...(mode === 'quota' && quotaBytes !== null ? { quotaBytes } : {}),
+            ...(mode === 'block' ? { active: false } : {}),
+            ...(mode === 'unblock' ? { active: true } : {}),
+          });
+          changed += result.changed;
+          failed += part.length - result.changed;
+        } catch (err) {
+          failed += part.length;
+          noteFailure(part[0] ?? 0, err);
+        }
+        setProgress({ done: Math.min(from + part.length, ids.length), total: ids.length });
+      }
+      setReasons(failures);
+      return { changed, failed };
     },
     onSuccess: (result) => {
       const what = mode === 'delete' ? 'Удалено' : 'Изменено';
@@ -987,6 +1058,26 @@ function BulkModal({
       }
     >
       <ErrorNotice error={run.error} />
+      {/*
+        Ход длинной правки. Тысяча ящиков идёт частями по двести, и без
+        этой строки окно выглядело бы зависшим ровно столько, сколько
+        занимает вся работа.
+      */}
+      {run.isPending && progress !== null && progress.total > BULK_CHUNK && (
+        <Notice tone="info">
+          Обработано {progress.done} из {progress.total}. Не закрывайте окно.
+        </Notice>
+      )}
+      {reasons.length > 0 && (
+        <Notice tone="error">
+          Не удалось изменить часть ящиков. Причины (первые {reasons.length}):
+          <ul>
+            {reasons.map((text) => (
+              <li key={text}>{text}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
       {mode === 'block' && (
         <Notice tone="error">
           {/*

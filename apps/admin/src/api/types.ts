@@ -96,6 +96,15 @@ export interface MailUserPage {
   total: number;
   limit: number;
   offset: number;
+  /**
+   * Отбор «почти заполненные» невозможен: снимка показателей нет.
+   *
+   * Занятости ящика в базе нет, она приходит из снимка, а сбор
+   * показателей выключается настройкой. Без этого признака пустой ответ
+   * читался как «переполненных нет» — то есть как ответ на вопрос, на
+   * который никто не отвечал.
+   */
+  metricsMissing?: boolean;
 }
 
 export interface Alias {
@@ -1405,7 +1414,8 @@ export interface SpamOverview {
   period: SpamPeriod | null;
   periodNote: string;
   collectingSince: string | null;
-  manualLearns: { spam: number; ham: number };
+  /** null — прочитать журнал не удалось; это НЕ то же самое, что ноль. */
+  manualLearns: { spam: number; ham: number } | null;
   symbols: SpamSymbol[];
   symbolsNote: string;
   selfProbeNote: string;

@@ -241,7 +241,22 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
      */
     const resources = await resourceSnapshot().catch(() => null);
     if (resources) {
+      /*
+       * ОДИН ДИСК — ОДНА СТРОКА.
+       *
+       * Томов три (почта, указатели, журналы), но на обычной установке
+       * все они лежат на одном разделе. Когда место кончалось, баннер
+       * писал три одинаковых предупреждения подряд — про «разные» пути и
+       * один и тот же диск. Человек, увидев три строки, ищет три
+       * проблемы. Номер устройства говорит правду о том, сколько дисков
+       * на самом деле (см. VolumeUsage.device); там, где его нет,
+       * различаем по пути, как и раньше.
+       */
+      const seenDevices = new Set<string>();
       for (const volume of resources.volumes) {
+        const key = volume.device === null ? `path:${volume.path}` : `dev:${String(volume.device)}`;
+        if (seenDevices.has(key)) continue;
+        seenDevices.add(key);
         // Процент считается ОДНОЙ формулой на весь продукт (metrics-disk.ts):
         // по доступному месту, а не по свободному, — резерв root службам
         // всё равно не отдадут.

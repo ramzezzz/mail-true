@@ -188,7 +188,16 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
     const schemaReady = await store.schemaReady();
     const [period, manual, collectingSince] = await Promise.all([
       schemaReady ? store.totals(from, to) : null,
-      store.manualLearns(from, to).catch(() => ({ spam: 0, ham: 0 })),
+      /*
+       * Отказ считается ОТСУТСТВИЕМ ЧИСЛА, а не нулём.
+       *
+       * Здесь стоял `catch(() => ({ spam: 0, ham: 0 }))`: недоступная база
+       * превращалась в честный на вид ноль, и плитка «обучений вручную»
+       * показывала «0» — то есть отвечала «фильтр никто не обучал» там,
+       * где ответа не знает никто. Соседние числа при отказе базы честно
+       * пропадают (schemaReady), это единственное выбивалось.
+       */
+      store.manualLearns(from, to).catch(() => null),
       schemaReady ? store.collectingSince() : null,
     ]);
 
@@ -235,7 +244,7 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       available: live !== null,
       unavailable,
       live,
-      /** Разность счётчиков за окно; null — миграция 0022 не применена. */
+      /** Разность счётчиков за окно; null — таблицы снимков в базе нет. */
       period: period
         ? {
             ...period,
@@ -248,10 +257,22 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
       periodNote: schemaReady
         ? 'Числа «за период» считаются по снимкам счётчиков rspamd: сам он хранит только ' +
           'значения с момента запуска, и после перезапуска они обнуляются'
-        : 'История за период недоступна: не применена миграция 0022_rspamd_stats.sql. ' +
+        : /*
+           * Имя файла здесь называть НЕЛЬЗЯ: 0022_rspamd_stats.sql лежит
+           * в legacy/ и в применяемый набор не входит — таблица снимков
+           * давно живёт в 0001_baseline.sql. Администратор шёл искать
+           * файл, которого в каталоге миграций нет, и делал вывод, что
+           * установка сломана. Называем действие, а не файл.
+           */
+          'История за период недоступна: в базе нет таблицы снимков счётчиков. ' +
+          'Примените миграции (install/apply-migrations.sh) и обновите страницу. ' +
           'Состояние «прямо сейчас» показывается и без неё',
       collectingSince,
-      /** Обучение из панели — по журналу аудита, а не по счётчику rspamd. */
+      /**
+       * Обучение из панели — по журналу аудита, а не по счётчику rspamd.
+       * `null` — прочитать не удалось; ноль и «неизвестно» на экране
+       * должны выглядеть по-разному.
+       */
       manualLearns: manual,
       symbols,
       symbolsNote:
