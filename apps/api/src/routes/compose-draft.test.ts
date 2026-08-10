@@ -140,7 +140,7 @@ interface Harness {
   close(): Promise<void>;
 }
 
-async function buildHarness(smtpPort = 25): Promise<Harness> {
+async function buildHarness(smtpPort = 25, mailboxMax = 10 * 1024 * 1024): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'mail-true-draft-'));
   // Настоящее хранилище загрузок, а не заглушка: маршрут чтения черновика
   // именно им и пользуется, когда возвращает вложения обратно в форму.
@@ -155,6 +155,9 @@ async function buildHarness(smtpPort = 25): Promise<Harness> {
     MESSAGE_MAX_BYTES: 25 * 1024 * 1024,
     COMPOSE_BODY_MAX_BYTES: 12 * 1024 * 1024,
     UPLOAD_DIR: join(dir, 'uploads'),
+    // Предел на ящик здесь настоящий: без него проверка места в маршруте
+    // сравнивала бы с undefined и молча пропускала любой объём.
+    UPLOAD_MAILBOX_MAX_BYTES: mailboxMax,
   } as unknown as AppConfig;
 
   const client = new FakeClient();
@@ -403,6 +406,77 @@ test('в ОТПРАВЛЕННОМ письме заголовка Bcc нет —
   } finally {
     await h.close();
     await smtp.close();
+  }
+});
+
+/**
+ * Однопиксельный PNG — настоящие байты, а не выдуманные: тело черновика
+ * проходит через сборку письма и разбор обратно, и на подделке это бы
+ * рассыпалось.
+ */
+const PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
+/** Номера загрузок, на которые ссылается тело черновика. */
+function uploadIdsIn(html: string): string[] {
+  return [...html.matchAll(/\/api\/uploads\/([^/"']+)\/content/gu)].map((m) => m[1] ?? '');
+}
+
+test('картинка тела кладётся в хранилище один раз на все открытия черновика', async () => {
+  const h = await buildHarness();
+  try {
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Со снимком экрана',
+      bodyHtml: `<div>Смотрите: <img src="${PNG_DATA_URL}"></div>`,
+    });
+
+    const first = await readDraft(h.app, uid);
+    const firstIds = uploadIdsIn(first.bodyHtml);
+    assert.equal(firstIds.length, 1, 'картинка тела не доехала до хранилища загрузок');
+    const afterFirst = await h.uploads.usedBy('test@mail.local');
+    assert.ok(afterFirst > 0, 'байты картинки не легли в хранилище');
+
+    /*
+     * Второе открытие ТОГО ЖЕ черновика. Раньше картинки тела шли мимо
+     * памяти о материализации: каждое открытие клало в хранилище новую
+     * копию, и черновик с фотографией на четыре мегабайта стоил по
+     * четыре мегабайта за заход. Человек упирался в предел на ящик
+     * потом и в другом месте — прикрепляя обычный файл к другому письму.
+     */
+    const second = await readDraft(h.app, uid);
+    assert.deepEqual(uploadIdsIn(second.bodyHtml), firstIds, 'картинку выложили заново');
+    assert.equal(
+      await h.uploads.usedBy('test@mail.local'),
+      afterFirst,
+      'повторное открытие черновика съело место под копию картинки',
+    );
+
+    // И вложением та же картинка не показывается: человек её не прикреплял.
+    assert.deepEqual(second.attachments, []);
+  } finally {
+    await h.close();
+  }
+});
+
+test('картинка тела не проходит мимо предела на ящик', async () => {
+  // Предел меньше самой картинки: раньше этот путь не проверял место
+  // вовсе (uploads.save проверок не делает), и переполнить хранилище
+  // через открытие черновика можно было молча.
+  const h = await buildHarness(25, 32);
+  try {
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Со снимком экрана',
+      bodyHtml: `<div><img src="${PNG_DATA_URL}"></div>`,
+    });
+
+    const response = await h.app.inject({ method: 'GET', url: `/api/drafts/${uid}` });
+    assert.equal(response.statusCode, 413, response.body);
+    // Числами и с указанием, что делать: иначе отказ выглядит поломкой
+    assert.match(response.json().message as string, /предел на ящик/u);
+  } finally {
+    await h.close();
   }
 });
 

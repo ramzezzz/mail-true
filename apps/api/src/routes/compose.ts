@@ -28,7 +28,11 @@ import {
 } from '../errors.js';
 import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
 import { findFolderById, MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
-import { parseDraftSource, type DraftAttachmentPart } from '../mail/draft-read.js';
+import {
+  parseDraftSource,
+  type DraftAttachmentPart,
+  type DraftInlinePart,
+} from '../mail/draft-read.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
 import {
   checkSendAt,
@@ -313,6 +317,20 @@ async function composeRaw(
   bodyHtml = uploadImages.html;
   attachedBytes += uploadImages.bytes;
   for (const item of uploadImages.attachments) attachments.push(item);
+  /*
+   * Картинки, которую унёс уборщик, в письме не будет — а на экране у
+   * человека она есть. Отправлять такое молча нельзя: он узнает о
+   * потере только от получателя, и то не всегда.
+   *
+   * На сохранении черновика (inlineBestEffort) не мешаем: картинки уже
+   * нет, а отказ забрал бы заодно и набранный текст.
+   */
+  if (uploadImages.missing > 0 && settings?.inlineBestEffort !== true) {
+    throw new BadRequestError(
+      `Картинок в письме не осталось на сервере — ${String(uploadImages.missing)}: ` +
+        'начатые письма хранятся сутки. Вставьте их в письмо заново и отправьте ещё раз.',
+    );
+  }
   if (uploadImages.skipped > 0 && settings?.inlineBestEffort !== true) {
     throw new MessageTooLargeError(
       `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
@@ -381,7 +399,15 @@ async function composeRaw(
     bcc: formatAddresses(payload.bcc),
     subject: payload.subject,
     html: cleanHtml,
-    text: htmlToText(payload.bodyHtml),
+    /*
+     * Текст считается от ГОТОВОГО тела, а не от исходного (payload).
+     * В исходном ещё стоят вшитые картинки: снимок экрана из буфера
+     * уезжал в текстовую часть двумястами килобайтами base64, письмо
+     * вырастало вдвое сверх посчитанного предела, а в списке
+     * «Отправленных» вместо начала письма показывалось `<img src="data:`.
+     * Соседний путь отправки (accounts/compose.ts) считает так же.
+     */
+    text: htmlToText(cleanHtml),
     attachments,
     date: new Date(),
   };
@@ -564,13 +590,28 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
    * отпечаток: имена, типы и размеры частей). Изменился или загрузки
    * унесло уборщиком — выкладываем заново, теперь уже с проверкой места.
    */
-  const materializedDrafts = new Map<string, { fingerprint: string; ids: string[] }>();
+  const materializedDrafts = new Map<
+    string,
+    { fingerprint: string; ids: string[]; inlineIds: string[] }
+  >();
   /** Сколько черновиков помним. Забытый — просто выложится заново. */
   const MATERIALIZED_MAX = 500;
 
-  /** Чем один набор вложений черновика отличается от другого. */
-  function attachmentsFingerprint(parts: readonly DraftAttachmentPart[]): string {
-    return parts.map((p) => `${p.filename}|${p.mimeType}|${String(p.content.length)}`).join('\n');
+  /**
+   * Чем один набор частей черновика отличается от другого.
+   *
+   * Считается по ОБОИМ спискам сразу — и по вложениям, и по картинкам тела.
+   * Раньше картинки тела в отпечаток не входили и выкладывались отдельным
+   * путём мимо всей этой памяти: одно и то же фото уезжало в хранилище
+   * заново при каждом открытии черновика.
+   */
+  function partsFingerprint(
+    attachments: readonly DraftAttachmentPart[],
+    inline: readonly DraftInlinePart[],
+  ): string {
+    const one = (p: { filename: string; mimeType: string; content: Buffer }): string =>
+      `${p.filename}|${p.mimeType}|${String(p.content.length)}`;
+    return [...attachments.map(one), ...inline.map((p) => `cid:${p.cid}|${one(p)}`)].join('\n');
   }
 
   /**
@@ -592,34 +633,49 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   }
 
   /**
-   * Вложения черновика во временном хранилище — по одному набору на
-   * черновик, а не по набору на каждое открытие (см. materializedDrafts).
+   * Части черновика во временном хранилище — по одному набору на черновик,
+   * а не по набору на каждое открытие (см. materializedDrafts).
    *
-   * Место проверяется ТЕМ ЖЕ пределом, что и обычная загрузка файла
-   * (routes/uploads.ts): этот путь клал файлы мимо всякой проверки, но в
-   * занятое место они засчитывались — то есть переполнить хранилище через
-   * него было можно, а узнать об этом человек мог только по отказу в
-   * другом окне.
+   * Здесь выкладываются ОБА вида частей: и вложения, и картинки тела.
+   * Раньше картинки шли мимо — прямым вызовом uploads.save в самом
+   * маршруте, — и обходили сразу две защиты, поставленные для вложений.
+   *
+   * Первая — память о прошлом открытии: черновик с фотографией на четыре
+   * мегабайта оставлял по копии на КАЖДОЕ открытие, и десять заходов
+   * дописать письмо стоили сорока мегабайт на диске.
+   *
+   * Вторая — предел на ящик. uploads.save места не проверяет (проверку
+   * делает вызывающий, см. routes/uploads.ts), поэтому через открытие
+   * черновика хранилище переполнялось молча; а упирался человек в этот
+   * предел потом и в другом месте — прикрепляя обычный файл к совсем
+   * другому письму. Связи между причиной и отказом не видно никакой.
+   *
+   * Возвращаются номера картинок В ТОМ ЖЕ ПОРЯДКЕ, что и части на входе:
+   * маршрут по ним подставляет адреса вместо `cid:` в теле.
    */
-  async function draftAttachments(
+  async function materializeDraft(
     session: MailSession,
     uid: number,
     parts: readonly DraftAttachmentPart[],
-  ): Promise<DraftContent['attachments']> {
-    if (parts.length === 0) return [];
+    inline: readonly DraftInlinePart[],
+  ): Promise<{ attachments: DraftContent['attachments']; inlineIds: string[] }> {
+    if (parts.length === 0 && inline.length === 0) return { attachments: [], inlineIds: [] };
     const key = `${session.email}:${String(uid)}`;
-    const fingerprint = attachmentsFingerprint(parts);
+    const fingerprint = partsFingerprint(parts, inline);
     const remembered = materializedDrafts.get(key);
     if (remembered && remembered.fingerprint === fingerprint) {
       const reused = await reuseUploads(session.email, remembered.ids);
-      if (reused) return reused;
+      const reusedInline = await reuseUploads(session.email, remembered.inlineIds);
+      if (reused && reusedInline) {
+        return { attachments: reused, inlineIds: reusedInline.map((u) => u.id) };
+      }
     }
 
-    const incoming = parts.reduce((sum, part) => sum + part.content.length, 0);
+    const incoming = [...parts, ...inline].reduce((sum, part) => sum + part.content.length, 0);
     const used = await uploads.usedBy(session.email);
     if (used + incoming > config.UPLOAD_MAILBOX_MAX_BYTES) {
       throw new UploadQuotaError(
-        'Вложения черновика не помещаются во временное хранилище: предел на ящик — ' +
+        'Черновик не помещается во временное хранилище: предел на ящик — ' +
           `${megabytes(config.UPLOAD_MAILBOX_MAX_BYTES)} МБ. ` +
           'Отправьте или удалите начатые письма и откройте черновик снова.',
       );
@@ -635,13 +691,23 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       );
       saved.push({ id: meta.id, filename: meta.filename, size: meta.size });
     }
-    materializedDrafts.set(key, { fingerprint, ids: saved.map((a) => a.id) });
+    const inlineIds: string[] = [];
+    for (const image of inline) {
+      const meta = await uploads.save(
+        session.email,
+        image.filename,
+        image.mimeType,
+        Readable.from(image.content),
+      );
+      inlineIds.push(meta.id);
+    }
+    materializedDrafts.set(key, { fingerprint, ids: saved.map((a) => a.id), inlineIds });
     if (materializedDrafts.size > MATERIALIZED_MAX) {
       // Map помнит порядок вставки — уходит самый старый черновик
       const oldest = materializedDrafts.keys().next().value;
       if (oldest !== undefined) materializedDrafts.delete(oldest);
     }
-    return saved;
+    return { attachments: saved, inlineIds };
   }
 
   /**
@@ -1910,7 +1976,6 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      */
     const parsed = await parseDraftSource(source);
     const sendFailure = readFailureFromRaw(source);
-    const attachments = await draftAttachments(session, uid, parsed.attachments);
 
     /*
      * КАРТИНКИ ТЕЛА — ЧЕРЕЗ ХРАНИЛИЩЕ ЗАГРУЗОК.
@@ -1921,21 +1986,38 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      * пересохранений, в отличие от номера черновика, который меняется
      * при каждом.
      *
+     * Кладутся они ТЕМ ЖЕ проходом, что и вложения (materializeDraft), —
+     * иначе повторное открытие черновика оставляло бы по копии каждой
+     * картинки, а предел на ящик этот путь не проверял вовсе.
+     *
      * В списке вложений эти картинки НЕ показываются: человек их не
      * прикреплял, они часть письма. При сборке письма их подхватит
      * inlineUploadImages (routes/compose.ts, composeRaw).
      */
+    const { attachments, inlineIds } = await materializeDraft(
+      session,
+      uid,
+      parsed.attachments,
+      parsed.inlineImages,
+    );
+
     let bodyHtml = parsed.bodyHtml;
-    for (const image of parsed.inlineImages) {
-      const meta = await uploads.save(
-        session.email,
-        image.filename,
-        image.mimeType,
-        Readable.from(image.content),
-      );
-      const url = `/api/uploads/${encodeURIComponent(meta.id)}/content`;
-      bodyHtml = bodyHtml.split(`cid:${image.cid}`).join(url);
-    }
+    parsed.inlineImages.forEach((image, index) => {
+      const id = inlineIds[index];
+      if (id === undefined) return;
+      const url = `/api/uploads/${encodeURIComponent(id)}/content`;
+      /*
+       * Ищем ТАК ЖЕ, как ищет разбор, — иначе картинка пропадает разом
+       * отовсюду. Разбор считает часть вставшей в тело по НОРМАЛИЗОВАННОЙ
+       * ссылке (mail/sanitize.ts: регистр не важен, угловые скобки сняты)
+       * и потому исключает её из вложений; а подстановка точной подстрокой
+       * `cid:<номер>` не находила ни `CID:foo`, ни `cid:<foo>`. Такие
+       * черновики кладёт в ящик не наше окно, а обычная почтовая
+       * программа по тому же ящику — для сервера это норма.
+       */
+      const link = new RegExp(`cid:<?${image.cid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}>?`, 'gi');
+      bodyHtml = bodyHtml.replace(link, () => url);
+    });
 
     const content: DraftContent = {
       draftUid: uid,

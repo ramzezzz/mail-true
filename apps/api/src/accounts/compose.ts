@@ -7,6 +7,7 @@
  * (вложения из нашего хранилища, но отправитель и транспорт чужие),
  * чтобы не сращивать два пути в один с флагами.
  */
+import { readFile } from 'node:fs/promises';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type Mail from 'nodemailer/lib/mailer/index.js';
 import { ENCODING_OVERHEAD } from '../config.js';
@@ -14,6 +15,7 @@ import { BadRequestError, MessageTooLargeError } from '../errors.js';
 import { forwardedAttachment, type ForwardedMessage } from '../mail/forwarded.js';
 import { inlineQuotedImages, type InlineImageSource } from '../mail/inline-images.js';
 import { inlineDataImages } from '../mail/inline-data.js';
+import { inlineUploadImages } from '../mail/inline-uploads.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import type { UploadStore } from '../uploads.js';
@@ -141,10 +143,47 @@ export async function composeExternalRaw(
   }
 
   /*
+   * Картинки дописываемого черновика приходят ССЫЛКОЙ на временное
+   * хранилище (`/api/uploads/<номер>/content`) — так их отдаёт чтение
+   * черновика. Перенести их во вложения обязательно и на этом пути:
+   * ссылка относительная, у получателя она разрешается в никуда, и
+   * письмо, отправленное с подключённого внешнего адреса, уходило без
+   * единой картинки — молча, при том что на экране отправителя они были.
+   *
+   * Владелец — `owner` (ящик веб-почты), а не адрес отправителя: файлы
+   * лежат под учёткой того, кто вошёл.
+   */
+  const uploadImages = await inlineUploadImages(
+    bodyHtml,
+    uploads,
+    owner,
+    Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+    (path) => readFile(path),
+  );
+  bodyHtml = uploadImages.html;
+  attachedBytes += uploadImages.bytes;
+  for (const item of uploadImages.attachments) attachments.push(item);
+  if (uploadImages.missing > 0) {
+    // Начатые письма хранятся сутки; ушедшее без картинки письмо человек
+    // увидит уже только у получателя — молчать здесь нельзя
+    throw new BadRequestError(
+      `Картинок в письме не осталось на сервере — ${String(uploadImages.missing)}: ` +
+        'начатые письма хранятся сутки. Вставьте их в письмо заново и отправьте ещё раз.',
+    );
+  }
+  if (uploadImages.skipped > 0) {
+    throw new MessageTooLargeError(
+      `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+        `картинок из черновика не поместилось — ${String(uploadImages.skipped)}. ` +
+        'Уберите часть картинок или отправьте их вложениями.',
+      { limitBytes: messageMaxBytes },
+    );
+  }
+
+  /*
    * Вшитые в тело картинки (`data:`) — во вложения, как и на своём пути
-   * отправки: снимок экрана из буфера и картинка дописываемого черновика
-   * приходят именно так, а получателю `data:` в письме не показывают ни
-   * Outlook, ни Gmail.
+   * отправки: снимок экрана из буфера приходит именно так, а получателю
+   * `data:` в письме не показывают ни Outlook, ни Gmail.
    */
   const dataImages = inlineDataImages(
     bodyHtml,

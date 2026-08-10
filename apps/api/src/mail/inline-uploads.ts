@@ -31,6 +31,11 @@ export interface UploadSource {
     id: string,
     owner: string,
   ): Promise<{ meta: { filename: string; mimeType: string; size: number }; path: string } | null>;
+  /**
+   * Продлить срок жизни использованной загрузки. Необязателен: проверки
+   * подставляют сюда заглушку хранилища, а не всё хранилище целиком.
+   */
+  touch?(id: string): Promise<void>;
 }
 
 /**
@@ -47,6 +52,14 @@ export interface InlineUploadsResult {
   attachments: Attachment[];
   /** Сколько картинок не поместилось в предел письма. */
   skipped: number;
+  /**
+   * Сколько картинок не нашлось в хранилище — их унёс уборщик.
+   *
+   * Считается отдельно от `skipped`: причина другая и лечится иначе.
+   * Молчать здесь нельзя — письмо ушло бы без картинки, которая у
+   * человека на экране есть.
+   */
+  missing: number;
   /** Сколько байт заняли перенесённые картинки. */
   bytes: number;
 }
@@ -55,9 +68,10 @@ export interface InlineUploadsResult {
  * Заменяет ссылки на загрузки встроенными вложениями.
  *
  * Загрузка, которой уже нет (уборщик подчистил брошенные файлы), ссылку
- * не меняет: у получателя такой картинки не будет, но письмо уйдёт. Это
- * ровно то, что происходило со всеми картинками до появления переноса, —
- * то есть худший случай здесь равен прежнему поведению, а не хуже него.
+ * не меняет, но попадает в счётчик `missing`. Отправка по нему
+ * отказывает: письмо ушло бы без картинки, которая у человека на экране
+ * есть, — а это ровно та молчаливая потеря, ради которой всё это
+ * устройство и заводилось.
  */
 export async function inlineUploadImages(
   html: string,
@@ -67,7 +81,7 @@ export async function inlineUploadImages(
   readFile: (path: string) => Promise<Buffer>,
 ): Promise<InlineUploadsResult> {
   if (!html.includes('/api/uploads/')) {
-    return { html, attachments: [], skipped: 0, bytes: 0 };
+    return { html, attachments: [], skipped: 0, missing: 0, bytes: 0 };
   }
 
   const attachments: Attachment[] = [];
@@ -76,6 +90,7 @@ export async function inlineUploadImages(
   const replacements: Array<{ from: string; to: string }> = [];
   let total = 0;
   let skipped = 0;
+  let missing = 0;
 
   for (const match of html.matchAll(UPLOAD_URL)) {
     const url = match[0];
@@ -89,7 +104,10 @@ export async function inlineUploadImages(
     // Владелец — тот, от чьего имени письмо: чужая загрузка для него не
     // существует и в письмо попасть не может.
     const found = await uploads.get(id, owner).catch(() => null);
-    if (!found) continue;
+    if (!found) {
+      missing += 1;
+      continue;
+    }
     if (!/^image\//i.test(found.meta.mimeType)) continue;
     if (total + found.meta.size > maxBytes) {
       skipped += 1;
@@ -115,9 +133,14 @@ export async function inlineUploadImages(
       contentDisposition: 'inline',
     });
     replacements.push({ from: url, to: `cid:${cid}` });
+
+    // Картинку пустили в дело — срок жизни считается заново. Иначе она
+    // умирала ровно через сутки после открытия черновика, а окно
+    // написания живёт дольше: письмо уходило без неё, молча.
+    await uploads.touch?.(id).catch(() => undefined);
   }
 
   let out = html;
   for (const { from, to } of replacements) out = out.split(from).join(to);
-  return { html: out, attachments, skipped, bytes: total };
+  return { html: out, attachments, skipped, missing, bytes: total };
 }

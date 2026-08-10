@@ -22,7 +22,7 @@
  */
 import assert from 'node:assert/strict';
 import { createServer, type Server, type Socket } from 'node:net';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -242,6 +242,12 @@ function externalAccount(smtpPort: number): ExternalAccount {
   } as unknown as ExternalAccount;
 }
 
+/** Однопиксельный PNG — настоящие байты, а не выдуманные. */
+const PNG_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
 function testConfig(uploadDir: string): AppConfig {
   return {
     SMTP_HOST: '127.0.0.1',
@@ -269,9 +275,30 @@ async function withApp(options: SmtpOptions, run: (ctx: Ctx) => Promise<void>): 
     withClient: async <T>(_e: string, _p: string, fn: (c: ImapFlow) => Promise<T>): Promise<T> =>
       fn(client as unknown as ImapFlow),
   };
+  /*
+   * Хранилище отдаёт одну настоящую картинку — под номером `kartinka`.
+   * Ссылки на загрузки ставит в тело чтение черновика, и этот путь
+   * отправки обязан переносить их во вложения так же, как свой: иначе
+   * получателю уедет относительный адрес, ведущий у него в никуда.
+   */
+  const pngPath = join(root, 'kartinka.png');
+  await writeFile(pngPath, PNG_BYTES);
   const uploads = {
-    get: async () => null,
+    get: async (id: string, owner: string) =>
+      id === 'kartinka' && owner === 'test@mail.local'
+        ? {
+            meta: {
+              id,
+              owner,
+              filename: 'kartinka.png',
+              mimeType: 'image/png',
+              size: PNG_BYTES.length,
+            },
+            path: pngPath,
+          }
+        : null,
     delete: async () => undefined,
+    touch: async () => undefined,
   } as unknown as UploadStore;
   const logger = {
     warn: () => undefined,
@@ -349,6 +376,53 @@ function sendBody(extra: Record<string, unknown> = {}): Record<string, unknown> 
 /* ------------------------------------------------------------------ */
 /* Отказ части получателей нельзя выдавать за успех                     */
 /* ------------------------------------------------------------------ */
+
+test('картинка черновика уезжает с внешнего адреса вложением, а не ссылкой', async () => {
+  /*
+   * Человек открыл черновик с картинкой и в списке «От кого» выбрал
+   * подключённый внешний адрес. В теле к этому моменту стоит ссылка на
+   * наше временное хранилище — её ставит чтение черновика.
+   *
+   * Свой путь отправки переносит такие картинки во встроенные вложения,
+   * а этот не переносил вовсе: получателю уезжал относительный адрес
+   * `/api/uploads/<номер>/content`, который у него разрешается в никуда.
+   * Письмо приходило без единой картинки — молча, при том что на экране
+   * отправителя они были.
+   */
+  await withApp({}, async ({ app, smtp }) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/accounts/external/7/send',
+      payload: sendBody({
+        bodyHtml: '<p>Смотрите: <img src="/api/uploads/kartinka/content"></p>',
+      }),
+    });
+    assert.equal(res.statusCode, 200, res.body);
+
+    const raw = smtp.messages[0] ?? '';
+    assert.doesNotMatch(raw, /\/api\/uploads\//u, 'ссылка на наше хранилище уехала получателю');
+    assert.match(raw, /Content-ID:/u, 'картинка не стала встроенным вложением');
+    // Не `src="cid:` — тело едет в quoted-printable, и кавычка там `=3D"`
+    assert.match(raw, /cid:/u, 'тело не ссылается на вложенную картинку');
+  });
+});
+
+test('картинка, которой уже нет, останавливает отправку с внешнего адреса', async () => {
+  // Начатые письма живут сутки. Уехавшее без картинки письмо человек
+  // увидит уже только у получателя — молчать здесь нельзя.
+  await withApp({}, async ({ app, smtp }) => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/accounts/external/7/send',
+      payload: sendBody({
+        bodyHtml: '<p><img src="/api/uploads/unesli-uborshikom/content"></p>',
+      }),
+    });
+    assert.equal(res.statusCode, 400, res.body);
+    assert.match(res.json().message as string, /Вставьте их в письмо заново/u);
+    assert.equal(smtp.messages.length, 0, 'письмо ушло без картинки');
+  });
+});
 
 test('отвергнутый получатель назван, а не выдан за отправленного', async () => {
   await withApp({ reject: ['three@mail.local'] }, async ({ app, smtp }) => {

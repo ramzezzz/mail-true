@@ -89,6 +89,56 @@ test('картинка черновика отдаётся отдельно, а 
   assert.deepEqual(parsed.attachments, []);
 });
 
+test('картинка фоном в стиле не пропадает ни из тела, ни из вложений', async () => {
+  /*
+   * Черновик, положенный в ящик обычной почтовой программой
+   * (Thunderbird, Outlook) по тому же ящику, — для почтового сервера
+   * это норма. Такие письма ссылаются на картинку не только атрибутом
+   * `src`, но и фоном в стиле, причём заглавными буквами и в угловых
+   * скобках.
+   *
+   * Здесь расходились две половины разбора: часть считалась «вставшей
+   * в тело» (значит, из вложений её убирали), а ссылку в теле при этом
+   * уничтожали — очистка стилей возвращала `none`, не глядя на
+   * `keepCid`. Картинка пропадала отовсюду разом, и следующее
+   * автосохранение закрепляло потерю в ящике.
+   */
+  const source = Buffer.from(
+    [
+      'From: test@mail.local',
+      'To: irina@mail.local',
+      'Subject: Test',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/related; boundary="rel-3"',
+      '',
+      '--rel-3',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<div style="background:url(cid:logo@mail.true)">Шапка</div>',
+      '<img src="CID:<logo@mail.true>">',
+      '',
+      '--rel-3',
+      'Content-Type: image/png; name="logo.png"',
+      'Content-ID: <logo@mail.true>',
+      'Content-Disposition: inline; filename="logo.png"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      PNG_BASE64,
+      '',
+      '--rel-3--',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+
+  const parsed = await parseDraftSource(source);
+
+  assert.equal(parsed.inlineImages.length, 1, 'картинка не доехала до хранилища загрузок');
+  assert.match(parsed.bodyHtml, /url\(cid:logo@mail\.true\)/iu, 'ссылка в стиле уничтожена');
+  assert.doesNotMatch(parsed.bodyHtml, /none/u, 'фон заменён на «ничего»');
+  assert.deepEqual(parsed.attachments, [], 'картинка приложена ещё и файлом');
+});
+
 test('часть, на которую тело не ссылается, остаётся вложением', async () => {
   /*
    * Обратный ход: `related`-часть, чей `cid` в теле нигде не упомянут.

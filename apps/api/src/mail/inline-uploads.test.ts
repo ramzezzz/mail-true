@@ -113,3 +113,39 @@ test('тело без ссылок на хранилище не трогаетс
   assert.equal(result.html, html);
   assert.equal(result.bytes, 0);
 });
+
+test('унесённая уборщиком картинка считается, а не пропадает молча', async () => {
+  /*
+   * Начатые письма живут сутки, а окно написания держат открытым
+   * дольше. Прежде такая ссылка просто оставалась в теле: письмо
+   * уходило без картинки, при том что на экране отправителя она была,
+   * и человек узнавал о потере разве что от получателя. Отправка
+   * теперь по этому счётчику отказывает (routes/compose.ts).
+   */
+  const html = '<p>Смотрите: <img src="/api/uploads/sgineli-davno/content"></p>';
+  const result = await inlineUploadImages(html, store({}), 'test@mail.local', 1024 * 1024, read);
+
+  assert.equal(result.missing, 1, 'потеря картинки прошла незамеченной');
+  assert.equal(result.attachments.length, 0);
+});
+
+test('использованной картинке продлевается срок жизни', async () => {
+  // Иначе картинка умирает ровно через сутки после открытия черновика —
+  // прямо под человеком, который это письмо всё ещё пишет.
+  const touched: string[] = [];
+  const withTouch: UploadSource = {
+    ...store({ abc: { mimeType: 'image/png' } }),
+    touch: async (id: string) => {
+      touched.push(id);
+    },
+  };
+  await inlineUploadImages(
+    '<img src="/api/uploads/abc/content">',
+    withTouch,
+    'test@mail.local',
+    1024 * 1024,
+    read,
+  );
+
+  assert.deepEqual(touched, ['abc'], 'срок жизни картинки не продлён');
+});

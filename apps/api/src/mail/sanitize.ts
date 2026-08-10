@@ -160,7 +160,16 @@ function scrubCss(css: string, allowRemote: boolean): { css: string; blocked: nu
     if (/^data:image\//i.test(trimmed)) return match;
     if (trimmed.toLowerCase().startsWith('cid:')) {
       const resolved = ctx.resolveCid?.(trimmed.slice(4).replace(/[<>]/g, ''));
-      return resolved ? `url("${resolved}")` : 'none';
+      if (resolved) return `url("${resolved}")`;
+      /*
+       * `keepCid` учитывается и здесь, а не только в атрибутах.
+       * Без этого фон `url(cid:...)` в черновике уничтожался: часть
+       * при этом считалась вставшей в тело и выбрасывалась из
+       * вложений — то есть картинка пропадала отовсюду разом. Такие
+       * черновики кладёт в ящик не наше окно, а обычная почтовая
+       * программа по тому же ящику, и для сервера это норма.
+       */
+      return ctx.keepCid ? match : 'none';
     }
     if (REMOTE_URL.test(trimmed) && allowRemote) return match;
     blocked += 1;

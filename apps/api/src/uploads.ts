@@ -25,6 +25,17 @@ export interface UploadMeta {
   mimeType: string;
   size: number;
   createdAt: number;
+  /**
+   * Когда загрузку в последний раз пустили в дело (см. `touch`).
+   *
+   * Уборщик считает срок от НЕЁ, а не от createdAt. Иначе картинка
+   * дописываемого черновика умирала ровно через сутки после первого
+   * открытия — а веб-почту держат открытой сутками. Дальше следующее
+   * автосохранение клало в ящик письмо уже без картинки, исходный
+   * черновик с MIME-частью к тому моменту был удалён предыдущим
+   * сохранением, и восстановить её было неоткуда.
+   */
+  usedAt?: number;
 }
 
 /** Загрузки этого ящика больше не помещаются в отведённое место. */
@@ -152,6 +163,24 @@ export class UploadStore {
     return used;
   }
 
+  /**
+   * Отмечает, что загрузка пущена в дело: срок жизни считается заново.
+   *
+   * Зовётся при каждой сборке письма из тела, где на неё есть ссылка
+   * (mail/inline-uploads.ts), — то есть при каждом автосохранении
+   * черновика с картинкой. Пока человек пишет письмо, картинка не
+   * умрёт под ним, сколько бы суток окно ни было открыто.
+   *
+   * Ошибки намеренно проглатываются: не продлить срок — мелочь, а
+   * уронить из-за этого сохранение письма нельзя.
+   */
+  async touch(id: string): Promise<void> {
+    const found = await this.read(id);
+    if (!found) return;
+    const meta: UploadMeta = { ...found.meta, usedAt: Date.now() };
+    await writeFile(this.metaPath(id), JSON.stringify(meta), 'utf8').catch(() => undefined);
+  }
+
   async delete(id: string): Promise<void> {
     if (!ID_RE.test(id)) return;
     await unlink(this.binPath(id)).catch(() => undefined);
@@ -179,7 +208,10 @@ export class UploadStore {
       const id = name.slice(0, -5);
       withMeta.add(id);
       const found = await this.read(id);
-      if (found && now - found.meta.createdAt > maxAgeMs) {
+      // Срок считается от последнего использования, а не от создания:
+      // иначе картинка открытого черновика умирает под пишущим человеком
+      const since = found ? Math.max(found.meta.createdAt, found.meta.usedAt ?? 0) : 0;
+      if (found && now - since > maxAgeMs) {
         await this.delete(id);
         removed += 1;
       }
