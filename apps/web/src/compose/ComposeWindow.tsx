@@ -18,6 +18,7 @@ import {
 } from '../api/queries';
 import { useSendAsExternal, useSenders, type SenderOption } from '../api/accountsQueries';
 import { useUiStore, type ComposeDraft, type ComposeWindowState } from '../app/store';
+import { useAttachmentLimit } from '../app/session';
 import { Button, Dropdown, IconButton, MenuItem, Tooltip, useDropdownClose } from '../components';
 import { RecipientField } from '../contacts/RecipientField';
 import { parseAddresses } from '../lib/addresses';
@@ -371,6 +372,8 @@ export function ComposeWindow({
   // уезжал пустой блок, и выбрать одну из заведённых подписей было негде.
   const { data: settings, isPending: settingsPending } = useGeneralSettings();
   const preferences = settings ?? DEFAULT_GENERAL_SETTINGS;
+  // Предел вложения — тот же, что проверяет сервер (см. attachFile)
+  const attachmentLimit = useAttachmentLimit();
   const closeCompose = useUiStore((s) => s.closeCompose);
   const showNotice = useUiStore((s) => s.showNotice);
   const toggleMinimized = useUiStore((s) => s.toggleComposeMinimized);
@@ -1529,6 +1532,28 @@ export function ComposeWindow({
 
   const attachFile = async (file: File | undefined) => {
     if (!file) return;
+    /*
+     * Слишком большой файл отбиваем ДО заливки.
+     *
+     * Предел приходит с сессией (тот же, что проверяет сервер), и своей
+     * копии числа здесь нет намеренно: оно меняется настройкой сервера, а
+     * вторая копия разошлась бы с первой и отбивала бы файлы, которые на
+     * самом деле проходят.
+     *
+     * Без этой проверки файл ехал на сервер целиком и только там получал
+     * отказ: на десятках мегабайт человек ждал минутами, чтобы узнать,
+     * что вложение не влезет. Предел неизвестен (сессия ещё грузится) —
+     * ведём себя как раньше: пусть решает сервер.
+     */
+    if (attachmentLimit > 0 && file.size > attachmentLimit) {
+      const limit = (attachmentLimit / (1024 * 1024)).toFixed(1).replace('.', ',');
+      const size = (file.size / (1024 * 1024)).toFixed(1).replace('.', ',');
+      setError(
+        `«${file.name}» весит ${size} МБ, а предел одного вложения — ${limit} МБ. ` +
+          'Пришлите файл ссылкой или разбейте его на части.',
+      );
+      return;
+    }
     setUploading((n) => n + 1);
     try {
       const uploaded = await api.uploadAttachment(file);

@@ -279,3 +279,17 @@ export function useAccountAddress(): string {
   const ctx = useContext(SessionContext);
   return (ctx?.session?.email ?? '').toLowerCase();
 }
+
+/**
+ * Предел одного вложения — тот же, что проверяет сервер.
+ *
+ * Ноль означает «пока не знаем»: сессия ещё не загрузилась или сервер
+ * старый. В этом случае окно написания ведёт себя как раньше — заливает
+ * и ждёт ответа. Придумывать своё число нельзя: разойдётся с настройкой
+ * сервера при первой же её смене, и человек получит отказ там, где файл
+ * на самом деле проходит.
+ */
+export function useAttachmentLimit(): number {
+  const ctx = useContext(SessionContext);
+  return ctx?.session?.limits?.attachmentBytes ?? 0;
+}

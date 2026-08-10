@@ -30,6 +30,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ComposeWindows } from '../src/compose/ComposeWindows';
 import { visibleContent, visibleText } from '../src/compose/ComposeWindow';
 import { useUiStore } from '../src/app/store';
+import { SessionProvider } from '../src/app/session';
 import { api } from '../src/api';
 
 let host: HTMLDivElement;
@@ -46,6 +47,22 @@ function render() {
       <QueryClientProvider client={client}>
         <MemoryRouter>
           <ComposeWindows />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  });
+}
+
+/** Отрисовка с живой сессией: из неё окно берёт предел вложения. */
+function renderWithSession() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  act(() => {
+    root.render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <SessionProvider>
+            <ComposeWindows />
+          </SessionProvider>
         </MemoryRouter>
       </QueryClientProvider>,
     );
@@ -149,13 +166,11 @@ describe('картинка — это содержимое письма', () => 
      * помещаться в предел тела запроса: и сохранение, и отправка
      * отвечали «Запрос слишком большой», ни словом не поминая картинку.
      */
-    const upload = vi
-      .spyOn(api, 'uploadAttachment')
-      .mockResolvedValue({
-        id: 'a1b2c3d4-0000-4000-8000-000000000001',
-        filename: 'снимок.png',
-        size: 70,
-      });
+    const upload = vi.spyOn(api, 'uploadAttachment').mockResolvedValue({
+      id: 'a1b2c3d4-0000-4000-8000-000000000001',
+      filename: 'снимок.png',
+      size: 70,
+    });
     render();
     act(() => useUiStore.getState().openCompose({ to: 'irina@mail.local' }));
 
@@ -208,5 +223,37 @@ describe('картинка — это содержимое письма', () => 
     const escaped = '<img src="/api/parts?id=2&amp;size=big">';
 
     expect(visibleContent(raw)).toBe(visibleContent(escaped));
+  });
+});
+
+describe('слишком большое вложение', () => {
+  /*
+   * Файл заливался целиком и только на сервере получал отказ: на десятках
+   * мегабайт человек ждал минутами, чтобы узнать, что вложение не влезет.
+   * Предел приходит с сессией — тот же, что проверяет сервер; своей копии
+   * числа в браузере нет, иначе она разошлась бы с настройкой сервера.
+   */
+  it('отбивается до заливки, с числами и советом', async () => {
+    const upload = vi.spyOn(api, 'uploadAttachment');
+    vi.spyOn(api, 'getSession').mockResolvedValue({
+      authenticated: true,
+      email: 'test@mail.local',
+      limits: { attachmentBytes: 1024 * 1024, messageBytes: 25 * 1024 * 1024 },
+    });
+    renderWithSession();
+    act(() => useUiStore.getState().openCompose({ to: 'irina@mail.local' }));
+    await settle();
+
+    const input = host.querySelector('input[type="file"]');
+    if (!input) throw new Error('нет поля выбора файла');
+    const big = new File([new Uint8Array(3 * 1024 * 1024)], 'ролик.mp4', { type: 'video/mp4' });
+    Object.defineProperty(input, 'files', { value: [big], configurable: true });
+    act(() => {
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+
+    expect(upload, 'файл всё-таки поехал на сервер').not.toHaveBeenCalled();
+    expect(host.textContent ?? '').toContain('предел одного вложения');
   });
 });
