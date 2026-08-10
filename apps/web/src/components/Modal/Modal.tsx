@@ -10,6 +10,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { cx } from '../../lib/cx';
+import { noteModalClosed, noteModalOpened } from '../../lib/hotkeys';
 import { IconButton } from '../IconButton/IconButton';
 import styles from './Modal.module.css';
 
@@ -118,9 +119,21 @@ export function Modal({ title, onClose, children, footer, className }: ModalProp
     document.addEventListener('keydown', onKeyDown, true);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
+    /*
+     * Пока окно открыто, горячие клавиши страницы и каркаса молчат.
+     *
+     * Перехват выше берёт только Escape и Tab, остальное проходит сквозь
+     * затемнение к списку писем позади. Достаточно щёлкнуть по тексту
+     * внутри окна — фокус уходит на неинтерактивный узел, — и «E»
+     * отправляет в архив невидимое письмо, «#» кладёт его в корзину, а
+     * «C» открывает окно написания ПОД затемнением. Подробности — в
+     * lib/hotkeys.ts.
+     */
+    noteModalOpened();
     return () => {
       document.removeEventListener('keydown', onKeyDown, true);
       document.body.style.overflow = previousOverflow;
+      noteModalClosed();
     };
   }, [requestClose]);
 

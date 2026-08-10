@@ -8,7 +8,10 @@ import {
   HOTKEY_SCOPE_LIST,
   hotkeyFor,
   ignoreHotkeysFor,
+  anyModalOpen,
   globalHotkeyFor,
+  noteModalClosed,
+  noteModalOpened,
   isInteractiveTarget,
   matchGlobalHotkey,
   matchHotkey,
@@ -256,5 +259,45 @@ describe('отметить письмо с клавиатуры', () => {
     list.setAttribute('data-hotkeys', 'list');
     list.appendChild(row);
     expect(hotkeyFor({ key: ' ' }, row)).toBe('toggle-select');
+  });
+});
+
+describe('открытое модальное окно забирает клавиши себе', () => {
+  it('пока окно открыто, клавиши страницы и каркаса молчат', () => {
+    /*
+     * ЧТО БЫЛО. Окно перехватывает только Escape и Tab, всё остальное
+     * проходит сквозь затемнение к списку писем ПОЗАДИ. Пока фокус стоит
+     * на поле или кнопке окна, клавиши и так игнорируются — но стоит
+     * щёлкнуть по тексту внутри (по картинке в предпросмотре вложения,
+     * по строке в «Исходном тексте письма»), и фокус уходит на
+     * неинтерактивный узел. С этого момента «E» отправляет в архив
+     * письмо, которого человек не видит, «#» — в корзину, а «C»
+     * открывает окно написания ПОД затемнением.
+     */
+    expect(globalHotkeyFor({ key: 'c' }, document.body)).toBe('compose');
+
+    noteModalOpened();
+    try {
+      expect(anyModalOpen()).toBe(true);
+      expect(globalHotkeyFor({ key: 'c' }, document.body)).toBeNull();
+      expect(hotkeyFor({ key: 'e' }, document.body)).toBeNull();
+      expect(hotkeyFor({ key: '#' }, document.body)).toBeNull();
+    } finally {
+      noteModalClosed();
+    }
+
+    expect(anyModalOpen()).toBe(false);
+    expect(globalHotkeyFor({ key: 'c' }, document.body)).toBe('compose');
+  });
+
+  it('окно поверх окна: клавиши возвращаются только после последнего', () => {
+    // Подтверждение над формой — обычное дело, и закрытие внутреннего
+    // окна не должно возвращать клавиши, пока внешнее ещё висит.
+    noteModalOpened();
+    noteModalOpened();
+    noteModalClosed();
+    expect(anyModalOpen()).toBe(true);
+    noteModalClosed();
+    expect(anyModalOpen()).toBe(false);
   });
 });
