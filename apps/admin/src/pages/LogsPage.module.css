@@ -152,6 +152,26 @@
   border-bottom: 1px solid var(--mt-color-separator-secondary);
 }
 
+/*
+ * Кнопка дочитывания. Выглядит ссылкой, а не кнопкой формы: она стоит
+ * внутри ленты и не должна спорить с ней за внимание — но нажимается и
+ * с клавиатуры, и на телефоне, где прокрутки вверх может не быть вовсе.
+ */
+.olderButton {
+  padding: 2px 6px;
+  border: 0;
+  background: none;
+  color: var(--mt-color-text-link, #0a5cff);
+  font: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.olderButton:hover,
+.olderButton:focus-visible {
+  text-decoration: underline;
+}
+
 .sentinel {
   padding: 12px;
   text-align: center;

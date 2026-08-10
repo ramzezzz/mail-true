@@ -164,7 +164,13 @@ export class QueueAgent {
     const body = await this.call('/queue', 'GET');
     const lines = Array.isArray(body.lines) ? (body.lines as unknown[]) : [];
     const messages: QueueMessage[] = [];
-    let truncated = lines.length > this.maxMessages;
+    /*
+     * Оборвать список мог и посредник — он читает вывод postqueue
+     * построчно и останавливается на своём пределе. Без этого признака
+     * человек видел бы двадцать тысяч писем из трёхсот тысяч и считал,
+     * что видит всю очередь.
+     */
+    let truncated = lines.length > this.maxMessages || body.truncated === true;
     for (const line of lines.slice(0, this.maxMessages)) {
       if (typeof line !== 'string') continue;
       const parsed = parseQueueLine(line);

@@ -20,7 +20,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '../components';
 import { useSession } from '../app/session';
-import { logoAlt, logoSrc, useBranding } from '../lib/branding';
+import { DEFAULT_PRODUCT_NAME, logoAlt, logoSrc, useBranding } from '../lib/branding';
 import { loginErrorText } from '../lib/errorText';
 import { LoginConstellation } from './login/LoginConstellation';
 import { LoginGlobe } from './login/LoginGlobe';
@@ -214,8 +214,19 @@ export function LoginPage() {
       <footer className={styles.footer}>
         {branding.loginFooter === null ? (
           <>
+            {/*
+              Название берётся из настроек оформления.
+
+              Раздел «Внешний вид» прямо обещает: «Название сервиса
+              заменяет „Mail.True“ в подписях страницы входа». Обещание не
+              выполнялось нигде — сами подписи были зашиты в код, а
+              productName читался только как запасной вариант для
+              заголовка панели. Администратор менял название, обновлял
+              страницу входа и видел прежнее «Mail.True».
+            */}
             <p>
-              Mail.True — почтовый сервер вашей организации. Работает в любом современном браузере.
+              {branding.productName ?? DEFAULT_PRODUCT_NAME} — почтовый сервер вашей организации.
+              Работает в любом современном браузере.
             </p>
             <p>Ваша почта хранится на вашем сервере.</p>
           </>

@@ -231,7 +231,11 @@ export function LoginPage() {
       <footer className={styles.footer}>
         {branding.loginFooter === null ? (
           <>
-            <p>Панель управления почтовым сервером Mail.True. Отдельный вход, отдельные права.</p>
+            {/* Название — из настроек оформления, см. LoginPage почты. */}
+            <p>
+              Панель управления почтовым сервером {branding.productName ?? DEFAULT_PRODUCT_NAME}.
+              Отдельный вход, отдельные права.
+            </p>
             <p>Каждое действие в панели попадает в журнал: кто, что и когда.</p>
           </>
         ) : (
