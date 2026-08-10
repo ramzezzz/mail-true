@@ -8,6 +8,7 @@
  * письма, а не чтение почты: отложенная отправка (очередь на диске,
  * mail/deferred-send.ts) и уведомление о прочтении (mail/read-receipt.ts).
  */
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { FastifyInstance } from 'fastify';
@@ -55,6 +56,7 @@ import {
   type InlineImageSource,
 } from '../mail/inline-images.js';
 import { inlineDataImages } from '../mail/inline-data.js';
+import { inlineUploadImages } from '../mail/inline-uploads.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import { ENCODING_OVERHEAD } from '../config.js';
@@ -295,6 +297,34 @@ async function composeRaw(
    * Идёт это ДО санитайзера и до подсчёта суммы — по тем же двум
    * причинам, что и перенос картинок цитаты выше.
    */
+  /*
+   * Картинки, лежащие во временном хранилище (их ставит чтение
+   * черновика), — во встроенные вложения. Отправить такую ссылку наружу
+   * нельзя: у получателя нет ни нашей сессии, ни доступа к чужому
+   * хранилищу, и он увидел бы пустое место.
+   */
+  const uploadImages = await inlineUploadImages(
+    bodyHtml,
+    uploads,
+    from,
+    Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+    (path) => readFile(path),
+  );
+  bodyHtml = uploadImages.html;
+  attachedBytes += uploadImages.bytes;
+  for (const item of uploadImages.attachments) attachments.push(item);
+  if (uploadImages.skipped > 0 && settings?.inlineBestEffort !== true) {
+    throw new MessageTooLargeError(
+      `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+        `картинок из черновика не поместилось — ${String(uploadImages.skipped)}. ` +
+        'Уберите часть картинок или отправьте их вложениями.',
+      {
+        limitBytes: messageMaxBytes,
+        projectedBytes: Math.round(attachedBytes * ENCODING_OVERHEAD),
+      },
+    );
+  }
+
   const dataImages = inlineDataImages(
     bodyHtml,
     Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
@@ -1882,13 +1912,38 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     const sendFailure = readFailureFromRaw(source);
     const attachments = await draftAttachments(session, uid, parsed.attachments);
 
+    /*
+     * КАРТИНКИ ТЕЛА — ЧЕРЕЗ ХРАНИЛИЩЕ ЗАГРУЗОК.
+     *
+     * Разбор оставил в теле ссылки `cid:` и отдал сами части отдельно.
+     * Кладём их во временное хранилище и подставляем в тело адрес по
+     * НОМЕРУ ЗАГРУЗКИ: он постоянен и переживает любое число
+     * пересохранений, в отличие от номера черновика, который меняется
+     * при каждом.
+     *
+     * В списке вложений эти картинки НЕ показываются: человек их не
+     * прикреплял, они часть письма. При сборке письма их подхватит
+     * inlineUploadImages (routes/compose.ts, composeRaw).
+     */
+    let bodyHtml = parsed.bodyHtml;
+    for (const image of parsed.inlineImages) {
+      const meta = await uploads.save(
+        session.email,
+        image.filename,
+        image.mimeType,
+        Readable.from(image.content),
+      );
+      const url = `/api/uploads/${encodeURIComponent(meta.id)}/content`;
+      bodyHtml = bodyHtml.split(`cid:${image.cid}`).join(url);
+    }
+
     const content: DraftContent = {
       draftUid: uid,
       to: parsed.to,
       cc: parsed.cc,
       bcc: parsed.bcc,
       subject: parsed.subject,
-      bodyHtml: parsed.bodyHtml,
+      bodyHtml,
       attachments,
       inReplyTo: parsed.inReplyTo,
       references: parsed.references,

@@ -206,6 +206,8 @@ export function LogsPage() {
   const listRef = useRef<HTMLDivElement | null>(null);
   /** Прилипание читается из ссылки: обработчик опроса не пересоздаётся. */
   const pinnedRef = useRef(true);
+  /** Опрос новых записей уже в полёте — второй не запускаем. */
+  const pollingRef = useRef(false);
   /** Что нужно сделать с прокруткой после отрисовки. */
   const scrollPlan = useRef<
     | { kind: 'bottom' }
@@ -318,6 +320,21 @@ export function LogsPage() {
   /* --- Дочитывание нового -------------------------------------------- */
   const pollOnce = useCallback(async () => {
     if (loaded.fileId === '') return;
+    /*
+     * ОДИН ОПРОС ЗА РАЗ.
+     *
+     * Возврат на вкладку зовёт опрос немедленно, а тикающий таймер может
+     * выстрелить следом, пока первый запрос ещё в полёте. Оба уходят с
+     * одним и тем же смещением и дописывают ОДНИ И ТЕ ЖЕ строки: в ленте
+     * появляются дубли, у React дублируются ключи, а якорь прокрутки
+     * (он ищет строку по её смещению) может померить не тот узел и
+     * сдвинуть ленту куда попало.
+     *
+     * Ссылка, а не состояние: между проверкой и запросом не должно быть
+     * ни одной перерисовки.
+     */
+    if (pollingRef.current) return;
+    pollingRef.current = true;
     try {
       const tail = await api.logsNew({
         source,
@@ -417,6 +434,8 @@ export function LogsPage() {
       // Разовый сбой опроса не должен гасить уже показанное: покажем его
       // и продолжим — журнал мог просто провернуться под нами.
       if (err instanceof ApiError && err.status >= 500) setError(err);
+    } finally {
+      pollingRef.current = false;
     }
   }, [applied, level, loaded.after, loaded.fileId, source, serviceNoise]);
 

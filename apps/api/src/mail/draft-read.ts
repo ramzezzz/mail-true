@@ -17,18 +17,16 @@ import type { AddressObject } from 'mailparser';
 import type { MailAddress } from '@mail-true/shared';
 import { sanitizeEmailHtml } from './sanitize.js';
 
-/**
- * Сколько байт картинок можно вшить в тело черновика.
- *
- * Считается по ИСХОДНЫМ байтам; в теле они вырастут на треть (base64) и
- * поедут в каждом автосохранении. Предел тела письма в запросе — 10 МБ,
- * всего запроса — 12 МБ, поэтому два мегабайта картинок (около 2,7 МБ
- * разметки) оставляют запас и на сам текст, и на цитату.
- */
-const MAX_INLINED_BYTES = 2 * 1024 * 1024;
-
 /** Вложение черновика, вынутое из письма. */
 export interface DraftAttachmentPart {
+  filename: string;
+  mimeType: string;
+  content: Buffer;
+}
+
+/** Встроенная картинка черновика: тело ссылается на неё по `cid`. */
+export interface DraftInlinePart {
+  cid: string;
   filename: string;
   mimeType: string;
   content: Buffer;
@@ -42,6 +40,8 @@ export interface ParsedDraft {
   subject: string;
   bodyHtml: string;
   attachments: DraftAttachmentPart[];
+  /** Картинки из тела: их укладывает в хранилище загрузок маршрут. */
+  inlineImages: DraftInlinePart[];
   inReplyTo: string | null;
   references: string[];
   requestReadReceipt: boolean;
@@ -91,67 +91,59 @@ export async function parseDraftSource(source: Buffer): Promise<ParsedDraft> {
   const parsed = await simpleParser(source, { skipImageLinks: true });
 
   /**
-   * Картинки черновика ВШИВАЮТСЯ В ТЕЛО (`data:`), а не ссылаются наружу.
+   * Встроенные картинки НЕ вшиваются в тело и не привязаны к номеру.
    *
    * ------------------------------------------------------------------
-   * ПОЧЕМУ НЕ ССЫЛКА НА ЧАСТЬ ПИСЬМА
+   * ТРЕТИЙ ПОДХОД, И ВОТ ПОЧЕМУ ДВА ПРЕДЫДУЩИХ НЕ ГОДИЛИСЬ
    * ------------------------------------------------------------------
-   * Сначала здесь стоял адрес нашего же маршрута части письма —
-   * `/api/messages/drafts:<номер>/parts/<N>`. Выглядело правильно и
-   * работало ровно один раз: номер черновика меняется при КАЖДОМ
-   * сохранении, прежний черновик при этом удаляется. Значит второе
-   * автосохранение (а оно случается через три секунды набора) шло за
-   * картинкой по мёртвому адресу, не находило её — и клало в ящик письмо
-   * уже без картинки. На экране она всё это время была: браузер держит её
-   * в своей памяти час. То есть человек отправлял письмо без картинки,
-   * глядя на картинку.
+   * Сначала здесь стоял адрес части письма
+   * (`/api/messages/drafts:<номер>/parts/<N>`). Работало ровно один раз:
+   * номер меняется при КАЖДОМ сохранении, прежний черновик удаляется, и
+   * второе автосохранение шло за картинкой по мёртвому адресу — письмо
+   * уходило без неё, хотя на экране она была.
    *
-   * Вшитая в тело картинка не зависит ни от какого номера. Уходящее
-   * письмо от этого не страдает: при сборке `data:` переносится во
-   * встроенное вложение с `cid:` (mail/inline-data.ts) — ровно так же,
-   * как это делается для картинок цитаты и для снимка экрана,
-   * вставленного в письмо из буфера.
+   * Потом картинка вшивалась прямо в тело (`data:`). Это чинило потерю,
+   * но тело росло на треть и уезжало на сервер при КАЖДОМ
+   * автосохранении: черновик с фотографией на четыре мегабайта гнал бы
+   * пять с половиной вверх каждые три секунды набора, а крупный
+   * черновик и вовсе переставал сохраняться — не влезал в предел запроса.
+   *
+   * Теперь в теле остаётся `cid:`, а сами части уезжают наружу отдельным
+   * полем: маршрут кладёт их во временное хранилище загрузок и
+   * подставляет в тело адрес по НОМЕРУ ЗАГРУЗКИ. Номер постоянен,
+   * переживает любое число пересохранений, и байты по сети больше не
+   * ездят туда-сюда.
    */
-  const placed = new Set<string>();
-  const inlined = new Map<string, string>();
-  let inlinedBytes = 0;
+  const inlineImages: DraftInlinePart[] = [];
+  const known = new Set<string>();
   for (const part of parsed.attachments) {
     const cid = typeof part.cid === 'string' ? part.cid.replace(/[<>]/g, '') : '';
     if (cid === '' || !part.related) continue;
     if (!/^image\//i.test(part.contentType || '')) continue;
-    /*
-     * ВШИВАЕМ, ПОКА ЭТО ПОМЕЩАЕТСЯ В ЗАПРОС.
-     *
-     * Вшитая картинка растёт на треть (base64) и ездит в теле КАЖДОГО
-     * автосохранения. Предел тела письма в запросе — 10 МБ, предел всего
-     * запроса — 12 МБ, а предел самого письма 25 МБ: то есть черновик с
-     * тремя картинками по три мегабайта законно существует, но вшитым
-     * телом в запрос уже не влезает. Без этого порога такой черновик
-     * открывался, показывался целиком — и его нельзя было ни сохранить,
-     * ни отправить: и автосохранение, и кнопка, и «Отправить» получали
-     * «Некорректные данные запроса». Раньше он отправлялся.
-     *
-     * Что происходит после порога: картинка не вшивается, а остаётся
-     * обычным вложением (ниже её подхватывает разбор вложений, потому
-     * что в тело она не встала). Человек увидит её файлом, а не в теле —
-     * это хуже, чем было, но это НЕ потеря: письмо сохраняется и уходит
-     * вместе с ней. Настоящее решение — держать картинки черновика во
-     * временном хранилище загрузок и ссылаться на них по номеру
-     * загрузки, а не возить байты туда-сюда.
-     */
-    if (inlinedBytes + part.content.length > MAX_INLINED_BYTES) continue;
-    inlinedBytes += part.content.length;
-    inlined.set(cid, `data:${part.contentType};base64,${part.content.toString('base64')}`);
+    known.add(cid);
+    inlineImages.push({
+      cid,
+      filename: part.filename ?? `image-${String(inlineImages.length + 1)}`,
+      mimeType: part.contentType || 'application/octet-stream',
+      content: part.content,
+    });
   }
+
+  /** Картинки, на которые тело действительно ссылается. */
+  const placed = new Set<string>();
 
   const html = parsed.html
     ? sanitizeEmailHtml(parsed.html, {
         allowRemote: true,
+        /*
+         * `keepCid` оставляет ссылку `cid:` как есть — её заменит
+         * маршрут, когда узнает номера загрузок. Показывать `cid:`
+         * браузеру нечем, но до экрана такое тело и не доходит.
+         */
+        keepCid: true,
         resolveCid: (cid: string): string | null => {
-          const url = inlined.get(cid);
-          if (url === undefined) return null;
-          placed.add(cid);
-          return url;
+          if (known.has(cid)) placed.add(cid);
+          return null;
         },
       }).html
     : // Текстовый черновик тоже надо во что-то превратить: редактор в окне
@@ -194,6 +186,7 @@ export async function parseDraftSource(source: Buffer): Promise<ParsedDraft> {
     subject: parsed.subject ?? '',
     bodyHtml: html,
     attachments,
+    inlineImages: inlineImages.filter((img) => placed.has(img.cid)),
     inReplyTo: parsed.inReplyTo ?? null,
     references,
     // Просьба уведомить о прочтении живёт заголовком (RFC 8098). Потерять её

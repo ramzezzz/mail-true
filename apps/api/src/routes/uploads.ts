@@ -1,8 +1,11 @@
 /**
  * POST /api/uploads — загрузка вложений во временное хранилище (multipart).
  */
+import { readFile } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
-import { UnauthorizedError, BadRequestError, FileTooLargeError } from '../errors.js';
+import { z } from 'zod';
+import { UnauthorizedError, BadRequestError, FileTooLargeError, NotFoundError } from '../errors.js';
+import { decidePartDelivery } from '../mail/part-delivery.js';
 import { UploadQuotaError } from '../uploads.js';
 import type { UploadMeta } from '../uploads.js';
 
@@ -26,6 +29,62 @@ function isTooLarge(err: unknown): boolean {
 
 export async function uploadRoutes(app: FastifyInstance): Promise<void> {
   const { uploads, config } = app.deps;
+
+  /**
+   * Отдать содержимое загрузки её владельцу.
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ ЭТОТ МАРШРУТ
+   * ------------------------------------------------------------------
+   * Ради встроенных картинок ЧЕРНОВИКА. У них нет постоянного адреса:
+   * ссылка на часть письма умирает при первом же пересохранении (номер
+   * черновика меняется, прежний удаляется), а вшивать байты прямо в тело
+   * значит возить их на сервер при каждом автосохранении — черновик с
+   * фотографией на четыре мегабайта гнал бы пять с половиной вверх
+   * каждые три секунды набора, и сервер каждый раз пересобирал бы письмо
+   * целиком.
+   *
+   * Номер загрузки постоянен и переживает любое число сохранений. Само
+   * хранилище уже есть и уже используется для вложений черновика
+   * (routes/compose.ts, draftAttachments) — не хватало только способа
+   * ПОКАЗАТЬ загруженное.
+   *
+   * Отдаём по тем же правилам, что и часть письма: тип из белого списка
+   * или поток байтов, запрет угадывания типа и строгая политика
+   * содержимого. Загрузка — это файл, который принёс сам человек, но
+   * принести он мог что угодно.
+   */
+  app.get<{ Params: { id: string } }>(
+    '/uploads/:id/content',
+    { preHandler: app.requireSession },
+    async (request, reply) => {
+      const session = request.mailSession;
+      if (!session) throw new UnauthorizedError();
+      const { id } = z.object({ id: z.string().min(1).max(100) }).parse(request.params);
+
+      // Владелец — из сессии. Чужая загрузка для нас не существует, и
+      // отвечаем мы так же, как на несуществующую: сказать «эта не ваша»
+      // значило бы подтвердить, что она есть.
+      const found = await uploads.get(id, session.email);
+      if (!found) throw new NotFoundError('Загрузка не найдена');
+
+      const { contentType, inline } = decidePartDelivery(found.meta.mimeType);
+      reply.header('content-type', contentType);
+      reply.header('x-content-type-options', 'nosniff');
+      reply.header(
+        'content-security-policy',
+        "default-src 'none'; sandbox; frame-ancestors 'none'",
+      );
+      reply.header(
+        'content-disposition',
+        `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(found.meta.filename)}`,
+      );
+      // Загрузка неизменна: её содержимое привязано к номеру, и новый
+      // файл получает новый номер.
+      reply.header('cache-control', 'private, max-age=3600, immutable');
+      return reply.send(await readFile(found.path));
+    },
+  );
 
   app.post('/uploads', { preHandler: app.requireSession }, async (request) => {
     if (!request.mailSession) throw new UnauthorizedError();
