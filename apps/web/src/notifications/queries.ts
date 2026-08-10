@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { browserClientId, notificationsApi } from './api';
+import { announceOwnKeyRaw } from './ownKey';
 import type { NotificationPrefsPatch, PushState } from './types';
 
 export const notificationKeys = {
@@ -13,15 +14,12 @@ export const notificationKeys = {
  *
  * Тот же отпечаток, что сообщается при входе, выходе и смене ящика (см.
  * notifications/ownKey.ts) — здесь он берётся прямо из ответа сервера,
- * потому что ответ уже на руках.
+ * потому что ответ уже на руках. Отправитель общий: `serviceWorker.ready`
+ * у незарегистрированного работника не разрешается никогда, и своя копия
+ * этого вызова означала бы второе место, где можно на нём повиснуть.
  */
 function tellWorker(accountKey: string): void {
-  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-  void navigator.serviceWorker.ready
-    .then((registration) => {
-      registration.active?.postMessage({ type: 'mt-own-key', key: accountKey });
-    })
-    .catch(() => undefined);
+  void announceOwnKeyRaw(accountKey);
 }
 
 export function usePushState(): UseQueryResult<PushState> {

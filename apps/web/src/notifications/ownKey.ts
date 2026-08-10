@@ -43,17 +43,42 @@ export async function accountKeyOf(email: string): Promise<string | null> {
 }
 
 /**
+ * Отправляет отпечаток работнику, если он вообще есть.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ НЕ `serviceWorker.ready`
+ * ------------------------------------------------------------------
+ * `ready` разрешается только когда работник ЗАРЕГИСТРИРОВАН, а
+ * регистрация живёт внутри включения уведомлений (subscribe.ts). У
+ * человека, который уведомления не включал, обещание не разрешается
+ * НИКОГДА — и `await` на нём просто вешает вызывающего. В выходе из
+ * почты это значило бы, что кнопка «Выйти» не делает ничего.
+ *
+ * `getRegistration()` отвечает всегда: работника нет — значит и
+ * показывать содержимое из push некому, и рассказывать нечего.
+ */
+async function postToWorker(key: string): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    registration?.active?.postMessage({ type: 'mt-own-key', key });
+  } catch {
+    /* Работник недоступен — сверка пойдёт через сервер. */
+  }
+}
+
+/**
  * Сообщает работнику, чей это браузер. `null` — ничей (выход).
  *
  * Отказ здесь ничего не ломает: без отпечатка работник спросит сервер, а
  * не сможет — покажет безымянное «Новое письмо».
  */
 export async function announceOwnKey(email: string | null): Promise<void> {
-  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   const key = email === null ? '' : ((await accountKeyOf(email).catch(() => null)) ?? '');
-  await navigator.serviceWorker.ready
-    .then((registration) => {
-      registration.active?.postMessage({ type: 'mt-own-key', key });
-    })
-    .catch(() => undefined);
+  await postToWorker(key);
+}
+
+/** Готовый отпечаток — когда его уже принёс ответ сервера. */
+export async function announceOwnKeyRaw(key: string): Promise<void> {
+  await postToWorker(key);
 }

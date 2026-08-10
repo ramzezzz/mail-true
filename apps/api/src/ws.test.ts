@@ -109,3 +109,16 @@ test('поднимать нечего, если вкладок нет и сро�
   );
   assert.match(rearm, /watchExpired\(watcher, Date\.now\(\)\)/u);
 });
+
+test('пришедшая вкладка и отложенная попытка не открывают ДВА соединения', () => {
+  /*
+   * Таймер восстановления мог сработать уже после того, как наблюдение
+   * подняла новая подписка. Тогда открывалось второе живое соединение с
+   * Dovecot, а первое оставалось висеть: его обработчики погашены номером
+   * поколения, то есть закрыть его было уже некому.
+   */
+  const open = CODE.slice(CODE.indexOf('private async openClient'));
+  assert.match(open, /clearTimeout\(watcher\.rearm\)/u, 'открывая соединение, снимаем таймер');
+  const rearm = CODE.slice(CODE.indexOf('private async rearm'));
+  assert.match(rearm, /if \(!watcher\.closed\) return/u, 'поднятое наблюдение поднимать нечего');
+});

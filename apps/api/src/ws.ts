@@ -231,6 +231,19 @@ export class MailNotifier {
    */
   private async openClient(watcher: Watcher): Promise<void> {
     const email = watcher.email;
+    /*
+     * Отложенную попытку снимаем: соединение мы открываем прямо сейчас.
+     *
+     * Без этого выходило второе ЖИВОЕ соединение с Dovecot. Вкладку
+     * открывали, пока висел таймер восстановления: subscribe поднимал
+     * наблюдение сам, а таймер потом срабатывал и открывал ещё одно.
+     * Первое оставалось висеть — его обработчики погашены номером
+     * поколения, то есть закрыть его было уже некому.
+     */
+    if (watcher.rearm) {
+      clearTimeout(watcher.rearm);
+      watcher.rearm = null;
+    }
     const client = new ImapFlow({
       host: this.config.IMAP_HOST,
       port: this.config.IMAP_PORT,
@@ -341,6 +354,8 @@ export class MailNotifier {
    */
   private async rearm(watcher: Watcher): Promise<void> {
     if (watcher.dropped) return;
+    // Пока таймер ждал, наблюдение мог поднять пришедший сокет.
+    if (!watcher.closed) return;
     if (this.watchers.get(watcher.email) !== watcher) return;
     if (watchExpired(watcher, Date.now())) return;
     try {

@@ -38,7 +38,7 @@ describe('отпечаток ящика', () => {
     const posted: unknown[] = [];
     const registration = { active: { postMessage: (m: unknown) => posted.push(m) } };
     vi.stubGlobal('navigator', {
-      serviceWorker: { ready: Promise.resolve(registration) },
+      serviceWorker: { getRegistration: () => Promise.resolve(registration) },
     });
     try {
       await announceOwnKey(null);
@@ -48,6 +48,30 @@ describe('отпечаток ящика', () => {
         type: 'mt-own-key',
         key: serverKey('admin@home.local'),
       });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe('браузер без работника', () => {
+  it('вызов завершается, а не висит вечно', async () => {
+    /*
+     * ЧТО БЫЛО. Отправка шла через navigator.serviceWorker.ready, а он
+     * разрешается ТОЛЬКО когда работник зарегистрирован — регистрация же
+     * живёт внутри включения уведомлений. У человека, который их не
+     * включал, обещание не разрешалось никогда, и выход из почты (там
+     * стоял await) не делал ничего: кнопка «Выйти» переставала работать.
+     */
+    vi.stubGlobal('navigator', {
+      serviceWorker: { getRegistration: () => Promise.resolve(undefined) },
+    });
+    try {
+      const finished = await Promise.race([
+        announceOwnKey(null).then(() => 'готово'),
+        new Promise((resolve) => setTimeout(() => resolve('повисло'), 500)),
+      ]);
+      expect(finished).toBe('готово');
     } finally {
       vi.unstubAllGlobals();
     }
