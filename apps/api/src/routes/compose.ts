@@ -231,31 +231,38 @@ async function composeRaw(
     );
   }
 
-  // Пользовательский HTML тоже прогоняем через санитайзер:
-  // composer не должен рассылать скрипты даже по ошибке фронтенда
-  let cleanHtml = sanitizeEmailHtml(payload.bodyHtml, { allowRemote: true }).html;
-
   /*
    * Встроенные картинки цитаты — во вложения письма.
    *
-   * Делается ДО подсчёта размера ниже: картинки из чужого письма весят
-   * ровно столько же, сколько весили там, и человек должен упереться в
-   * предел письма здесь, а не получить отказ от SMTP.
+   * ДО САНИТАЙЗЕРА, и это не мелочь порядка. Санитайзер знает про схемы
+   * `cid:` и `https:`, а наш собственный путь `/api/messages/…/parts/…`
+   * для него чужой: атрибут снимается целиком, и после него переносить
+   * уже нечего — именно так пересылка и теряла все встроенные картинки.
+   * Здесь ссылка превращается в `cid:`, которую санитайзер пропускает.
+   *
+   * Заодно ДО подсчёта размера ниже: картинки из чужого письма весят
+   * ровно столько же, сколько весили там, и упереться в предел письма
+   * человек должен здесь, а не получить отказ от SMTP.
    */
+  let bodyHtml = payload.bodyHtml;
   if (settings?.inlineSource) {
     const inlined = await inlineQuotedImages(
-      cleanHtml,
+      bodyHtml,
       settings.inlineSource,
       // Остаток предела в ИСХОДНЫХ байтах: письмо кодируется base64, и
       // тот же запас, что у обычных вложений, нужен и здесь.
       Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
     );
-    cleanHtml = inlined.html;
+    bodyHtml = inlined.html;
     for (const item of inlined.attachments) {
       attachedBytes += Buffer.isBuffer(item.content) ? item.content.length : 0;
       attachments.push(item);
     }
   }
+
+  // Пользовательский HTML тоже прогоняем через санитайзер:
+  // composer не должен рассылать скрипты даже по ошибке фронтенда
+  const cleanHtml = sanitizeEmailHtml(bodyHtml, { allowRemote: true }).html;
 
   const options: Mail.Options = {
     // Имя ставится объектом, а не строкой: экранирование кавычек и
