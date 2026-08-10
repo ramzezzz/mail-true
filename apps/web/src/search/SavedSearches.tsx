@@ -18,7 +18,9 @@
  * сохранено: пустой заголовок в колонке занимает место и ничего не значит.
  */
 
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { Button, Modal } from '../components';
 import { cx } from '../lib/cx';
 import { IconSearch, IconTrash } from '../mail/icons';
 import { buildSearchUrl } from './searchParams';
@@ -40,6 +42,8 @@ export function savedSearchUrl(saved: SavedSearch): string {
 export function SavedSearches() {
   const { available, items } = useSavedSearches();
   const remove = useDeleteSavedSearch();
+  /** Запрос, который собираются убрать: показываем подтверждение. */
+  const [pending, setPending] = useState<SavedSearch | null>(null);
 
   if (!available || items.length === 0) return null;
 
@@ -69,12 +73,47 @@ export function SavedSearches() {
             aria-label={`Убрать сохранённый запрос «${saved.name}»`}
             title="Убрать запрос. Письма не тронутся"
             disabled={remove.isPending}
-            onClick={() => remove.mutate(saved.id)}
+            /*
+             * Спрашиваем подтверждение: корзина стоит вплотную к ссылке
+             * открытия в узкой колонке, а правки у сохранённых запросов
+             * нет намеренно — промах мышью уносит имя и строку запроса
+             * без возврата, набирать заново придётся руками. Удаление
+             * шаблона рядом спрашивает так же.
+             */
+            onClick={() => setPending(saved)}
           >
             <IconTrash size={16} />
           </button>
         </div>
       ))}
+
+      {pending && (
+        <Modal
+          title={`Убрать запрос «${pending.name}»?`}
+          onClose={() => setPending(null)}
+          footer={
+            <>
+              <Button mode="secondary" onClick={() => setPending(null)}>
+                Отмена
+              </Button>
+              <Button
+                disabled={remove.isPending}
+                onClick={() => {
+                  remove.mutate(pending.id, { onSuccess: () => setPending(null) });
+                }}
+              >
+                Убрать
+              </Button>
+            </>
+          }
+        >
+          <p>
+            Письма не тронутся — исчезнет только сам запрос. Вернуть его нельзя: правки у
+            сохранённых запросов нет, набирать придётся заново.
+          </p>
+          <p className="mt-mono">{pending.query}</p>
+        </Modal>
+      )}
     </div>
   );
 }

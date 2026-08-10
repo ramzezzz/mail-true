@@ -8,6 +8,7 @@
  * устранения которой указатель и заведён.
  */
 import type { Logger } from 'pino';
+import { BadRequestError, UpstreamUnavailableError } from '../errors.js';
 import { errorInfo } from '../log.js';
 import type { MailSession } from '../types.js';
 import type { ContactsDb } from './db.js';
@@ -152,7 +153,20 @@ export class ContactsService {
   ): Promise<{ address: string; hidden: boolean }> {
     const db = this.#db;
     const address = normalizeAddress(rawAddress);
-    if (!db || !address) return { address: rawAddress, hidden: false };
+    /*
+     * Отказ, а не тихое «готово, ничего не скрыто».
+     *
+     * Ответ 200 с `hidden: false` браузер принимал за успех и оставлял
+     * адрес скрытым у себя — то есть на экране он исчезал, а в
+     * подсказках оставался и возвращался при следующем открытии. Откат
+     * по отказу, ради которого это и написано, не срабатывал.
+     */
+    if (!db) {
+      throw new UpstreamUnavailableError(
+        'Адресная книга недоступна: нет подключения к базе или не применена миграция',
+      );
+    }
+    if (!address) throw new BadRequestError('Это не похоже на почтовый адрес');
     await db.setHidden(session.email.toLowerCase(), address, hidden);
     return { address, hidden };
   }

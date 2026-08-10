@@ -174,14 +174,20 @@ test('убрать адрес из чужих подсказок нечем', as
   await app.close();
 });
 
-test('убрать не-адрес нельзя', async () => {
+test('убрать не-адрес нельзя — и об этом сказано, а не отвечено «готово»', async () => {
+  /*
+   * Раньше ответ был 200 с `hidden: false`. Браузер принимал его за
+   * успех и оставлял адрес скрытым у себя: на экране тот исчезал, а в
+   * подсказках оставался и возвращался при следующем открытии. Откат по
+   * отказу, ради которого всё и написано, не срабатывал.
+   */
   const { app, hidden } = buildApp({ session: SESSION });
   const response = await app.inject({
     method: 'POST',
     url: '/api/contacts/hide',
     payload: { address: 'не адрес' },
   });
-  assert.equal(response.statusCode, 200);
+  assert.notEqual(response.statusCode, 200);
   assert.deepEqual(hidden, [], 'в базу не уходит ничего');
   await app.close();
 });

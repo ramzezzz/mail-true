@@ -16,6 +16,7 @@
  * письме, и та же горстка кнопок правки текста.
  */
 
+import { useUiStore } from '../../app/store';
 import { useState } from 'react';
 import { Button, IconButton, Modal, TextField, Tooltip } from '../../components';
 import {
@@ -60,6 +61,7 @@ export function TemplatesPage() {
   const remove = useDeleteTemplate();
   const reorder = useReorderTemplates();
   const [dialog, setDialog] = useState<DialogState | null>(null);
+  const showNotice = useUiStore.getState().showNotice;
 
   const applyOrder = (id: number, direction: 'up' | 'down') => {
     reorder.mutate(moveTemplate(items, id, direction).map((t) => t.id));
@@ -209,10 +211,23 @@ export function TemplatesPage() {
           onDropAttachments={
             dialog.template.attachments.length > 0
               ? () =>
-                  update.mutate({
-                    id: dialog.template.id,
-                    patch: { attachmentIds: [] },
-                  })
+                  /*
+                   * Ответ сервера кладём обратно в окно, а человеку
+                   * говорим словами. Раньше нажатие «Убрать вложения»
+                   * не меняло на экране НИЧЕГО: окно рисует вложения из
+                   * снимка, взятого при открытии, а уведомления не было.
+                   * Человек нажимал ещё раз и ещё, а файлы к тому
+                   * времени уже удалились.
+                   */
+                  update.mutate(
+                    { id: dialog.template.id, patch: { attachmentIds: [] } },
+                    {
+                      onSuccess: (saved) => {
+                        setDialog({ kind: 'edit', template: saved });
+                        showNotice('Вложения шаблона убраны');
+                      },
+                    },
+                  )
               : undefined
           }
           attachments={dialog.template.attachments}

@@ -126,7 +126,7 @@ export function checkAttachmentBudget(files: readonly StoredAttachment[]): void 
   const total = files.reduce((sum, f) => sum + f.size, 0);
   if (total > MAX_TEMPLATE_BYTES) {
     throw new BadRequestError(
-      `Вложения шаблона весят ${formatBytes(total)}, а помещается ${formatBytes(MAX_TEMPLATE_BYTES)}. ` +
+      `Вложения шаблона весят ${formatBytes(total)}, а помещаются ${formatBytes(MAX_TEMPLATE_BYTES)}. ` +
         'Уберите лишнее или отправьте файл ссылкой.',
     );
   }

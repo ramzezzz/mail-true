@@ -204,9 +204,9 @@ test('адрес убирается из подсказок и возвраща�
   ]);
 });
 
-test('убрать не-адрес нельзя', async () => {
+test('убрать не-адрес нельзя — отказ, а не тихое «готово»', async () => {
   const { db, hidden } = fakeDb([]);
-  await build(db, null).setHidden(SESSION, 'не адрес', true);
+  await assert.rejects(() => build(db, null).setHidden(SESSION, 'не адрес', true));
   assert.deepEqual(hidden, [], 'в базу не уходит ничего');
 });
 

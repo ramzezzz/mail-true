@@ -127,9 +127,33 @@ export class ContactHarvester {
   readonly #opts: HarvesterSettings;
   /** Заходы одного ящика не должны накладываться друг на друга. */
   readonly #inflight = new Map<string, Promise<HarvestOutcome>>();
-  /** Когда по этому ящику последний раз смотрели новую почту. */
+  /**
+   * Когда по этому ящику последний раз смотрели новую почту.
+   *
+   * Записи убираются по устареванию: ключ — адрес ящика, и без уборки
+   * карта росла бы монотонно всё время жизни процесса. На сервере с
+   * тысячами ящиков это тихая утечка, которая ничем себя не проявляет,
+   * пока не кончится память.
+   */
   readonly #lastFresh = new Map<string, number>();
+  /** Сколько записей о свежести держим: больше — только память. */
+  static readonly #FRESH_LIMIT = 5000;
   #closed = false;
+
+  /**
+   * Запоминает время захода и подрезает карту, когда она разрослась.
+   *
+   * Убираем самые старые записи: они относятся к ящикам, в которые давно
+   * не заходили, и их отсутствие означает лишь один лишний заход в базу.
+   */
+  #rememberFresh(key: string, now: number): void {
+    this.#lastFresh.set(key, now);
+    if (this.#lastFresh.size <= ContactHarvester.#FRESH_LIMIT) return;
+    const stale = [...this.#lastFresh.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, this.#lastFresh.size - ContactHarvester.#FRESH_LIMIT);
+    for (const [staleKey] of stale) this.#lastFresh.delete(staleKey);
+  }
 
   constructor(opts: ContactHarvesterOptions) {
     this.#opts = {
@@ -295,7 +319,7 @@ export class ContactHarvester {
       });
 
       if (!plan) {
-        if (checkFresh) this.#lastFresh.set(freshKey, now);
+        if (checkFresh) this.#rememberFresh(freshKey, now);
         return EMPTY;
       }
 
@@ -328,7 +352,7 @@ export class ContactHarvester {
         await db.saveCursor(account, cursor);
       }
       more = !cursor.backfillDone;
-      if (checkFresh) this.#lastFresh.set(freshKey, now);
+      if (checkFresh) this.#rememberFresh(freshKey, now);
     } catch (err) {
       // Сборщик — вспомогательная работа. Его отказ не должен ни ронять
       // запрос человека, ни попадать в журнал уровнем «ошибка»: чаще
