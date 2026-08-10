@@ -173,7 +173,7 @@ export function ComposeAiPanel({
             </div>
           ))}
           {/* Опись отправленного; для ответа из кэша — строка про кэш */}
-          <OutboundDetails disclosure={repliesData.disclosure} />
+          <OutboundDetails disclosure={repliesData.disclosure} cached={repliesData.cached} />
         </div>
       )}
 
@@ -191,7 +191,10 @@ export function ComposeAiPanel({
             </Button>
           </div>
           <pre className={styles.variantBody}>{continuationData.value.continuation}</pre>
-          <OutboundDetails disclosure={continuationData.disclosure} />
+          <OutboundDetails
+            disclosure={continuationData.disclosure}
+            cached={continuationData.cached}
+          />
         </div>
       )}
 
@@ -218,7 +221,7 @@ export function ComposeAiPanel({
               ))}
             </ul>
           )}
-          <OutboundDetails disclosure={rewriteData.disclosure} />
+          <OutboundDetails disclosure={rewriteData.disclosure} cached={rewriteData.cached} />
         </div>
       )}
     </div>

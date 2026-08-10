@@ -62,6 +62,8 @@ export interface MessageAiController {
    * намеренно, чтобы два источника правды не разошлись.
    */
   summaryDisclosure: AiOutboundDisclosure | null;
+  /** Резюме взято из памяти — наружу в этот раз ничего не уходило. */
+  summaryCached: boolean;
   /** Резюме всей переписки, а не одного письма. */
   summaryIsThread: boolean;
   toggleSummary(): void;
@@ -69,6 +71,8 @@ export interface MessageAiController {
   extraction: AiExtraction | null;
   extractionPending: boolean;
   extractionDisclosure: AiOutboundDisclosure | null;
+  /** Разбор взят из памяти — наружу в этот раз ничего не уходило. */
+  extractionCached: boolean;
 
   translateVisible: boolean;
   translatePending: boolean;
@@ -215,12 +219,14 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
     summary: summarize.data?.value ?? null,
     summaryError: summarize.error ? aiErrorText(summarize.error) : null,
     summaryDisclosure: summarize.data?.disclosure ?? null,
+    summaryCached: summarize.data?.cached ?? false,
     summaryIsThread: isThread,
     toggleSummary,
 
     extraction: extract.data?.value ?? null,
     extractionPending: extract.isPending,
     extractionDisclosure: extract.data?.disclosure ?? null,
+    extractionCached: extract.data?.cached ?? false,
 
     translateVisible,
     translatePending: translate.isPending,
@@ -373,7 +379,10 @@ function SummaryBanner({ controller }: { controller: MessageAiController }) {
             <span className={styles.actionRequired}>От вас ждут ответа или действия</span>
           )}
           {/* Опись отправленного; для ответа из кэша — строка про кэш */}
-          <OutboundDetails disclosure={controller.summaryDisclosure} />
+          <OutboundDetails
+            disclosure={controller.summaryDisclosure}
+            cached={controller.summaryCached}
+          />
           <div className={styles.note}>
             <button
               type="button"
@@ -479,7 +488,10 @@ function ExtractionBanner({ controller }: { controller: MessageAiController }) {
         )}
       </div>
 
-      <OutboundDetails disclosure={controller.extractionDisclosure} />
+      <OutboundDetails
+        disclosure={controller.extractionDisclosure}
+        cached={controller.extractionCached}
+      />
     </section>
   );
 }

@@ -26,12 +26,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@web/components';
 import { PageTitle } from '../app/AdminLayout';
 import { Notice, Panel } from '../components/ui';
-import {
-  streamChat,
-  trimHistoryForServer,
-  CHAT_TURN_MAX_CHARS,
-  type ChatTurn,
-} from '../lib/chatStream';
+import { streamChat, tailForServer, CHAT_TURN_MAX_CHARS, type ChatTurn } from '../lib/chatStream';
 import styles from './AiChatPage.module.css';
 
 interface Turn extends ChatTurn {
@@ -109,7 +104,7 @@ export function AiChatPage() {
       '/api/admin/ai/chat/stream',
       // Длинные ответы помощника обрезаются перед отправкой; на экране
       // они остаются целиком.
-      trimHistoryForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
+      tailForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
       {
         onDelta: (chunk) => {
           setTurns((previous) => {

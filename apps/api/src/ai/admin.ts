@@ -492,7 +492,31 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
     '/ai/chat/stream',
     {
       preHandler: requireAdmin(app, 'serversettings.read'),
-      config: { rateLimit: { max: 20, timeWindow: 60_000 } },
+      /*
+       * КЛЮЧ — ПО АДМИНИСТРАТОРУ, И СЧИТАЕТСЯ ПОСЛЕ ПРОВЕРКИ ПРАВ.
+       *
+       * Умолчание ограничителя — ключ по адресу клиента и обработчик
+       * onRequest, то есть ДО requireAdmin. Отсюда две беды сразу. Первая
+       * помельче: два администратора из одного офиса делят двадцать
+       * разговоров в минуту на двоих. Вторая дороже: корзину выбирает
+       * КТО УГОДНО, даже не войдя в панель, — двадцать запросов в минуту
+       * с любого адреса, и настоящий администратор из того же офиса
+       * получает «слишком много запросов» вместо помощника.
+       *
+       * `hook: 'preHandler'` обязателен: плагин дописывает свой
+       * обработчик в конец списка, поэтому requireAdmin успевает
+       * отработать первым и `request.admin` уже заполнен. Разбор тот же,
+       * что у пользовательских маршрутов (ai/routes.ts).
+       */
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: 60_000,
+          hook: 'preHandler' as const,
+          keyGenerator: (request: { admin?: { login?: string } | null; ip: string }): string =>
+            request.admin?.login ?? request.ip,
+        },
+      },
     },
     async (request, reply) => {
       const db = requireDb();

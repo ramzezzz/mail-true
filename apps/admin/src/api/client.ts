@@ -439,8 +439,18 @@ export const api = {
   }) => get<QueuePage>(`/queue${query(params)}`),
   queueMessage: (id: string) =>
     get<{ queueId: string; text: string; truncated: boolean }>(`/queue/${id}/message`),
-  queueFlush: (id: string) => post<{ ok: true }>(`/queue/${id}/flush`),
-  queueDelete: (id: string) => post<{ ok: true }>(`/queue/${id}/delete`),
+  queueFlush: (id: string) =>
+    post<{ ok: boolean; reason?: 'gone' | 'unknown'; message?: string }>(`/queue/${id}/flush`),
+  /**
+   * Удалить письмо из очереди.
+   *
+   * Ответ бывает и отрицательным: `ok: false` с причиной означает, что
+   * удалять было нечего — письмо ушло само, пока страница была открыта.
+   * Тип обязан это отражать, иначе экран напишет «удалено» о том, чего
+   * не делал (и так и было).
+   */
+  queueDelete: (id: string) =>
+    post<{ ok: boolean; reason?: 'gone' | 'unknown'; message?: string }>(`/queue/${id}/delete`),
   flowHistory: (params: {
     hours?: number | undefined;
     status?: string | undefined;

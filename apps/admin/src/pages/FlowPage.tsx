@@ -187,6 +187,13 @@ function QueueTab() {
     action: 'flush' | 'delete';
   } | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  /**
+   * Последнее действие над очередью НЕ удалось.
+   *
+   * Зелёная плашка на неудаче — это та же ложь, что и текст «удалено»:
+   * человек читает цвет раньше слов.
+   */
+  const [doneFailed, setDoneFailed] = useState(false);
 
   // Чтение письма из очереди приравнено к чтению журналов почты: и там и
   // здесь видна чужая переписка. Сервер требует того же права.
@@ -219,12 +226,26 @@ function QueueTab() {
   const act = useMutation({
     mutationFn: ({ id, action }: { id: string; action: 'flush' | 'delete' }) =>
       action === 'flush' ? api.queueFlush(id) : api.queueDelete(id),
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
+      /*
+       * УДАЛЕНИЕ БЫВАЕТ И НЕУДАЧНЫМ — С КОДОМ 200.
+       *
+       * Сервер отвечает `ok: false`, когда удалять было нечего: письмо
+       * ушло само, пока страница была открыта. Записи в журнал он в этом
+       * случае намеренно не делает. А экран печатал «Письмо ABC удалено
+       * из очереди» безусловно — то есть после всей починки на сервере
+       * человек по-прежнему видел ложь, и теперь даже без строки в
+       * журнале, по которой раньше можно было разобраться.
+       */
+      const failed = data.ok === false;
       setDone(
-        variables.action === 'flush'
-          ? `Письмо ${variables.id} поставлено на немедленную доставку`
-          : `Письмо ${variables.id} удалено из очереди`,
+        failed
+          ? (data.message ?? `Письма ${variables.id} в очереди уже нет — обновите список`)
+          : variables.action === 'flush'
+            ? `Письмо ${variables.id} поставлено на немедленную доставку`
+            : `Письмо ${variables.id} удалено из очереди`,
       );
+      setDoneFailed(failed);
       setConfirming(null);
       void client.invalidateQueries({ queryKey: ['queue'] });
     },
@@ -288,7 +309,7 @@ function QueueTab() {
 
       <ErrorNotice error={queue.error} />
       <ErrorNotice error={act.error} />
-      {done && <Notice tone="success">{done}</Notice>}
+      {done && <Notice tone={doneFailed ? 'error' : 'success'}>{done}</Notice>}
       {queue.data?.truncated && (
         <Notice tone="info">
           Очередь длиннее предела разбора — показана её часть. Разберитесь с причиной затора:

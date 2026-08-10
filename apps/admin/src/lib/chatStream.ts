@@ -77,8 +77,21 @@ export function streamChat(
          */
         let message = 'Помощник сейчас недоступен';
         try {
-          const body = (await response.json()) as { message?: string };
+          const body = (await response.json()) as {
+            message?: string;
+            details?: Array<{ message?: string }>;
+          };
           if (typeof body.message === 'string' && body.message !== '') message = body.message;
+          /*
+           * У отказа проверки данных общий заголовок — «Некорректные
+           * данные запроса», — а всё, что человеку можно объяснить,
+           * лежит в подробностях: «Вопрос длиннее 4000 знаков.
+           * Сократите его или разбейте на несколько». Читая только
+           * message, мы показывали общий текст и прятали единственную
+           * полезную строку, ради которой её и писали.
+           */
+          const detail = body.details?.[0]?.message;
+          if (typeof detail === 'string' && detail !== '') message = detail;
         } catch {
           /* тело не JSON — оставляем общий текст */
         }
@@ -185,4 +198,30 @@ export function trimHistoryForServer(turns: readonly ChatTurn[]): ChatTurn[] {
       ? { role: turn.role, content: `${turn.content.slice(0, CHAT_TURN_MAX_CHARS)}…` }
       : { role: turn.role, content: turn.content },
   );
+}
+
+/** Сколько реплик разговора принимает сервер (см. CHAT_HISTORY_MAX_TURNS). */
+export const CHAT_HISTORY_MAX_TURNS = 20;
+
+/**
+ * Что из разговора уезжает на сервер.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ ХВОСТ, А НЕ ВСЯ ИСТОРИЯ
+ * ------------------------------------------------------------------
+ * Сервер принимает не больше двадцати реплик — и применяет это ко всему
+ * запросу сразу. Десять вопросов с ответами дают ровно двадцать; на
+ * одиннадцатом вопросе история становится двадцать первой репликой, и
+ * запрос отбивается ЦЕЛИКОМ. Дальше хуже: вопрос остаётся в истории, и
+ * следующая попытка шлёт двадцать две, потом двадцать три. Разговор
+ * умирал насмерть, починка одна — закрыть окно и потерять его весь.
+ *
+ * Ровно тот же класс отказа, что и у длинного ответа помощника, только
+ * по счёту реплик. Поэтому здесь то же решение: на сервер уезжает хвост
+ * разговора, а на экране остаётся всё. Хвост, а не начало: «а подробнее?»
+ * относится к последним репликам, и терять надо самые старые.
+ */
+export function tailForServer(turns: readonly ChatTurn[]): ChatTurn[] {
+  const tail = turns.length > CHAT_HISTORY_MAX_TURNS ? turns.slice(-CHAT_HISTORY_MAX_TURNS) : turns;
+  return trimHistoryForServer(tail);
 }

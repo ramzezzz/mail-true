@@ -227,7 +227,17 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       const mine = aliases.rows.filter(
         (a) => a.source === row.email || a.destination === row.email,
       );
-      const truncated = mine.length > ALIAS_LIMIT;
+      /*
+       * Считаем усечение и по ВЫБОРКЕ, а не только по отобранному.
+       *
+       * Поиск идёт подстрокой, поэтому в сотню строк выборки попадают и
+       * посторонние адреса, содержащие наш как часть: у ящика
+       * `admin@example.com` это `sysadmin@example.com`. Достаточно одного
+       * такого, чтобы своих осталось ровно сто и признак не поднялся —
+       * а за пределом выборки лежало бы ещё полсотни. Если выборка упёрлась
+       * в предел, показанное неполно в любом случае.
+       */
+      const truncated = mine.length > ALIAS_LIMIT || aliases.rows.length > ALIAS_LIMIT;
       return {
         ...toDto(row),
         /** Показаны не все адреса — их больше, чем помещается в карточку. */

@@ -25,7 +25,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Modal } from '../components';
 import { useAiState } from '../api/aiQueries';
 import { aiFeatureVisible, aiNeedsConsent, AI_SETTINGS_PATH } from './aiVisibility';
-import { streamChat, trimHistoryForServer, CHAT_TURN_MAX_CHARS, type ChatTurn } from './chatStream';
+import { streamChat, tailForServer, CHAT_TURN_MAX_CHARS, type ChatTurn } from './chatStream';
 import styles from './ChatPanel.module.css';
 
 /** Реплика на экране: у ответа помощника бывает состояние «печатает». */
@@ -114,7 +114,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
        * разговор насмерть: он не проходил проверку на сервере, оставался
        * в истории и валил каждый следующий вопрос.
        */
-      trimHistoryForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
+      tailForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
       {
         onDelta: (text) => {
           setTurns((previous) => {
@@ -219,9 +219,31 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
                 Остановить
               </Button>
             ) : (
-              <Button onClick={send} disabled={draft.trim() === ''}>
-                Спросить
-              </Button>
+              <>
+                {/*
+                  «Начать заново» — не украшение, а выход.
+
+                  Разговор нигде не хранится, и любой застрявший отказ
+                  (сеть, предел расходов домена, неудачный вопрос) человек
+                  мог починить только закрытием окна, то есть потерей всего
+                  разговора. В админской панели такая кнопка была с самого
+                  начала, в почте — нет.
+                */}
+                {turns.length > 0 && (
+                  <Button
+                    mode="secondary"
+                    onClick={() => {
+                      setTurns([]);
+                      setError(null);
+                    }}
+                  >
+                    Начать заново
+                  </Button>
+                )}
+                <Button onClick={send} disabled={draft.trim() === ''}>
+                  Спросить
+                </Button>
+              </>
             )}
           </div>
         </>

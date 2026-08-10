@@ -1429,8 +1429,13 @@ export interface SpamHistoryItem {
   requiredScore: number | null;
   subject: string;
   sender: string;
-  recipients: string[];
-  ip: string;
+  /*
+   * Получателей и адрес отправителя сервер больше НЕ отдаёт: это чужая
+   * переписка, а экран их не показывает. Поля оставлены необязательными,
+   * чтобы обращение к ним не притворялось безопасным при сборке.
+   */
+  recipients?: string[];
+  ip?: string;
   /** Непустое — письмо нашего аутентифицированного пользователя. */
   user: string;
   sizeBytes: number;
