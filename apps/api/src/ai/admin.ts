@@ -399,20 +399,81 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
       const id = pathId(request.params.id, 'записи');
       const row = await db.findDomainSettingsById(id);
       if (!row) throw new NotFoundError('Настройки ИИ для домена не найдены');
-      if (!row.enabled) {
+
+      /*
+       * ПРОВЕРКА ДО СОХРАНЕНИЯ.
+       *
+       * Настройки поставщика подбирают перебором: не тот адрес, не та
+       * модель, не тот ключ. Раньше проверка смотрела только на
+       * записанное в базе — то есть попробовать новое можно было, лишь
+       * сохранив его поверх рабочего. Одна неудачная проба — и помощник
+       * у всего домена сломан, пока человек не вспомнит прежние значения.
+       *
+       * Тело запроса необязательно: без него проверяется сохранённое,
+       * как и раньше. Что пришло — то и накладывается поверх записи;
+       * чего не прислали, берётся из базы. Поэтому сменить один адрес и
+       * проверить его СО СТАРЫМ ключом можно, не набирая ключ заново, —
+       * в браузер он не приезжает вовсе.
+       */
+      /**
+       * Настройки на пробу. Все поля необязательны: чего нет — берётся
+       * из записи. Пределы длины те же, что и при сохранении: проверка
+       * не должна пропускать то, что потом не сохранится.
+       */
+      const testDraftSchema = z
+        .object({
+          baseUrl: z.string().trim().min(1).max(500),
+          chatPath: z.string().trim().min(1).max(200),
+          model: z.string().trim().min(1).max(200),
+          providerLabel: z.string().trim().min(1).max(100),
+          apiKey: z.string().min(1).max(500),
+        })
+        .partial();
+
+      /** Ключ на пробу шифруется тем же ящиком: другого пути внутрь нет. */
+      const encryptTestKey = (key: string): string => {
+        const box = service.keyBox;
+        if (!box) {
+          throw new BadRequestError(
+            service.keyBoxReason ??
+              'Ключ доступа проверить нечем: не задана переменная окружения AI_ENCRYPTION_KEY',
+          );
+        }
+        return box.encrypt(key);
+      };
+
+      const draft = testDraftSchema.parse(request.body ?? {});
+      const trying = Object.keys(draft).length > 0;
+      const settings = {
+        ...row,
+        ...(draft.baseUrl === undefined ? {} : { baseUrl: draft.baseUrl }),
+        ...(draft.chatPath === undefined ? {} : { chatPath: draft.chatPath }),
+        ...(draft.model === undefined ? {} : { model: draft.model }),
+        ...(draft.providerLabel === undefined ? {} : { providerLabel: draft.providerLabel }),
+        ...(draft.apiKey === undefined ? {} : { apiKeyEnc: encryptTestKey(draft.apiKey) }),
+      };
+
+      /*
+       * Выключенный помощник проверке не мешает — иначе настроить его
+       * заранее было бы нельзя: сначала включи для всего домена, потом
+       * подбирай адрес. Включение при этом остаётся отдельным осознанным
+       * действием, и проверка его не подменяет.
+       */
+      if (!settings.enabled && !trying) {
         throw new BadRequestError('Сначала включите помощника для домена, потом проверяйте связь');
       }
 
       // Проверяем от имени служебного адреса домена, а не живого ящика.
       const probeAccount = `ai-probe@${row.domain}`;
-      const availability = await service.availability(probeAccount);
-      if (!availability.available || !availability.assistant) {
+      const built = service.assistantFrom({ ...settings, enabled: true });
+      if (!built.ok) {
         return {
           ok: false,
-          reason: availability.reason,
-          message: availability.detail ?? 'Помощник не собрался из текущих настроек',
+          reason: 'misconfigured' as const,
+          message: built.detail,
         };
       }
+      const availability = { assistant: built.assistant };
 
       const started = Date.now();
       const outcome = await availability.assistant.summarizeMessage(
@@ -438,7 +499,9 @@ export async function aiAdminRoutes(app: FastifyInstance, service: AiService): P
         targetType: 'domain',
         targetId: id,
         targetLabel: row.domain,
-        after: { ok: outcome.ok, endpoint: availability.assistant.endpoint },
+        // Проба по несохранённым значениям тоже попадает в журнал — иначе
+        // в нём не видно, чем именно администратор стучался наружу
+        after: { ok: outcome.ok, endpoint: availability.assistant.endpoint, draft: trying },
       });
 
       if (!outcome.ok) {

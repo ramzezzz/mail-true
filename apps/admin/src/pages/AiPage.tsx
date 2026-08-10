@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox } from '@web/components';
 import { api } from '../api/client';
-import type { AiDomain, AiDomainPatch, AiReference, AiTestResult } from '../api/types';
+import type { AiDomain, AiDomainPatch, AiReference, AiTestDraft, AiTestResult } from '../api/types';
 import { PageTitle } from '../app/AdminLayout';
 import { useSession } from '../app/session';
 import { Table, TableWrap, tableStyles } from '../components/Table';
@@ -325,8 +325,29 @@ function DomainSettings({
     },
   });
 
+  /**
+   * Проверка связи — по тому, что СЕЙЧАС В ФОРМЕ, а не по записанному.
+   *
+   * Настройки поставщика подбирают перебором: не тот адрес, не та
+   * модель, не тот ключ. Раньше проверить можно было только сохранённое,
+   * то есть каждую пробу приходилось записывать поверх рабочих настроек
+   * — одна неудачная, и помощник у всего домена сломан, пока человек не
+   * вспомнит, что было раньше.
+   *
+   * Пустые поля не шлём вовсе: пустой ключ означал бы «проверь без
+   * ключа», а человек имел в виду «оставь сохранённый». Незаполненное
+   * поле ключа — самый частый случай: в браузер ключ не приезжает.
+   */
   const runTest = useMutation({
-    mutationFn: () => api.aiTest(domain.domainId),
+    mutationFn: () => {
+      const draft2: AiTestDraft = {};
+      if (draft.baseUrl.trim() !== '') draft2.baseUrl = draft.baseUrl.trim();
+      if (draft.chatPath.trim() !== '') draft2.chatPath = draft.chatPath.trim();
+      if (draft.model.trim() !== '') draft2.model = draft.model.trim();
+      if (draft.providerLabel.trim() !== '') draft2.providerLabel = draft.providerLabel.trim();
+      if (draft.apiKey !== '') draft2.apiKey = draft.apiKey;
+      return api.aiTest(domain.domainId, draft2);
+    },
     onSuccess: (result) => setTest(result),
   });
 

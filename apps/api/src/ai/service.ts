@@ -295,6 +295,28 @@ export class AiService {
    * проверяется: состояние помощника нужно показать и до согласия,
    * иначе экран согласия нечем наполнить.
    */
+  /**
+   * Помощник по ПЕРЕДАННЫМ настройкам, а не по записанным в базе.
+   *
+   * Нужен ровно для одного — проверки связи из панели до сохранения.
+   * Настройки поставщика подбирают перебором: не тот адрес, не та модель,
+   * не тот ключ. Заставлять человека сохранять каждую попытку значит
+   * заставлять его портить рабочие настройки ради того, чтобы узнать, не
+   * лучше ли новые: одна неудачная проба — и помощник у всего домена
+   * сломан до тех пор, пока человек не вспомнит, что было раньше.
+   *
+   * Сборка та же самая, что и у обычного пути (#buildAssistant), — иначе
+   * проверка врала бы: зелёная на своей сборке и красная на настоящей.
+   */
+  assistantFrom(
+    settings: AiDomainSettings,
+  ): { ok: true; assistant: MailAssistant } | { ok: false; detail: string } {
+    if (!this.#config.AI_ENABLED) {
+      return { ok: false, detail: 'Помощник выключен на сервере (AI_ENABLED=false)' };
+    }
+    return this.#buildAssistant(settings);
+  }
+
   async availability(email: string): Promise<AiAvailability> {
     const off = (reason: AiBlockReason, detail: string | null): AiAvailability => ({
       available: false,

@@ -8,6 +8,7 @@ import type {
   AiDomainPatch,
   AiReference,
   AiModelList,
+  AiTestDraft,
   AiTestResult,
   Alias,
   AliasPage,
@@ -416,8 +417,16 @@ export const api = {
   aiDomains: () => get<{ items: AiDomain[] }>('/ai/domains'),
   aiDomain: (id: number) => get<AiDomain>(`/ai/domains/${id}`),
   updateAiDomain: (id: number, body: AiDomainPatch) => patch<AiDomain>(`/ai/domains/${id}`, body),
-  /** Живая проверка связи: один настоящий вызов сервиса на служебном тексте. */
-  aiTest: (id: number) => post<AiTestResult>(`/ai/domains/${id}/test`),
+  /**
+   * Живая проверка связи: один настоящий вызов сервиса на служебном тексте.
+   *
+   * Необязательный черновик — это НЕсохранённые значения из формы.
+   * Настройки поставщика подбирают перебором, и заставлять человека
+   * сохранять каждую попытку значит заставлять его ломать рабочие
+   * настройки ради того, чтобы узнать, не лучше ли новые.
+   */
+  aiTest: (id: number, draft?: AiTestDraft) =>
+    post<AiTestResult>(`/ai/domains/${id}/test`, draft ?? {}),
   /**
    * Какие модели есть у поставщика. Спрашивается по нажатию: это запрос
    * наружу, и делать его при открытии раздела незачем.

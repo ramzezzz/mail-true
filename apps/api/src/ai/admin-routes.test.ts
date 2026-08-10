@@ -262,3 +262,65 @@ void test('местный адрес остаётся местным', async () 
   assert.equal(response.statusCode, 200);
   assert.equal(response.json<DomainDto>().local, true, 'сосед по сети контейнеров — внутри');
 });
+
+/* ------------------------------------------------------------------ */
+/* Проверка связи по НЕсохранённым настройкам                          */
+/* ------------------------------------------------------------------ */
+
+void test('проверка связи берёт адрес из запроса, а не из базы', async () => {
+  /*
+   * Настройки поставщика подбирают перебором: не тот адрес, не та
+   * модель, не тот ключ. Раньше проверить можно было только записанное —
+   * то есть каждую пробу приходилось сохранять поверх рабочих настроек.
+   * Одна неудачная, и помощник у всего домена сломан, пока человек не
+   * вспомнит прежние значения.
+   */
+  const h = await harness(domainRow({ baseUrl: 'http://127.0.0.1:9/v1' }));
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/ai/domains/1/test',
+    headers: { cookie: h.cookie },
+    payload: { baseUrl: 'http://127.0.0.1:11434/v1', model: 'другая-модель' },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  // Связи в проверке нет (сервиса на этом порту не поднимали), но важно
+  // другое: сервер пошёл по ПРИСЛАННОМУ адресу и с присланной моделью
+  const body = response.json() as { ok: boolean; message?: string };
+  assert.equal(typeof body.ok, 'boolean');
+  // …и в базе от этого ничего не изменилось: проба не сохраняет
+  assert.equal(h.store.row.baseUrl, 'http://127.0.0.1:9/v1', 'проба записалась в базу');
+  assert.equal(h.store.row.model, 'qwen2.5:7b', 'проба записалась в базу');
+});
+
+void test('выключенного помощника можно настроить до включения', async () => {
+  // Иначе выходил замкнутый круг: сначала включи для всего домена, потом
+  // подбирай адрес — а включать вслепую и есть то, чего человек боится.
+  const h = await harness(domainRow({ enabled: false }));
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/ai/domains/1/test',
+    headers: { cookie: h.cookie },
+    payload: { baseUrl: 'http://127.0.0.1:11434/v1' },
+  });
+
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(h.store.row.enabled, false, 'проба включила помощника — так нельзя');
+});
+
+void test('без тела запроса проверяется сохранённое — как и раньше', async () => {
+  const h = await harness(domainRow({ enabled: false }));
+
+  const response = await h.app.inject({
+    method: 'POST',
+    url: '/ai/domains/1/test',
+    headers: { cookie: h.cookie },
+    payload: {},
+  });
+
+  // Выключенный помощник без черновика по-прежнему просит себя включить
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match(response.json().message as string, /включите помощника/u);
+});

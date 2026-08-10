@@ -504,6 +504,21 @@ export interface AiModelList {
   models: string[];
 }
 
+/**
+ * Несохранённые значения формы для проверки связи.
+ *
+ * Чего нет — берётся из записи в базе. Поэтому сменить один адрес и
+ * проверить его СО СТАРЫМ ключом можно, не набирая ключ заново: в
+ * браузер он не приезжает вовсе.
+ */
+export interface AiTestDraft {
+  baseUrl?: string;
+  chatPath?: string;
+  model?: string;
+  providerLabel?: string;
+  apiKey?: string;
+}
+
 export type AiTestResult =
   | {
       ok: true;
