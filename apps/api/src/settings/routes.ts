@@ -216,6 +216,48 @@ export const ruleSchema = z.object({
  */
 const MAX_FILTERS = 200;
 
+/**
+ * ПРАВИЛО «УДАЛЯТЬ ВСЁ ПОДРЯД» НЕ ПРИНИМАЕТСЯ.
+ *
+ * ------------------------------------------------------------------
+ * ЧТО БЫЛО
+ * ------------------------------------------------------------------
+ * Окно «Создание фильтра» открывается со строкой условия «От · содержит ·
+ * <пусто>». Человек выбирает действие «Удалить → безвозвратно, минуя
+ * корзину» и нажимает «Сохранить», НЕ заполнив значение. Браузер
+ * выбрасывает пустое условие как незаполненное (это верно), проверка
+ * полноты смотрит только на действия (тоже верно — правило без условий
+ * законно, так устроена «пересылка всей почты»), и на сервер уходит
+ * правило с пустым списком условий. В личный файл Sieve уезжает
+ *
+ *     if not header :is "X-Spam" "Yes" { discard; stop; }
+ *
+ * — то есть ВСЯ не-спамная почта уничтожается прямо при доставке,
+ * безвозвратно, начиная со следующего письма. А если отмечено «применить
+ * к письмам, которые уже лежат в папках», то и «Входящие» вычищаются
+ * немедленно.
+ *
+ * Пустой список условий сам по себе законен: правило «на всю почту» — это
+ * и пересылка, и метка, и раскладка в папку. Незаконно ровно одно
+ * сочетание: НИ ОДНОГО условия и УДАЛЕНИЕ. Ни один человек не заводит
+ * правило «уничтожать всю мою почту», а цена ошибки здесь — вся
+ * переписка.
+ *
+ * Браузер это сочетание тоже не пропустит (см. FilterDialog), но замок
+ * стоит здесь, потому что здесь он последний.
+ */
+function refuseDeleteEverything(dto: { conditions?: unknown[]; actions?: unknown }): void {
+  const actions = (dto.actions ?? {}) as { deleteMode?: string | null };
+  const deleteMode = actions.deleteMode ?? null;
+  if (deleteMode === null) return;
+  if ((dto.conditions?.length ?? 0) > 0) return;
+  throw new BadRequestError(
+    'Правило без единого условия применяется ко ВСЕЙ почте, а действие в нём — удаление. ' +
+      'Такое правило уничтожит каждое приходящее письмо, и вернуть их будет неоткуда. ' +
+      'Добавьте условие — кого именно удалять.',
+  );
+}
+
 export const orderSchema = z.object({
   ids: z.array(z.string().min(1).max(64)).max(MAX_FILTERS),
 });
@@ -478,6 +520,7 @@ export async function settingsUserRoutes(
   app.post('/filters', { preHandler: app.requireSession }, async (request) => {
     const session = sessionOf(request);
     const dto = ruleSchema.parse(request.body) as WebFilterRule;
+    refuseDeleteEverything(dto);
     const db = service.requireDb();
     /*
      * Потолок числа правил — до создания и до похода за папками.
@@ -510,6 +553,7 @@ export async function settingsUserRoutes(
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
     const dto = ruleSchema.parse(request.body) as WebFilterRule;
+    refuseDeleteEverything(dto);
     const db = service.requireDb();
     const folders = await foldersOf(session);
     // Правило читается ДО правки: поля, которых нет в запросе (метки,

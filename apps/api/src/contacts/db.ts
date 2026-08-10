@@ -302,6 +302,53 @@ export class ContactsDb {
     await this.#pool.query(statement.text, statement.values);
   }
 
+  /**
+   * Потолок указателя переписки: сколько адресов держим на ящик.
+   *
+   * ------------------------------------------------------------------
+   * ЗАЧЕМ ПОТОЛОК
+   * ------------------------------------------------------------------
+   * У соседей он есть у всех: шаблоны — 100, правила — 200, одноразовые
+   * адреса — 50. У адресной книги не было ничего: ни предела, ни срока
+   * хранения, ни уборки. А растёт она и сама (по строке на каждого
+   * уникального отправителя — на ящике, куда идут рассылки, это тысячи
+   * строк в год), и по просьбе клиента: `POST /contacts/restore` заводит
+   * запись для любого синтаксически верного адреса.
+   *
+   * Пять тысяч — это заведомо больше, чем помнит любая живая переписка,
+   * и заведомо меньше, чем «сколько угодно». Подсказки всё равно берут
+   * несколько строк по ранжированию, так что на их качество потолок не
+   * влияет: срезается самый давний хвост.
+   */
+  static readonly MAX_CONTACTS = 5000;
+
+  /**
+   * Срезает самые давние адреса сверх потолка.
+   *
+   * СКРЫТЫЕ НЕ ТРОГАЕМ. «Не подсказывать этот адрес» — осознанное решение
+   * человека, и вернуть его молча значит отменить это решение. Их число
+   * ограничено его же терпением, а не потоком писем.
+   */
+  async trim(accountEmail: string, max = ContactsDb.MAX_CONTACTS): Promise<number> {
+    const result = await this.#pool.query(
+      `DELETE FROM mail_contacts
+        WHERE account_email = $1
+          AND NOT hidden
+          AND address IN (
+            SELECT address FROM mail_contacts
+             WHERE account_email = $1 AND NOT hidden
+             ORDER BY last_seen_at DESC, address
+             OFFSET $2
+          )`,
+      [accountEmail, max],
+    );
+    const removed = result.rowCount ?? 0;
+    if (removed > 0) {
+      this.#logger.info({ removed, max }, 'Указатель переписки подрезан по потолку');
+    }
+    return removed;
+  }
+
   /** Сколько адресов в указателе ящика (без скрытых). */
   async count(accountEmail: string): Promise<number> {
     const rows = await this.#query<{ n: string }>(

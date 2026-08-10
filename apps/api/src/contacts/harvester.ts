@@ -344,7 +344,19 @@ export class ContactHarvester {
           }
         });
         scanned += batch.scanned;
-        if (batch.folded.length > 0) contacts += await db.upsert(account, batch.folded);
+        if (batch.folded.length > 0) {
+          contacts += await db.upsert(account, batch.folded);
+          /*
+           * Потолок применяется здесь же, а не отдельным уборщиком.
+           *
+           * Растёт указатель ровно в этом месте — по строке на каждого
+           * нового собеседника, — и подрезать его тут дешевле всего:
+           * запрос идёт по тому же ящику, который мы и так держим. Своего
+           * работника ради этого заводить незачем, а без потолка таблица
+           * росла бы вечно: ни предела, ни срока хранения у неё не было.
+           */
+          await db.trim(account).catch(() => 0);
+        }
         cursor = applyRange(cursor, range, batch.scanned);
         // Отметка сохраняется после КАЖДОЙ порции, а не в конце захода:
         // оборванное соединение посреди разбора не должно заставлять

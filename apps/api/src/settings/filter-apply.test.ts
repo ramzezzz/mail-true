@@ -157,3 +157,46 @@ test('оборванный прогон по старым письмам не о
 
   await app.close();
 });
+
+test('правило «удалять всё подряд» сервер не принимает', async () => {
+  /*
+   * ЧТО БЫЛО. Окно фильтра открывается со строкой условия без значения.
+   * Человек выбирает «Удалить безвозвратно, минуя корзину» и нажимает
+   * «Сохранить», не заполнив значение: браузер выбрасывает пустое условие,
+   * проверка полноты смотрит только на действия, и на сервер приходит
+   * правило с пустым списком условий. В личный файл Sieve уезжает discard
+   * на всю не-спамную почту — безвозвратно, начиная со следующего письма.
+   *
+   * Пустой список условий сам по себе законен (правило «на всю почту» —
+   * это и пересылка, и метка). Незаконно ровно одно сочетание: ни одного
+   * условия и удаление.
+   */
+  const { app } = await harness();
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/filters',
+    payload: {
+      id: '',
+      enabled: true,
+      auto: false,
+      conditions: [],
+      actions: {
+        moveToFolderId: null,
+        markRead: false,
+        markFlagged: false,
+        labelKeys: [],
+        deleteMode: 'purge',
+        applyToExistingFolderIds: [],
+        forwardTo: null,
+        autoReply: null,
+        continueOtherFilters: true,
+        applyToSpam: false,
+      },
+      name: 'всё в утиль',
+    },
+  });
+
+  assert.equal(response.statusCode, 400, response.body);
+  assert.match((response.json() as { message: string }).message, /ВСЕЙ почте|удаление/u);
+});

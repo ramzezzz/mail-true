@@ -47,6 +47,11 @@ export async function saveGeneralWithSignatures(
 
   const existing = await db.listSignatures(email);
   const keptIds = new Set<number>();
+  /*
+   * Идентификаторы, которые мы уже видели. Нужны, чтобы узнать СОЗДАННУЮ
+   * подпись в списке, который возвращает createSignature.
+   */
+  const seenIds = new Set<number>(existing.map((s) => s.id));
   for (const item of dto.signatures) {
     const id = Number(item.id);
     const found = Number.isInteger(id) ? existing.find((s) => s.id === id) : undefined;
@@ -69,8 +74,26 @@ export async function saveGeneralWithSignatures(
         // наверх было нельзя: сохранение возвращало вниз.
         position: dto.signatures.indexOf(item),
       });
-      const created = after[after.length - 1];
-      if (created) keptIds.add(created.id);
+      /*
+       * СОЗДАННАЯ — ЭТО НОВЫЙ ИДЕНТИФИКАТОР, А НЕ ПОСЛЕДНЯЯ СТРОКА.
+       *
+       * Здесь стояло `after[after.length - 1]`. Список приходит
+       * отсортированным по позиции (ORDER BY position, id), а позиция
+       * новой подписи — её место в форме, то есть далеко не всегда
+       * последнее. Если у какой-то СТАРОЙ строки позиция больше, в
+       * keptIds попадал её идентификатор — и цикл удаления ниже её
+       * пропускал.
+       *
+       * Достаточно за одно сохранение удалить две подписи и добавить
+       * одну: удалялась только первая, вторая возвращалась в список
+       * молча. Ответ сервера кладётся прямо в черновик формы, так что
+       * человек видел, как удалённая подпись появляется обратно.
+       */
+      const created = after.find((s) => !seenIds.has(s.id));
+      if (created) {
+        seenIds.add(created.id);
+        keptIds.add(created.id);
+      }
     }
   }
   /*

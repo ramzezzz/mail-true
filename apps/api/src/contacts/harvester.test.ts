@@ -263,6 +263,8 @@ function buildHarvester(
       upserts += 1;
       return 1;
     },
+    // Потолок указателя: подрезка идёт сразу после пополнения.
+    trim: async (): Promise<number> => 0,
   } as unknown as ContactsDb;
 
   const client = {

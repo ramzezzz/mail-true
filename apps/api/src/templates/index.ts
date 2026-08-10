@@ -19,6 +19,7 @@
 import type { FastifyInstance } from 'fastify';
 import { loadAccountsConfig } from '../accounts/config.js';
 import { errorInfo } from '../log.js';
+import { probeSchemaWithRetry } from '../schema-probe.js';
 import { TemplatesDb } from './db.js';
 import {
   templateRoutes,
@@ -40,20 +41,33 @@ export async function templatesRoutes(app: FastifyInstance): Promise<void> {
   if (connectionString) {
     db = new TemplatesDb({ connectionString, logger });
     const store = db;
-    store
-      .schemaReady()
-      .then((ready) => {
-        if (!ready) {
-          deps.unavailableReason = TEMPLATES_MIGRATION_HINT;
-          logger.error(TEMPLATES_MIGRATION_HINT);
-          return;
-        }
+    /*
+     * Проба повторяется: секундный сбой базы при старте не должен
+     * выключать раздел до перезапуска контейнера. Подробный разбор — в
+     * disposable/index.ts, откуда взята эта же функция.
+     */
+    void probeSchemaWithRetry(
+      () => store.schemaReady(),
+      () => {
+        // Причину не трогаем: при живом хранилище её никто не читает.
         deps.store = store;
-      })
-      .catch((err: unknown) => {
-        deps.unavailableReason = 'Не удалось проверить схему шаблонов писем';
-        logger.error(errorInfo(err), 'Не удалось проверить схему шаблонов писем');
-      });
+      },
+      () => {
+        deps.unavailableReason = TEMPLATES_MIGRATION_HINT;
+        logger.error(TEMPLATES_MIGRATION_HINT);
+      },
+      (err, willRetry) => {
+        deps.unavailableReason = willRetry
+          ? 'База ещё не отвечает — раздел включится, как только она поднимется'
+          : 'Не удалось проверить схему шаблонов писем';
+        logger.error(
+          errorInfo(err),
+          willRetry
+            ? 'Схему шаблонов писем проверить не удалось, попробуем ещё раз'
+            : 'Не удалось проверить схему шаблонов писем',
+        );
+      },
+    );
   } else {
     logger.warn(TEMPLATES_NO_DATABASE);
   }

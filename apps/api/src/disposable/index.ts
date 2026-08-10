@@ -17,6 +17,7 @@
 import type { FastifyInstance } from 'fastify';
 import { loadAccountsConfig } from '../accounts/config.js';
 import { errorInfo } from '../log.js';
+import { probeSchemaWithRetry } from '../schema-probe.js';
 import { loadSettingsConfig } from '../settings/config.js';
 import { DisposableDb } from './db.js';
 import {
@@ -44,20 +45,28 @@ export async function disposableRoutes(app: FastifyInstance): Promise<void> {
     const store = db;
     // Проба схемы асинхронная и НЕ задерживает сборку маршрутов: почта
     // обязана подниматься и с лежащей базой. До ответа раздела нет.
-    store
-      .schemaReady()
-      .then((ready) => {
-        if (!ready) {
-          deps.unavailableReason = DISPOSABLE_MIGRATION_HINT;
-          logger.error(DISPOSABLE_MIGRATION_HINT);
-          return;
-        }
+    void probeSchemaWithRetry(
+      () => store.schemaReady(),
+      () => {
+        // Причину не трогаем: при живом хранилище её никто не читает.
         deps.store = store;
-      })
-      .catch((err: unknown) => {
-        deps.unavailableReason = 'Не удалось проверить схему одноразовых адресов';
-        logger.error(errorInfo(err), 'Не удалось проверить схему одноразовых адресов');
-      });
+      },
+      () => {
+        deps.unavailableReason = DISPOSABLE_MIGRATION_HINT;
+        logger.error(DISPOSABLE_MIGRATION_HINT);
+      },
+      (err, willRetry) => {
+        deps.unavailableReason = willRetry
+          ? 'База ещё не отвечает — раздел включится, как только она поднимется'
+          : 'Не удалось проверить схему одноразовых адресов';
+        logger.error(
+          errorInfo(err),
+          willRetry
+            ? 'Схему одноразовых адресов проверить не удалось, попробуем ещё раз'
+            : 'Не удалось проверить схему одноразовых адресов',
+        );
+      },
+    );
   } else {
     logger.warn(DISPOSABLE_NO_DATABASE);
   }

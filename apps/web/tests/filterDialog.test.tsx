@@ -134,7 +134,16 @@ describe('условия', () => {
 
 describe('метки', () => {
   it('предлагаются метки ящика и отмеченная попадает в правило', () => {
-    const onSave = render(emptyRule());
+    /*
+     * Условие заполнено намеренно. Раньше здесь стояло голое
+     * emptyRule() — то есть строка условия без значения, — и правило
+     * уходило на сервер БЕЗ условий, применяясь ко всей почте. Проверка
+     * проходила ровно потому, что окно это пропускало.
+     */
+    const onSave = render({
+      ...emptyRule(),
+      conditions: [{ field: 'from', operator: 'contains', value: 'a@b.c' }],
+    });
     const scheta = checkboxByLabel('Счета');
     act(() => {
       scheta.click();
@@ -194,5 +203,42 @@ describe('удаление', () => {
     act(() => save?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
     expect(onSave.mock.calls[0]?.[0].actions.moveToFolderId).toBeNull();
     expect(onSave.mock.calls[0]?.[0].actions.deleteMode).toBe('trash');
+  });
+});
+
+describe('незаполненное условие', () => {
+  it('правило с пустым значением не сохраняется, даже если действие задано', () => {
+    /*
+     * ЧТО БЫЛО. Окно открывается со строкой «От · содержит · <пусто>».
+     * Человек выбирает «Удалить безвозвратно, минуя корзину», жмёт
+     * «Сохранить», значение не заполнив. Сборка правила выбрасывала
+     * пустое условие (верно), проверка полноты смотрела только на
+     * действия (тоже верно — правило без условий законно), и на сервер
+     * уходило правило с ПУСТЫМ списком условий: в Sieve — discard на всю
+     * не-спамную почту, безвозвратно, начиная со следующего письма.
+     */
+    const onSave = render(emptyRule());
+    setSelect('Действие', 'delete');
+    setSelect('Как удалить', 'purge');
+    const save = [...host.querySelectorAll('button')].find((b) =>
+      (b.textContent ?? '').includes('Сохранить'),
+    );
+    act(() => save?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('не заполнено значение');
+  });
+
+  it('осознанное правило «на всю почту» по-прежнему сохраняется', () => {
+    // Обратный ход: строк условий нет вовсе — это законный путь, так
+    // устроена пересылка всей почты.
+    const onSave = render({ ...emptyRule(), conditions: [] });
+    setSelect('Действие', 'delete');
+    const save = [...host.querySelectorAll('button')].find((b) =>
+      (b.textContent ?? '').includes('Сохранить'),
+    );
+    act(() => save?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+    expect(onSave).toHaveBeenCalled();
   });
 });

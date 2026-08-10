@@ -32,7 +32,7 @@ import { originOf } from './access-record.js';
 import type { SettingsConfig } from './config.js';
 import { ExportRunner, exportFileSize } from './export-runner.js';
 import { isUniqueViolation, type ExportRow, type OwnerStore } from './owner-db.js';
-import { DEFAULT_RECOVERY_DAYS, type RecoveryService } from './recovery-service.js';
+import type { RecoveryService } from './recovery-service.js';
 import type { ServiceAddressBook } from './service-addresses.js';
 
 /** Сколько событий истории отдаётся за один запрос. */
@@ -394,7 +394,21 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
         totals: { count: 0, bytes: 0 },
       };
     }
-    const days = (await ctx.store.getRecoveryDays(session.email)) ?? DEFAULT_RECOVERY_DAYS;
+    /*
+     * Срок отдаётся ЗАЖАТЫМ по потолку — тем же расчётом, что и поведение.
+     *
+     * Здесь стояло сырое значение из настроек, а реальный срок считает
+     * RecoveryService.daysFor, который применяет TRASH_RECOVERY_MAX_DAYS
+     * (этот зажим и написан ради случая «администратор уменьшил потолок
+     * после того, как человек выбрал срок побольше»). Расхождение видно
+     * прямо на экране: список сроков в форме фильтруется по потолку, а
+     * выбранное значение остаётся прежним — селект не совпадает ни с
+     * одним пунктом и показывает «Не хранить», а окно очистки корзины
+     * обещает «вернуть можно ещё 7 дней». Три разных ответа на один
+     * вопрос, причём человек, читающий «не хранить», уверен, что очистка
+     * окончательна.
+     */
+    const days = await ctx.recovery.daysFor(session.email);
     const [items, totals] = await Promise.all([
       ctx.store.listRecovery(session.email, RECOVERY_PAGE),
       ctx.store.recoveryTotals(session.email),

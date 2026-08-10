@@ -138,15 +138,32 @@ export function FilterDialog({
     draft.actions.markFlagged ||
     draft.actions.labelKeys.length > 0;
 
+  const normalized = buildRule(draft);
+  /*
+   * УСЛОВИЕ БЕЗ ЗНАЧЕНИЯ — ЭТО НЕ «ВСЕ ПИСЬМА».
+   *
+   * Окно открывается со строкой «От · содержит · <пусто>». Сборка
+   * правила выбрасывает незаполненное условие — и правильно делает, — а
+   * проверка полноты смотрит только на действия, потому что правило без
+   * условий законно (так устроена пересылка всей почты). В сумме это
+   * означало вот что: человек выбрал «Удалить безвозвратно», забыл
+   * вписать адрес отправителя и нажал «Сохранить» — и завёл правило,
+   * уничтожающее ВСЮ приходящую почту. Молча.
+   *
+   * Различаем два разных случая: строк условий не было вовсе (осознанное
+   * «на всю почту», такой путь есть у кнопки «Добавить пересылку») и
+   * строки были, но все оказались пустыми. Второе — незаконченная форма.
+   */
+  const conditionsDropped = draft.conditions.length > 0 && normalized.conditions.length === 0;
+
   const submit = () => {
     const rule = buildRule(draft);
     setTouched(true);
-    if (!isRuleComplete(rule)) return;
+    if (!isRuleComplete(rule) || conditionsDropped) return;
     onSave(rule);
   };
 
-  const normalized = buildRule(draft);
-  const invalid = touched && !isRuleComplete(normalized);
+  const invalid = touched && (!isRuleComplete(normalized) || conditionsDropped);
 
   return (
     <Modal
@@ -404,7 +421,10 @@ export function FilterDialog({
 
       {invalid && (
         <p className={styles.error} role="alert">
-          Задайте условие со значением и хотя бы одно действие.
+          {conditionsDropped
+            ? 'В условии не заполнено значение. Правило без условий применяется ко ВСЕМ ' +
+              'письмам — впишите значение или уберите строку условия, если так и задумано.'
+            : 'Задайте условие со значением и хотя бы одно действие.'}
         </p>
       )}
       {error && (
