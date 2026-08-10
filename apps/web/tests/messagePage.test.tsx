@@ -544,3 +544,51 @@ describe('цепочка переписки на странице письма',
     expect(host.textContent).toContain('переписке');
   });
 });
+
+describe('цитата при сбое связи', () => {
+  /*
+   * Тело, которое на экране, приготовлено для ЧТЕНИЯ: внешние картинки в
+   * нём заменены прозрачным пикселем, а настоящий адрес убран в
+   * `data-mt-src` — и при отправке эта пометка вырезается. Запасной путь
+   * молча собирал письмо, в котором вместо всех картинок пустые точки
+   * 1×1: сеть моргнула на секунду, человек нажал «Ответить», письмо
+   * ушло без единой картинки. Ни одного признака, что что-то не так.
+   */
+  it('говорит вслух, что картинок в цитате не будет', async () => {
+    vi.spyOn(api, 'getMessage').mockImplementation(async (_id, options) => {
+      // Запрос «с настоящими картинками» — тот самый, что делает цитату
+      if (options?.images === true) throw new Error('сеть отвалилась');
+      return serverMessage();
+    });
+    useUiStore.setState({ notice: null, composeWindows: [] });
+    render();
+    await waitFor(() => text().includes('Тест картинок и отписки'), 'письмо');
+
+    const replyButton = button('Ответить');
+    if (!replyButton) throw new Error('нет кнопки «Ответить»');
+    click(replyButton);
+
+    await waitFor(() => useUiStore.getState().notice !== null, 'сообщение о картинках');
+    expect(useUiStore.getState().notice ?? '').toContain('Картинки исходного письма');
+    // Окно всё равно открылось: отнимать начатое письмо из-за картинок нельзя
+    expect(useUiStore.getState().composeWindows.length).toBe(1);
+  });
+
+  it('о письме без внешних картинок молчит', async () => {
+    vi.spyOn(api, 'getMessage').mockImplementation(async (_id, options) => {
+      if (options?.images === true) throw new Error('сеть отвалилась');
+      return serverMessage({ bodyHtml: '<p>Обычное письмо без картинок</p>', blockedRemote: 0 });
+    });
+    useUiStore.setState({ notice: null, composeWindows: [] });
+    render();
+    await waitFor(() => text().includes('Тест картинок и отписки'), 'письмо');
+
+    const replyButton = button('Ответить');
+    if (!replyButton) throw new Error('нет кнопки «Ответить»');
+    click(replyButton);
+
+    await waitFor(() => useUiStore.getState().composeWindows.length === 1, 'окно ответа');
+    // Блокировать было нечего — запасное тело ничем не хуже настоящего
+    expect(useUiStore.getState().notice).toBe(null);
+  });
+});

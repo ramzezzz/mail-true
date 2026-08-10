@@ -47,7 +47,7 @@ import { recipientLabel } from '../lib/recipients';
 import { forwardInit, replyInit } from '../lib/composeFromMessage';
 import { collectForwardAttachments } from '../lib/forwardAttachments';
 import { errorText, isNotFoundError } from '../lib/errorText';
-import { blockedImageCount, shouldOfferImages } from '../lib/externalImages';
+import { BLOCKED_SRC_ATTR, blockedImageCount, shouldOfferImages } from '../lib/externalImages';
 import { serializeRulePrefill } from '../lib/filterRules';
 import { annotatePrintLinks, printAddress, printAddresses, printDate } from '../lib/printMessage';
 import { readReceiptAsk, readReceiptWho } from '../lib/readReceipt';
@@ -527,7 +527,40 @@ export function MessagePage() {
      */
     void fetchMessageForQuote(queryClient, message.id)
       .then((full) => openCompose(replyInit(full, preferences.quoteOriginalOnReply)))
-      .catch(() => openCompose(replyInit(message, preferences.quoteOriginalOnReply)));
+      .catch(() => {
+        openCompose(replyInit(message, preferences.quoteOriginalOnReply));
+        warnAboutQuoteImages(message);
+      });
+  };
+
+  /**
+   * Говорит вслух, что в цитате остались пустые пиксели вместо картинок.
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ ЭТО НЕ МЕЛОЧЬ
+   * ------------------------------------------------------------------
+   * Тело, которое на экране, приготовлено для ЧТЕНИЯ: внешние картинки
+   * в нём заменены прозрачным пикселем, а настоящий адрес убран в
+   * `data-mt-src` — и при отправке эта пометка вырезается. То есть
+   * запасной путь молча собирает письмо, в котором вместо всех картинок
+   * пустые точки 1×1.
+   *
+   * Сеть моргнула на секунду, человек нажал «Переслать» рассылку или
+   * письмо с фотографией — окно открылось как обычно, цитата на вид
+   * пустовата, письмо ушло без единой картинки. Ни одного признака, что
+   * что-то пошло не так.
+   *
+   * Окно всё равно открываем: текст человек пишет сам, и отнимать у него
+   * начатое письмо из-за картинок нельзя. Но сказать обязаны.
+   */
+  const warnAboutQuoteImages = (source: Message): void => {
+    // Ни слова, если блокировать было нечего: у письма без внешних
+    // картинок запасное тело ничем не хуже настоящего.
+    if (!(source.bodyHtml ?? '').includes(BLOCKED_SRC_ATTR)) return;
+    showNotice(
+      'Картинки исходного письма не загрузились — в цитате их не будет. ' +
+        'Закройте окно и попробуйте ещё раз, когда связь наладится.',
+    );
   };
 
   /**
@@ -576,6 +609,7 @@ export function MessagePage() {
       .catch(() => {
         const windowId = openCompose(forwardInit(message));
         void bringAttachments(message, windowId);
+        warnAboutQuoteImages(message);
       });
   };
 
