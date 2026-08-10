@@ -25,7 +25,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Modal } from '../components';
 import { useAiState } from '../api/aiQueries';
 import { aiFeatureVisible, aiNeedsConsent, AI_SETTINGS_PATH } from './aiVisibility';
-import { streamChat, type ChatTurn } from './chatStream';
+import { streamChat, trimHistoryForServer, CHAT_TURN_MAX_CHARS, type ChatTurn } from './chatStream';
 import styles from './ChatPanel.module.css';
 
 /** Реплика на экране: у ответа помощника бывает состояние «печатает». */
@@ -78,6 +78,23 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const send = (): void => {
     const question = draft.trim();
     if (question === '' || busy) return;
+    /*
+     * Слишком длинный вопрос отбиваем ЗДЕСЬ и словами.
+     *
+     * На сервере предел тот же, но там он применяется ко всей истории
+     * сразу, а история уезжает с каждым вопросом. Отправив такой вопрос,
+     * человек получал бы отказ и — что хуже — оставлял бы бракованную
+     * реплику в разговоре навсегда: следующий вопрос падал бы с той же
+     * ошибкой. Обрезать написанное молча тоже нельзя: модель ответит не
+     * на то, о чём спросили.
+     */
+    if (question.length > CHAT_TURN_MAX_CHARS) {
+      setError(
+        `Вопрос длиннее ${String(CHAT_TURN_MAX_CHARS)} знаков — сократите его ` +
+          'или разбейте на несколько.',
+      );
+      return;
+    }
 
     const history: Turn[] = [...turns, { role: 'user', content: question }];
     setTurns([...history, { role: 'assistant', content: '', pending: true }]);
@@ -91,7 +108,13 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
      */
     const stream = streamChat(
       '/api/ai/chat/stream',
-      history.map((turn) => ({ role: turn.role, content: turn.content })),
+      /*
+       * Длинные ответы помощника обрезаются ПЕРЕД отправкой, а на экране
+       * остаются целиком. Без этого один подробный ответ модели ломал
+       * разговор насмерть: он не проходил проверку на сервере, оставался
+       * в истории и валил каждый следующий вопрос.
+       */
+      trimHistoryForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
       {
         onDelta: (text) => {
           setTurns((previous) => {
@@ -180,6 +203,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
               rows={2}
               value={draft}
               placeholder="Ваш вопрос…"
+              maxLength={CHAT_TURN_MAX_CHARS}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
                 // Enter отправляет, Shift+Enter переносит строку — так же,

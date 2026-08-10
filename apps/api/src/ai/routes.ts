@@ -20,9 +20,10 @@ import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import { replyTones, rewriteModes, type AiError, type AiOutcome } from '@mail-true/ai';
 import { UnauthorizedError } from '../errors.js';
 import type { MailSession } from '../types.js';
+import { chatHistorySchema } from './chat-history.js';
 import { AI_FEATURES, defaultFeatures, type AiUserFeature } from './features.js';
 import { loadMessageForAi, loadMessagesForAi } from './messages.js';
-import { AiDisabledError, aiErrorToHttp } from './errors.js';
+import { aiErrorToHttp } from './errors.js';
 import type { AiService } from './service.js';
 import { errorInfo } from '../log.js';
 
@@ -79,12 +80,6 @@ const consentSchema = z.object({
   features: z.array(z.enum(AI_FEATURES)).max(AI_FEATURES.length).optional(),
 });
 
-const streamSchema = z.object({
-  messageId: messageIdSchema,
-  tone: z.enum(replyTones).default('short'),
-  instruction: z.string().trim().max(500).optional(),
-});
-
 /**
  * Разговор целиком: история живёт у клиента и приезжает с каждым
  * вопросом. Сервер её не хранит — закрытая вкладка стирает разговор
@@ -95,18 +90,11 @@ const streamSchema = z.object({
  * сервис вместе со всей историей и оплачивается вместе с ней. Двадцать
  * реплик по четыре тысячи символов — это уже заметная часть дневного
  * предела домена за одно нажатие.
+ *
+ * Сама схема — общая с чатом администратора (ai/chat-history.ts): там же
+ * разобрано, почему ответ помощника обрезается, а вопрос человека нет.
  */
-const chatSchema = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant']),
-        content: z.string().trim().min(1).max(4000),
-      }),
-    )
-    .min(1)
-    .max(20),
-});
+const chatSchema = chatHistorySchema;
 
 /* ------------------------------------------------------------------ */
 /* Вспомогательное                                                      */
@@ -138,8 +126,32 @@ function unwrap<T>(outcome: AiOutcome<T>): {
   };
 }
 
-/** Ограничение частоты для тяжёлых маршрутов: сервис ИИ медленный и платный. */
-const AI_RATE_LIMIT = { rateLimit: { max: 60, timeWindow: 60_000 } };
+/**
+ * Ограничение частоты для тяжёлых маршрутов: сервис ИИ медленный и платный.
+ *
+ * ------------------------------------------------------------------
+ * СЧИТАЕТСЯ ПО ЯЩИКУ, А НЕ ПО АДРЕСУ КЛИЕНТА
+ * ------------------------------------------------------------------
+ * Умолчание ограничителя — ключ по адресу клиента и обработчик onRequest,
+ * то есть ДО проверки сессии. Для помощника это неверно с обеих сторон:
+ * контора за одним внешним адресом делила шестьдесят запросов в минуту
+ * между всеми сотрудниками сразу (а расход считается по домену, и предел
+ * этот не спасал), тогда как захваченный ящик с домашнего адреса получал
+ * все шестьдесят в одиночку. Тот же разбор — у отправки письма
+ * (routes/compose.ts), там это давно исправлено.
+ *
+ * `hook: 'preHandler'` обязателен: на onRequest `request.mailSession` ещё
+ * пуст, и ключом молча снова стал бы адрес клиента.
+ */
+const AI_RATE_LIMIT = {
+  rateLimit: {
+    max: 60,
+    timeWindow: 60_000,
+    hook: 'preHandler' as const,
+    keyGenerator: (request: { mailSession?: MailSession | null; ip: string }): string =>
+      request.mailSession?.email ?? request.ip,
+  },
+};
 
 /**
  * Событие потока в том виде, в каком его можно показать браузеру.
@@ -190,23 +202,6 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
   app.get('/state', { preHandler: app.requireSession }, async (request) => {
     return service.state(session(request).email);
   });
-
-  /**
-   * Что именно уйдёт наружу для конкретного письма — БЕЗ отправки.
-   * Нужен экрану согласия: обещания в общих словах — это туман,
-   * а здесь пользователь видит настоящий текст своего письма.
-   */
-  app.get<{ Params: { id: string } }>(
-    '/outbound/:id',
-    { preHandler: app.requireSession },
-    async (request) => {
-      const mail = session(request);
-      const availability = await service.availability(mail.email);
-      if (!availability.available || !availability.assistant) throw new AiDisabledError();
-      const message = await loadMessageForAi(app, mail, messageIdSchema.parse(request.params.id));
-      return availability.assistant.previewOutbound(message);
-    },
-  );
 
   /* --- согласие ---------------------------------------------------- */
 
@@ -473,85 +468,6 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
         finished = true;
         reply.raw.end();
       }
-      return reply;
-    },
-  );
-
-  /* --- потоковый черновик ответа ------------------------------------ */
-
-  /**
-   * Черновик ответа с потоковой выдачей (Server-Sent Events).
-   *
-   * Первое событие — `disclosure`: интерфейс покажет опись отправленного
-   * ещё до появления первой буквы ответа. Затем идут события `delta`
-   * с кусками текста, в конце — `done` или `error`.
-   *
-   * Метод POST, а не GET: тело письма и пожелание к ответу не должны
-   * попадать в адресную строку и журналы прокси.
-   */
-  app.post(
-    '/reply/stream',
-    { preHandler: app.requireSession, config: { rateLimit: { max: 20, timeWindow: 60_000 } } },
-    async (request, reply) => {
-      const mail = session(request);
-      const body = streamSchema.parse(request.body);
-      const { assistant } = await service.forFeature(mail.email, 'reply');
-      const message = await loadMessageForAi(app, mail, body.messageId);
-
-      reply.raw.writeHead(200, {
-        'content-type': 'text/event-stream; charset=utf-8',
-        'cache-control': 'no-cache, no-transform',
-        connection: 'keep-alive',
-        // Отключаем буферизацию nginx: иначе поток дойдёт одним куском.
-        'x-accel-buffering': 'no',
-      });
-
-      // Пользователь ушёл со страницы — прекращаем запрос к сервису ИИ,
-      // чтобы не платить за ответ, который никто не прочитает.
-      //
-      // Слушаем именно ОТВЕТ, а не запрос: у запроса с телом событие
-      // 'close' приходит сразу после вычитывания тела, и отмена сработала
-      // бы до первой буквы ответа. Закрытие ответа означает ровно то,
-      // что нужно: соединение с клиентом оборвалось.
-      const controller = new AbortController();
-      let finished = false;
-      reply.raw.on('close', () => {
-        if (!finished) controller.abort();
-      });
-
-      const send = (event: StreamEventLike): void => {
-        reply.raw.write(`data: ${JSON.stringify(publicStreamEvent(event))}\n\n`);
-      };
-
-      try {
-        for await (const event of assistant.streamReply(
-          message,
-          { accountId: mail.email, signal: controller.signal },
-          {
-            tone: body.tone,
-            ...(body.instruction === undefined ? {} : { instruction: body.instruction }),
-          },
-        )) {
-          send(event);
-        }
-      } catch (err) {
-        request.log.warn(errorInfo(err), 'Поток ответа ИИ оборвался');
-        send({
-          type: 'error',
-          error: {
-            kind: 'network',
-            message: 'Поток прервался',
-            retryable: true,
-            status: null,
-            details: null,
-          },
-        });
-      } finally {
-        finished = true;
-        reply.raw.end();
-      }
-      // Ответ отправлен вручную через reply.raw — сообщаем об этом Fastify,
-      // иначе он попытается отправить его ещё раз.
       return reply;
     },
   );

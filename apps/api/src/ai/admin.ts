@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { PROMPT_VERSIONS, isInsidePerimeter, type AiFeature } from '@mail-true/ai';
 import { BadRequestError, NotFoundError } from '../errors.js';
 import { audit, requireAdmin } from '../admin/guard.js';
+import { chatHistorySchema } from './chat-history.js';
 import { AI_FEATURES, AI_FEATURE_INFO, NEVER_SENT } from './features.js';
 import { publicStreamEvent } from './routes.js';
 import { keyHint } from './secret.js';
@@ -88,18 +89,13 @@ const TECHNICAL_FEATURES = Object.keys(PROMPT_VERSIONS) as [AiFeature, ...AiFeat
 /**
  * Разговор целиком: история живёт у клиента и приезжает с каждым
  * вопросом. Сервер её не хранит — закрытая вкладка стирает разговор.
+ *
+ * Схема общая с пользовательским чатом (ai/chat-history.ts): дефект,
+ * ломавший разговор насмерть длинным ответом помощника, был здесь ровно
+ * тот же, и чинить его в двух местах по-разному — значит однажды
+ * починить только в одном.
  */
-const chatSchema = z.object({
-  messages: z
-    .array(
-      z.object({
-        role: z.enum(['user', 'assistant']),
-        content: z.string().trim().min(1).max(4000),
-      }),
-    )
-    .min(1)
-    .max(20),
-});
+const chatSchema = chatHistorySchema;
 
 const auditQuerySchema = z.object({
   accountId: z.string().max(255).optional(),

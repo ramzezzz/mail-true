@@ -75,6 +75,8 @@ export interface MessageAiController {
   translation: string | null;
   translationLanguage: string;
   translationDisclosure: AiOutboundDisclosure | null;
+  /** Перевод взят из памяти — наружу в этот раз ничего не уходило. */
+  translationCached: boolean;
   translationError: string | null;
   translationShown: boolean;
   translate(): void;
@@ -225,6 +227,7 @@ export function useMessageAi({ messageId, threadIds }: MessageAiOptions): Messag
     translation: translate.data?.value.text ?? null,
     translationLanguage: translate.data?.value.detectedLanguage ?? '',
     translationDisclosure: translate.data?.disclosure ?? null,
+    translationCached: translate.data?.cached ?? false,
     translationError: translate.error ? aiErrorText(translate.error) : null,
     translationShown,
     translate: doTranslate,
@@ -565,7 +568,10 @@ export function AiTranslatedBody({ controller }: { controller: MessageAiControll
         </p>
       )}
       <div className={styles.translationOutbound}>
-        <OutboundDetails disclosure={controller.translationDisclosure} />
+        <OutboundDetails
+          disclosure={controller.translationDisclosure}
+          cached={controller.translationCached}
+        />
       </div>
       {/* Текст от модели выводим как текст: чужой HTML в письмо не вставляем */}
       <pre className={styles.translationBody}>{controller.translation}</pre>

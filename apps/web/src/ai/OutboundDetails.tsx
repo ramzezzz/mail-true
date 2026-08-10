@@ -26,12 +26,22 @@ export const OUTBOUND_CACHED_NOTE = 'Ответ сохранён ранее, н�
 const PREVIEW_CHARS = 220;
 
 export interface OutboundDetailsProps {
-  /** null — ответ из кэша: отправки не было, описывать нечего. */
+  /** null — описывать нечего: опись до нас не доехала. */
   disclosure: AiOutboundDisclosure | null;
+  /**
+   * Ответ взят из памяти — наружу в этот раз ничего не уходило.
+   *
+   * Раньше это выражалось отсутствием описи, и вместе с ней пропадало
+   * всё остальное: какие части письма в работу НЕ попали. Для перевода
+   * это дорого — он заменяет письмо на экране, и вырезанные куски
+   * исчезали из виду. Теперь опись приходит и на ответ из памяти, а
+   * «наружу ничего не уходило» говорится отдельной строкой.
+   */
+  cached?: boolean;
   className?: string | undefined;
 }
 
-export function OutboundDetails({ disclosure, className }: OutboundDetailsProps) {
+export function OutboundDetails({ disclosure, cached, className }: OutboundDetailsProps) {
   if (!disclosure) {
     return <div className={cx(styles.cached, className)}>{OUTBOUND_CACHED_NOTE}</div>;
   }
@@ -42,7 +52,7 @@ export function OutboundDetails({ disclosure, className }: OutboundDetailsProps)
         <span className={styles.summaryIcon}>
           <IconChevronDown size={12} />
         </span>
-        Что ушло наружу
+        {cached === true ? 'Что уходило наружу' : 'Что ушло наружу'}
         <span className={styles.summaryTotal}>
           {formatNumber(disclosure.totalChars)}{' '}
           {plural(disclosure.totalChars, ['символ', 'символа', 'символов'])}, примерно{' '}
@@ -52,6 +62,7 @@ export function OutboundDetails({ disclosure, className }: OutboundDetailsProps)
       </summary>
 
       <div className={styles.body}>
+        {cached === true && <p className={styles.cached}>{OUTBOUND_CACHED_NOTE}</p>}
         {/* Куда ушло */}
         {disclosure.local ? (
           <p className={styles.local}>

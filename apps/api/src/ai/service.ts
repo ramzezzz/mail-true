@@ -82,6 +82,17 @@ export interface AiFeatureState {
   title: string;
   description: string;
   sends: string;
+  /**
+   * Возможность есть на сервере, но кнопки в почте у неё пока нет.
+   *
+   * Признак жил в справочнике возможностей (features.ts) и доезжал до
+   * панели администратора, а до ПОЛЬЗОВАТЕЛЯ — нет: в состоянии
+   * помощника его просто не было. Ветка, которая его показывает, стояла
+   * в настройках почты мёртвым кодом, и человек, включивший «Раскладку
+   * по смыслу» или «Поиск обычными словами», не получал ничего и не
+   * понимал почему.
+   */
+  notInUi?: boolean;
   /** Разрешена администратором домена. */
   allowed: boolean;
   /** Включена самим пользователем. */
@@ -511,6 +522,7 @@ export class AiService {
         title: info.title,
         description: info.description,
         sends: info.sends,
+        ...(info.notInUi === true ? { notInUi: true } : {}),
         allowed: isAllowed,
         enabled: isAllowed && chosen.includes(key),
       };

@@ -26,7 +26,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@web/components';
 import { PageTitle } from '../app/AdminLayout';
 import { Notice, Panel } from '../components/ui';
-import { streamChat, type ChatTurn } from '../lib/chatStream';
+import {
+  streamChat,
+  trimHistoryForServer,
+  CHAT_TURN_MAX_CHARS,
+  type ChatTurn,
+} from '../lib/chatStream';
 import styles from './AiChatPage.module.css';
 
 interface Turn extends ChatTurn {
@@ -83,6 +88,16 @@ export function AiChatPage() {
   const ask = (question: string): void => {
     const text = question.trim();
     if (text === '' || busy) return;
+    // Разбор — тот же, что и в почте (apps/web ChatPanel): предел на
+    // сервере применяется ко всей истории, а история уезжает с каждым
+    // вопросом, поэтому одна длинная реплика ломает весь разговор.
+    if (text.length > CHAT_TURN_MAX_CHARS) {
+      setError(
+        `Вопрос длиннее ${String(CHAT_TURN_MAX_CHARS)} знаков — сократите его ` +
+          'или разбейте на несколько.',
+      );
+      return;
+    }
 
     const history: Turn[] = [...turns, { role: 'user', content: text }];
     setTurns([...history, { role: 'assistant', content: '', pending: true }]);
@@ -92,7 +107,9 @@ export function AiChatPage() {
 
     const stream = streamChat(
       '/api/admin/ai/chat/stream',
-      history.map((turn) => ({ role: turn.role, content: turn.content })),
+      // Длинные ответы помощника обрезаются перед отправкой; на экране
+      // они остаются целиком.
+      trimHistoryForServer(history.map((turn) => ({ role: turn.role, content: turn.content }))),
       {
         onDelta: (chunk) => {
           setTurns((previous) => {
@@ -177,6 +194,7 @@ export function AiChatPage() {
             rows={2}
             value={draft}
             placeholder="О чём спросить…"
+            maxLength={CHAT_TURN_MAX_CHARS}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               // Enter отправляет, Shift+Enter переносит строку.
