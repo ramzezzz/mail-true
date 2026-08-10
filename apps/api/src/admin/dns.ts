@@ -132,6 +132,23 @@ export interface DnsCheckOptions {
   dkimSelector?: string;
   /** Ожидаемый публичный ключ DKIM (base64 из rspamd). */
   dkimPublicKey?: string | null;
+  /**
+   * Откуда взят ожидаемый ключ DKIM.
+   *
+   * 'server' — прочитан у rspamd, то есть это ДЕЙСТВИТЕЛЬНО тот ключ,
+   * которым подписываются письма. 'stored' — взят из настроек домена,
+   * то есть из того, что кто-то вписал в панель.
+   *
+   * Различие не косметическое: совпадение с сохранённым значением
+   * НИЧЕГО не говорит о подписи. Самый быстрый способ их развести —
+   * восстановить копию настроек на другой установке: приватный ключ
+   * остаётся в томе rspamd, а публичный переезжает вместе с доменом.
+   * Раньше отказ посредника (в том числе «файла нет») глушился, сверка
+   * молча уходила к сохранённому значению и выдавала зелёное «совпадает
+   * с тем, которым подписывает сервер» — у домена, письма которого не
+   * подписываются ничем.
+   */
+  dkimKeySource?: 'server' | 'stored';
   /** Порт IMAPS для SRV-записи (993). */
   imapsPort?: number;
   /** Порт submission для SRV-записи (587). */
@@ -167,8 +184,24 @@ export const PUBLIC_RESOLVERS: readonly string[] = ['8.8.8.8', '9.9.9.9', '1.1.1
 export type DnsAnswer =
   /** Резольвер ответил записями. */
   | { kind: 'records'; values: string[]; via: string }
-  /** Резольвер ответил по существу: такого имени/типа нет. */
-  | { kind: 'absent'; via: string }
+  /**
+   * Резольвер ответил по существу: такого имени/типа нет.
+   *
+   * `nameExists` различает два РАЗНЫХ ответа, которые раньше слипались в
+   * один:
+   *   - NXDOMAIN — имени нет вовсе (зоны не существует либо в ней нет
+   *     такого узла);
+   *   - NODATA   — имя есть, а записей запрошенного типа у него нет.
+   *
+   * Для самой проверки записи разницы нет: и то и другое лечится у
+   * регистратора. А вот вывод «зона не делегирована» строится именно на
+   * ней: делегированная, но ещё пустая зона отвечает NODATA по апексу — и
+   * без различения объявлялась несуществующей. Тогда все пятнадцать
+   * проверок становились серыми, а вместо «добавьте MX 10 mail.<домен>»
+   * человек читал «проверить нечем» — на самом частом сценарии раздела:
+   * домен только что завели и открыли проверку, чтобы узнать, что писать.
+   */
+  | { kind: 'absent'; via: string; nameExists?: boolean }
   /** По существу не ответил никто — спросить не удалось. */
   | { kind: 'unreachable'; reason: string };
 
@@ -192,6 +225,16 @@ export function fqdn(name: string): string {
 function isDefiniteAbsence(err: unknown): boolean {
   const code = (err as { code?: string } | null)?.code;
   return code === 'ENOTFOUND' || code === 'ENODATA' || code === 'NXDOMAIN';
+}
+
+/**
+ * Существует ли САМО ИМЯ при ответе «записи нет».
+ *
+ * ENODATA — имя есть, записей запрошенного типа нет. Остальные коды
+ * отсутствия (ENOTFOUND, NXDOMAIN) означают, что имени нет.
+ */
+function nameExistsOnAbsence(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === 'ENODATA';
 }
 
 function describeFailure(err: unknown): string {
@@ -270,7 +313,9 @@ async function askOne(
     if (values.length === 0) return { kind: 'absent', via: server };
     return { kind: 'records', values, via: server };
   } catch (err) {
-    if (isDefiniteAbsence(err)) return { kind: 'absent', via: server };
+    if (isDefiniteAbsence(err)) {
+      return { kind: 'absent', via: server, nameExists: nameExistsOnAbsence(err) };
+    }
     return { kind: 'unreachable', reason: `${server}: ${describeFailure(err)}` };
   }
 }
@@ -464,6 +509,22 @@ export function spfAllowsHost(
      * встречается, когда MX домена указывает прямо на него.
      */
     if (m === `mx:${target}` || m === `mx:${domain}`) return 'yes';
+    /*
+     * ГОЛЫЙ «a» — ЭТО ТОЖЕ РАЗРЕШЕНИЕ.
+     *
+     * Механизм без аргумента разрешает отправку с адресов A-записи
+     * САМОГО домена. Запись «v=spf1 a -all» на домене, apex которого
+     * указывает на почтовый сервер, — рабочая и распространённая, а
+     * разбор её не знал: строка краснела как «настроено с ошибкой» с
+     * диффом «в записи нет ни mx, ни a:mail.example.ru». Тот же класс
+     * ошибки, что уже дважды чинили здесь же (квалификатор «+», «mx:»
+     * с доменом).
+     *
+     * Сверить адрес мы не можем — A-запись apex спрашивается отдельной
+     * проверкой, и она в этом же отчёте. Считаем разрешением: механизм
+     * ссылается на наш собственный домен, а не на чужой.
+     */
+    if (m === 'a' || m === `a:${domain}`) return 'yes';
     if (m === `a:${target}`) return 'yes';
     if (publicIpv4 && ip4MechanismCovers(m, publicIpv4)) return 'yes';
   }
@@ -1029,6 +1090,7 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
   {
     const dkimName = `${selector}._domainkey.${name}`;
     const expectedKey = options.dkimPublicKey ?? null;
+    const keyFromServer = options.dkimKeySource !== 'stored';
     const expected = expectedKey
       ? buildDkimRecord(expectedKey)
       : 'v=DKIM1; k=rsa; p=<публичный ключ из rspamd>';
@@ -1078,6 +1140,24 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
               };
             }
             if (dkimKeysMatch(parsed.key, expectedKey)) {
+              if (!keyFromServer) {
+                /*
+                 * Совпало с тем, что записано в панели, — и только.
+                 * Настоящий ключ лежит у rspamd, спросить его не вышло, а
+                 * значит про подпись мы не знаем ничего. Зелёное здесь
+                 * было бы обещанием, которого никто не давал.
+                 */
+                return {
+                  verdict: 'warn',
+                  diff: null,
+                  hint:
+                    'Опубликованный ключ совпадает с тем, что записан в панели. Но настоящий ' +
+                    'ключ лежит у rspamd, и прочитать его не удалось — значит сверка неполная: ' +
+                    'в панели может стоять чужой ключ (так бывает после восстановления копии ' +
+                    'настроек на другой установке). Нажмите «Прочитать с сервера» в разделе ' +
+                    '«Ключ DKIM».',
+                };
+              }
               return {
                 verdict: 'ok',
                 diff: null,
@@ -1092,7 +1172,11 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
               hint:
                 'Опубликован ЧУЖОЙ ключ — подписи не пройдут проверку. Так бывает, когда стек ' +
                 'переустановили: rspamd сгенерировал новый ключ, а в DNS остался старый. ' +
-                'Замените значение записи на строку из поля «Что должно быть».',
+                'Замените значение записи на строку из поля «Что должно быть».' +
+                (keyFromServer
+                  ? ''
+                  : ' Учтите: ожидаемый ключ взят из настроек панели — прочитать его у rspamd ' +
+                    'не удалось, так что расходиться могут и они, а не только DNS.'),
             };
           },
         },
@@ -1497,8 +1581,18 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
   const RESERVED_TLDS = ['local', 'localhost', 'test', 'example', 'invalid', 'internal', 'lan'];
   const tld = name.split('.').pop() ?? '';
   const reserved = RESERVED_TLDS.includes(tld);
+  /*
+   * «Ничего нет» — это когда нет и САМОГО ИМЕНИ домена.
+   *
+   * Апекс отвечает NODATA («имя есть, записей такого типа нет») ровно в
+   * одном случае: зона делегирована и существует, но в ней пока ничего не
+   * завели. Это не «домена нет в интернете», а «домен есть и ждёт
+   * записей» — то есть тот самый момент, ради которого раздел и открывают.
+   */
+  const apexNameExists = apexAnswer.kind === 'absent' && apexAnswer.nameExists === true;
   const nothingAtAll =
     answeredBy.length > 0 &&
+    !apexNameExists &&
     hostA.kind === 'absent' &&
     apexAnswer.kind === 'absent' &&
     mxAnswer.kind === 'absent' &&
@@ -1566,8 +1660,23 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
  * доменов после точечной проверки показывала бы «настроен один пункт из
  * пятнадцати». Итог пересчитывается по обновлённому набору.
  */
-export function mergeDnsCheck(previous: DnsReport | null, fresh: DnsReport): DnsReport {
-  if (!previous || previous.domain !== fresh.domain) return fresh;
+/**
+ * Сливает точечную перепроверку с прежним отчётом.
+ *
+ * `partial` — проверяли не все записи. Тогда прежнего отчёта нет (или он
+ * от другого домена) — и общей оценке взяться неоткуда: считать её по
+ * одной записи значит написать в таблице «все записи на месте» после
+ * перепроверки одного SPF. Отдаём `unknown`: это единственный статус,
+ * который панель показывает серым и не выдаёт за успех.
+ */
+export function mergeDnsCheck(
+  previous: DnsReport | null,
+  fresh: DnsReport,
+  partial = false,
+): DnsReport {
+  if (!previous || previous.domain !== fresh.domain) {
+    return partial ? { ...fresh, overall: 'unknown' } : fresh;
+  }
   const updated = new Map(fresh.checks.map((c) => [c.id, c] as const));
   const checks = previous.checks.map((c) => updated.get(c.id) ?? c);
   // Записи, которых в прежнем отчёте не было (набор проверок пополнился).

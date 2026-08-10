@@ -440,16 +440,38 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
      * Поэтому спрашиваем настоящий ключ у посредника. Он недоступен —
      * возвращаемся к значению из базы: проверка без сверки лучше, чем
      * отсутствие проверки, а расхождение поймается в следующий раз.
+     *
+     * НО ОБ ЭТОМ ГОВОРИМ ВСЛУХ. Раньше отказ посредника глушился
+     * `.catch(() => null)`, сверка тихо уходила к сохранённому значению
+     * и выдавала зелёное «совпадает с тем, которым подписывает сервер».
+     * А отказом отвечает и обычнейший случай: ключа для этого домена у
+     * rspamd просто нет (генерируется он только для основного домена).
+     * То есть у второго домена организации DKIM был зелёным всегда — при
+     * том что его письма не подписываются ничем.
      */
     const selector = row.dkim_selector ?? 'mail';
     let expectedDkim = row.dkim_public_key;
+    let dkimKeySource: 'server' | 'stored' = 'stored';
     const agent = ctx.serviceAgent;
-    if (agent) {
+    /*
+     * За ключом идём, только если проверяем DKIM.
+     *
+     * Чтение ключа — это `docker compose exec` в контейнер антиспама, и
+     * оно шло на КАЖДУЮ проверку, включая перепроверку одной записи SPF,
+     * которой ключ не нужен вовсе (`only` отсекает проверку уже после
+     * сбора данных). У точечных проверок предел 120 в минуту, и делают их
+     * подряд — то есть сотня заходов в rspamd ради ничего.
+     */
+    const needDkim = only === undefined || only.includes('dkim');
+    if (agent && needDkim) {
       const real = await agent
         .dkimRecord(row.name, selector)
         .then((record) => publicKeyOf(record))
         .catch(() => null);
-      if (real !== null && real !== '') expectedDkim = real;
+      if (real !== null && real !== '') {
+        expectedDkim = real;
+        dkimKeySource = 'server';
+      }
     }
 
     return checkDomainDns(row.name, {
@@ -457,6 +479,7 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
       publicIpv4: await settings.text('MAIL_PUBLIC_IPV4'),
       dkimSelector: selector,
       dkimPublicKey: expectedDkim,
+      dkimKeySource,
       imapsPort: ctx.config.IMAPS_PORT,
       submissionPort: ctx.config.SUBMISSION_PORT,
       pop3sPort: ctx.config.POP3S_PORT,
@@ -519,7 +542,8 @@ export async function adminDomainRoutes(app: FastifyInstance): Promise<void> {
 
       // Точечная проверка не должна стирать то, что известно про
       // остальные записи, — вклеиваем результат в прежний отчёт.
-      const merged = mergeDnsCheck((row.dns_status as DnsReport | null) ?? null, fresh);
+      // true — проверяли одну запись: общей оценке по ней взяться неоткуда.
+      const merged = mergeDnsCheck((row.dns_status as DnsReport | null) ?? null, fresh, true);
       await ctx.db.saveDnsStatus(id, merged, merged.overall);
       return { check, resolver: fresh.resolver, overall: merged.overall };
     },

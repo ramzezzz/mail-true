@@ -414,11 +414,20 @@ export function renewalHealthCheck(
   state: RenewalState,
   source: CertificateSource,
   now: number = Date.now(),
+  /**
+   * Срок ФАКТИЧЕСКОГО сертификата. Без него оценка своего сертификата
+   * проваливалась в безусловное «в порядке»: у него автопродления нет,
+   * и единственное, что о нём можно честно сказать, — успевает ли
+   * человек поставить новый. Раздел «Сертификат» это значение передавал,
+   * а «Наблюдение» — нет, и один и тот же истёкший сертификат был там
+   * красным, а тут зелёным.
+   */
+  daysLeft: number | null = null,
 ): { id: string; group: string; title: string } & RenewalVerdict {
   return {
     id: 'cert:renewal',
     group: 'Сертификаты',
     title: 'Автопродление сертификата',
-    ...gradeRenewal(state, source, now),
+    ...gradeRenewal(state, source, now, daysLeft),
   };
 }

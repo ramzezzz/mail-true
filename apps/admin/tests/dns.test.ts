@@ -21,6 +21,7 @@ import {
   answerStamp,
   answerTime,
   buildZoneText,
+  zoneTxtValue,
   copyHint,
   formatActual,
   groupChecks,
@@ -345,5 +346,39 @@ describe('запоздавший ответ проверки DNS', () => {
     expect(next?.report?.checks[0]?.verdict).toBe('ok');
     expect(next?.report?.checks[1]?.verdict, 'соседняя запись потеряла своё время').toBe('missing');
     expect(next?.report?.overall).toBe('warn');
+  });
+});
+
+describe('записи зоны годны для вставки как есть', () => {
+  it('TXT берётся в кавычки — иначе точка с запятой съедает половину записи', () => {
+    /*
+     * ЧТО БЫЛО. В файле зоны «;» начинает комментарий, а пробел разделяет
+     * значения. Без кавычек от DMARC оставалось «v=DMARC1» — запись без
+     * обязательного p=, то есть недействительная; от DKIM — «v=DKIM1»,
+     * ключ отрезан целиком; SPF «v=spf1 mx ~all» получатель склеивал в
+     * «v=spf1mx~all». Ломались ровно те три записи, ради которых раздел и
+     * существует, а MX и A рядом вставали правильно — и виноватым
+     * выглядел регистратор.
+     */
+    expect(zoneTxtValue('v=DMARC1; p=quarantine; rua=mailto:postmaster@example.ru')).toBe(
+      '"v=DMARC1; p=quarantine; rua=mailto:postmaster@example.ru"',
+    );
+    expect(zoneTxtValue('v=spf1 mx ~all')).toBe('"v=spf1 mx ~all"');
+  });
+
+  it('длинный ключ DKIM режется на куски по 255 байт', () => {
+    // Одна character-string в TXT не длиннее 255 байт (RFC 1035, §3.3.14),
+    // а публичный ключ длиннее. Несколько кусков подряд получатель
+    // склеивает сам — это и есть штатный способ записать длинный TXT.
+    const long = `v=DKIM1; k=rsa; p=${'A'.repeat(400)}`;
+    const value = zoneTxtValue(long);
+    const chunks = value.match(/"[^"]*"/gu) ?? [];
+    expect(chunks.length).toBe(2);
+    for (const chunk of chunks) expect(chunk.length - 2).toBeLessThanOrEqual(255);
+    expect(chunks.map((c) => c.slice(1, -1)).join('')).toBe(long);
+  });
+
+  it('кавычка внутри значения экранируется, а не рвёт строку', () => {
+    expect(zoneTxtValue('a"b')).toBe('"a\\"b"');
   });
 });

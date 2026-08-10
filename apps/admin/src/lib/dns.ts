@@ -227,6 +227,50 @@ export function copyHint(check: DnsCheck): string | null {
 }
 
 /**
+ * Значение TXT в виде, годном для файла зоны.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ КАВЫЧКИ ОБЯЗАТЕЛЬНЫ
+ * ------------------------------------------------------------------
+ * В файле зоны точка с запятой начинает КОММЕНТАРИЙ, а пробел разделяет
+ * значения. Без кавычек из наших записей оставалось вот что:
+ *
+ *   DMARC  «v=DMARC1; p=quarantine; rua=…»  →  «v=DMARC1»
+ *          то есть запись без обязательного p= — недействительная;
+ *   DKIM   «v=DKIM1; k=rsa; p=MIIBI…»       →  «v=DKIM1»
+ *          ключ отрезан целиком;
+ *   SPF    «v=spf1 mx ~all»                  →  три отдельных куска,
+ *          которые получатель склеивает в «v=spf1mx~all».
+ *
+ * Ломались ровно те три записи, ради которых раздел и существует, — а MX,
+ * A и CNAME рядом вставали правильно. «Половина заработала» выглядит как
+ * беда регистратора, и искать её будут не здесь.
+ *
+ * Длина одного куска TXT ограничена 255 БАЙТАМИ (RFC 1035, §3.3.14), а
+ * публичный ключ DKIM длиннее. Несколько кусков подряд получатель
+ * склеивает сам — это и есть штатный способ записать длинный TXT.
+ */
+export function zoneTxtValue(value: string): string {
+  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  const encoder = new TextEncoder();
+  const chunks: string[] = [];
+  let current = '';
+  let bytes = 0;
+  for (const char of escaped) {
+    const size = encoder.encode(char).length;
+    if (bytes + size > 255) {
+      chunks.push(current);
+      current = '';
+      bytes = 0;
+    }
+    current += char;
+    bytes += size;
+  }
+  chunks.push(current);
+  return chunks.map((chunk) => `"${chunk}"`).join(' ');
+}
+
+/**
  * Все записи одним куском — для тех, кто заполняет панель регистратора
  * подряд. Недоступные для копирования (PTR) и неизвестные значения
  * не попадают: строка должна быть годной для вставки как есть.
@@ -236,7 +280,8 @@ export function buildZoneText(report: DnsReport): string {
   for (const check of report.checks) {
     if (!check.copyable) continue;
     if (check.expected.startsWith('<')) continue;
-    lines.push(`${check.recordName}.\t3600\tIN\t${check.recordType}\t${check.expected}`);
+    const value = check.recordType === 'TXT' ? zoneTxtValue(check.expected) : check.expected;
+    lines.push(`${check.recordName}.\t3600\tIN\t${check.recordType}\t${value}`);
   }
   return lines.join('\n');
 }

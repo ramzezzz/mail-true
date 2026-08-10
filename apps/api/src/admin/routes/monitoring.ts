@@ -833,7 +833,25 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
       };
     });
 
-    certificateChecks.push(renewalHealthCheck(renewal, certSource));
+    /*
+     * Срок фактического сертификата передаётся оценке автопродления.
+     *
+     * Без него у СВОЕГО сертификата оценка проваливалась в безусловное
+     * «в порядке»: автопродления у него нет, и единственное, что о нём
+     * можно честно сказать, — успевает ли человек поставить новый. Тот
+     * же истёкший сертификат раздел «Сертификат» показывал красным, а
+     * «Наблюдение» — зелёным.
+     *
+     * Берём наименьший остаток из доступных проб: если хоть одна служба
+     * отдаёт просроченный сертификат, «в порядке» — неправда.
+     */
+    const daysLeftNow = certificates
+      .filter((cert) => cert.available && cert.daysLeft !== null)
+      .reduce<number | null>(
+        (least, cert) => (least === null ? cert.daysLeft : Math.min(least, cert.daysLeft ?? least)),
+        null,
+      );
+    certificateChecks.push(renewalHealthCheck(renewal, certSource, Date.now(), daysLeftNow));
 
     const dnsChecks: HealthCheck[] = domains.map((domain) => {
       const overall = domain.dns_overall ?? 'unknown';

@@ -168,6 +168,20 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     const dnsNeverChecked = domains
       .filter((d) => d.dns_checked_at === null)
       .map((d) => ({ id: d.id, name: d.name }));
+    /*
+     * «НЕИЗВЕСТНО» — НЕ «В ПОРЯДКЕ».
+     *
+     * Проверка была (dns_checked_at заполнен), но ответа не получила:
+     * сервер не выпускают на 53/udp, резольверы молчат, зона ещё пуста.
+     * Такой домен не попадал ни в проблемы, ни в «ни разу не проверяли»,
+     * и баннер писал «Всё в порядке: замечаний нет» — про домен, о
+     * котором не известно ничего. Раздел «Наблюдение» в той же ситуации
+     * честно показывает серую строку, а в этом же файле тот же довод
+     * применён к redis двадцатью строками ниже.
+     */
+    const dnsUnknown = domains
+      .filter((d) => d.dns_checked_at !== null && (d.dns_overall ?? 'unknown') === 'unknown')
+      .map((d) => ({ id: d.id, name: d.name }));
 
     const audit = await ctx.db
       .listAudit({ limit: 10, offset: 0 })
@@ -183,6 +197,12 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     if (dnsNeverChecked.length > 0) {
       problems.push(
         `DNS ни разу не проверялся у доменов: ${dnsNeverChecked.map((d) => d.name).join(', ')}`,
+      );
+    }
+    if (dnsUnknown.length > 0) {
+      problems.push(
+        `DNS проверить не удалось у доменов: ${dnsUnknown.map((d) => d.name).join(', ')} ` +
+          '— записи могут быть не настроены, а могут просто не отвечать резольверы',
       );
     }
     if (counters.admins <= 1) {
