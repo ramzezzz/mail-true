@@ -11,6 +11,8 @@ import type {
   AiTestResult,
   Alias,
   AliasPage,
+  AdminAccount,
+  AdminRole,
   AdminSession,
   AuditPage,
   BackupPreviewResponse,
@@ -247,6 +249,18 @@ export const api = {
   overviewMailboxes: (limit?: number) =>
     get<OverviewMailboxes>(`/overview/mailboxes${query({ limit })}`),
   overviewSecurity: () => get<OverviewSecurity>('/overview/security'),
+
+  /* --- администраторы панели --- */
+  admins: () => get<{ items: AdminAccount[] }>('/admins'),
+  createAdmin: (body: { login: string; password: string; role: AdminRole; displayName?: string }) =>
+    post<AdminAccount>('/admins', body),
+  updateAdmin: (id: number, body: { role?: AdminRole; active?: boolean }) =>
+    patch<AdminAccount>(`/admins/${String(id)}`, body),
+  setAdminPassword: (id: number, password: string) =>
+    post<{ ok: true; closedSessions: number | null; sessionsProblem: string | null }>(
+      `/admins/${String(id)}/password`,
+      { password },
+    ),
 
   /* --- пользователи --- */
   users: (params: {

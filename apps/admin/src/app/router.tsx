@@ -29,6 +29,7 @@ import { DomainChangePage } from '../pages/DomainChangePage';
 import { SpamPage } from '../pages/SpamPage';
 import { MonitoringPage } from '../pages/MonitoringPage';
 import { ServerSettingsPage } from '../pages/ServerSettingsPage';
+import { AdminsPage } from '../pages/AdminsPage';
 import { TlsPage } from '../pages/TlsPage';
 
 const router = createBrowserRouter([
@@ -68,6 +69,8 @@ const router = createBrowserRouter([
       { path: 'monitoring', element: <MonitoringPage /> },
       // Настройки сервера: то, что раньше правили в infra/.env руками
       { path: 'server-settings', element: <ServerSettingsPage /> },
+      // Администраторы панели: роли, включение-выключение, смена пароля
+      { path: 'admins', element: <AdminsPage /> },
       // Сертификат: какой TLS стоит сейчас и замена его на свой
       { path: 'tls', element: <TlsPage /> },
       { path: '*', element: <Navigate to="/" replace /> },

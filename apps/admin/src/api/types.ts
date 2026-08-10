@@ -2132,3 +2132,23 @@ export interface UpdateStatus {
   /** Вывод как есть — его читают, когда обновление не задалось. */
   log: string;
 }
+
+/**
+ * Учётная запись администратора панели (`GET /admins`).
+ *
+ * Раньше этот список никем не запрашивался: управление администраторами
+ * жило только в консоли (admin/cli.ts), то есть отключить уволенного
+ * можно было лишь с доступом к серверу.
+ */
+export interface AdminAccount {
+  id: number;
+  login: string;
+  displayName: string | null;
+  role: AdminRole;
+  roleLabel: string;
+  active: boolean;
+  lastLoginAt: string | null;
+  lastLoginIp: string | null;
+  lockedUntil: string | null;
+  createdAt: string;
+}

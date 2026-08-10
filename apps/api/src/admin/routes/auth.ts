@@ -5,12 +5,20 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { newSessionId } from '../../crypto.js';
-import { AuthFailedError, UnauthorizedError } from '../../errors.js';
-import { auditAnonymous, loadAdminSession, originOf, requireAdmin } from '../guard.js';
-import { LockedError } from '../errors.js';
-import { verifyAdminPassword } from '../passwords.js';
+import {
+  BadRequestError,
+  AuthFailedError,
+  NotFoundError,
+  UnauthorizedError,
+} from '../../errors.js';
+import { audit, auditAnonymous, loadAdminSession, originOf, requireAdmin } from '../guard.js';
+import { ConflictError, LockedError } from '../errors.js';
+import { hashAdminPassword, verifyAdminPassword } from '../passwords.js';
 import { permissionsOf, ROLE_LABELS, isAdminRole } from '../permissions.js';
 import { settingsOf } from '../server-settings.js';
+import { changeAdminPassword } from '../admin-password.js';
+import type { AdminUserRow } from '../db.js';
+import { pathId } from '../../params.js';
 import { closeMailboxSession, MAILBOX_COOKIE } from './mailbox.js';
 
 const loginSchema = z.object({
@@ -362,4 +370,200 @@ export async function adminAuthRoutes(app: FastifyInstance): Promise<void> {
       })),
     };
   });
+
+  /* ---------------------------------------------------------------- */
+  /* Управление администраторами                                        */
+  /* ---------------------------------------------------------------- */
+  /*
+   * ЗАЧЕМ ЭТИ ТРИ МАРШРУТА.
+   *
+   * Право `admins.manage` было, список на чтение был, а завести второго
+   * администратора, сменить ему роль, сбросить пароль или ОТКЛЮЧИТЬ
+   * учётную запись уволенного можно было только из консоли: ssh, docker
+   * exec, admin/cli.ts. То есть самое срочное действие после увольнения
+   * или утечки пароля требовало доступа к серверу — а он есть не у того,
+   * кто первым узнаёт об увольнении.
+   *
+   * Мгновенность обеспечена и без нас: guard перечитывает `active` и роль
+   * из базы на каждом запросе, поэтому выключенная учётная запись теряет
+   * доступ сразу, не дожидаясь истечения cookie.
+   */
+
+  // Имя своё, а не loginSchema: так называется схема формы входа выше.
+  const adminLoginSchema = z
+    .string()
+    .trim()
+    .toLowerCase()
+    .min(3)
+    .max(64)
+    .regex(/^[a-z0-9._-]+$/u, 'Логин: латиница, цифры, точка, дефис и подчёркивание');
+  const roleSchema = z.enum(['owner', 'user_manager', 'readonly']);
+  const passwordSchema = z.string().min(12).max(200);
+
+  const createAdminSchema = z.object({
+    login: adminLoginSchema,
+    password: passwordSchema,
+    role: roleSchema,
+    displayName: z.string().trim().max(128).optional(),
+  });
+  const patchAdminSchema = z.object({
+    role: roleSchema.optional(),
+    active: z.boolean().optional(),
+  });
+  const adminPasswordSchema = z.object({ password: passwordSchema });
+
+  const adminDto = (r: AdminUserRow): Record<string, unknown> => ({
+    id: r.id,
+    login: r.login,
+    displayName: r.display_name,
+    role: r.role,
+    roleLabel: isAdminRole(r.role) ? ROLE_LABELS[r.role] : r.role,
+    active: r.active,
+    lastLoginAt: r.last_login_at?.toISOString() ?? null,
+    lastLoginIp: r.last_login_ip,
+    lockedUntil: r.locked_until?.toISOString() ?? null,
+    createdAt: r.created_at.toISOString(),
+  });
+
+  /**
+   * Сколько ДЕЙСТВУЮЩИХ владельцев останется, если применить правку.
+   *
+   * Владелец — единственная роль, которая управляет владельцами. Оставить
+   * сервер без единого действующего владельца значит запереть панель:
+   * вернуть доступ можно будет только из консоли, а ровно от неё эти
+   * маршруты и избавляют.
+   */
+  async function ownersAfter(change: {
+    id: number;
+    role?: string | undefined;
+    active?: boolean | undefined;
+  }): Promise<number> {
+    const rows = await ctx.db.listAdmins();
+    return rows.filter((r) => {
+      const role = r.id === change.id ? (change.role ?? r.role) : r.role;
+      const active = r.id === change.id ? (change.active ?? r.active) : r.active;
+      return role === 'owner' && active;
+    }).length;
+  }
+
+  app.post('/admins', { preHandler: requireAdmin(app, 'admins.manage') }, async (request) => {
+    const body = createAdminSchema.parse(request.body);
+    const exists = await ctx.db.findAdminByLogin(body.login);
+    if (exists) throw new ConflictError(`Администратор «${body.login}» уже есть`);
+
+    const created = await ctx.db.createAdmin(
+      body.login,
+      hashAdminPassword(body.password),
+      body.role,
+      body.displayName?.trim() ? body.displayName.trim() : null,
+    );
+    await audit(ctx, request, {
+      action: 'admins.create',
+      targetType: 'admin',
+      targetId: created.id,
+      targetLabel: created.login,
+      after: { login: created.login, role: created.role, active: created.active },
+    });
+    return adminDto(created);
+  });
+
+  app.patch<{ Params: { id: string } }>(
+    '/admins/:id',
+    { preHandler: requireAdmin(app, 'admins.manage') },
+    async (request) => {
+      const id = pathId(request.params.id, 'администратора');
+      const body = patchAdminSchema.parse(request.body);
+      const rows = await ctx.db.listAdmins();
+      const row = rows.find((r) => r.id === id);
+      if (!row) throw new NotFoundError('Администратор не найден');
+
+      const me = await loadAdminSession(app, request);
+      /*
+       * Себя нельзя ни выключить, ни понизить — и это не забота о
+       * начальстве, а защита от запертой панели: снявший с себя права
+       * потеряет доступ на следующем же запросе (guard читает роль из
+       * базы каждый раз), а вернуть их будет некому.
+       */
+      if (me && me.adminId === id) {
+        if (body.active === false) throw new BadRequestError('Себя выключить нельзя');
+        if (body.role !== undefined && body.role !== row.role) {
+          throw new BadRequestError('Свою роль сменить нельзя — попросите другого владельца');
+        }
+      }
+      if ((await ownersAfter({ id, role: body.role, active: body.active })) === 0) {
+        throw new BadRequestError(
+          'Это последний действующий владелец. Сначала назначьте другого: иначе панель ' +
+            'останется без управления, и вернуть доступ можно будет только из консоли.',
+        );
+      }
+
+      const updated = await ctx.db.updateAdmin(id, {
+        ...(body.role !== undefined ? { role: body.role } : {}),
+        ...(body.active !== undefined ? { active: body.active } : {}),
+      });
+      if (!updated) throw new NotFoundError('Администратор не найден');
+
+      /*
+       * Выключенного выкидываем немедленно. Guard и так проверяет `active`
+       * на каждом запросе, но закрыть сессию честнее: в списке сессий её
+       * после этого нет, и рассуждать «а вдруг где-то кэш» не приходится.
+       */
+      let closedSessions: number | null = null;
+      if (body.active === false) {
+        closedSessions = await ctx.sessions.revokeByAdminId(id).catch(() => null);
+      }
+
+      await audit(ctx, request, {
+        action: 'admins.update',
+        targetType: 'admin',
+        targetId: id,
+        targetLabel: row.login,
+        before: { role: row.role, active: row.active },
+        after: { role: updated.role, active: updated.active, closed_sessions: closedSessions },
+      });
+      return adminDto(updated);
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admins/:id/password',
+    { preHandler: requireAdmin(app, 'admins.manage') },
+    async (request) => {
+      const id = pathId(request.params.id, 'администратора');
+      const { password } = adminPasswordSchema.parse(request.body);
+      const rows = await ctx.db.listAdmins();
+      const row = rows.find((r) => r.id === id);
+      if (!row) throw new NotFoundError('Администратор не найден');
+
+      /*
+       * Пароль меняется тем же путём, что и из консоли: та же функция,
+       * тот же сброс счётчика неудач и та же немедленная отмена всех
+       * сессий этой учётной записи. Иначе панель и консоль делали бы вид,
+       * что делают одно и то же, а панель оставляла бы действующей
+       * украденную сессию.
+       */
+      const result = await changeAdminPassword(
+        { db: ctx.db, sessions: ctx.sessions },
+        row.login,
+        password,
+      );
+      if (!result) throw new NotFoundError('Администратор не найден');
+
+      await audit(ctx, request, {
+        action: 'admins.password',
+        targetType: 'admin',
+        targetId: id,
+        targetLabel: row.login,
+        after: {
+          closed_sessions: result.closedSessions,
+          sessions_problem: result.sessionsProblem,
+        },
+      });
+      return {
+        ok: true,
+        closedSessions: result.closedSessions,
+        sessionsProblem: result.sessionsProblem,
+      };
+    },
+  );
 }

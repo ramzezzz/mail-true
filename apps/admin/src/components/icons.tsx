@@ -38,6 +38,9 @@ function stroke(paths: readonly string[], { size = 16 }: IconProps = {}): ReactE
   );
 }
 
+/** Карточка ящика: что в нём и сколько занято. */
+export const IconCard = (p: IconProps = {}) => stroke(['M3 6h18v12H3z', 'M3 10h18', 'M7 14h5'], p);
+
 /** Шестерёнка — настройки ящика. */
 export const IconSettings = (p: IconProps = {}) =>
   stroke(

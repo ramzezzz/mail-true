@@ -344,6 +344,42 @@ export class AdminDb {
     return row;
   }
 
+  /**
+   * Меняет роль и/или признак «действует» у администратора.
+   *
+   * Пароль сюда не входит намеренно: у него свой путь
+   * (admin-password.ts), который вдобавок закрывает все сессии этой
+   * учётной записи. Если бы пароль менялся здесь, второе действие рано
+   * или поздно забыли бы — и смена пароля перестала бы выгонять того, у
+   * кого украли cookie.
+   */
+  async updateAdmin(
+    id: number,
+    patch: { role?: string; active?: boolean },
+  ): Promise<AdminUserRow | null> {
+    const sets: string[] = [];
+    const values: unknown[] = [id];
+    if (patch.role !== undefined) {
+      values.push(patch.role);
+      sets.push(`role = $${String(values.length)}`);
+    }
+    if (patch.active !== undefined) {
+      values.push(patch.active);
+      sets.push(`active = $${String(values.length)}`);
+    }
+    if (sets.length === 0) {
+      const rows = await this.listAdmins();
+      return rows.find((r) => r.id === id) ?? null;
+    }
+    return this.one<AdminUserRow>(
+      `UPDATE admin_users SET ${sets.join(', ')}, updated_at = now()
+        WHERE id = $1
+       RETURNING id, login, password_hash, display_name, role, totp_enabled, active,
+                 last_login_at, last_login_ip, failed_attempts, locked_until, created_at`,
+      values,
+    );
+  }
+
   async markAdminLoginSuccess(id: number, ip: string | null): Promise<void> {
     await this.query(
       `UPDATE admin_users

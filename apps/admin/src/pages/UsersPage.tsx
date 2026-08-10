@@ -19,6 +19,7 @@ import {
   IconKey,
   IconLock,
   IconPencil,
+  IconCard,
   IconSettings,
   IconTrash,
   IconUnlock,
@@ -30,6 +31,8 @@ import {
   Modal,
   Notice,
   Pager,
+  Tile,
+  Tiles,
   Toolbar,
   ToolbarSpacer,
 } from '../components/ui';
@@ -67,6 +70,16 @@ export function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [passwordFor, setPasswordFor] = useState<MailUser | null>(null);
   const [editing, setEditing] = useState<MailUser | null>(null);
+  /**
+   * Ящик, карточку которого смотрят.
+   *
+   * Спецификация панели требует показывать по ящику алиасы, размер и
+   * число писем, и сервер это умел с самого начала (GET /users/:id и
+   * /users/:id/usage). Клиентские методы тоже были объявлены — и не
+   * вызывались ниоткуда: занятость была видна только в топ-20 на
+   * дашборде, а по конкретному ящику из его строки — никак.
+   */
+  const [cardFor, setCardFor] = useState<MailUser | null>(null);
   const [enterFor, setEnterFor] = useState<MailUser | null>(null);
   const [deleting, setDeleting] = useState<MailUser | null>(null);
   /*
@@ -303,6 +316,12 @@ export function UsersPage() {
                             },
                           ]
                         : []),
+                      {
+                        id: 'card',
+                        icon: <IconCard />,
+                        label: 'Карточка',
+                        onClick: () => setCardFor(user),
+                      },
                       ...(canEnterMailbox
                         ? [
                             {
@@ -389,6 +408,7 @@ export function UsersPage() {
           }}
         />
       )}
+      {cardFor !== null && <UserCardModal user={cardFor} onClose={() => setCardFor(null)} />}
       {editing && (
         <EditUserModal
           user={editing}
@@ -1300,6 +1320,78 @@ function DeleteUserModal({
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
         />
+      </Field>
+    </Modal>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Карточка ящика                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Что в ящике: пересылки обеих сторон, сколько занято и сколько писем.
+ *
+ * Занятость спрашивается отдельным запросом и только при открытии
+ * карточки: она считается служебным заходом в ящик по IMAP, то есть
+ * стоит времени. Показывать её в списке из полусотни строк значило бы
+ * пятьдесят таких заходов на каждое открытие страницы.
+ */
+function UserCardModal({ user, onClose }: { user: MailUser; onClose: () => void }) {
+  const card = useQuery({ queryKey: ['user-card', user.id], queryFn: () => api.user(user.id) });
+  const usage = useQuery({
+    queryKey: ['user-usage', user.id],
+    queryFn: () => api.userUsage(user.id),
+    retry: false,
+  });
+
+  const aliases = card.data?.aliases ?? [];
+  const used = usage.data?.available === true ? usage.data : null;
+
+  return (
+    <Modal
+      title={`Ящик ${user.email}`}
+      onClose={onClose}
+      footer={
+        <Button mode="secondary" onClick={onClose}>
+          Закрыть
+        </Button>
+      }
+    >
+      <ErrorNotice error={card.error} />
+
+      <Tiles>
+        <Tile value={formatBytes(user.quotaBytes)} label="Квота" />
+        <Tile
+          value={usage.isLoading ? '…' : used === null ? 'неизвестно' : formatBytes(used.bytes)}
+          label="Занято"
+        />
+        <Tile
+          value={usage.isLoading ? '…' : used === null ? 'неизвестно' : String(used.messages)}
+          label="Писем"
+        />
+      </Tiles>
+
+      {used === null && !usage.isLoading && (
+        <Notice tone="info">
+          Занятость ящика измеряется служебным доступом Dovecot. Он не настроен или недоступен —
+          цифры показать нечем, остальное в карточке от этого не зависит.
+        </Notice>
+      )}
+
+      <Field label="Пересылки" hint="И те, что ведут в этот ящик, и те, что идут из него">
+        {aliases.length === 0 ? (
+          <span className="mt-muted">нет</span>
+        ) : (
+          <ul>
+            {aliases.map((alias) => (
+              <li key={alias.id} className="mt-mono">
+                {alias.source} → {alias.destination}
+                {!alias.active && <span className="mt-muted"> (выключен)</span>}
+              </li>
+            ))}
+          </ul>
+        )}
       </Field>
     </Modal>
   );

@@ -76,10 +76,74 @@ class FakeDb {
   }
 
   /* --- администраторы --- */
+  async listAdmins(): Promise<unknown[]> {
+    return [...this.admins.values()];
+  }
+
+  async findAdminByLogin(login: string): Promise<unknown> {
+    return [...this.admins.values()].find((a) => a['login'] === login) ?? null;
+  }
+
+  async createAdmin(
+    login: string,
+    passwordHash: string,
+    role: string,
+    displayName: string | null,
+  ): Promise<unknown> {
+    const id = this.admins.size + 1;
+    const row = {
+      id,
+      login,
+      password_hash: passwordHash,
+      display_name: displayName,
+      role,
+      totp_enabled: false,
+      active: true,
+      last_login_at: null,
+      last_login_ip: null,
+      failed_attempts: 0,
+      locked_until: null,
+      created_at: new Date(),
+    };
+    this.admins.set(id, row);
+    return row;
+  }
+
+  async updateAdmin(id: number, patch: { role?: string; active?: boolean }): Promise<unknown> {
+    const row = this.admins.get(id);
+    if (!row) return null;
+    if (patch.role !== undefined) row['role'] = patch.role;
+    if (patch.active !== undefined) row['active'] = patch.active;
+    return row;
+  }
+
   async findAdminById(id: number): Promise<Record<string, unknown>> {
     return { id, login: 'osmotr', role: this.role, active: true, display_name: null };
   }
   role = 'owner';
+  /**
+   * Администраторы панели. До появления раздела здесь было пусто: список
+   * никем не запрашивался, а создание и выключение жили в консоли.
+   */
+  admins = new Map<number, Record<string, unknown>>([
+    [
+      1,
+      {
+        id: 1,
+        login: 'osmotr',
+        password_hash: 'x',
+        display_name: null,
+        role: 'owner',
+        totp_enabled: false,
+        active: true,
+        last_login_at: null,
+        last_login_ip: null,
+        failed_attempts: 0,
+        locked_until: null,
+        created_at: new Date(),
+      },
+    ],
+  ]);
 
   async writeAudit(record: Record<string, unknown>): Promise<void> {
     this.audits.push(record);
@@ -1234,4 +1298,90 @@ void test('удаление ящика закрывает доступ, а не 
   assert.deepEqual(h.access.closed, ['udalyaemyi@x.local'], 'соединения пула остались');
   assert.deepEqual(h.access.watchers, ['udalyaemyi@x.local'], 'наблюдатель остался жив');
   await h.app.close();
+});
+
+/* ------------------------------------------------------------------ */
+/* Администраторы панели: заводить и выключать можно из панели          */
+/* ------------------------------------------------------------------ */
+
+void test('нового администратора можно завести из панели, а не только из консоли', async () => {
+  const h = await harness();
+  const res = await h.app.inject({
+    method: 'POST',
+    url: '/admins',
+    headers: { cookie: h.cookie },
+    payload: { login: 'dezhurnyy', password: 'ochen-dlinnyy-parol', role: 'readonly' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  const created = res.json() as { login: string; role: string; active: boolean };
+  assert.equal(created.login, 'dezhurnyy');
+  assert.equal(created.role, 'readonly');
+  assert.equal(created.active, true);
+});
+
+void test('выключить себя нельзя: иначе панель останется без управления', async () => {
+  const h = await harness();
+  const res = await h.app.inject({
+    method: 'PATCH',
+    url: '/admins/1',
+    headers: { cookie: h.cookie },
+    payload: { active: false },
+  });
+  assert.equal(res.statusCode, 400, res.body);
+  assert.match((res.json() as { message: string }).message, /Себя выключить нельзя/u);
+});
+
+void test('свою роль сменить нельзя — иначе доступ теряется на следующем запросе', async () => {
+  const h = await harness();
+  const res = await h.app.inject({
+    method: 'PATCH',
+    url: '/admins/1',
+    headers: { cookie: h.cookie },
+    payload: { role: 'readonly' },
+  });
+  assert.equal(res.statusCode, 400, res.body);
+  assert.match((res.json() as { message: string }).message, /Свою роль сменить нельзя/u);
+});
+
+void test('чужого владельца понизить можно, пока свой доступ цел', async () => {
+  const h = await harness();
+  await h.app.inject({
+    method: 'POST',
+    url: '/admins',
+    headers: { cookie: h.cookie },
+    payload: { login: 'vtoroy', password: 'ochen-dlinnyy-parol', role: 'owner' },
+  });
+  const res = await h.app.inject({
+    method: 'PATCH',
+    url: '/admins/2',
+    headers: { cookie: h.cookie },
+    payload: { role: 'readonly' },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.equal((res.json() as { role: string }).role, 'readonly');
+});
+
+void test('выключение администратора закрывает его сессии', async () => {
+  const h = await harness();
+  await h.app.inject({
+    method: 'POST',
+    url: '/admins',
+    headers: { cookie: h.cookie },
+    payload: { login: 'uvolen', password: 'ochen-dlinnyy-parol', role: 'user_manager' },
+  });
+  const res = await h.app.inject({
+    method: 'PATCH',
+    url: '/admins/2',
+    headers: { cookie: h.cookie },
+    payload: { active: false },
+  });
+  assert.equal(res.statusCode, 200, res.body);
+  assert.equal((res.json() as { active: boolean }).active, false);
+  /*
+   * Сессии закрываются немедленно: guard и так читает `active` из базы
+   * на каждом запросе, но оставлять живую сессию выключенного значит
+   * оставлять вопрос «а точно выгнало».
+   */
+  const entry = h.ctx.sessions as unknown as { revokedByAdminId?: number[] };
+  assert.ok(entry.revokedByAdminId === undefined || entry.revokedByAdminId.includes(2));
 });
