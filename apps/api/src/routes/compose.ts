@@ -28,7 +28,6 @@ import {
 import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
 import { findFolderById, MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import { parseDraftSource, type DraftAttachmentPart } from '../mail/draft-read.js';
-import { cidToPartMap } from '../mail/structure.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
 import {
   checkSendAt,
@@ -55,6 +54,7 @@ import {
   inlineQuotedImages,
   type InlineImageSource,
 } from '../mail/inline-images.js';
+import { inlineDataImages } from '../mail/inline-data.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import { ENCODING_OVERHEAD } from '../config.js';
@@ -280,6 +280,38 @@ async function composeRaw(
         },
       );
     }
+  }
+
+  /*
+   * ВШИТЫЕ В ТЕЛО КАРТИНКИ (`data:`) — ТОЖЕ ВО ВЛОЖЕНИЯ.
+   *
+   * Их два источника, и оба житейские: снимок экрана, вставленный в
+   * письмо из буфера, и картинка открытого на дописывание черновика
+   * (mail/draft-read.ts отдаёт её именно так — иначе она пропадала при
+   * втором же автосохранении). Отправить `data:` наружу нельзя: Outlook
+   * и Gmail такие картинки в письмах не показывают, то есть получатель
+   * увидит пустое место.
+   *
+   * Идёт это ДО санитайзера и до подсчёта суммы — по тем же двум
+   * причинам, что и перенос картинок цитаты выше.
+   */
+  const dataImages = inlineDataImages(
+    bodyHtml,
+    Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+  );
+  bodyHtml = dataImages.html;
+  attachedBytes += dataImages.bytes;
+  for (const item of dataImages.attachments) attachments.push(item);
+  if (dataImages.skipped > 0 && settings?.inlineBestEffort !== true) {
+    throw new MessageTooLargeError(
+      `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+        `вставленных картинок не поместилось — ${String(dataImages.skipped)}. ` +
+        'Уберите часть картинок или отправьте их вложениями.',
+      {
+        limitBytes: messageMaxBytes,
+        projectedBytes: Math.round(attachedBytes * ENCODING_OVERHEAD),
+      },
+    );
   }
 
   /*
@@ -1828,31 +1860,17 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     if (!session) throw new UnauthorizedError();
     const { uid } = z.object({ uid: z.coerce.number().int().positive() }).parse(request.params);
 
-    /*
-     * Строение письма берётся вместе с исходником, одним заходом.
-     *
-     * Оно нужно ради встроенных картинок: в теле черновика они стоят
-     * ссылками `cid:`, а показать их можно только по номеру части
-     * (`/api/messages/drafts:<uid>/parts/<часть>`). Соответствие «cid ->
-     * номер части» живёт в BODYSTRUCTURE и больше нигде: разбор самих
-     * байтов номеров частей не знает. Разбор — в DraftReadOptions.
-     */
-    const found = await pool.withClient(session.email, session.password, async (client) => {
+    const source = await pool.withClient(session.email, session.password, async (client) => {
       const folder = await requireDraftsFolder(client);
       const lock = await client.getMailboxLock(folder.path);
       try {
-        const msg = await client.fetchOne(
-          String(uid),
-          { uid: true, source: true, bodyStructure: true },
-          { uid: true },
-        );
-        return msg && msg.source ? { source: msg.source, structure: msg.bodyStructure } : null;
+        const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
+        return msg && msg.source ? msg.source : null;
       } finally {
         lock.release();
       }
     });
-    if (!found) throw new NotFoundError('Черновик не найден');
-    const source = found.source;
+    if (!source) throw new NotFoundError('Черновик не найден');
 
     /**
      * Черновик, вернувшийся из очереди отправки, несёт причину заголовком
@@ -1860,16 +1878,7 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      * человек, открывший такой черновик, не должен гадать, откуда взялось
      * письмо, которого он не сохранял, и почему оно не ушло.
      */
-    const cidMap = cidToPartMap(found.structure);
-    const parsed = await parseDraftSource(source, {
-      resolveCid: (cid) => {
-        const part = cidMap.get(cid);
-        return part
-          ? `/api/messages/${encodeURIComponent(`drafts:${String(uid)}`)}/parts/` +
-              encodeURIComponent(part)
-          : null;
-      },
-    });
+    const parsed = await parseDraftSource(source);
     const sendFailure = readFailureFromRaw(source);
     const attachments = await draftAttachments(session, uid, parsed.attachments);
 

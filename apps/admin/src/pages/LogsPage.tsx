@@ -205,7 +205,13 @@ export function LogsPage() {
   /** Прилипание читается из ссылки: обработчик опроса не пересоздаётся. */
   const pinnedRef = useRef(true);
   /** Что нужно сделать с прокруткой после отрисовки. */
-  const scrollPlan = useRef<{ kind: 'bottom' } | { kind: 'keep'; height: number } | null>(null);
+  const scrollPlan = useRef<
+    | { kind: 'bottom' }
+    | { kind: 'keep'; height: number }
+    /** Держим взгляд на конкретной строке: её смещение в файле и место в ленте. */
+    | { kind: 'anchor'; offset: number; top: number }
+    | null
+  >(null);
 
   const sources = useQuery({ queryKey: ['log-sources'], queryFn: () => api.logSources() });
 
@@ -268,12 +274,27 @@ export function LogsPage() {
       // Положение видимых строк обязано остаться прежним: иначе текст
       // уезжает из-под глаз ровно в тот момент, когда его читают.
       scrollPlan.current = { kind: 'keep', height: list.scrollHeight };
-      setLoaded((prev) => ({
-        ...prev,
-        lines: [...[...page.items].reverse(), ...prev.lines],
-        olderBefore: page.nextBefore,
-        budgetExhausted: page.budgetExhausted,
-      }));
+      setLoaded((prev) => {
+        /*
+         * ПОКА МЫ ХОДИЛИ ЗА СТАРЫМ, КРОМКА МОГЛА ПЕРЕЕХАТЬ.
+         *
+         * Лента держит последние четыре тысячи строк: пришедшая порция
+         * новых записей срезает верх и переставляет курсор старого выше
+         * того места, откуда мы читали. Приписать вернувшиеся строки к
+         * такой ленте — значит оставить между ними и её началом
+         * невидимый кусок, до которого потом не добраться.
+         *
+         * Проще и честнее ничего не приписывать: курсор уже указывает на
+         * новую кромку, и повторное нажатие дочитает ровно оттуда.
+         */
+        if (prev.olderBefore !== before) return prev;
+        return {
+          ...prev,
+          lines: [...[...page.items].reverse(), ...prev.lines],
+          olderBefore: page.nextBefore,
+          budgetExhausted: page.budgetExhausted,
+        };
+      });
     } catch (err) {
       setError(err);
     } finally {
@@ -323,7 +344,35 @@ export function LogsPage() {
         // окно переполнилось и лишнее срезано СВЕРХУ. Тогда содержимое
         // над кромкой действительно уменьшилось.
         if (!stick) {
-          scrollPlan.current = trimmed ? { kind: 'keep', height: list?.scrollHeight ?? 0 } : null;
+          /*
+           * ПРИ ОБРЕЗКЕ ПОПРАВКА СЧИТАЕТСЯ ПО ЯКОРЮ, А НЕ ПО ВЫСОТЕ.
+           *
+           * Формула `scrollTop += scrollHeight - высота_до` верна только
+           * для чистого дописывания СВЕРХУ (дочитывание старого): там
+           * ниже кромки ничего не появляется. А при обрезке сверху убрано
+           * `h_срез`, снизу дописано `h_ново`, и разность высот равна
+           * `h_ново − h_срез`: поправка выходила больше нужной ровно на
+           * высоту дописанного. Читаемый текст уезжал вверх на десяток
+           * строк каждые три секунды — то есть ровно то, чего комментарий
+           * выше обещал не делать.
+           *
+           * Якорь — первая строка, которая ОСТАНЕТСЯ. Её положение в
+           * ленте до и после обновления даёт точную поправку, и высоту
+           * строк знать не нужно.
+           */
+          if (trimmed && list) {
+            const anchor = kept[0]?.offset;
+            const node =
+              anchor === undefined
+                ? null
+                : list.querySelector<HTMLElement>(`[data-log-offset="${String(anchor)}"]`);
+            scrollPlan.current =
+              node && anchor !== undefined
+                ? { kind: 'anchor', offset: anchor, top: node.offsetTop }
+                : null;
+          } else {
+            scrollPlan.current = null;
+          }
         }
         /*
          * СРЕЗАННОЕ СВЕРХУ ОБЯЗАНО ОСТАВАТЬСЯ ДОСТИЖИМЫМ.
@@ -387,6 +436,11 @@ export function LogsPage() {
     scrollPlan.current = null;
     if (plan.kind === 'bottom') {
       list.scrollTop = list.scrollHeight;
+    } else if (plan.kind === 'anchor') {
+      // Строка, на которой держим взгляд, съехала вверх ровно на высоту
+      // срезанного — на столько же двигаем и прокрутку.
+      const node = list.querySelector<HTMLElement>(`[data-log-offset="${String(plan.offset)}"]`);
+      if (node) list.scrollTop += node.offsetTop - plan.top;
     } else {
       list.scrollTop += list.scrollHeight - plan.height;
     }
@@ -527,12 +581,27 @@ export function LogsPage() {
             строк в нём нет»: оно советует прокрутку, которой не бывает.
           */}
           <div className={styles.older}>
-            {olderPending ? (
-              'Подгружаем старое…'
-            ) : loaded.olderBefore !== null ? (
-              <button type="button" className={styles.olderButton} onClick={() => void loadOlder()}>
-                Показать более старые записи
+            {/*
+              Кнопка не исчезает на время загрузки.
+
+              Прежде она подменялась текстом «Подгружаем старое…» — то есть
+              узел с фокусом удалялся, и фокус падал на body. Лента не
+              фокусируема, так что прокрутить её с клавиатуры было уже
+              нечем: чтобы дочитать следующую порцию, приходилось заново
+              протабиться через всю панель инструментов. С клавиатуры
+              кнопка работала ровно один раз подряд.
+            */}
+            {loaded.olderBefore !== null ? (
+              <button
+                type="button"
+                className={styles.olderButton}
+                disabled={olderPending}
+                onClick={() => void loadOlder()}
+              >
+                {olderPending ? 'Подгружаем старое…' : 'Показать более старые записи'}
               </button>
+            ) : olderPending ? (
+              'Подгружаем старое…'
             ) : loaded.lines.length > 0 ? (
               'Это начало текущего файла журнала'
             ) : (
@@ -545,7 +614,10 @@ export function LogsPage() {
               {breaks.has(item.offset) && item.at !== null && (
                 <div className={styles.dayBreak}>{dayTitleOf(item.at)}</div>
               )}
-              <div className={cx(styles.line, styles[`level_${item.level}`])}>
+              <div
+                className={cx(styles.line, styles[`level_${item.level}`])}
+                data-log-offset={item.offset}
+              >
                 <span className={styles.time}>{timeOf(item.at)}</span>
                 {/* Уровень словом: цвет — не единственный признак */}
                 <span className={styles.level}>{levelShort(item.level)}</span>

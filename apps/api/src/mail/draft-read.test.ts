@@ -9,8 +9,14 @@
  * `cid:`. Прежнее чтение снимало атрибут `src` целиком (браузеру такую
  * ссылку открыть нечем) и выбрасывало сами части как «уже показанные в
  * теле». Вместе это давало потерю: человек открывал сохранённый черновик
- * пересылки, а картинок не было ни в теле, ни во вложениях. Следующее
- * сохранение закрепляло потерю — в ящик ложилось письмо уже без них.
+ * пересылки, а картинок не было ни в теле, ни во вложениях.
+ *
+ * Починка первого захода — подставлять адрес части письма
+ * (`/api/messages/drafts:<номер>/parts/<N>`) — работала ровно ОДИН раз:
+ * номер черновика меняется при каждом сохранении, прежний удаляется, и
+ * второе автосохранение шло за картинкой по мёртвому адресу. Поэтому
+ * теперь картинка вшивается прямо в тело (`data:`), а при сборке письма
+ * переносится во встроенное вложение (mail/inline-data.ts).
  *
  * Проверки идут по СОБРАННОМУ ПИСЬМУ, а не по выдуманной структуре: только
  * так видно, что разбор понимает настоящий `multipart/related` — с теми же
@@ -55,35 +61,61 @@ function draftWithInlineImage(): Buffer {
   );
 }
 
-test('картинка из тела черновика превращается в ссылку на часть письма', async () => {
-  const parsed = await parseDraftSource(draftWithInlineImage(), {
-    resolveCid: (cid) => (cid === 'logo@mail.true' ? `/api/messages/drafts:42/parts/2` : null),
-  });
+test('картинка черновика вшивается в тело, а не ссылается на его номер', async () => {
+  const parsed = await parseDraftSource(draftWithInlineImage());
 
-  // Тело показывается: у окна написания есть чем открыть эту ссылку, и
-  // при следующем сохранении она вернётся во встроенное вложение
-  // (см. mail/inline-images.ts) — круг замыкается без потерь.
-  assert.match(parsed.bodyHtml, /src="\/api\/messages\/drafts:42\/parts\/2"/);
+  /*
+   * Вшита в тело. Такая картинка не зависит ни от какого номера: её
+   * видно в окне сразу, она переживает любое число пересохранений, и при
+   * сборке письма уезжает получателю встроенным вложением.
+   */
+  assert.match(parsed.bodyHtml, /src="data:image\/png;base64,[A-Za-z0-9+/=]+"/);
   assert.doesNotMatch(parsed.bodyHtml, /cid:/, 'ссылки cid: браузеру показывать нечем');
+  assert.doesNotMatch(parsed.bodyHtml, /\/parts\//, 'привязки к номеру черновика быть не должно');
 
   // И вложением та же картинка НЕ прикладывается: человек увидел бы файл,
   // которого не прикреплял, и он уехал бы получателю вторым экземпляром.
   assert.deepEqual(parsed.attachments, []);
 });
 
-test('картинка, которую не удалось поставить в тело, остаётся вложением', async () => {
+test('часть, на которую тело не ссылается, остаётся вложением', async () => {
   /*
-   * Обратный ход. Соответствие «cid -> номер части» собирается из
-   * BODYSTRUCTURE, и его может не быть вовсе: старое письмо, чужая
-   * почтовая программа, отказ IMAP. Прежний разбор в этом случае терял
-   * картинку ОТОВСЮДУ — тело без адреса, вложений нет. Лишний файл в
-   * окне человек увидит и уберёт сам; исчезнувший не увидит никогда.
+   * Обратный ход: `related`-часть, чей `cid` в теле нигде не упомянут.
+   * Прежний разбор выбрасывал такие части безусловно — то есть терял
+   * вложение молча. Лишний файл в окне человек увидит и уберёт сам;
+   * исчезнувший не увидит никогда.
    */
-  const parsed = await parseDraftSource(draftWithInlineImage());
+  const source = Buffer.from(
+    [
+      'From: test@mail.local',
+      'To: irina@mail.local',
+      'Subject: Test',
+      'MIME-Version: 1.0',
+      'Content-Type: multipart/related; boundary="rel-2"',
+      '',
+      '--rel-2',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<div>Без картинок</div>',
+      '',
+      '--rel-2',
+      'Content-Type: image/png; name="orphan.png"',
+      'Content-ID: <orphan@mail.true>',
+      'Content-Disposition: inline; filename="orphan.png"',
+      'Content-Transfer-Encoding: base64',
+      '',
+      PNG_BASE64,
+      '',
+      '--rel-2--',
+      '',
+    ].join('\r\n'),
+    'utf8',
+  );
+
+  const parsed = await parseDraftSource(source);
 
   assert.equal(parsed.attachments.length, 1, 'картинка потерялась целиком');
-  assert.equal(parsed.attachments[0]?.filename, 'logo.png');
-  assert.equal(parsed.attachments[0]?.mimeType, 'image/png');
+  assert.equal(parsed.attachments[0]?.filename, 'orphan.png');
   assert.ok((parsed.attachments[0]?.content.length ?? 0) > 0, 'байты картинки обязаны быть');
 });
 
@@ -114,7 +146,7 @@ test('обычное вложение черновика остаётся вло
     'utf8',
   );
 
-  const parsed = await parseDraftSource(source, { resolveCid: () => null });
+  const parsed = await parseDraftSource(source);
 
   assert.equal(parsed.attachments.length, 1);
   assert.equal(parsed.attachments[0]?.filename, 'dogovor.pdf');

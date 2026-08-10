@@ -22,6 +22,7 @@
 
 import { useState } from 'react';
 import { useScheduledMessages, useUndoSend } from '../api/queries';
+import { useUiStore } from '../app/store';
 import styles from './ScheduledPanel.module.css';
 
 /** «завтра в 9:00», «12 августа в 14:30» — то, что человек и задавал. */
@@ -57,6 +58,7 @@ export function ScheduledPanel() {
    * человек оставался гадать, вернули ему письмо или выбросили. А выбросить
    * его тут действительно было можно — ровно это и чинится задачей.
    */
+  const showNotice = useUiStore((state) => state.showNotice);
   const [done, setDone] = useState<string | null>(null);
   const items = data ?? [];
 
@@ -77,10 +79,20 @@ export function ScheduledPanel() {
       {
         onSuccess: (result) => {
           if (result.cancelled) {
-            setDone(
+            /*
+             * Говорим ОБЩИМ извещением, а не строкой внутри панели.
+             *
+             * Панель исчезает вместе с опустевшим списком — а он пустеет
+             * ровно в самом частом случае: письмо в очереди было одно.
+             * Строку внутри неё человек не видел никогда, то есть
+             * молчаливая отмена, которую она должна была исправить,
+             * оставалась молчаливой. Сообщения об ОШИБКЕ видны, потому
+             * что при ошибке строка остаётся в списке.
+             */
+            showNotice(
               result.draftId
-                ? 'Отправка отменена, письмо вернулось в «Черновики».'
-                : 'Отправка отменена.',
+                ? 'Отправка отменена, письмо вернулось в «Черновики»'
+                : 'Отправка отменена',
             );
             return;
           }

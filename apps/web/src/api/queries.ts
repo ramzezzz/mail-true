@@ -433,9 +433,25 @@ export function useSendReadReceipt(messageId: string | undefined) {
 }
 
 export function useSaveDraft() {
-  const invalidate = useInvalidateMail();
+  const client = useQueryClient();
   return useMutation({
     mutationFn: (request: SendRequest) => api.saveDraft(request),
-    onSuccess: invalidate,
+    /*
+     * СБРАСЫВАЕМ СПИСКИ ПИСЕМ, НО НЕ СЧЁТЧИКИ ПАПОК.
+     *
+     * Здесь стоял общий сброс всей почты — он же перечитывает `/api/folders`,
+     * а тот на сервере без LIST-STATUS делает отдельный STATUS по КАЖДОЙ
+     * папке. Пока черновик сохраняли кнопкой, это случалось считанные разы.
+     * С автосохранением — на каждую трёхсекундную паузу в наборе: письмо,
+     * которое пишут десять минут, давало десятки полных обходов ящика и
+     * перерисовок списка за спиной открытого окна.
+     *
+     * Спискам сброс нужен: сохранённый черновик обязан появиться в
+     * «Черновиках». Счётчику непрочитанных он не нужен вовсе — черновик
+     * непрочитанным не бывает.
+     */
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['messages'] });
+    },
   });
 }

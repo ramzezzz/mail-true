@@ -13,6 +13,7 @@ import { ENCODING_OVERHEAD } from '../config.js';
 import { BadRequestError, MessageTooLargeError } from '../errors.js';
 import { forwardedAttachment, type ForwardedMessage } from '../mail/forwarded.js';
 import { inlineQuotedImages, type InlineImageSource } from '../mail/inline-images.js';
+import { inlineDataImages } from '../mail/inline-data.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import type { UploadStore } from '../uploads.js';
@@ -137,6 +138,28 @@ export async function composeExternalRaw(
         { limitBytes: messageMaxBytes },
       );
     }
+  }
+
+  /*
+   * Вшитые в тело картинки (`data:`) — во вложения, как и на своём пути
+   * отправки: снимок экрана из буфера и картинка дописываемого черновика
+   * приходят именно так, а получателю `data:` в письме не показывают ни
+   * Outlook, ни Gmail.
+   */
+  const dataImages = inlineDataImages(
+    bodyHtml,
+    Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+  );
+  bodyHtml = dataImages.html;
+  attachedBytes += dataImages.bytes;
+  for (const item of dataImages.attachments) attachments.push(item);
+  if (dataImages.skipped > 0) {
+    throw new MessageTooLargeError(
+      `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+        `вставленных картинок не поместилось — ${String(dataImages.skipped)}. ` +
+        'Уберите часть картинок или отправьте их вложениями.',
+      { limitBytes: messageMaxBytes },
+    );
   }
 
   const projected = Math.round(attachedBytes * ENCODING_OVERHEAD);

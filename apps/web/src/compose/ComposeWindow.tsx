@@ -98,6 +98,14 @@ const WINDOW_KEY_PREFIX = `w${Date.now().toString(36)}${Math.random().toString(3
  */
 const AUTOSAVE_DELAY_MS = 3_000;
 
+/**
+ * Сколько тихих записей подряд можно не заметить.
+ *
+ * После этого автосохранение перестаёт пробовать и говорит вслух: молчать
+ * дальше значит обещать сохранность, которой нет.
+ */
+const AUTOSAVE_MAX_FAILURES = 3;
+
 interface ComposeWindowProps {
   win: ComposeWindowState;
   /** Порядковый номер развёрнутого окна — для каскада. */
@@ -900,6 +908,9 @@ export function ComposeWindow({
   /** Слепок последней УДАЧНОЙ записи; null — не сохраняли ни разу. */
   const savedShotRef = useRef<string | null>(null);
 
+  /** Сколько тихих записей подряд не удалось. */
+  const failuresRef = useRef(0);
+
   /**
    * Запись прямо сейчас в пути.
    *
@@ -912,6 +923,19 @@ export function ComposeWindow({
    * и такой гонки не оставляет.
    */
   const savingRef = useRef(false);
+
+  /** Летящая запись — её ждёт «Отменить», чтобы прибрать за ней. */
+  const inFlightRef = useRef<Promise<boolean> | null>(null);
+
+  /**
+   * Номер черновика, каким он стал ПОСЛЕДНИМ.
+   *
+   * В состоянии окна он тоже есть, но обработчики держат значение своего
+   * рендера, а номер меняется и мимо них: спасение черновика после
+   * неудачной отправки кладёт новую версию и удаляет прежнюю.
+   */
+  const latestDraftUidRef = useRef<number | null>(draft.draftUid);
+  latestDraftUidRef.current = draft.draftUid;
 
   /**
    * Сохранение черновика. Возвращает обещание, чтобы закрытие по Esc могло
@@ -929,18 +953,39 @@ export function ComposeWindow({
     rememberBody();
     const shot = fingerprint();
     savingRef.current = true;
-    return new Promise((resolve) => {
+    const promise = new Promise<boolean>((resolve) => {
       saveDraft.mutate(buildPayload(), {
         onSuccess: (r) => {
           savingRef.current = false;
           savedShotRef.current = shot;
+          failuresRef.current = 0;
           setError(null);
-          patch({ savedAt: r.savedAt, draftUid: r.draftUid ?? draft.draftUid });
+          const uid = r.draftUid ?? draft.draftUid;
+          latestDraftUidRef.current = uid;
+          patch({ savedAt: r.savedAt, draftUid: uid });
           resolve(true);
         },
         onError: (err) => {
           savingRef.current = false;
           if (options.silent === true) {
+            /*
+             * Считаем отказы подряд. Тихая запись повторяется каждые три
+             * секунды, и при истёкшей сессии, пропавшей сети или
+             * подчищенных уборщиком загрузках это ровно один бесполезный
+             * запрос в три секунды на каждое открытое окно — вечно, без
+             * единого признака на экране. После трёх подряд перестаём
+             * пробовать и говорим об этом: человек уверен, что письмо
+             * сохраняется само, а оно не сохраняется ни разу.
+             */
+            failuresRef.current += 1;
+            if (failuresRef.current >= AUTOSAVE_MAX_FAILURES) {
+              setError(
+                actionErrorText(
+                  'Черновик не сохраняется сам — сохраните его кнопкой «Сохранить»',
+                  err,
+                ),
+              );
+            }
             resolve(false);
             return;
           }
@@ -963,6 +1008,8 @@ export function ComposeWindow({
         },
       });
     });
+    inFlightRef.current = promise;
+    return promise;
   };
 
   /**
@@ -1023,7 +1070,24 @@ export function ComposeWindow({
     to.trim() !== (win.init.to ?? '').trim() ||
     cc.trim() !== (win.init.cc ?? '').trim() ||
     bcc.trim() !== (win.init.bcc ?? '').trim() ||
-    attachments.length > 0 ||
+    /*
+     * Вложения сравниваются С НАЧАЛЬНЫМИ, а не проверяются на «непусто».
+     *
+     * Иначе открытый на дописывание черновик с вложением считался
+     * «с содержимым» сразу — и через три секунды молча переписывался:
+     * новый номер, новая дата, прыжок наверх списка. От одного лишь
+     * открытия «посмотреть».
+     *
+     * Остальные поля сравнивались с `win.init` с самого начала — эти два
+     * просто забыли.
+     */
+    attachments.map((a) => a.id).join(',') !==
+      (win.init.attachments ?? []).map((a) => a.id).join(',') ||
+    /*
+     * Вложенное ЦЕЛИКОМ письмо — всегда содержимое, даже если его положило
+     * открытие окна: «Переслать как вложение» человек нажал сам, и окно с
+     * таким письмом закрывать без черновика нельзя.
+     */
     attachedMessages.length > 0 ||
     /*
      * Файл, который ЕЩЁ ЕДЕТ, — тоже работа человека, хотя в черновике его
@@ -1095,16 +1159,60 @@ export function ComposeWindow({
    */
   const discard = (): void => {
     const savedHere = draft.draftUid !== null && !continuingDraft;
+    /*
+     * «УЖЕ СОХРАНЕНО» — ТОЛЬКО ЕСЛИ ЭТО ПРАВДА.
+     *
+     * Прежний вопрос выбирался по одному признаку «дописываем черновик»
+     * и утверждал «оно уже сохранено» безусловно. А сохранено оно к
+     * этому моменту могло и не быть: автосохранение ждёт три секунды
+     * тишины, а тихая запись, упавшая по сети или истёкшей сессии, не
+     * показывает ничего. Человек читал утверждение и сам отдавал только
+     * что написанный абзац.
+     *
+     * Сравнение слепков отвечает на этот вопрос точно: оно и есть
+     * «записано ли то, что сейчас в окне».
+     */
+    const reallySaved = savedShotRef.current === fingerprint();
     if (hasContent() || savedHere) {
-      const question = continuingDraft
-        ? 'Закрыть окно? Письмо останется в «Черновиках» — оно уже сохранено.'
-        : 'Закрыть письмо без сохранения? Написанное будет потеряно.';
+      const question =
+        continuingDraft && reallySaved
+          ? 'Закрыть окно? Письмо останется в «Черновиках» — оно уже сохранено.'
+          : continuingDraft
+            ? 'Закрыть окно? Несохранённые изменения будут потеряны, ' +
+              'в «Черновиках» останется прежняя версия.'
+            : 'Закрыть письмо без сохранения? Написанное будет потеряно.';
       if (!window.confirm(question)) return;
     }
-    if (savedHere && draft.draftUid !== null) {
-      moveMessages.mutate({ ids: [`drafts:${String(draft.draftUid)}`], targetFolderId: 'trash' });
-    }
-    closeCompose(win.id);
+    /*
+     * ЗАПИСЬ МОГЛА УЙТИ И ЕЩЁ НЕ ВЕРНУТЬСЯ.
+     *
+     * Автосохранение — это запрос в ящик, и он живёт сотни миллисекунд.
+     * Нажатие «Отменить» ровно в это окно раньше закрывало окно, пока
+     * номер черновика ещё не пришёл, — и доехавшая запись оставляла в
+     * «Черновиках» письмо, которое человек только что осознанно
+     * выбросил, а убирать его было уже некому.
+     *
+     * Поэтому здесь мы ДОЖИДАЕМСЯ летящей записи и убираем то, что она
+     * положила. Окно на это время остаётся открытым: закрыть его и
+     * прибрать за спиной нельзя — компонента уже не будет.
+     */
+    const cleanup = async (): Promise<void> => {
+      if (savingRef.current) await inFlightRef.current;
+      /*
+       * Номер берём СВЕЖИЙ, из ссылки: после неудачной отправки его
+       * меняет спасение черновика (сервер кладёт новую версию и удаляет
+       * прежнюю), и `draft.draftUid` в этом замыкании устарел. Прежний
+       * код переносил в «Корзину» несуществующий номер: спасённый
+       * черновик оставался лежать, хотя человек согласился с тем, что
+       * написанное будет потеряно.
+       */
+      const uid = latestDraftUidRef.current;
+      if (uid !== null && !continuingDraft) {
+        moveMessages.mutate({ ids: [`drafts:${String(uid)}`], targetFolderId: 'trash' });
+      }
+      closeCompose(win.id);
+    };
+    void cleanup();
   };
 
   /**
@@ -1198,6 +1306,7 @@ export function ComposeWindow({
     if (draft.pending) return;
     if (waitingForAttachments) return;
     if (savingRef.current) return;
+    if (failuresRef.current >= AUTOSAVE_MAX_FAILURES) return;
     if (saveDraft.isPending || sendMessage.isPending || sendAsExternal.isPending) return;
     if (!hasContent()) return;
     if (savedShotRef.current === fingerprint()) return;
