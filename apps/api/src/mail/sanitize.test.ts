@@ -228,3 +228,18 @@ test('@font-face и @keyframes остаются нетронутыми', () => {
   assert.match(html, /@keyframes go\{from\{opacity:0\}to\{opacity:1\}\}/);
   assert.ok(html.includes('@font-face{font-family:X;'));
 });
+
+test('у отправляемого письма ссылка cid остаётся, у показываемого — нет', () => {
+  // Письмо УХОДИТ: cid — правильный вид ссылки на встроенную картинку,
+  // которую только что приложили к письму (mail/inline-images.ts).
+  const outgoing = sanitizeEmailHtml('<img src="cid:mt-1@mail.true">', {
+    allowRemote: true,
+    keepCid: true,
+  }).html;
+  assert.match(outgoing, /src="cid:mt-1@mail\.true"/);
+
+  // Письмо ПОКАЗЫВАЕТСЯ и резолвера частей нет: открыть такую ссылку
+  // браузеру нечем, поэтому адрес снимается — как и раньше.
+  const shown = sanitizeEmailHtml('<img src="cid:mt-1@mail.true">', { allowRemote: false }).html;
+  assert.ok(!shown.includes('cid:'));
+});

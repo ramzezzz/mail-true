@@ -262,7 +262,16 @@ async function composeRaw(
 
   // Пользовательский HTML тоже прогоняем через санитайзер:
   // composer не должен рассылать скрипты даже по ошибке фронтенда
-  const cleanHtml = sanitizeEmailHtml(bodyHtml, { allowRemote: true }).html;
+  const cleanHtml = sanitizeEmailHtml(bodyHtml, {
+    allowRemote: true,
+    /*
+     * Ссылки `cid:` остаются: письмо уходит наружу, и это правильный вид
+     * ссылки на встроенную картинку. При показе письма такую ссылку
+     * снимают — открыть её браузером нечем, — и снятие здесь означало бы
+     * `<img>` без картинки у получателя.
+     */
+    keepCid: true,
+  }).html;
 
   const options: Mail.Options = {
     // Имя ставится объектом, а не строкой: экранирование кавычек и

@@ -21,6 +21,17 @@ export interface SanitizeOptions {
   allowRemote: boolean;
   /** Преобразование Content-ID (без угловых скобок) в URL части письма. */
   resolveCid?: ((cid: string) => string | null) | undefined;
+  /**
+   * Оставлять ссылки `cid:` как есть — для письма, которое УХОДИТ.
+   *
+   * При показе письма такая ссылка бесполезна: браузер её не откроет,
+   * поэтому без resolveCid адрес снимается. Но у отправляемого письма всё
+   * наоборот — `cid:` и есть правильный вид ссылки на встроенную
+   * картинку, а снятие адреса означает `<img>` без картинки у получателя.
+   * Именно так пересылка и теряла картинки: их уже перенесли во вложения
+   * (mail/inline-images.ts), а санитайзер тут же убирал ссылку на них.
+   */
+  keepCid?: boolean | undefined;
 }
 
 export interface SanitizeResult {
@@ -112,10 +123,12 @@ const REMOTE_URL = /^(?:https?:)?\/\//i;
 let ctx: {
   allowRemote: boolean;
   resolveCid: ((cid: string) => string | null) | null;
+  keepCid: boolean;
   blocked: number;
 } = {
   allowRemote: false,
   resolveCid: null,
+  keepCid: false,
   blocked: 0,
 };
 
@@ -177,7 +190,9 @@ function rewriteImageSource(el: Element, attr: 'src' | 'background'): void {
     const resolved = ctx.resolveCid ? ctx.resolveCid(cid) : null;
     if (resolved) {
       el.setAttribute(attr, resolved);
-    } else {
+    } else if (!ctx.keepCid) {
+      // Показать её нечем — а вот у уходящего письма это единственный
+      // правильный вид ссылки (см. keepCid).
       el.removeAttribute(attr);
     }
     return;
@@ -391,6 +406,7 @@ export function sanitizeEmailHtml(html: string, options: SanitizeOptions): Sanit
   ctx = {
     allowRemote: options.allowRemote,
     resolveCid: options.resolveCid ?? null,
+    keepCid: options.keepCid ?? false,
     blocked: 0,
   };
   const clean = purifier.sanitize(html, {
