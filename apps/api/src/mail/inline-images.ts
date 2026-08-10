@@ -46,6 +46,15 @@ export interface InlineImageSource {
 export interface InlineImagesResult {
   html: string;
   attachments: Attachment[];
+  /**
+   * Сколько картинок не поместилось в предел письма.
+   *
+   * Не поместившаяся картинка остаётся ссылкой на наш сервер, которую
+   * получатель открыть не может, — то есть письмо уходит без неё. Молчать
+   * об этом нельзя, поэтому число возвращается наружу: маршрут отправки
+   * отказывает до отправки и объясняет почему.
+   */
+  skipped: number;
 }
 
 /** Ссылка на часть письма — это `id письма` + `id части`. */
@@ -72,12 +81,13 @@ export async function inlineQuotedImages(
   /** Потолок на письмо: сумма встроенных картинок. */
   maxBytes: number,
 ): Promise<InlineImagesResult> {
-  if (!html.includes('/parts/')) return { html, attachments: [] };
+  if (!html.includes('/parts/')) return { html, attachments: [], skipped: 0 };
 
   const attachments: Attachment[] = [];
   /** Одна и та же часть в теле встречается дважды — вкладываем один раз. */
   const seen = new Map<string, string>();
   let total = 0;
+  let skipped = 0;
   const replacements: Array<{ from: string; to: string }> = [];
 
   for (const match of html.matchAll(IMG_SRC)) {
@@ -96,7 +106,10 @@ export async function inlineQuotedImages(
     // Только картинки: чужой тип содержимого в теле письма делать
     // встроенным незачем — он и не показывался бы.
     if (!/^image\//i.test(part.contentType)) continue;
-    if (total + part.content.length > maxBytes) continue;
+    if (total + part.content.length > maxBytes) {
+      skipped += 1;
+      continue;
+    }
     total += part.content.length;
 
     /*
@@ -118,7 +131,7 @@ export async function inlineQuotedImages(
 
   let out = html;
   for (const { from, to } of replacements) out = out.split(from).join(to);
-  return { html: out, attachments };
+  return { html: out, attachments, skipped };
 }
 
 /** Загрузчик частей писем поверх живого соединения IMAP. */

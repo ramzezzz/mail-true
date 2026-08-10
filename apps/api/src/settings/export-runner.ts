@@ -151,7 +151,16 @@ export class ExportRunner {
    */
   async purgeReady(): Promise<number> {
     let removed = 0;
-    for (;;) {
+    /*
+     * Потолок проходов, а не «пока список не опустеет».
+     *
+     * Выборка берёт строки в состоянии `ready`, а закрывает их
+     * finishExport. Если он однажды перестанет менять состояние (отказ
+     * базы, сменившаяся схема), цикл `for(;;)` крутился бы вечно, держа
+     * процесс на старте. Сто проходов по сотне строк — это десять тысяч
+     * архивов, заведомо больше любой живой установки.
+     */
+    for (let pass = 0; pass < 100; pass += 1) {
       const rows = await this.#opts.store.listReadyExports(EXPIRE_BATCH);
       if (rows.length === 0) break;
       for (const row of rows) {

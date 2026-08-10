@@ -221,15 +221,6 @@ async function composeRaw(
     attachedBytes += item.raw.length;
     attachments.push(forwardedAttachment(item));
   }
-  const projected = Math.round(attachedBytes * ENCODING_OVERHEAD);
-  if (projected > messageMaxBytes) {
-    throw new MessageTooLargeError(
-      `Вложения не помещаются: вместе они дадут около ${megabytes(projected)} МБ, ` +
-        `а предел письма — ${megabytes(messageMaxBytes)} МБ. ` +
-        'Уберите часть файлов или отправьте их отдельными письмами.',
-      { limitBytes: messageMaxBytes, projectedBytes: projected },
-    );
-  }
 
   /*
    * Встроенные картинки цитаты — во вложения письма.
@@ -258,6 +249,39 @@ async function composeRaw(
       attachedBytes += Buffer.isBuffer(item.content) ? item.content.length : 0;
       attachments.push(item);
     }
+    /*
+     * Картинки, не поместившиеся в предел, — это отказ, а не мелочь.
+     *
+     * Молча оставить ссылку значит вернуться ровно к тому, что чинилось:
+     * получатель видит письмо без картинок и не знает почему. Отказываем
+     * до отправки и теми же словами, что и при тяжёлых вложениях.
+     */
+    if (inlined.skipped > 0) {
+      throw new MessageTooLargeError(
+        `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+          `картинок из цитаты не поместилось — ${String(inlined.skipped)}. ` +
+          'Уберите часть цитируемого письма или перешлите его вложением.',
+        {
+          limitBytes: messageMaxBytes,
+          projectedBytes: Math.round(attachedBytes * ENCODING_OVERHEAD),
+        },
+      );
+    }
+  }
+
+  /*
+   * Сумма считается ПОСЛЕ переноса картинок: они тоже вложения, и не
+   * учитывать их значило бы пропустить письмо, которое всё равно не
+   * пройдёт по размеру, — но узнал бы об этом уже SMTP.
+   */
+  const projected = Math.round(attachedBytes * ENCODING_OVERHEAD);
+  if (projected > messageMaxBytes) {
+    throw new MessageTooLargeError(
+      `Вложения не помещаются: вместе они дадут около ${megabytes(projected)} МБ, ` +
+        `а предел письма — ${megabytes(messageMaxBytes)} МБ. ` +
+        'Уберите часть файлов или отправьте их отдельными письмами.',
+      { limitBytes: messageMaxBytes, projectedBytes: projected },
+    );
   }
 
   // Пользовательский HTML тоже прогоняем через санитайзер:
@@ -583,6 +607,18 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       rateLimit: {
         max: config.SEND_RATE_PER_MINUTE,
         timeWindow: 60_000,
+        /*
+         * hook: 'preHandler' — обязателен, а не украшение.
+         *
+         * По умолчанию ограничитель частоты вешается на onRequest, то есть
+         * ДО проверки сессии: `request.mailSession` там ещё пуст, ключом
+         * молча становился адрес клиента, и предел «по ящику» на деле
+         * оставался прежним пределом по адресу — ровно тем, от которого
+         * этот маршрут и уводили. На preHandler наш requireSession стоит
+         * первым (плагин дописывает свой обработчик в конец), поэтому
+         * адрес ящика к этому моменту уже известен.
+         */
+        hook: 'preHandler' as const,
         keyGenerator: (request: { mailSession?: MailSession | null; ip: string }): string =>
           request.mailSession?.email ?? request.ip,
       },
@@ -1669,15 +1705,20 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
     // keepBcc — чтобы «Скрытая копия» дожила до дописывания черновика,
     // см. composeRaw. У отправляемого письма этого заголовка быть не должно.
-    const raw = await composeRaw(
-      payload,
-      session.email,
-      uploads,
-      config.MESSAGE_MAX_BYTES,
-      forwarded,
-      {
+    /*
+     * Картинки цитаты переносим и в ЧЕРНОВИК.
+     *
+     * Иначе выходило так: человек нажал «Переслать», сохранил черновик,
+     * вернулся к нему завтра — а картинок в теле уже нет. Ссылки на наш
+     * маршрут санитайзер снимает при сборке письма, и в черновике
+     * оставался `<img>` без адреса; дальше письмо уходило без картинок,
+     * хотя по прямому пути «переслать и сразу отправить» они доезжали.
+     */
+    const raw = await pool.withClient(session.email, session.password, (client) =>
+      composeRaw(payload, session.email, uploads, config.MESSAGE_MAX_BYTES, forwarded, {
         keepBcc: true,
-      },
+        inlineSource: imapPartSource(client, requireFolder, splitMessageId),
+      }),
     );
     const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
 
