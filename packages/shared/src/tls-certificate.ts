@@ -113,6 +113,18 @@ export interface TlsValidationResult {
    * том порядке, в каком их ждут службы. Пусто, если проверка не прошла.
    */
   readonly fullchainPem: string;
+  /**
+   * Что записывать в файл ключа: ТОЛЬКО проверенный блок PEM.
+   *
+   * Проверка разбирает первый блок `PRIVATE KEY`, а на диск раньше
+   * ложилось всё, что вставили: заголовки `Bag Attributes` от
+   * `openssl pkcs12`, второй (старый) ключ, посторонний текст. То есть
+   * проверяли одно, а записывали другое — и при двух ключах в файле
+   * службы могли взять не тот.
+   *
+   * Пусто, если ключ не присылали или проверка не прошла.
+   */
+  readonly privateKeyPem: string;
 }
 
 const PEM_BLOCK = /-----BEGIN ([A-Z0-9 ]+)-----[\r\n]+([A-Za-z0-9+/=\s]+?)-----END \1-----/g;
@@ -284,6 +296,7 @@ export function validateCertificateBundle(input: TlsBundleInput): TlsValidationR
     chain: [],
     missingNames: [],
     fullchainPem: '',
+    privateKeyPem: '',
   };
 
   // --- 1. Формат ----------------------------------------------------
@@ -574,5 +587,7 @@ export function validateCertificateBundle(input: TlsBundleInput): TlsValidationR
     chain,
     missingNames: [...missingRequired, ...missingOptional],
     fullchainPem: failed ? '' : `${fullchain.filter((p) => p !== '').join('\n')}\n`,
+    // Только разобранный блок ключа — см. описание поля.
+    privateKeyPem: failed || keyBlocks.length === 0 ? '' : `${keyBlocks[0]?.pem ?? ''}\n`,
   };
 }

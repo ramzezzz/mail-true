@@ -404,7 +404,31 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
         ];
         for (const { port, what } of MAIL_PORTS) {
           const rows = audit.ports.filter((p) => p.host === port && p.proto === 'tcp');
-          if (rows.length === 0) continue;
+          if (rows.length === 0) {
+            /*
+             * ПРОПАВШАЯ ПРОВЕРКА ХУЖЕ КРАСНОЙ.
+             *
+             * Раньше строка просто исчезала из списка: посредник
+             * пропускает службу, у которой нет запущенного контейнера, а
+             * это ровно тот случай, когда всё и сломано — лежащий
+             * Postfix убирал с экрана строку «Порт 25 — приём почты».
+             * Человек видел список без единой красной строки и считал,
+             * что почта в порядке.
+             *
+             * Тот же довод уже записан в этом файле про миграции.
+             */
+            checks.push({
+              id: `port-${String(port)}`,
+              group: 'Порты наружу',
+              title: `Порт ${String(port)} — ${what}`,
+              state: 'fail',
+              detail:
+                'публикации не видно вовсе — обычно это значит, что служба не запущена ' +
+                'и порт не слушает никто',
+              hint: 'Проверьте состояние служб в сводке и поднимите стек.',
+            });
+            continue;
+          }
           const outside = rows.some((row) => row.public);
           const binds = [...new Set(rows.map((row) => row.bind))].join(', ');
           checks.push({

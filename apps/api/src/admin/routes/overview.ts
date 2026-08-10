@@ -26,6 +26,8 @@ import {
   type UserTrafficSort,
 } from '../metrics-store.js';
 import { readCertificates, TLS_WARN_DAYS, type TlsTarget } from '../metrics-tls.js';
+import { diskUsedPercent } from '../metrics-disk.js';
+import { gradeDisk, gradeQueue } from '../selfcheck.js';
 
 type ServiceState = 'ok' | 'fail' | 'unknown';
 
@@ -185,6 +187,55 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
     }
     if (counters.admins <= 1) {
       problems.push('Администратор всего один — при потере доступа чинить будет некому');
+    }
+
+    /*
+     * МЕСТО НА ДИСКЕ И ОЧЕРЕДЬ — ТОЖЕ ЧАСТЬ ОТВЕТА «ВСЁ ЛИ В ПОРЯДКЕ».
+     *
+     * Раньше баннер смотрел только на службы, DNS и число
+     * администраторов. Забитый диск и застрявшая очередь — то есть
+     * состояния, при которых почта уже не работает или вот-вот
+     * перестанет, — на него не влияли никак: сверху зелёное «замечаний
+     * нет», а ниже, в блоках этой же страницы, красное.
+     *
+     * Снимок берётся у сборщика (он уже собран, это чтение из памяти),
+     * поэтому проверка ничего не стоит.
+     */
+    const resources = await resourceSnapshot().catch(() => null);
+    if (resources) {
+      for (const volume of resources.volumes) {
+        // Процент считается ОДНОЙ формулой на весь продукт (metrics-disk.ts):
+        // по доступному месту, а не по свободному, — резерв root службам
+        // всё равно не отдадут.
+        const percent = diskUsedPercent(volume.totalBytes, volume.freeBytes);
+        if (percent !== null && gradeDisk(percent) === 'fail') {
+          problems.push(
+            `Место на диске (${volume.path}) почти кончилось: занято ${String(Math.round(percent))}% — ` +
+              'приём почты остановится',
+          );
+        }
+      }
+      const queue = resources.queue;
+      if (queue && gradeQueue(queue.total, queue.oldestSeconds) === 'fail') {
+        problems.push(
+          `Очередь Postfix не разбирается: ${String(queue.total)} писем, самое старое ждёт ` +
+            `${String(Math.round((queue.oldestSeconds ?? 0) / 3600))} ч.`,
+        );
+      }
+    }
+
+    /*
+     * «Состояние неизвестно» — не то же самое, что «в порядке».
+     *
+     * У хранилища сессий это значит, что проба его не нашла: вошедшие
+     * могут получать ошибку на каждый запрос, а баннер писал «замечаний
+     * нет». Молчание о непроверенном — худший из ответов: оно читается
+     * как «проверено и хорошо».
+     */
+    for (const service of services) {
+      if (service.state === 'unknown' && service.id === 'redis') {
+        problems.push(`${service.title}: ${service.detail}`);
+      }
     }
 
     return {
