@@ -358,33 +358,17 @@ export class ServiceAgent {
    * репозитория.
    */
   async version(): Promise<VersionInfo> {
-    const body = await this.call('/version', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
-    const str = (key: string): string => (typeof body[key] === 'string' ? body[key] : '');
-    const num = (key: string): number => (typeof body[key] === 'number' ? body[key] : 0);
-    const rows = (key: string): Record<string, unknown>[] =>
-      Array.isArray(body[key]) ? (body[key] as Record<string, unknown>[]) : [];
-
-    return {
-      commit: str('commit'),
-      short: str('short'),
-      branch: str('branch'),
-      committedAt: str('committedAt'),
-      subject: str('subject'),
-      dirty: body.dirty === true,
-      behind: num('behind'),
-      ahead: num('ahead'),
-      pending: rows('pending').map((row) => ({
-        hash: typeof row.hash === 'string' ? row.hash : '',
-        at: typeof row.at === 'string' ? row.at : '',
-        subject: typeof row.subject === 'string' ? row.subject : '',
-      })),
-      images: rows('images').map((row) => ({
-        service: typeof row.service === 'string' ? row.service : '',
-        image: typeof row.image === 'string' ? row.image : '',
-        digest: typeof row.digest === 'string' ? row.digest : '',
-        created: typeof row.created === 'string' ? row.created : '',
-      })),
-    };
+    /*
+     * Предел ожидания — БОЛЬШОЙ, а не обычный.
+     *
+     * На /version посредник делает восемь отдельных `docker run … git` и
+     * по `docker inspect` на каждую службу, и всё это в один поток. На
+     * спокойной машине это секунды, на загруженной — больше десяти, и
+     * тогда раздел «Обновления» открывался с «Посредник перезапуска не
+     * отвечает» при полностью живом посреднике.
+     */
+    const body = await this.call('/version', 'GET', undefined, ServiceAgent.SLOW_TIMEOUT_MS);
+    return parseVersion(body);
   }
 
   /**
@@ -421,18 +405,7 @@ export class ServiceAgent {
    */
   async updateStatus(): Promise<UpdateStatus> {
     const body = await this.call('/update/status', 'GET', undefined, ServiceAgent.READ_TIMEOUT_MS);
-    const raw = typeof body.state === 'string' ? body.state : 'idle';
-    const state: UpdateStatus['state'] =
-      raw === 'running' || raw === 'done' || raw === 'failed' ? raw : 'idle';
-    const mode = body.mode === 'code' || body.mode === 'images' ? body.mode : null;
-    return {
-      state,
-      mode,
-      exitCode: typeof body.exitCode === 'number' ? body.exitCode : 0,
-      startedAt: typeof body.startedAt === 'string' ? body.startedAt : '',
-      finishedAt: typeof body.finishedAt === 'string' ? body.finishedAt : '',
-      log: typeof body.log === 'string' ? body.log : '',
-    };
+    return parseUpdateStatus(body);
   }
 
   async dkimRecord(domain: string, selector: string): Promise<string> {
@@ -546,6 +519,83 @@ function toNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && /^\d+$/.test(value)) return Number(value);
   return undefined;
+}
+
+/**
+ * Разбор ответа /version.
+ *
+ * ------------------------------------------------------------------
+ * ЧИСЛО ПРИХОДИТ СТРОКОЙ. ВСЕГДА.
+ * ------------------------------------------------------------------
+ * Посредник написан на Perl без библиотеки JSON и намеренно отдаёт
+ * наружу всё строками: «строка, случайно состоящая из цифр, должна
+ * доехать строкой» (agent.pl, to_json). Здесь стояло `typeof ===
+ * 'number'`, то есть `behind` всегда получался нулём — а по нему
+ * страница решает, есть ли что обновлять:
+ *
+ *   - кнопка «Обновить продукт» была заблокирована ВСЕГДА;
+ *   - рядом печаталось «Не применённого нет»;
+ *   - и тут же — таблица «Что приедет при обновлении» со списком уже
+ *     приехавших коммитов (строки-то доезжали нормально).
+ *
+ * То есть обновиться из панели было нельзя вообще, а экран сам себе
+ * противоречил. Лечение в этом же файле уже было написано — toNumber, —
+ * но к этому ответу его не применили.
+ *
+ * Вынесено из класса по той же причине, что и parseAudit: чтобы
+ * проверялось напрямую. Подделка посредника в проверках отдавала
+ * НАСТОЯЩЕЕ число, и дефект был ей не виден.
+ */
+export function parseVersion(body: Record<string, unknown>): VersionInfo {
+  const str = (key: string): string => (typeof body[key] === 'string' ? body[key] : '');
+  const num = (key: string): number => toNumber(body[key]) ?? 0;
+  const rows = (key: string): Record<string, unknown>[] =>
+    Array.isArray(body[key]) ? (body[key] as Record<string, unknown>[]) : [];
+
+  return {
+    commit: str('commit'),
+    short: str('short'),
+    branch: str('branch'),
+    committedAt: str('committedAt'),
+    subject: str('subject'),
+    dirty: body.dirty === true,
+    behind: num('behind'),
+    ahead: num('ahead'),
+    pending: rows('pending').map((row) => ({
+      hash: typeof row.hash === 'string' ? row.hash : '',
+      at: typeof row.at === 'string' ? row.at : '',
+      subject: typeof row.subject === 'string' ? row.subject : '',
+    })),
+    images: rows('images').map((row) => ({
+      service: typeof row.service === 'string' ? row.service : '',
+      image: typeof row.image === 'string' ? row.image : '',
+      digest: typeof row.digest === 'string' ? row.digest : '',
+      created: typeof row.created === 'string' ? row.created : '',
+    })),
+  };
+}
+
+/**
+ * Разбор ответа /update/status.
+ *
+ * `exitCode` — та же беда, что и с `behind`: число приходит строкой, и
+ * строка «Обновление не доведено до конца (код возврата N)» печатала
+ * ноль при ЛЮБОЙ неудаче — то есть место, где должна быть причина,
+ * занимал признак успеха.
+ */
+export function parseUpdateStatus(body: Record<string, unknown>): UpdateStatus {
+  const raw = typeof body.state === 'string' ? body.state : 'idle';
+  const state: UpdateStatus['state'] =
+    raw === 'running' || raw === 'done' || raw === 'failed' ? raw : 'idle';
+  const mode = body.mode === 'code' || body.mode === 'images' ? body.mode : null;
+  return {
+    state,
+    mode,
+    exitCode: toNumber(body.exitCode) ?? 0,
+    startedAt: typeof body.startedAt === 'string' ? body.startedAt : '',
+    finishedAt: typeof body.finishedAt === 'string' ? body.finishedAt : '',
+    log: typeof body.log === 'string' ? body.log : '',
+  };
 }
 
 /**

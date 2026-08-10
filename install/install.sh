@@ -920,14 +920,28 @@ else
     MT_CRITICAL=$((MT_CRITICAL + 1))
 fi
 
-# Служебные адреса по RFC 2142: postmaster обязателен, abuse ожидают все
+# Служебные адреса по RFC 2142: postmaster обязателен, abuse ожидают все.
+#
+# Код возврата раньше стирался (`|| true`), а зелёная строка печаталась
+# безусловно — то есть при недоступной базе установщик всё равно
+# сообщал, что postmaster и abuse заведены. Это тот же приём, который
+# двадцатью строками ниже (учётная запись администратора) уже разобран
+# как дефект: «оба случая давали одну и ту же ЗЕЛЁНУЮ строку».
+ALIAS_FAILED=''
 for alias_name in postmaster abuse; do
-    printf "INSERT INTO virtual_aliases (domain_id, source, destination)
+    if ! printf "INSERT INTO virtual_aliases (domain_id, source, destination)
             SELECT id, '%s@%s', '%s' FROM virtual_domains WHERE name = '%s'
             ON CONFLICT (source, destination) DO NOTHING;\n" \
-        "$alias_name" "$DOMAIN" "$ADMIN_EMAIL" "$DOMAIN" | psql_run >/dev/null || true
+        "$alias_name" "$DOMAIN" "$ADMIN_EMAIL" "$DOMAIN" | psql_run >/dev/null 2>&1; then
+        ALIAS_FAILED="$ALIAS_FAILED $alias_name@$DOMAIN"
+    fi
 done
-ok "алиасы postmaster@$DOMAIN и abuse@$DOMAIN ведут на $ADMIN_EMAIL"
+if [ -z "$ALIAS_FAILED" ]; then
+    ok "алиасы postmaster@$DOMAIN и abuse@$DOMAIN ведут на $ADMIN_EMAIL"
+else
+    warn "не удалось завести служебные адреса:$ALIAS_FAILED"
+    hint "их ждут почтовые службы и жалобщики; заведите вручную в панели, раздел «Алиасы»"
+fi
 
 # Учётная запись администратора в админке.
 # Хэш считает node внутри контейнера autoconfig — тот же алгоритм, что в
@@ -1193,15 +1207,28 @@ MEM_USED="$(dc ps -q 2>/dev/null | xargs -r docker stats --no-stream --format '{
 # браузер всё равно будет ругаться, но открывать надо тоже по https.
 WEB_SCHEME=https
 
+# ------------------------------------------------------------------
+# Порт в адресе — если он не стандартный.
+#
+# Шаг «Порты» существует ровно ради нестандартных номеров (второй стенд
+# на той же машине, занятый 443). А итоговый экран печатал адрес без
+# порта — то есть адрес, который не откроется. Резервный вход рядом порт
+# печатает честно, так что расхождение было видно в том же выводе.
+# ------------------------------------------------------------------
+WEB_SUFFIX=''
+if [ "${NGINX_HTTPS_PORT:-443}" != "443" ]; then
+    WEB_SUFFIX=":${NGINX_HTTPS_PORT}"
+fi
+
 cat <<EOF
 
   ── Куда заходить ─────────────────────────────────────────────
 
-  Почта:    $WEB_SCHEME://mail.$DOMAIN   (и $WEB_SCHEME://$DOMAIN)
+  Почта:    $WEB_SCHEME://mail.$DOMAIN$WEB_SUFFIX   (и $WEB_SCHEME://$DOMAIN$WEB_SUFFIX)
             логин — полный адрес ящика: $ADMIN_EMAIL
             пароль — тот же, что у администратора
 
-  Панель:   $WEB_SCHEME://admin.$DOMAIN
+  Панель:   $WEB_SCHEME://admin.$DOMAIN$WEB_SUFFIX
             логин — $ADMIN_LOGIN
 EOF
 if [ "${GENERATED_ADMIN_PASSWORD:-0}" != "1" ]; then

@@ -294,9 +294,18 @@ export async function readSummary(ctx: InstallContext, answers: Answers): Promis
   } catch {
     dnsRecords = '';
   }
+  /*
+   * Порт в адресе — если он не стандартный.
+   *
+   * Шаг «Порты» существует ровно ради нестандартных номеров (второй
+   * стенд на той же машине, занятый 443), а итоговый экран печатал адрес
+   * без порта — то есть адрес, который не откроется.
+   */
+  const httpsPort = answers.ports.https ?? 443;
+  const suffix = httpsPort === 443 ? '' : `:${String(httpsPort)}`;
   return {
-    webUrl: `https://mail.${answers.domain}`,
-    adminUrl: `https://admin.${answers.domain}`,
+    webUrl: `https://mail.${answers.domain}${suffix}`,
+    adminUrl: `https://admin.${answers.domain}${suffix}`,
     adminEmail: answers.adminEmail,
     adminLogin: answers.adminLogin,
     domain: answers.domain,

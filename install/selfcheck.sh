@@ -41,6 +41,21 @@ load_env
 DOMAIN="${MAIL_DOMAIN:?в infra/.env нет MAIL_DOMAIN}"
 MAIL_HOST="${MAIL_HOSTNAME:-$DOMAIN}"
 SELECTOR="${DKIM_SELECTOR:-mail}"
+# ------------------------------------------------------------------
+# Куда стучаться живыми пробами и на каком порту ждать веб.
+#
+# Раньше это были литералы 127.0.0.1 и 443. Оба неверны в обычных
+# случаях, которые продукт поддерживает явно: BIND_ADDRESS с конкретным
+# адресом (тогда петля не слушает ВООБЩЕ) и нестандартный порт HTTPS
+# (шаг «Порты» в веб-мастере существует ровно ради него). На таком
+# сервере самопроверка печатала полдесятка красных строк и выходила с
+# кодом 1 — при полностью исправной работе.
+# ------------------------------------------------------------------
+PROBE_ADDR="${BIND_ADDRESS:-127.0.0.1}"
+if [ "$PROBE_ADDR" = "0.0.0.0" ] || [ "$PROBE_ADDR" = "::" ] || [ -z "$PROBE_ADDR" ]; then
+    PROBE_ADDR="127.0.0.1"
+fi
+WEB_PORT="${NGINX_HTTPS_PORT:-443}"
 # Ящик, на котором проверяется доставка. По умолчанию — ящик администратора
 # из состояния установки; можно указать другой: MAILTRUE_CHECK_MAILBOX=...
 ADMIN_EMAIL="postmaster@$DOMAIN"
@@ -64,7 +79,16 @@ if ! docker info >/dev/null 2>&1; then
     exit 1
 fi
 
-for svc in unbound postgres redis dovecot rspamd postfix autoconfig api web admin nginx; do
+# service-agent в списке не для полноты.
+#
+# Его тут не было, и мёртвый посредник самопроверка не замечала вовсе:
+# единственное упоминание ниже (сверка infra/.env) само себя пропускает,
+# если контейнер не работает. А без посредника перестают работать раздел
+# «Перезапуск», раздел «Обновления» целиком и запись настроек группы
+# recreate — то есть сервер наполовину неуправляем, а отчёт печатает
+# «не пройдено: 0» и выходит с кодом 0.
+for svc in unbound postgres redis dovecot rspamd postfix autoconfig api web admin nginx \
+           service-agent; do
     state="$(service_state "$svc")"
     case "$state" in
         # «unhealthy» содержит «healthy» — больные состояния проверяем ПЕРВЫМИ,
@@ -372,20 +396,32 @@ else
         fi
     done
 
-    # Живая проверка: тот ли сертификат реально отдают сервисы
-    for probe in "993:IMAPS" "443:HTTPS"; do
+    # ------------------------------------------------------------------
+    # Живая проверка: тот ли сертификат реально отдают сервисы.
+    #
+    # Порты и адрес — ИЗ НАСТРОЕК, как и в шаге «Порты» выше. Здесь они
+    # были литералами (993, 443, 587) и адресом 127.0.0.1, и на исправном
+    # сервере это давало полдесятка красных строк в двух совершенно
+    # обычных случаях: второй стенд на нестандартных портах и
+    # BIND_ADDRESS с конкретным адресом (тогда петля не слушает вовсе).
+    # Причём в том же выводе шаг «Порты» оставался зелёным — отчёт
+    # противоречил сам себе, а десяток неисправимых красных строк приучает
+    # не смотреть на вывод вообще.
+    # ------------------------------------------------------------------
+    for probe in "${IMAPS_PORT:-993}:IMAPS" "${NGINX_HTTPS_PORT:-443}:HTTPS"; do
         port="${probe%%:*}"; what="${probe##*:}"
-        if printf 'Q\n' | timeout 8 openssl s_client -connect "127.0.0.1:$port" \
+        if printf 'Q\n' | timeout 8 openssl s_client -connect "$PROBE_ADDR:$port" \
                 -servername "$MAIL_HOST" >/dev/null 2>&1; then
             ok "$what ($port) отдаёт TLS-сертификат"
         else
             fail "$what ($port) не отвечает по TLS"
         fi
     done
-    if printf 'Q\n' | timeout 8 openssl s_client -connect "127.0.0.1:587" -starttls smtp >/dev/null 2>&1; then
-        ok "submission (587) поддерживает STARTTLS"
+    if printf 'Q\n' | timeout 8 openssl s_client -connect "$PROBE_ADDR:${SUBMISSION_PORT:-587}" \
+            -starttls smtp >/dev/null 2>&1; then
+        ok "submission (${SUBMISSION_PORT:-587}) поддерживает STARTTLS"
     else
-        fail "submission (587) не поднимает STARTTLS — клиенты не смогут отправлять"
+        fail "submission (${SUBMISSION_PORT:-587}) не поднимает STARTTLS — клиенты не смогут отправлять"
     fi
 
     # ------------------------------------------------------------------
@@ -602,10 +638,15 @@ step "7. Веб-интерфейс"
 # проверка работает и до того, как записи разошлись.
 
 # web_probe <имя хоста> <путь> <ожидаемый код> <описание>
+#
+# Порт и адрес берутся из настроек: 443 и 127.0.0.1 литералами означали
+# полностью красный шаг на сервере с нестандартным портом или заданным
+# BIND_ADDRESS — при исправном веб-интерфейсе.
 web_probe() {
     local host="$1" path="$2" want="$3" what="$4" code
     code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 \
-            --resolve "$host:443:127.0.0.1" "https://$host$path" 2>/dev/null || echo 000)"
+            --resolve "$host:$WEB_PORT:$PROBE_ADDR" "https://$host:$WEB_PORT$path" \
+            2>/dev/null || echo 000)"
     if [ "$code" = "$want" ]; then
         ok "$what (HTTP $code)"
         return 0
@@ -627,8 +668,8 @@ else
 fi
 
 # Статика интерфейса должна приходить целиком, иначе страница будет белой
-ASSET="$(curl -sk --max-time 10 --resolve "mail.$DOMAIN:443:127.0.0.1" \
-         "https://mail.$DOMAIN/" 2>/dev/null | grep -oE '/assets/[^"]+\.js' | head -1)"
+ASSET="$(curl -sk --max-time 10 --resolve "mail.$DOMAIN:$WEB_PORT:$PROBE_ADDR" \
+         "https://mail.$DOMAIN:$WEB_PORT/" 2>/dev/null | grep -oE '/assets/[^"]+\.js' | head -1)"
 if [ -n "$ASSET" ]; then
     web_probe "mail.$DOMAIN" "$ASSET" 200 "файлы сборки интерфейса отдаются"
 else
@@ -753,6 +794,11 @@ if [ -f "$ENV_FILE" ]; then
             hint "починить: docker compose -f $INFRA_DIR/docker-compose.yml up -d --force-recreate service-agent"
             hint "и впредь править .env только поверх: cat новый > $ENV_FILE"
         fi
+    else
+        # Пропуск проговариваем вслух. Раньше проверка молча исчезала
+        # вместе с посредником — а именно тогда она и нужна.
+        warn "посредник не работает: сверить infra/.env с ним нечем"
+        hint "поднять: docker compose -f $INFRA_DIR/docker-compose.yml up -d service-agent"
     fi
 fi
 

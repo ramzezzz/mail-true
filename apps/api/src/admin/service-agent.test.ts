@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseAudit } from './service-agent.js';
+import { parseAudit, parseUpdateStatus, parseVersion } from './service-agent.js';
 
 test('порт, пришедший строкой, не теряется', () => {
   const parsed = parseAudit({
@@ -105,4 +105,74 @@ test('непришедшее поле остаётся непришедшим, �
   assert.equal(parsed.env.sameAsExample, undefined);
   assert.equal(parsed.env.crlfLines, undefined);
   assert.equal(parsed.env.groupReadable, undefined);
+});
+
+/* ------------------------------------------------------------------ */
+/* Раздел «Обновления»                                                  */
+/* ------------------------------------------------------------------ */
+
+/** Ответ посредника ровно такой, какой он отдаёт на самом деле. */
+const REAL_VERSION_BODY = {
+  ok: true,
+  commit: 'a'.repeat(40),
+  short: 'aaaaaaa',
+  branch: 'master',
+  committedAt: '2026-08-09T10:00:00.000Z',
+  subject: 'что-то полезное',
+  dirty: false,
+  // Числами наружу посредник не отдаёт НИЧЕГО — это его сознательное
+  // решение (agent.pl, to_json): «строка, случайно состоящая из цифр,
+  // должна доехать строкой».
+  behind: '3',
+  ahead: '0',
+  pending: [{ hash: 'bbbbbbb', at: '2026-08-09T11:00:00.000Z', subject: 'правка' }],
+  images: [],
+};
+
+test('«отстали на N коммитов» не теряется оттого, что число приехало строкой', () => {
+  /*
+   * ЧТО БЫЛО. Разбор требовал именно number, и `behind` всегда получался
+   * нулём. По нему страница решает, есть ли что обновлять: кнопка
+   * «Обновить продукт» была заблокирована ВСЕГДА, рядом печаталось «Не
+   * применённого нет» — и тут же таблица «Что приедет при обновлении» со
+   * списком приехавших коммитов, потому что строки доезжали нормально.
+   * Обновиться из панели было нельзя вообще.
+   *
+   * Проверка не ловила этого потому, что подделка посредника отдавала
+   * настоящее число. Здесь — то, что отдаёт настоящий посредник.
+   */
+  const parsed = parseVersion(REAL_VERSION_BODY);
+  assert.equal(parsed.behind, 3, 'иначе кнопка обновления заблокирована навсегда');
+  assert.equal(parsed.ahead, 0);
+  assert.equal(parsed.pending.length, 1);
+  assert.equal(parsed.dirty, false);
+});
+
+test('число принимается и в своём виде — на случай другого посредника', () => {
+  const parsed = parseVersion({ ...REAL_VERSION_BODY, behind: 7 });
+  assert.equal(parsed.behind, 7);
+});
+
+test('мусор вместо числа не превращается в NaN на экране', () => {
+  const parsed = parseVersion({ ...REAL_VERSION_BODY, behind: 'много' });
+  assert.equal(parsed.behind, 0);
+});
+
+test('код возврата неудачного обновления не подменяется нулём', () => {
+  /*
+   * Та же причина. Строка «Обновление не доведено до конца (код возврата
+   * N)» печатала ноль при ЛЮБОЙ неудаче — то есть место, где должна быть
+   * причина, занимал признак успеха.
+   */
+  const parsed = parseUpdateStatus({
+    ok: true,
+    state: 'failed',
+    mode: 'code',
+    exitCode: '1',
+    startedAt: '2026-08-09T10:05:00.000Z',
+    finishedAt: '2026-08-09T10:09:00.000Z',
+    log: 'сборка упала',
+  });
+  assert.equal(parsed.state, 'failed');
+  assert.equal(parsed.exitCode, 1, 'ноль здесь означал бы «всё хорошо»');
 });
