@@ -149,6 +149,14 @@ server {
         default_type "text/plain";
         # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
         add_header Cache-Control "no-store" always;
+        # Свой add_header в location отменяет наследование ВСЕХ серверных
+        # add_header — HSTS, nosniff и прочих. Повторяем их здесь, чтобы
+        # приём не зависел от того, в каком location оказался запрос.
+        add_header Strict-Transport-Security $hsts_header always;
+        add_header X-Content-Type-Options    "nosniff" always;
+        add_header X-Frame-Options           "DENY" always;
+        add_header Referrer-Policy           "same-origin" always;
+        add_header X-Robots-Tag              "noindex, nofollow" always;
     }
 
     # --- Автонастройка почтовых клиентов (было и осталось) ---------
@@ -318,6 +326,14 @@ server {
         root /var/www/acme;
         default_type "text/plain";
         add_header Cache-Control "no-store" always;
+        # Свой add_header в location отменяет наследование ВСЕХ серверных
+        # add_header. Повторяем их здесь, чтобы набор заголовков не зависел
+        # от того, в какой location попал запрос.
+        add_header Strict-Transport-Security $hsts_header always;
+        add_header X-Content-Type-Options    "nosniff" always;
+        add_header X-Frame-Options           "DENY" always;
+        add_header Referrer-Policy           "same-origin" always;
+        add_header X-Robots-Tag              "noindex, nofollow" always;
     }
 
     # HTTP → HTTPS, по той же причине, что и у почты: cookie сессии
@@ -341,7 +357,7 @@ server {
 
     server_tokens off;
     # Импорт списка ящиков из CSV
-    client_max_body_size 16m;
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
 
     gzip on;
     gzip_proxied any;
@@ -452,7 +468,7 @@ server {
     ssl_session_timeout 1h;
 
     server_tokens off;
-    client_max_body_size 16m;
+    client_max_body_size ${CLIENT_MAX_BODY_SIZE};
 
     allow 127.0.0.0/8;
     allow ::1/128;

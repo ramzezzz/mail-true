@@ -53,6 +53,10 @@ services:
       # По умолчанию выключено; infra/test-antispam.sh включает при необходимости.
       UNBOUND_LOG_QUERIES: ${UNBOUND_LOG_QUERIES:-no}
       UNBOUND_DNSSEC: ${UNBOUND_DNSSEC:-yes}
+      # Своя подсеть: в unbound.conf перечислены только диапазоны RFC1918,
+      # а DOCKER_SUBNET настраивается и может лежать вне них — тогда
+      # резольвер откажет всему стеку. Разбор — в unbound/entrypoint.sh.
+      DOCKER_SUBNET: ${DOCKER_SUBNET:-172.28.0.0/16}
     volumes:
       - ./unbound/unbound.conf:/etc/unbound/unbound.conf:ro
     networks:
@@ -230,6 +234,10 @@ services:
       RSPAMD_PASSWORD: ${RSPAMD_PASSWORD}
       # Адрес своего резольвера для встроенного DNS-клиента rspamd
       RESOLVER_IP: ${RESOLVER_IP:-172.28.0.53}
+      # Адрес Dovecot: с него приходят письма, которые сервер порождает сам
+      # (пересылка копии и автоответчик). Им нужна подпись DKIM, и отбивать
+      # их нельзя — см. разбор в rspamd/entrypoint.sh.
+      DOVECOT_IP: ${DOVECOT_IP:-172.28.0.54}
       # Антивирус: по умолчанию выключен (ClamAV с базами ≈ 1 ГБ памяти).
       # Включается вместе с профилем: CLAMAV_ENABLED=true + --profile clamav
       CLAMAV_ENABLED: ${CLAMAV_ENABLED:-false}

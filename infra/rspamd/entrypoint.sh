@@ -37,7 +37,25 @@ password = "${RSPAMD_PASSWORD}";
 enable_password = "${RSPAMD_PASSWORD}";
 EOF
 
-# DKIM: селектор и путь к ключам из окружения
+# ------------------------------------------------------------------
+# DKIM: селектор, путь к ключам и КТО получает подпись
+# ------------------------------------------------------------------
+# sign_authenticated закрывает почту из веб-интерфейса и почтовых клиентов
+# (submission:587 с SASL), sign_local — то, что положено локально через
+# sendmail. Но есть третий отправитель, который не попадает ни туда, ни
+# сюда: сам Dovecot. Правило «переслать копию» (redirect) и автоответчик
+# (vacation) отдают письмо на postfix:25 с адреса ${DOVECOT_IP} и БЕЗ
+# SASL-логина — см. submission_host в infra/dovecot/conf/dovecot.conf.template.
+# Для rspamd это ни authenticated, ни local (адрес стека намеренно исключён
+# из local_addrs в local.d/options.inc), поэтому подпись не ставилась вовсе:
+# автоответ с нашего домена уходил без DKIM и при опубликованном
+# DMARC p=quarantine/reject — а такие записи рекомендует наша же панель —
+# уезжал в карантин получателя.
+if [ -n "${DOVECOT_IP}" ]; then
+    SIGN_NETWORKS="sign_networks = [\"${DOVECOT_IP}/32\"];"
+else
+    SIGN_NETWORKS=""
+fi
 cat > /etc/rspamd/override.d/dkim_signing.conf <<EOF
 enabled = true;
 selector = "${DKIM_SELECTOR}";
@@ -46,8 +64,57 @@ allow_username_mismatch = true;
 use_domain = "header";
 sign_authenticated = true;
 sign_local = true;
+${SIGN_NETWORKS}
 try_fallback = true;
 EOF
+
+# ------------------------------------------------------------------
+# Почта, которую порождает сам Dovecot, не должна получать отказ
+# ------------------------------------------------------------------
+# ЗАЧЕМ. Отказ на письмо от redirect/vacation — это не «письмо не ушло»,
+# это потеря ВХОДЯЩЕГО письма: команда redirect получает 5xx, скрипт Sieve
+# падает фатально, LMTP отвечает временным отказом, и письмо не попадает в
+# ящик вообще (разбор — в dovecot.conf.template рядом с sieve_default).
+# То есть одно правило пересылки могло остановить доставку всей почты в
+# ящик, стоило пересылаемому письму набрать 15 баллов на внешних списках.
+# Само письмо уже проверено при входе, второй раз спрашивать внешние
+# источники незачем — тот же довод, что и у own_users в local.d/settings.conf.
+#
+# Файл кладём в том (каталог local.d примонтирован только на чтение) и
+# подключаем из settings.conf через .include: секцию settings нельзя писать
+# в override.d — там она ЗАМЕНИТ правило own_users целиком.
+mkdir -p /var/lib/rspamd/generated
+if [ -n "${DOVECOT_IP}" ]; then
+    cat > /var/lib/rspamd/generated/own_dovecot.conf <<EOF
+own_dovecot {
+    priority = high;
+    ip = "${DOVECOT_IP}/32";
+
+    apply {
+        groups_disabled = [
+            "rbl", "spamhaus", "surbl", "surblorg", "uribl", "rspamdbl",
+            "ebl", "sem", "blocklistde", "mailspike", "dnswl", "fuzzy",
+            "phishing", "hfilter", "mx"
+        ];
+
+        # Отказ и серый список отключены полностью: любой из них означает
+        # потерю входящего письма, а не отказ в пересылке.
+        actions {
+            add_header = 12;
+            greylist = null;
+            reject = null;
+        }
+    }
+}
+EOF
+    echo "rspamd: письма от Dovecot (${DOVECOT_IP}) подписываются DKIM и не отбиваются"
+else
+    : > /var/lib/rspamd/generated/own_dovecot.conf
+    echo "rspamd: DOVECOT_IP не задан — пересылка и автоответы идут как чужая почта"
+fi
+chmod 755 /var/lib/rspamd/generated
+chmod 644 /var/lib/rspamd/generated/own_dovecot.conf
+chown -R _rspamd:_rspamd /var/lib/rspamd/generated
 
 # ------------------------------------------------------------------
 # Сколько писем может отправить один вошедший
@@ -146,10 +213,19 @@ fi
 # и проверки молча перестают работать. Поэтому адрес резольвера задаём явно.
 # Имена контейнеров (redis, clamav) unbound отдаёт через stub-зоны — см.
 # infra/unbound/unbound.conf.
+#
+# Здесь же — таймаут, повторы и число сокетов: override.d заменяет объект
+# dns ЦЕЛИКОМ, поэтому те же строки в local.d/options.inc не действовали
+# (проверено `rspamadm configdump options` — в объекте оставался один
+# nameserver). При недоступном резольвере проверка должна деградировать
+# быстро, а не висеть на пяти повторах по умолчанию.
 if [ -n "${RESOLVER_IP}" ]; then
     cat > /etc/rspamd/override.d/options.inc <<EOF
 dns {
     nameserver = ["${RESOLVER_IP}"];
+    timeout = 1s;
+    retransmits = 2;
+    sockets = 16;
 }
 EOF
     echo "DNS: rspamd резолвит через ${RESOLVER_IP} (unbound)"

@@ -44,8 +44,23 @@ server {
     # блоком без изменений.
     server_name autoconfig.${MAIL_DOMAIN} autoconfig.*;
 
+    http2 on;
+
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
+
+    # Хост автонастройки смотрит в интернет наравне с почтовым, поэтому и
+    # обходится с ним одинаково. Раньше здесь не было ни одного из этих
+    # правил: nginx представлялся полной версией всем подряд (`server_name`
+    # с маской ловит запрос к любому домену на сервере), а Autodiscover
+    # принимал тело запроса размером по умолчанию.
+    server_tokens off;
+    client_max_body_size 256k;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options        "DENY" always;
+    add_header Referrer-Policy        "same-origin" always;
+    add_header X-Robots-Tag           "noindex, nofollow" always;
 
     # --- Подтверждение владения доменом для Let's Encrypt -----------
     #
@@ -73,6 +88,13 @@ server {
         default_type "text/plain";
         # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
         add_header Cache-Control "no-store" always;
+        # Свой add_header в location отменяет наследование ВСЕХ серверных
+        # add_header, поэтому заголовки безопасности приходится повторять
+        # здесь целиком — иначе на этом пути они просто не отдаются.
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options        "DENY" always;
+        add_header Referrer-Policy        "same-origin" always;
+        add_header X-Robots-Tag           "noindex, nofollow" always;
     }
 
     location / {
@@ -97,8 +119,23 @@ server {
     # много. Запасной путь через default_server остаётся на месте.
     server_name autodiscover.${MAIL_DOMAIN} autodiscover.*;
 
+    http2 on;
+
     ssl_certificate     /certs/mail.crt;
     ssl_certificate_key /certs/mail.key;
+
+    # Хост автонастройки смотрит в интернет наравне с почтовым, поэтому и
+    # обходится с ним одинаково. Раньше здесь не было ни одного из этих
+    # правил: nginx представлялся полной версией всем подряд (`server_name`
+    # с маской ловит запрос к любому домену на сервере), а Autodiscover
+    # принимал тело запроса размером по умолчанию.
+    server_tokens off;
+    client_max_body_size 256k;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options        "DENY" always;
+    add_header Referrer-Policy        "same-origin" always;
+    add_header X-Robots-Tag           "noindex, nofollow" always;
 
     # --- Подтверждение владения доменом для Let's Encrypt -----------
     #
@@ -126,6 +163,13 @@ server {
         default_type "text/plain";
         # Файлы кладёт certbot и сразу убирает; кэшировать нечего.
         add_header Cache-Control "no-store" always;
+        # Свой add_header в location отменяет наследование ВСЕХ серверных
+        # add_header, поэтому заголовки безопасности приходится повторять
+        # здесь целиком — иначе на этом пути они просто не отдаются.
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options        "DENY" always;
+        add_header Referrer-Policy        "same-origin" always;
+        add_header X-Robots-Tag           "noindex, nofollow" always;
     }
 
     location / {

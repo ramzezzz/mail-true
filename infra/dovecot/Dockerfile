@@ -10,7 +10,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # вещей: помеченный спам должен попадать в папку «Спам» (сам Rspamd этого
     # сделать не может — он только ставит заголовок), и на нём же будут
     # работать пользовательские правила фильтрации.
-        dovecot-sieve dovecot-managesieved \
+    #
+    # dovecot-managesieved НЕ ставится намеренно. Протокол ManageSieve —
+    # это правка личных скриптов Sieve из почтового клиента, а скрипты у
+    # нас порождает панель (apps/api/src/settings/sieve.ts) и перезаписывает
+    # при каждом изменении правил: правка снаружи была бы молча потеряна
+    # при первом же сохранении в веб-интерфейсе. Раньше пакет ставился, но
+    # в `protocols` служба не включалась — лишний демон в образе и мёртвая
+    # ветка managesieve-login в fail2ban/filter.d/mailtrue-dovecot.conf.
+        dovecot-sieve \
         gettext-base netcat-openbsd ca-certificates \
     # Разборщики вложений для fts_decoder (decode2text.sh):
     #   poppler-utils — pdftotext (PDF)
