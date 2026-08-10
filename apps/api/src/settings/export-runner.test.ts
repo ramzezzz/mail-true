@@ -84,6 +84,22 @@ class FakeStore {
     return Promise.resolve([]);
   }
 
+  /** Остатки от незаконченных заданий: сюда их складывает проверка ниже. */
+  abandoned: ExportRow[] = [];
+  readonly forgotten: number[] = [];
+
+  listExportsWithFile(): Promise<ExportRow[]> {
+    const rows = this.abandoned;
+    // Один раз: настоящая выборка после forgetExportFile их уже не найдёт.
+    this.abandoned = [];
+    return Promise.resolve(rows);
+  }
+
+  forgetExportFile(id: number): Promise<void> {
+    this.forgotten.push(id);
+    return Promise.resolve();
+  }
+
   claimExport(): Promise<ExportRow | null> {
     const row = this.#row;
     // Задание берётся в работу ровно один раз — как и настоящим запросом
@@ -397,4 +413,45 @@ void test('папка с точкой в имени не сливается с �
   assert.notEqual(dotted, nested, 'два разных письма получали одно имя файла в архиве');
   assert.ok(dotted.startsWith('vip.клиенты/'), 'имя папки обязано остаться таким, как в ящике');
   assert.ok(nested.startsWith('vip/клиенты/'), 'вложенная папка обязана остаться каталогом');
+});
+
+/* ------------------------------------------------------------------ */
+/* Остаток архива от незаконченного задания                             */
+/* ------------------------------------------------------------------ */
+
+test('отменённое задание не оставляет архив с перепиской на диске', async () => {
+  /*
+   * ЧТО БЫЛО. Отмена полагалась на живого работника: он замечал смену
+   * состояния и удалял свой файл сам. Работника могло и не быть —
+   * процесс перезапустили посреди выгрузки, а человек в ближайшие десять
+   * минут нажал «Отменить». Файл с НАСТОЯЩИМИ письмами оставался в томе,
+   * а путь к нему из базы стирался: найти его после этого не мог уже
+   * никто, и он лежал там до перезагрузки тома, попадая заодно в каждую
+   * резервную копию.
+   */
+  const dir = await mkdtemp(join(tmpdir(), 'mt-export-'));
+  const leftover = join(dir, 'ostatok.zip');
+  await writeFile(leftover, 'кусок архива с чужой перепиской');
+
+  const store = new FakeStore(null as unknown as ExportRow);
+  store.abandoned = [{ ...job(1, leftover), state: 'cancelled', filePath: leftover }];
+  const runner = new ExportRunner({
+    config: {} as AppConfig,
+    settings: {
+      MAILBOX_EXPORT_DIR: dir,
+      MAILBOX_EXPORT_CONCURRENCY: 1,
+      MAILBOX_EXPORT_MAX_BYTES: 1024,
+      MAILBOX_EXPORT_TTL_HOURS: 24,
+      MAILBOX_EXPORT_TICK_MS: 1000,
+    } as SettingsConfig,
+    logger,
+    store: store as unknown as OwnerStore,
+    master: null,
+    connect: () => Promise.reject(new Error('Dovecot недоступен')),
+  });
+
+  await runner.tick();
+
+  assert.deepEqual(await readdir(dir), [], 'остаток архива обязан исчезнуть с диска');
+  assert.deepEqual(store.forgotten, [1], 'а путь к нему — из задания');
 });

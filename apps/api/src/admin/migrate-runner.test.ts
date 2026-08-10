@@ -159,6 +159,14 @@ class FakeDb {
   /** Чем ответить на счёт попыток: так изображается недоступная база. */
   failAttemptCounter: Error | null = null;
 
+  /** Строки ящиков, оставшиеся «переносится», закрываются вслед за заданием. */
+  stoppedItems: Array<{ jobId: number; reason: string }> = [];
+
+  async stopRunningMigrationItems(jobId: number, reason: string): Promise<number> {
+    this.stoppedItems.push({ jobId, reason });
+    return 0;
+  }
+
   async bumpMigrationAttempt(): Promise<number> {
     if (this.failAttemptCounter) throw this.failAttemptCounter;
     this.attempts += 1;
@@ -214,6 +222,7 @@ function batchReporting(
         copied: status === 'ok' ? 10 : 6,
         skipped: 0,
         failed: status === 'ok' ? 0 : 4,
+        missing: 0,
       };
       accounts.push(report);
       options.onAccountDone?.(index, report);
@@ -811,5 +820,92 @@ void test('недоступная база не отменяет предел п
     db.jobPatches.at(-1)?.finished,
     true,
     'при лежачей базе задание не закрывается никогда — и пароли лежат бессрочно',
+  );
+});
+
+/* ------------------------------------------------------------------ */
+/* Ящики, оставшиеся «переносится» у закрытого задания                  */
+/* ------------------------------------------------------------------ */
+
+test('закрытое по исчерпании попыток задание не оставляет ящик вечно «переносящимся»', async () => {
+  /*
+   * ЧТО БЫЛО. Задание закрывалось, а строки ящиков не трогал никто. Ящик,
+   * который переносили в момент срыва, оставался 'running' навсегда: у
+   * законченного задания в панели висело «идёт перенос», кнопка
+   * «Повторить неудавшиеся» его не брала, и в подсчёт «перенесено /
+   * частично / не удалось» он тоже не попадал. Ящик, который не переехал,
+   * выпадал из повтора без единого слова.
+   */
+  const db = new FakeDb();
+  db.failListItems = new Error('база моргнула');
+  const box = new SecretBox(SECRET);
+  const runner = runnerWith(db, box, { runBatch: batchReporting(['ok']) });
+  const row = () =>
+    jobRow({ total: 1, secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol' } }) });
+
+  // Пять срывов подряд — предел попыток.
+  for (let i = 0; i < 5; i += 1) await runner.runJob(row());
+
+  const last = db.jobPatches.at(-1) ?? {};
+  assert.equal(last['state'], 'failed', 'задание обязано закрыться');
+  assert.equal(db.stoppedItems.length, 1, 'а вместе с ним — и строки ящиков');
+  assert.match(String(db.stoppedItems[0]?.reason), /повторить/iu, 'причина обязана быть названа');
+});
+
+test('второй проход, перечитавший ящик целиком, не удваивает счётчики', async () => {
+  /*
+   * ЧТО БЫЛО. Числа прошлых проходов складывались с текущими всегда. Это
+   * верно, пока проход идёт по курсору. Если курсор не годится (у
+   * источника сменился UIDVALIDITY, потеряно состояние, папку
+   * пересоздали), проход перечитывает ящик ЦЕЛИКОМ, и уже перенесённые
+   * письма приходят как «пропущено, уже есть». Тогда copied прошлого
+   * прохода и skipped этого — одни и те же письма, и строка ящика
+   * показывала «перенесено 6, пропущено 10 из 10»: число, по которому
+   * сверяют полноту переезда, врало в сторону «всё хорошо».
+   */
+  const db = new FakeDb();
+  const box = new SecretBox(SECRET);
+  // Прошлый проход перенёс 6 писем из 10.
+  db.items = [itemRow(0, { copied: 6, skipped: 0, failed: 0, total: 10 })];
+  const runner = runnerWith(db, box, {
+    // Этот проход прочитал ящик заново: все десять — «уже есть».
+    runBatch: async (options) => {
+      const report: MailboxReport = {
+        sourceUser: 'user0@staraya.ru',
+        destUser: 'user0@novaya.ru',
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: 1,
+        status: 'ok',
+        folders: [],
+        totalMessages: 10,
+        copied: 0,
+        skipped: 10,
+        failed: 0,
+        missing: 0,
+      };
+      options.onAccountDone?.(0, report);
+      return {
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        accounts: [report],
+        ok: 1,
+        partial: 0,
+        failed: 0,
+        stopped: 0,
+      };
+    },
+  });
+
+  await runner.runJob(
+    jobRow({ total: 1, secret_enc: packSecrets(box, { mailboxPasswords: { '0': 'parol' } }) }),
+  );
+
+  const finished = db.itemPatches.filter((p) => p.patch['finished'] === true).at(-1);
+  const copied = Number(finished?.patch['copied'] ?? -1);
+  const skipped = Number(finished?.patch['skipped'] ?? -1);
+  assert.ok(
+    copied + skipped <= 10,
+    `перенесённых и пропущенных вместе не может быть больше писем в ящике: ${String(copied)} + ${String(skipped)}`,
   );
 });

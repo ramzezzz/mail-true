@@ -851,6 +851,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
         let processed = 0;
         for (const row of preview.rows) {
           processed += 1;
+          /** Придумал ли пароль сервер: такую строку сохраняем немедленно. */
+          let generatedThisRow = false;
           if (row.errors.length > 0) {
             result.failed.push({ line: row.line, email: row.email, error: row.errors.join('; ') });
           } else {
@@ -878,6 +880,7 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
                 });
               } else {
                 const generated = row.password === null;
+                generatedThisRow = generated;
                 const password = row.password ?? generatePassword();
                 const user = await ctx.db.createMailUser({
                   domainId: domain.id,
@@ -907,9 +910,21 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
               });
             }
           }
-          // Промежуточное сохранение: падение процесса на середине не должно
-          // уносить с собой пароли уже созданных ящиков.
-          if (processed % 25 === 0) await save('running', processed);
+          /*
+           * Промежуточное сохранение.
+           *
+           * Раз в 25 строк — этого мало там, где пароль ПРИДУМАЛ СЕРВЕР:
+           * ящик уже создан и закоммичен, а пароль к нему живёт только в
+           * памяти процесса. Падение или перезапуск на 99-й строке
+           * означали 24 созданных ящика, в которые не может войти никто:
+           * в базе хэш, а восстановить пароль неоткуда. Шапка
+           * import-jobs.ts при этом обещает обратное — «обрыв связи
+           * теперь не значит ничего».
+           *
+           * Поэтому такие строки сохраняются сразу же. Строки с паролем
+           * из файла терять нечего: он есть у того, кто этот файл принёс.
+           */
+          if (generatedThisRow || processed % 25 === 0) await save('running', processed);
         }
         await save('done', processed);
         await auditRow({

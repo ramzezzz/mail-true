@@ -113,6 +113,7 @@ export class ExportRunner {
     this.#ticking = true;
     try {
       await this.#expireOld(now);
+      await this.#dropAbandoned();
       if (this.#active >= this.#opts.settings.MAILBOX_EXPORT_CONCURRENCY) return;
       const stale = new Date(now.getTime() - STALE_MINUTES * 60_000);
       const job = await this.#opts.store.claimExport(now, stale);
@@ -125,6 +126,47 @@ export class ExportRunner {
       this.#opts.logger.warn(errorInfo(err), 'Выгрузка ящика: проход не удался');
     } finally {
       this.#ticking = false;
+    }
+  }
+
+  /**
+   * Уборка: задание закончилось, а файл остался.
+   *
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Отмена выгрузки полагалась на живого работника: он замечал смену
+   * состояния и удалял свой файл сам. Работника могло и не быть — процесс
+   * перезапустили посреди выгрузки, человек в ближайшие десять минут
+   * (пока задание считается брошенным) нажал «Отменить». Файл с
+   * НАСТОЯЩИМИ письмами оставался в томе, а путь к нему из базы стирался:
+   * найти его не мог уже никто, и он лежал там до перезагрузки тома,
+   * попадая заодно в каждую резервную копию.
+   *
+   * Теперь путь при отмене сохраняется, а этот проход доводит дело до
+   * конца — независимо от того, дожил ли до него работник.
+   */
+  async #dropAbandoned(): Promise<void> {
+    const rows = await this.#opts.store.listExportsWithFile(EXPIRE_BATCH, ['cancelled', 'failed']);
+    for (const row of rows) {
+      if (row.filePath) {
+        // Отказ удаления — не повод забыть путь: файл никуда не делся, и
+        // забыв путь, мы потеряли бы последнюю возможность его убрать.
+        try {
+          await rm(row.filePath, { force: true });
+        } catch (err) {
+          this.#opts.logger.warn(
+            { ...errorInfo(err), job: row.id },
+            'Выгрузка ящика: остаток архива стереть не удалось, попробуем на следующем проходе',
+          );
+          continue;
+        }
+      }
+      await this.#opts.store.forgetExportFile(row.id);
+      this.#opts.logger.info(
+        { job: row.id, account: row.accountEmail },
+        'Выгрузка ящика: остаток архива от незаконченного задания удалён',
+      );
     }
   }
 
@@ -151,6 +193,26 @@ export class ExportRunner {
    */
   async purgeReady(): Promise<number> {
     let removed = 0;
+    /*
+     * Незаконченные задания тоже держат файлы.
+     *
+     * Выключатель обещает «копий переписки на диске не будет», а работник
+     * при выключенной выгрузке не запускается вовсе. Значит строка,
+     * застрявшая в 'running' с записанным путём (перезапуск посреди
+     * выгрузки — и следом выключили настройку), осталась бы лежать вместе
+     * со своим куском архива навсегда: ни перезахватить её некому, ни
+     * увидеть.
+     */
+    for (const row of await this.#opts.store.listExportsWithFile(1000, [
+      'queued',
+      'running',
+      'cancelled',
+      'failed',
+    ])) {
+      if (row.filePath) await rm(row.filePath, { force: true }).catch(() => undefined);
+      await this.#opts.store.forgetExportFile(row.id);
+      removed += 1;
+    }
     /*
      * Потолок проходов, а не «пока список не опустеет».
      *

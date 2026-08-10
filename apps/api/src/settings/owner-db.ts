@@ -291,6 +291,16 @@ export interface OwnerStore {
   listExpiredExports(now: Date, limit: number): Promise<ExportRow[]>;
   /** Все готовые архивы — для уборки при выключенной выгрузке. */
   listReadyExports(limit: number): Promise<ExportRow[]>;
+  /**
+   * Задания, за которыми остался файл, хотя работать по ним уже некому.
+   *
+   * `states` — какие состояния считать законченными. Обычному проходу
+   * хватает 'cancelled' и 'failed'; при выключенной выгрузке сюда же
+   * попадают 'queued' и 'running', потому что работника нет вовсе.
+   */
+  listExportsWithFile(limit: number, states: readonly ExportState[]): Promise<ExportRow[]>;
+  /** Забыть путь к файлу, ничего больше в задании не трогая. */
+  forgetExportFile(id: number): Promise<void>;
   /** Сколько заданий сейчас в работе (по всем ящикам). */
   runningExports(): Promise<number>;
 
@@ -337,6 +347,16 @@ export interface ExportProgressPatch {
 
 export interface ExportFinishPatch {
   state: Exclude<ExportState, 'queued' | 'running'>;
+  /**
+   * Путь к файлу: `null` — забыть, строка — записать, ПОЛЕ ОТСУТСТВУЕТ —
+   * не трогать.
+   *
+   * Различие не косметическое. Отмена выгрузки вызывала finishExport без
+   * этого поля, а запрос писал `patch.filePath ?? null` — то есть путь к
+   * недописанному архиву со всей перепиской СТИРАЛСЯ из базы, а файл
+   * оставался на диске. Найти его после этого было нечем: выборки
+   * уборщика смотрят на 'ready', а перезахват — на 'queued'/'running'.
+   */
   filePath?: string | null;
   fileBytes?: number;
   lastError?: string | null;
@@ -633,7 +653,8 @@ export class OwnerDb implements OwnerStore {
     await this.#query(
       `UPDATE mailbox_export_jobs SET
          state = $2,
-         file_path = $3,
+         -- Путь трогаем только если о нём сказали: см. ExportFinishPatch.
+         file_path = CASE WHEN $7::boolean THEN $3::text ELSE file_path END,
          file_bytes = COALESCE($4, file_bytes),
          last_error = $5,
          expires_at = $6,
@@ -647,8 +668,24 @@ export class OwnerDb implements OwnerStore {
         patch.fileBytes ?? null,
         patch.lastError ?? null,
         patch.expiresAt?.toISOString() ?? null,
+        patch.filePath !== undefined,
       ],
     );
+  }
+
+  async listExportsWithFile(limit: number, states: readonly ExportState[]): Promise<ExportRow[]> {
+    const rows = await this.#query<ExportRowRaw>(
+      `SELECT ${EXPORT_COLUMNS} FROM mailbox_export_jobs
+        WHERE file_path IS NOT NULL AND state = ANY($2::text[])
+        ORDER BY id
+        LIMIT $1`,
+      [limit, states as string[]],
+    );
+    return rows.map(toExportRow);
+  }
+
+  async forgetExportFile(id: number): Promise<void> {
+    await this.#query(`UPDATE mailbox_export_jobs SET file_path = NULL WHERE id = $1`, [id]);
   }
 
   async listExpiredExports(now: Date, limit: number): Promise<ExportRow[]> {

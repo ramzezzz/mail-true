@@ -559,7 +559,20 @@ export async function applyRestore(
           where.section = 'Ящики';
           where.label = box.email;
           const domainName = box.email.split('@')[1] ?? '';
-          if (domainName === '') continue;
+          /*
+           * Адрес без домена не пропускаем МОЛЧА.
+           *
+           * Схема копии требует от адреса только длину (min(3)), «@» в
+           * ней не проверяется. План восстановления такую запись считает
+           * в «Появится», а обход её выбрасывал — и человек читал «ящиков
+           * появится: 12» там, где появилось 11. Тот же файл двадцатью
+           * строками ниже объявляет обратное принципом: «пропущенный
+           * алиас — не тихий пропуск».
+           */
+          if (domainName === '') {
+            skippedMailboxes.push(`${box.email} — в адресе нет домена`);
+            continue;
+          }
           // Домен под ящик заводим молча только потому, что план уже
           // предупредил об этом человека (см. buildRestorePlan).
           const domainId = await ensureDomain(client, domainName);
@@ -631,7 +644,12 @@ export async function applyRestore(
           where.section = 'Алиасы';
           where.label = `${alias.source} → ${alias.destination}`;
           const domainName = alias.source.split('@')[1] ?? '';
-          if (domainName === '') continue;
+          if (domainName === '') {
+            // Молчаливый пропуск здесь тем более недопустим: ниже это
+            // прямо названо принципом раздела.
+            skippedAliases.push(`${alias.source} → ${alias.destination} — в адресе нет домена`);
+            continue;
+          }
           /*
            * АЛИАС ПОВЕРХ ЖИВОГО ЯЩИКА НЕ ЗАВОДИТСЯ — ДАЖЕ ИЗ КОПИИ.
            *

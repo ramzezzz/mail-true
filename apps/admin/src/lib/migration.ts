@@ -105,14 +105,24 @@ export function currentActivity(items: readonly MigrationItem[]): string | null 
     : `${running.sourceUser}: подготовка (читается список папок)`;
 }
 
-/** Ящики, которые имеет смысл повторить. */
+/**
+ * Ящики, которые имеет смысл повторить.
+ *
+ * 'running' в списке — не описка. Кнопка появляется только у ЗАКОНЧЕННОГО
+ * задания, а значит строка, оставшаяся «переносится», — это ящик,
+ * который переносили в момент обрыва (перезапуск работника, исчерпанные
+ * попытки, брошенное задание). Пока его здесь не было, такой ящик не
+ * попадал ни в повтор, ни в счётчики: не переехал — и об этом никто не
+ * сказал.
+ */
 export function retryableItems(items: readonly MigrationItem[]): MigrationItem[] {
   return items.filter(
     (item) =>
       item.state === 'failed' ||
       item.state === 'partial' ||
       item.state === 'stopped' ||
-      item.state === 'queued',
+      item.state === 'queued' ||
+      item.state === 'running',
   );
 }
 

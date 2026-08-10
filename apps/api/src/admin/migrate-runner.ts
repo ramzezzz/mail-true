@@ -647,6 +647,21 @@ export class MigrationRunner {
               'Проверьте настройки и заведите его заново.',
           })
           .catch(() => undefined);
+        /*
+         * И строки ящиков — вслед за заданием.
+         *
+         * Ящик, который переносился в момент срыва, иначе оставался
+         * «переносится» навсегда: у закрытого задания вечное «идёт»,
+         * «Повторить неудавшиеся» его не берёт, в подсчёт «перенесено /
+         * частично / не удалось» он не попадает. Ящик, который не
+         * переехал, выпадал из повтора без единого слова.
+         */
+        await db
+          .stopRunningMigrationItems(
+            id,
+            'Задание закрыто: попытки исчерпаны. Ящик можно повторить.',
+          )
+          .catch(() => 0);
         this.#localAttempts.delete(id);
         logger.error(
           { jobId: id, attempts },
@@ -784,14 +799,34 @@ export class MigrationRunner {
     /** Итог по ящику с учётом предыдущих проходов. */
     const withCarried = (
       position: number,
-      v: { copied: number; skipped: number; failed: number },
+      v: { copied: number; skipped: number; failed: number; total?: number },
     ): { copied: number; skipped: number; failed: number } => {
       const before = carried.get(position) ?? { copied: 0, skipped: 0, failed: 0, total: 0 };
-      return {
+      const sum = {
         copied: before.copied + v.copied,
         skipped: before.skipped + v.skipped,
         failed: v.failed,
       };
+      /*
+       * СЛОЖЕНИЕ ВЕРНО, ПОКА ПРОХОД ИДЁТ ПО КУРСОРУ.
+       *
+       * Если курсор не годится (у источника сменился UIDVALIDITY, потеряно
+       * состояние, папку пересоздали), проход перечитывает папку ЦЕЛИКОМ —
+       * и письма, перенесённые прошлым проходом, приходят как «пропущено,
+       * уже есть». Тогда copied прошлого прохода и skipped этого — одни и
+       * те же письма, а строка ящика показывала «перенесено 724,
+       * пропущено 924 из 924»: число, по которому сверяют полноту
+       * переезда, врало в сторону «всё хорошо».
+       *
+       * Признак однозначный: перенесённых и пропущенных вместе не может
+       * быть больше, чем писем в ящике. Превысило — значит проход
+       * самодостаточен, и складывать не с чем.
+       */
+      const total = v.total ?? 0;
+      if (total > 0 && sum.copied + sum.skipped > total) {
+        return { copied: v.copied, skipped: v.skipped, failed: v.failed };
+      }
+      return sum;
     };
 
     const totals = (): { copied: number; skipped: number; failed: number } => {
@@ -901,6 +936,21 @@ export class MigrationRunner {
         // именно из таких и состоит задание, которое не поедет никогда.
         if (report.status === 'ok' || report.status === 'partial') advance();
         const errors = collectErrors(report.folders);
+        /*
+         * Письма, которых исходный сервер не отдал, — отдельной строкой.
+         *
+         * Они не попадают ни в «перенесено», ни в «пропущено», ни в
+         * «ошибок»: раньше их не было видно вообще нигде, и расхождение
+         * с «всего писем» списать было не на что. Чаще всего письмо
+         * просто удалили на источнике, поэтому это не ошибка — но и не
+         * молчание.
+         */
+        if (report.missing > 0) {
+          errors.push(
+            `Исходный сервер не отдал писем: ${String(report.missing)}. ` +
+              'Обычно это письма, удалённые на источнике во время переноса.',
+          );
+        }
         // Ошибка уровня ящика (не достучались, нет пароля) в папки не
         // попадает — без неё отчёт показал бы «ошибок 0» у не переехавшего
         // ящика, и это самое опасное враньё в отчёте.
@@ -908,7 +958,12 @@ export class MigrationRunner {
         // Числа с учётом предыдущих проходов: продолженный после
         // перезапуска ящик обязан показать всё, что в нём лежит, а не
         // только докачанное этим проходом.
-        const final = withCarried(position, report);
+        const final = withCarried(position, {
+          copied: report.copied,
+          skipped: report.skipped,
+          failed: report.failed,
+          total: report.totalMessages,
+        });
         void db
           .updateMigrationItem(jobId, position, {
             state: report.status,

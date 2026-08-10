@@ -100,6 +100,12 @@ class MemoryStore implements OwnerStore {
   listReadyExports(): Promise<ExportRow[]> {
     return Promise.resolve([]);
   }
+  listExportsWithFile(): Promise<ExportRow[]> {
+    return Promise.resolve([]);
+  }
+  forgetExportFile(): Promise<void> {
+    return Promise.resolve();
+  }
   runningExports(): Promise<number> {
     return Promise.resolve(0);
   }

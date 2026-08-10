@@ -573,6 +573,7 @@ export class MailboxMigrator extends EventEmitter {
       copied: 0,
       skipped: 0,
       failed: 0,
+      missing: 0,
     };
 
     try {
@@ -615,6 +616,7 @@ export class MailboxMigrator extends EventEmitter {
         report.copied += folderReport.copied;
         report.skipped += folderReport.skipped;
         report.failed += folderReport.failed;
+        report.missing += folderReport.missing;
         if (this.stopRequested) stopped = true;
       }
 
@@ -657,6 +659,7 @@ export class MailboxMigrator extends EventEmitter {
       copied: 0,
       skipped: 0,
       failed: 0,
+      missing: 0,
       errors: [],
     };
 
@@ -1062,6 +1065,20 @@ export class MailboxMigrator extends EventEmitter {
         stopped = true;
         break;
       }
+      /*
+       * UID, по которому сервер ничего не вернул, — это не ноль.
+       *
+       * Он не попадал ни в `copied`, ни в `skipped`, ни в `failed`, а
+       * `total` брался из числа писем в папке: сумма не сходилась, и
+       * заметить это было нечем. Курсор при этом через такой UID
+       * проходил, то есть повторный запуск письма уже не видел. Чаще
+       * всего письмо просто удалили на источнике между поиском и
+       * чтением — но отличить это от «сервер не отдал» нельзя, а молчать
+       * в обоих случаях нельзя тем более.
+       */
+      if (metas.length < chunkUids.length) {
+        folderReport.missing += chunkUids.length - metas.length;
+      }
 
       /*
        * Сколько копий каждого письма порции уже перенесено — ОДНИМ
@@ -1082,6 +1099,8 @@ export class MailboxMigrator extends EventEmitter {
       const ledger = new DedupLedger();
       const keySeen = new Set<string>();
       const toCopy: SourceMessageMeta[] = [];
+      /** Письма, отвергнутые пределом размера: курсор обязан на них встать. */
+      const oversize: number[] = [];
       for (const meta of metas) {
         if (!keySeen.has(meta.key)) {
           keySeen.add(meta.key);
@@ -1108,6 +1127,10 @@ export class MailboxMigrator extends EventEmitter {
             `UID ${meta.uid}: пропущено, размер ${meta.size} байт превышает лимит`,
           );
           folderReport.failed++;
+          // Курсор через него шагать не должен: письмо не переехало, и
+          // подняв предел, повторный запуск обязан его увидеть. В toCopy
+          // оно не попадает, поэтому трекеру говорим отдельно (ниже).
+          oversize.push(meta.uid);
         } else {
           toCopy.push(meta);
         }
@@ -1123,6 +1146,10 @@ export class MailboxMigrator extends EventEmitter {
             toCopy.map((m) => m.uid),
             cursorUid, // назад курсор не отматываем
           );
+      // Письмо, не поехавшее из-за предела размера, замораживает курсор
+      // ровно так же, как любая другая неудача: инвариант «курсор стоит
+      // перед первым непереехавшим письмом» обязан выполняться и здесь.
+      for (const uid of oversize) cursor?.markFailed(uid);
 
       for (const meta of toCopy) {
         // Остановка проверяется ПЕРЕД письмом, а не после: письмо либо

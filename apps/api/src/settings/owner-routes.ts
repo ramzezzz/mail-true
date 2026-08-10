@@ -233,7 +233,20 @@ export async function ownerRoutes(app: FastifyInstance, ctx: OwnerRoutesContext)
     if (job.state !== 'queued' && job.state !== 'running') {
       throw new BadRequestError('Это задание уже закончилось — отменять нечего');
     }
+    /*
+     * Путь к недописанному архиву НЕ стираем.
+     *
+     * Раньше здесь вызывался finishExport без поля filePath, а запрос
+     * писал `patch.filePath ?? null` — то есть путь исчезал из базы, а
+     * файл со всей уже собранной перепиской оставался на диске. Удалить
+     * его успевал только живой работник; если процесс перезапустили
+     * посреди выгрузки, а отмену нажали в ближайшие десять минут, файл не
+     * убирал уже никто: выборки уборщика смотрят на 'ready', перезахват —
+     * на 'queued'/'running'. Теперь путь остаётся, и остаток архива
+     * заберёт уборщик работника.
+     */
     await store.finishExport(id, { state: 'cancelled' });
+    void ctx.exportRunner?.tick();
     return { ok: true };
   });
 

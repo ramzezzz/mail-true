@@ -85,6 +85,7 @@ void test('уборщик удаляет карантин и записывае�
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -145,6 +146,7 @@ void test('карантин не удался — уборщик не смеет
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -192,6 +194,7 @@ void test('карантин не удался и не удаётся снова 
     },
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -232,6 +235,7 @@ void test('уборщик находит осиротевшие каталоги
     updateMailboxDeletion: async () => undefined,
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -277,6 +281,7 @@ void test('про осиротевшие каталоги уборщик соо�
     updateMailboxDeletion: async () => undefined,
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -379,6 +384,7 @@ void test('повторный карантин не трогает ящик, з�
     listEmailsIn: async () => ['ivan@x.local'],
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     // Застрявших удалений в этих проверках нет: они про обычный проход.
     countStuckDeletions: async () => 0,
@@ -413,6 +419,7 @@ void test('застрявшие удаления не молчат: уборщи
     updateMailboxDeletion: async () => undefined,
     expireStaleMailboxAccess: async () => 0,
     deleteExpiredImportJobs: async () => 0,
+    failStaleImportJobs: async () => 0,
     sweepAdminLoginFailures: async () => 0,
     countStuckDeletions: async () => 3,
     listEmailsIn: async () => [],
