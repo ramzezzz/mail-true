@@ -28,6 +28,7 @@ import {
 import { listFolders, markAnswered, requireFolder, splitMessageId } from '../imap/service.js';
 import { findFolderById, MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import { parseDraftSource, type DraftAttachmentPart } from '../mail/draft-read.js';
+import { cidToPartMap } from '../mail/structure.js';
 import { DraftSequencer } from '../mail/draft-sequencer.js';
 import {
   checkSendAt,
@@ -175,6 +176,18 @@ async function composeRaw(
      * см. mail/inline-images.ts.
      */
     inlineSource?: InlineImageSource;
+    /**
+     * Переносить картинки «сколько поместится», а не отказывать целиком.
+     *
+     * Нужно ровно одному вызову — спасению текста в «Черновики» после
+     * отказа отправки. Там письмо УЖЕ признано неотправляемым (чаще всего
+     * именно по размеру), и отказ из-за не поместившейся картинки означал
+     * бы, что черновик не запишется вовсе: человек потерял бы весь текст
+     * вместо одной картинки. Не поместившаяся остаётся ссылкой на наш же
+     * маршрут — в черновике она открывается и показывается, в отличие от
+     * уходящего письма, где такая ссылка бесполезна получателю.
+     */
+    inlineBestEffort?: boolean;
   },
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
@@ -256,7 +269,7 @@ async function composeRaw(
      * получатель видит письмо без картинок и не знает почему. Отказываем
      * до отправки и теми же словами, что и при тяжёлых вложениях.
      */
-    if (inlined.skipped > 0) {
+    if (inlined.skipped > 0 && settings.inlineBestEffort !== true) {
       throw new MessageTooLargeError(
         `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
           `картинок из цитаты не поместилось — ${String(inlined.skipped)}. ` +
@@ -667,6 +680,19 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     log: { warn: (obj: unknown, msg: string) => void },
   ): Promise<{ draftUid: number | null; draftId: string | null }> {
     /*
+     * КАРТИНКИ ПЕРЕНОСЯТСЯ И СЮДА.
+     *
+     * Собиралось это письмо без `inlineSource`, и оттого спасённый
+     * черновик ложился в ящик с пустыми `<img>`: ссылки на наш маршрут
+     * частей санитайзер снимает при сборке, а переносить их во вложения
+     * было некому. То есть после отказа почтового сервера человек
+     * получал в «Черновиках» письмо, из которого пропали все картинки
+     * пересылаемого — и узнавал об этом, только отправив его повторно.
+     *
+     * Соседний путь (обычное сохранение черновика) переносит их с самого
+     * начала; здесь дефект был воспроизведён заново.
+     */
+    /*
      * ПИСЬМО СОХРАНЯЕТСЯ ВСЕГДА — В ТОМ ЧИСЛЕ ПОВЕРХ ОТКРЫТОГО ЧЕРНОВИКА.
      *
      * Раньше здесь первой же строкой стоял выход: «черновик прислан, значит
@@ -680,15 +706,17 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      * удалит заменённую), поэтому копий не прибавляется — а текст цел.
      */
     try {
-      const raw = await composeRaw(
-        payload,
-        session.email,
-        uploads,
-        config.MESSAGE_MAX_BYTES,
-        forwarded,
-        {
+      const raw = await pool.withClient(session.email, session.password, (client) =>
+        composeRaw(payload, session.email, uploads, config.MESSAGE_MAX_BYTES, forwarded, {
           keepBcc: true,
-        },
+          inlineSource: imapPartSource(client, requireFolder, splitMessageId),
+          /*
+           * «Сколько поместится» — потому что сюда приходят и письма,
+           * которые не проходят по размеру. Отказ на этом месте оставил
+           * бы человека вовсе без черновика (см. inlineBestEffort).
+           */
+          inlineBestEffort: true,
+        }),
       );
       const uid = await saveDraftVersion(session, raw, payload.draftUid, payload.draftKey);
       return { draftUid: uid, draftId: uid ? `drafts:${uid}` : null };
@@ -1536,8 +1564,32 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
   app.post('/messages/send/undo', { preHandler: app.requireSession }, async (request) => {
     const session = request.mailSession;
     if (!session) throw new UnauthorizedError();
-    const { pendingId } = z
-      .object({ pendingId: z.string().min(1).max(100) })
+    const { pendingId, heldByWindow } = z
+      .object({
+        pendingId: z.string().min(1).max(100),
+        /**
+         * ОКНО НАПИСАНИЯ ДЕРЖИТ ЭТО ПИСЬМО И ВЕРНЁТ ЕГО СЕБЕ САМО.
+         *
+         * Единственный случай, когда возвращать письмо в «Черновики» не
+         * надо: пятисекундная отмена, нажатая в том же окне, откуда письмо
+         * ушло. Там оно живёт целиком — с телом, получателями и теми же
+         * вложениями, — и черновик стал бы лишней копией.
+         *
+         * Во всех остальных случаях окна нет. Раньше выбор делался по
+         * признаку `scheduled` — «отложено человеком», — и это было
+         * неверно: обычное письмо, которому почтовый сервер отказал
+         * временно, работник переносит на новый срок, и оно попадает в
+         * панель «Уйдут позже» уже БЕЗ всякого окна (оно закрылось через
+         * пять секунд). Кнопка «Отменить» на такой строке стирала письмо
+         * с диска целиком: ни в «Черновиках», ни в окне, ни в очереди —
+         * при том что панель прямо обещает возврат в «Черновики».
+         *
+         * Поэтому умолчание безопасное: не сказали — значит возвращаем.
+         * Старый клиент из кэша браузера в худшем случае получит лишний
+         * черновик рядом с вернувшимся окном, а не потерянное письмо.
+         */
+        heldByWindow: z.boolean().optional(),
+      })
       .parse(request.body ?? {});
 
     const gone = { ok: true, cancelled: false as const, reason: 'gone' as const };
@@ -1560,22 +1612,48 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
       if (!entry || entry.owner !== session.email) return gone;
 
       /*
-       * ПИСЬМО, ОТЛОЖЕННОЕ ЧЕЛОВЕКОМ, ВОЗВРАЩАЕТСЯ В «ЧЕРНОВИКИ».
+       * SMTP УЖЕ ПРИНЯЛ ЭТО ПИСЬМО — ОТМЕНЯТЬ НЕЧЕГО.
        *
-       * Для пятисекундной отмены следов действительно не нужно: письмо
-       * держит открытое окно написания, оно его и вернёт. Но у «отправить
-       * в понедельник» окна давно нет — черновик удалён при постановке в
-       * очередь, вложения тоже, — и прежнее «просто стереть» означало,
-       * что единственная кнопка «Отменить» уничтожает письмо целиком,
-       * вместе с текстом и вложениями. Именно поэтому в конверте есть
-       * признак scheduled.
+       * Конверт с отметкой `sentAt` лежит в очереди не потому, что письмо
+       * не ушло, а потому, что не доделан хвост: копия в «Отправленные»,
+       * уборка вложений, пометка исходного письма. Процесс мог умереть
+       * ровно в этом окне (перезапуск из панели, обновление образа), и
+       * тогда конверт дожидается следующего обхода — работник увидит
+       * отметку, отправлять второй раз не станет и доделает остальное.
+       *
+       * Прежний код этой отметки не смотрел: он снимал конверт с очереди
+       * и отвечал «отменено» о письме, которое уже у получателя. Хуже
+       * того, вместе с конвертом пропадал и хвост — копия в
+       * «Отправленных» не появлялась уже никогда, и у человека не
+       * оставалось ни следа отправленного письма.
+       */
+      if (entry.sentAt) {
+        request.log.info(
+          { pendingId, sentAt: entry.sentAt },
+          'Отмена опоздала: письмо уже принято почтовым сервером',
+        );
+        return { ok: true, cancelled: false as const, reason: 'gone' as const };
+      }
+
+      /*
+       * ПИСЬМО ВОЗВРАЩАЕТСЯ В «ЧЕРНОВИКИ» — ВЕЗДЕ, КРОМЕ ОДНОГО СЛУЧАЯ.
+       *
+       * Случай этот — пятисекундная отмена из того же окна написания:
+       * письмо там целиком, окно его и вернёт, а черновик был бы лишней
+       * копией. Про то, что окно живо, говорит сам клиент (heldByWindow);
+       * гадать об этом на сервере не по чему.
+       *
+       * Раньше здесь стояло `if (entry.scheduled)`, то есть возврат
+       * полагался только письмам, отложенным человеком. Разбор — в
+       * комментарии к heldByWindow выше: обычное письмо после временного
+       * отказа SMTP живёт в очереди без окна, и «Отменить» его уничтожало.
        *
        * Скрытая копия возвращается заголовком: в отправляемых байтах её
        * нет, а в черновике она нужна — иначе дописанное письмо уйдёт без
        * части получателей.
        */
       let draftUid: number | null = null;
-      if (entry.scheduled) {
+      if (!heldByWindow) {
         try {
           const raw = await spool.raw(pendingId);
           if (raw) {
@@ -1750,17 +1828,31 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
     if (!session) throw new UnauthorizedError();
     const { uid } = z.object({ uid: z.coerce.number().int().positive() }).parse(request.params);
 
-    const source = await pool.withClient(session.email, session.password, async (client) => {
+    /*
+     * Строение письма берётся вместе с исходником, одним заходом.
+     *
+     * Оно нужно ради встроенных картинок: в теле черновика они стоят
+     * ссылками `cid:`, а показать их можно только по номеру части
+     * (`/api/messages/drafts:<uid>/parts/<часть>`). Соответствие «cid ->
+     * номер части» живёт в BODYSTRUCTURE и больше нигде: разбор самих
+     * байтов номеров частей не знает. Разбор — в DraftReadOptions.
+     */
+    const found = await pool.withClient(session.email, session.password, async (client) => {
       const folder = await requireDraftsFolder(client);
       const lock = await client.getMailboxLock(folder.path);
       try {
-        const msg = await client.fetchOne(String(uid), { uid: true, source: true }, { uid: true });
-        return msg && msg.source ? msg.source : null;
+        const msg = await client.fetchOne(
+          String(uid),
+          { uid: true, source: true, bodyStructure: true },
+          { uid: true },
+        );
+        return msg && msg.source ? { source: msg.source, structure: msg.bodyStructure } : null;
       } finally {
         lock.release();
       }
     });
-    if (!source) throw new NotFoundError('Черновик не найден');
+    if (!found) throw new NotFoundError('Черновик не найден');
+    const source = found.source;
 
     /**
      * Черновик, вернувшийся из очереди отправки, несёт причину заголовком
@@ -1768,7 +1860,16 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
      * человек, открывший такой черновик, не должен гадать, откуда взялось
      * письмо, которого он не сохранял, и почему оно не ушло.
      */
-    const parsed = await parseDraftSource(source);
+    const cidMap = cidToPartMap(found.structure);
+    const parsed = await parseDraftSource(source, {
+      resolveCid: (cid) => {
+        const part = cidMap.get(cid);
+        return part
+          ? `/api/messages/${encodeURIComponent(`drafts:${String(uid)}`)}/parts/` +
+              encodeURIComponent(part)
+          : null;
+      },
+    });
     const sendFailure = readFailureFromRaw(source);
     const attachments = await draftAttachments(session, uid, parsed.attachments);
 

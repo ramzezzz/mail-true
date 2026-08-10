@@ -248,7 +248,7 @@ export const mockApi: MailApi = {
    * уйти. Заглушка обязана уметь отвечать и так, иначе этот случай
    * (самый неприятный из всех) в интерфейсе не увидит никто.
    */
-  async undoSend(pendingId) {
+  async undoSend({ pendingId }) {
     await delay(120);
     return { ok: true, cancelled: pending.delete(pendingId) };
   },

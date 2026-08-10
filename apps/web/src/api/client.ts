@@ -41,6 +41,7 @@ import type {
   SendResponse,
   ScheduledMessage,
   SendFailureNotice,
+  UndoSendRequest,
   UndoSendResponse,
   SessionInfo,
   UploadResponse,
@@ -75,7 +76,7 @@ export interface MailApi {
    * Именно запрос к серверу, а не таймер в браузере: письмо ждёт ТАМ,
    * поэтому закрытая вкладка отменяет отмену, а не отправку.
    */
-  undoSend(pendingId: string): Promise<UndoSendResponse>;
+  undoSend(request: UndoSendRequest): Promise<UndoSendResponse>;
   /**
    * Письма, которые отправить не удалось и о которых человеку ещё
    * не сказали.
@@ -233,10 +234,10 @@ export const httpApi: MailApi = {
   sendMessage: (request) =>
     apiFetch('/api/messages/send', { method: 'POST', body: JSON.stringify(request) }),
 
-  undoSend: (pendingId) =>
+  undoSend: (request) =>
     apiFetch('/api/messages/send/undo', {
       method: 'POST',
-      body: JSON.stringify({ pendingId }),
+      body: JSON.stringify(request),
     }),
 
   getSendFailures: async () =>

@@ -9,11 +9,18 @@
  */
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import type Mail from 'nodemailer/lib/mailer/index.js';
-import { BadRequestError } from '../errors.js';
+import { ENCODING_OVERHEAD } from '../config.js';
+import { BadRequestError, MessageTooLargeError } from '../errors.js';
 import { forwardedAttachment, type ForwardedMessage } from '../mail/forwarded.js';
+import { inlineQuotedImages, type InlineImageSource } from '../mail/inline-images.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import type { UploadStore } from '../uploads.js';
+
+/** Размер по-человечески — теми же словами, что и на своём пути отправки. */
+function megabytes(bytes: number): string {
+  return (bytes / (1024 * 1024)).toFixed(1).replace('.', ',');
+}
 
 export interface ExternalAddress {
   name: string | null;
@@ -66,14 +73,41 @@ export async function composeExternalRaw(
    * вошёл, — по ней хранилище и проверяет владельца.
    */
   owner: string,
+  /**
+   * Предел письма целиком — тот же, что и у своего пути отправки.
+   *
+   * Раньше на этом пути не было ни предела, ни суммы вложений: письмо
+   * собиралось целиком в память (nodemailer держит его дважды), уезжало
+   * чужому серверу и получало отказ уже от него — а до отказа успевало
+   * съесть память процесса, то есть уронить почту всем остальным. На
+   * своём пути это давно закрыто; здесь дефект жил отдельной жизнью.
+   */
+  messageMaxBytes: number,
   /** Письма, пересылаемые целиком: их исходники читает вызывающий. */
   forwarded: readonly ForwardedMessage[] = [],
+  settings: {
+    /**
+     * Откуда брать встроенные картинки цитаты — см. mail/inline-images.ts.
+     *
+     * Без этого письмо с чужого адреса уходило БЕЗ ЕДИНОЙ картинки:
+     * в теле они стоят ссылками на наш маршрут частей, и санитайзер
+     * снимает такой адрес целиком. Свой путь отправки переносит их во
+     * встроенные вложения с самого начала, а этот — не переносил, и
+     * пересылка с подключённого адреса молча теряла всю графику.
+     */
+    inlineSource?: InlineImageSource;
+  } = {},
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
-  for (const item of forwarded) attachments.push(forwardedAttachment(item));
+  let attachedBytes = 0;
+  for (const item of forwarded) {
+    attachedBytes += item.raw.length;
+    attachments.push(forwardedAttachment(item));
+  }
   for (const id of draft.attachmentIds) {
     const found = await uploads.get(id, owner);
     if (!found) throw new BadRequestError(`Вложение не найдено: ${id}`);
+    attachedBytes += found.meta.size;
     attachments.push({
       filename: found.meta.filename,
       path: found.path,
@@ -81,7 +115,44 @@ export async function composeExternalRaw(
     });
   }
 
-  const cleanHtml = sanitizeEmailHtml(draft.bodyHtml, { allowRemote: true }).html;
+  // Картинки цитаты — ДО санитайзера: после него переносить уже нечего,
+  // адрес снят целиком. Разбор порядка — в routes/compose.ts.
+  let bodyHtml = draft.bodyHtml;
+  if (settings.inlineSource) {
+    const inlined = await inlineQuotedImages(
+      bodyHtml,
+      settings.inlineSource,
+      Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+    );
+    bodyHtml = inlined.html;
+    for (const item of inlined.attachments) {
+      attachedBytes += Buffer.isBuffer(item.content) ? item.content.length : 0;
+      attachments.push(item);
+    }
+    if (inlined.skipped > 0) {
+      throw new MessageTooLargeError(
+        `Письмо не помещается в предел ${megabytes(messageMaxBytes)} МБ: ` +
+          `картинок из цитаты не поместилось — ${String(inlined.skipped)}. ` +
+          'Уберите часть цитируемого письма или перешлите его вложением.',
+        { limitBytes: messageMaxBytes },
+      );
+    }
+  }
+
+  const projected = Math.round(attachedBytes * ENCODING_OVERHEAD);
+  if (projected > messageMaxBytes) {
+    throw new MessageTooLargeError(
+      `Вложения не помещаются: вместе они дадут около ${megabytes(projected)} МБ, ` +
+        `а предел письма — ${megabytes(messageMaxBytes)} МБ. ` +
+        'Уберите часть файлов или отправьте их отдельными письмами.',
+      { limitBytes: messageMaxBytes, projectedBytes: projected },
+    );
+  }
+
+  // `keepCid: true` — по той же причине, что и на своём пути: письмо
+  // уходит наружу, и `cid:` там единственный работающий вид ссылки на
+  // встроенную картинку. Без него перенос выше был бы бессмыслен.
+  const cleanHtml = sanitizeEmailHtml(bodyHtml, { allowRemote: true, keepCid: true }).html;
   const options: Mail.Options = {
     from: { name: from.name ?? '', address: from.address },
     to: toMailAddresses(draft.to),
@@ -89,7 +160,7 @@ export async function composeExternalRaw(
     bcc: toMailAddresses(draft.bcc),
     subject: draft.subject,
     html: cleanHtml,
-    text: htmlToText(draft.bodyHtml),
+    text: htmlToText(bodyHtml),
     attachments,
     date: new Date(),
   };

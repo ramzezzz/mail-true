@@ -24,6 +24,7 @@ import type {
   ScheduledMessage,
   SendFailureNotice,
   SendRequest,
+  UndoSendRequest,
 } from './types';
 import { useUiStore } from '../app/store';
 import { actionErrorText } from '../lib/errorText';
@@ -402,7 +403,7 @@ export function useUndoSend() {
   const invalidate = useInvalidateMail();
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (pendingId: string) => api.undoSend(pendingId),
+    mutationFn: (request: UndoSendRequest) => api.undoSend(request),
     onSuccess: () => {
       // Очередь тоже перечитываем: отменённое письмо ушло из неё, а
       // отменённое отложенное — ещё и появилось в «Черновиках».

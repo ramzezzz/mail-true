@@ -14,8 +14,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { newSessionId } from '../crypto.js';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
-import { listFolders } from '../imap/service.js';
+import { listFolders, requireFolder, splitMessageId } from '../imap/service.js';
 import { loadForwardedMessages } from '../mail/forwarded.js';
+import { imapPartSource } from '../mail/inline-images.js';
+import { MAX_ENTITY_ID_LENGTH } from '../mail/folders.js';
 import { setSessionCookie } from '../routes/auth.js';
 import { draftSequencerFor, dropDraftAfterSend } from '../routes/compose.js';
 import { originOf } from '../settings/access-record.js';
@@ -112,7 +114,14 @@ const sendSchema = z.object({
   // здесь. Раньше этих полей в схеме не было: окно показывало плашки
   // вложенных писем и зажжённую кнопку, а до сервера они не доезжали —
   // письмо уходило без них, и человеку говорили «отправлено».
-  attachMessageIds: z.array(z.string().min(1).max(200)).max(10).optional(),
+  /*
+   * Предел длины — общий для всего продукта (см. MAX_ENTITY_ID_LENGTH).
+   * Своё «200» здесь означало, что письмо из папки с длинным названием
+   * (а идентификатор письма содержит путь папки) не пересылалось с
+   * подключённого адреса вовсе: запрос отбивался общим «Некорректные
+   * данные запроса», из которого не понять ни что не так, ни где.
+   */
+  attachMessageIds: z.array(z.string().min(1).max(MAX_ENTITY_ID_LENGTH)).max(10).optional(),
   requestReadReceipt: z.boolean().optional(),
 });
 
@@ -654,7 +663,21 @@ export async function accountsUserRoutes(
   /* Отправка «от имени» внешнего адреса                              */
   /* -------------------------------------------------------------- */
 
-  app.post('/external/:id/send', { preHandler: app.requireSession }, async (request) => {
+  /*
+   * Свой предел тела запроса — тот же, что у своего пути написания.
+   *
+   * Общий предел приложения (2 МБ) меньше, чем разрешает схема самого
+   * запроса (10 МБ на тело письма), и письмо со вставленными картинками
+   * упиралось в невидимый потолок: человек получал английскую ошибку не
+   * из контракта, а окно оставалось с текстом и без объяснения. У своего
+   * пути отправки это давно разобрано, здесь — нет.
+   */
+  const externalSendRoute = {
+    preHandler: app.requireSession,
+    bodyLimit: config.COMPOSE_BODY_MAX_BYTES,
+  };
+
+  app.post('/external/:id/send', externalSendRoute, async (request) => {
     const session = sessionOf(request);
     const { id } = idParam.parse(request.params);
     const draft = sendSchema.parse(request.body);
@@ -676,12 +699,22 @@ export async function accountsUserRoutes(
           )
         : [];
 
-    const raw = await composeExternalRaw(
-      draft,
-      { name: draft.fromName, address: found.account.address },
-      uploads,
-      session.email,
-      forwarded,
+    /*
+     * Соединение со СВОИМ ящиком нужно ради встроенных картинок цитаты:
+     * их части лежат в том письме, которое человек пересылает, а лежит
+     * оно у нас — даже когда письмо уходит с чужого адреса. Без этого
+     * получатель видел письмо без единой картинки, и молча.
+     */
+    const raw = await app.deps.pool.withClient(session.email, session.password, (client) =>
+      composeExternalRaw(
+        draft,
+        { name: draft.fromName, address: found.account.address },
+        uploads,
+        session.email,
+        config.MESSAGE_MAX_BYTES,
+        forwarded,
+        { inlineSource: imapPartSource(client, requireFolder, splitMessageId) },
+      ),
     );
     const outcome = await sendAsExternal({
       account: found.account,

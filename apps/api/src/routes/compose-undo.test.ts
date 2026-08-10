@@ -371,14 +371,33 @@ async function send(app: FastifyInstance, extra: Record<string, unknown> = {}): 
   return res.json() as SendBody;
 }
 
-async function undo(app: FastifyInstance, pendingId: string): Promise<{ cancelled: boolean }> {
-  const res = await app.inject({
-    method: 'POST',
-    url: '/api/messages/send/undo',
-    payload: { pendingId },
-  });
+interface UndoBody {
+  cancelled: boolean;
+  reason?: string;
+  draftUid?: number | null;
+}
+
+/**
+ * Отмена из ОКНА НАПИСАНИЯ: письмо держит открытое окно, оно его и вернёт.
+ * Признак `heldByWindow` шлёт только полоса «Отменить отправку» — и только
+ * поэтому сервер не кладёт копию в «Черновики».
+ */
+async function undo(app: FastifyInstance, pendingId: string): Promise<UndoBody> {
+  return undoRequest(app, { pendingId, heldByWindow: true });
+}
+
+/** Отмена из панели «Уйдут позже»: окна нет, письмо возвращают в ящик. */
+async function undoFromPanel(app: FastifyInstance, pendingId: string): Promise<UndoBody> {
+  return undoRequest(app, { pendingId });
+}
+
+async function undoRequest(
+  app: FastifyInstance,
+  payload: Record<string, unknown>,
+): Promise<UndoBody> {
+  const res = await app.inject({ method: 'POST', url: '/api/messages/send/undo', payload });
   assert.equal(res.statusCode, 200, res.body);
-  return res.json() as { cancelled: boolean };
+  return res.json() as UndoBody;
 }
 
 /* ------------------------------------------------------------------ */
@@ -548,6 +567,105 @@ test('несуществующее и чужое письмо отменяютс
     );
     assert.equal((await undo(app, foreign.id)).cancelled, false);
     assert.notEqual(await spool.get(foreign.id), null, 'чужое письмо остаётся в очереди');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Отмена без окна: письмо возвращается, а не пропадает                 */
+/* ------------------------------------------------------------------ */
+
+/*
+ * САМЫЙ ДОРОГОЙ СЛУЧАЙ ЭТОГО МАРШРУТА.
+ *
+ * Письмо, отданное обычной отправкой, живёт в очереди дольше пяти секунд
+ * не в теории: почтовый сервер отказывает временно (перезапуск, серая
+ * очередь получателя, нет связи), и работник переносит срок. Окно
+ * написания к этому времени закрыто, черновик удалён при постановке в
+ * очередь, вложения удерживаются очередью — и единственное место, где
+ * человек видит письмо, это панель «Уйдут позже» с кнопкой «Отменить».
+ *
+ * Прежний код возвращал в «Черновики» только письма с признаком
+ * «отложено человеком», а остальные снимал с очереди безусловно. То есть
+ * нажатие на эту кнопку уничтожало письмо целиком: ни у получателя, ни в
+ * «Черновиках», ни в окне, ни в очереди. Панель при этом прямо обещает
+ * обратное.
+ */
+test('отмена без окна возвращает письмо в «Черновики» — вместе со скрытой копией', async () => {
+  await withApp({ undoSendSeconds: 5 }, async ({ app, client, smtp, spoolDir }) => {
+    const body = await send(app, { bcc: [{ name: null, address: 'tihiy@mail.local' }] });
+    const pendingId = body.pendingId ?? '';
+
+    // Так письмо и оказывается в панели без всякого окна: попытка
+    // сорвалась, срок перенесён, окно давно закрыто.
+    const spool = new DeferredSpool(spoolDir);
+    const attempts = await spool.bumpAttempt(pendingId, new Date(Date.now() + 600_000));
+    assert.equal(attempts, 1);
+
+    const result = await undoFromPanel(app, pendingId);
+
+    assert.equal(result.cancelled, true);
+    assert.equal(typeof result.draftUid, 'number', 'письмо обязано вернуться в «Черновики»');
+    assert.equal(client.drafts.size, 1, 'без этого письмо было бы стёрто целиком');
+    assert.equal(smtp.messages.length, 0, 'отменённое письмо никому не уходит');
+    assert.deepEqual(await readdir(spoolDir), [], 'из очереди письмо снято');
+
+    const raw = client.appended.find((a) => a.path === 'Drafts')?.raw;
+    assert.ok(raw, 'черновик должен был лечь в «Черновики»');
+    const text = raw.toString('utf8');
+    assert.match(text, /^To: .*to@mail\.local/m, 'получатели обязаны вернуться вместе с письмом');
+    /*
+     * Скрытая копия в отправляемых байтах отсутствует намеренно, а в
+     * черновике она нужна: без неё дописанное письмо ушло бы уже без
+     * части адресатов — молча и для отправителя, и для них.
+     */
+    assert.match(text, /^Bcc: tihiy@mail\.local$/m, 'скрытая копия потерялась при возврате');
+  });
+});
+
+test('отмена ИЗ ОКНА черновика не плодит: письмо возвращает само окно', async () => {
+  // Обратный ход к проверке выше. Разница ровно в одном признаке запроса,
+  // и она осмысленная: окно держит письмо целиком, и копия в «Черновиках»
+  // была бы вторым экземпляром того же письма.
+  await withApp({ undoSendSeconds: 5 }, async ({ app, client, spoolDir }) => {
+    const body = await send(app);
+    const result = await undo(app, body.pendingId ?? '');
+
+    assert.equal(result.cancelled, true);
+    assert.equal(result.draftUid ?? null, null);
+    assert.equal(client.drafts.size, 0);
+    assert.deepEqual(await readdir(spoolDir), []);
+  });
+});
+
+/*
+ * Отметка «SMTP принял» появляется РАНЬШЕ, чем конверт уходит с диска:
+ * между ответом «250» и уборкой стоят копия в «Отправленные», удаление
+ * вложений и пометка исходного письма. Процесс может умереть внутри этого
+ * окна — обычное дело при обновлении или перезапуске из панели.
+ *
+ * Прежняя отмена этой отметки не смотрела: снимала конверт с очереди и
+ * отвечала «отменено» о письме, которое уже у получателя. Вместе с
+ * конвертом пропадал и хвост — копия в «Отправленных» не появлялась уже
+ * никогда.
+ */
+test('письмо, принятое почтовым сервером, не отменяется — и хвост доделывается', async () => {
+  await withApp({ undoSendSeconds: 5 }, async ({ app, scope, client, smtp, spoolDir }) => {
+    const body = await send(app);
+    const pendingId = body.pendingId ?? '';
+    const spool = new DeferredSpool(spoolDir);
+    await spool.markSent(pendingId);
+
+    const result = await undoFromPanel(app, pendingId);
+
+    assert.equal(result.cancelled, false, 'ушедшее письмо отменить нельзя');
+    assert.equal(client.drafts.size, 0, 'и в «Черновики» его класть тоже нельзя');
+    assert.notEqual(await spool.get(pendingId), null, 'конверт нужен работнику для хвоста');
+
+    // Обратный ход: работник доделывает начатое и второй раз SMTP не трогает
+    await scope.deferredSender.tick(new Date(Date.now() + 60_000));
+    assert.equal(smtp.messages.length, 0, 'повторно письмо не отдают');
+    assert.equal(client.sent.size, 1, 'копия в «Отправленных» обязана появиться');
+    assert.deepEqual(await readdir(spoolDir), [], 'после хвоста очередь пустеет');
   });
 });
 
