@@ -12,7 +12,7 @@
  * которое о них знало, и сохранённое не влияло ни на что.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useGeneralSettings, useSaveGeneralSettings } from '../../api/settingsQueries';
 import { UNDO_SEND_CHOICES, type GeneralSettings, type Signature } from '../../api/settingsTypes';
 import { Button, SelectField, Switch, TextAreaField, TextField } from '../../components';
@@ -34,11 +34,21 @@ export function GeneralSettingsPage() {
   const { data, isPending, isError } = useGeneralSettings();
   const save = useSaveGeneralSettings();
   const [draft, setDraft] = useState<GeneralSettings | null>(null);
+  /**
+   * Подписи, которые были на экране при загрузке формы.
+   *
+   * Сервер удаляет только их: заведённое позже (из админки, из соседней
+   * вкладки) вкладка, открытая час назад, снести не должна.
+   */
+  const loadedSignatureIds = useRef<string[]>([]);
 
   // Пришли значения с сервера — заводим черновик. Пока идёт сохранение,
   // черновик не перетираем: иначе поле дёрнулось бы под курсором.
   useEffect(() => {
-    if (data && draft === null) setDraft(structuredClone(data));
+    if (data && draft === null) {
+      setDraft(structuredClone(data));
+      loadedSignatureIds.current = data.signatures.map((s) => s.id);
+    }
   }, [data, draft]);
 
   if (isError) {
@@ -69,7 +79,14 @@ export function GeneralSettingsPage() {
 
   const addSignature = () => {
     const signature: Signature = {
-      id: `new-${Date.now()}`,
+      /*
+       * Идентификатор случайный, а не по времени: два нажатия в одну
+       * миллисекунду (двойной щелчок, макрос) давали один и тот же
+       * `new-<время>` — правки шли в обе подписи разом, React ругался на
+       * повтор ключа, а на сервере вторая правка затирала первую и одна
+       * подпись пропадала молча.
+       */
+      id: `new-${crypto.randomUUID()}`,
       name: `Подпись ${draft.signatures.length + 1}`,
       text: '',
     };
@@ -105,7 +122,22 @@ export function GeneralSettingsPage() {
       showNotice('Автоответчик не включён: без текста отвечать нечем');
       return;
     }
-    save.mutate(draft, { onSuccess: (saved) => setDraft(structuredClone(saved)) });
+    /*
+     * Вместе с формой шлём идентификаторы подписей, которые были на
+     * экране при её загрузке. По ним сервер решает, что удалять: без
+     * этого вкладка, открытая час назад, сносила подпись, заведённую за
+     * это время из админки или из соседней вкладки, — вместе с
+     * написанным текстом.
+     */
+    save.mutate(
+      { ...draft, knownSignatureIds: loadedSignatureIds.current },
+      {
+        onSuccess: (saved) => {
+          setDraft(structuredClone(saved));
+          loadedSignatureIds.current = saved.signatures.map((s) => s.id);
+        },
+      },
+    );
   };
 
   const removeSignature = (id: string) =>

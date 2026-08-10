@@ -198,6 +198,21 @@ class FakeSettingsDb {
     return [...list];
   }
 
+  /**
+   * Явный выбор «Без подписи»: снимает флаг у всех.
+   *
+   * Отдельно от прочих правок потому, что настоящее хранилище после
+   * каждой из них возвращает флаг первой подписи (защита от состояния
+   * «подписи есть, а основной нет»), и без этого шага выбор «Без
+   * подписи» не сохранялся бы никогда.
+   */
+  async clearDefaultSignatureChoice(email: string): Promise<Signature[]> {
+    const list = this.signatures.get(this.#key(email)) ?? [];
+    for (const item of list) item.isDefault = false;
+    this.signatures.set(this.#key(email), list);
+    return [...list];
+  }
+
   async listFilters(email: string): Promise<FilterRule[]> {
     return [...(this.filters.get(this.#key(email)) ?? [])];
   }

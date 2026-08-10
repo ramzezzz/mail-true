@@ -409,17 +409,44 @@ export class SettingsDb {
 
   async createSignature(
     email: string,
-    input: { name: string; bodyHtml: string; isDefault: boolean },
+    input: { name: string; bodyHtml: string; isDefault: boolean; position?: number },
   ): Promise<Signature[]> {
     if (input.isDefault) await this.clearDefaultSignature(email);
+    /*
+     * Место в списке задаёт вызывающий, если знает его.
+     *
+     * Без этого новая подпись всегда уезжала в конец: сохранение из
+     * панели проставляет остальным position по их месту в форме, а новой
+     * ставило max+1. Администратор добавлял подпись, поднимал её наверх,
+     * сохранял — и она возвращалась вниз. Хуже: её position совпадал с
+     * позицией последней существующей, и порядок дальше решал id, а от
+     * порядка зависит, какая подпись станет основной.
+     */
     await this.query(
       `INSERT INTO mail_signatures (account_email, name, body_html, is_default, position)
        VALUES (lower($1), $2, $3, $4,
-               coalesce((SELECT max(position) + 1 FROM mail_signatures
-                          WHERE lower(account_email) = lower($1)), 0))`,
-      [email, input.name, input.bodyHtml, input.isDefault],
+               coalesce($5::int,
+                        (SELECT max(position) + 1 FROM mail_signatures
+                          WHERE lower(account_email) = lower($1)),
+                        0))`,
+      [email, input.name, input.bodyHtml, input.isDefault, input.position ?? null],
     );
     await this.ensureOneDefaultSignature(email);
+    return this.listSignatures(email);
+  }
+
+  /**
+   * Убрать признак «основная» у всех подписей ящика.
+   *
+   * Нужно для явного выбора «Без подписи»: ensureOneDefaultSignature
+   * существует как защита от испорченных данных («подписи есть, а
+   * основной нет») и после каждой правки возвращала флаг первой. Из-за
+   * этого выбор «Без подписи» не сохранялся НИКОГДА: человек выбирал его,
+   * жал «Сохранить», и селект на глазах перескакивал обратно, а окно
+   * написания продолжало подставлять отключённую подпись.
+   */
+  async clearDefaultSignatureChoice(email: string): Promise<Signature[]> {
+    await this.clearDefaultSignature(email);
     return this.listSignatures(email);
   }
 

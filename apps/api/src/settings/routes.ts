@@ -52,7 +52,15 @@ const signatureSchema = z.object({
 
 export const generalSchema = z.object({
   senderName: z.string().max(255).default(''),
-  signatures: z.array(signatureSchema).max(20).default([]),
+  /*
+   * БЕЗ умолчания — как у трёх соседних полей ниже и ровно по той же
+   * причине: форма, которая о поле не знает, не должна МОЛЧА ЕГО
+   * ГАСИТЬ. С умолчанием `[]` запрос без этого поля стирал все подписи
+   * ящика и отвечал 200, а тексты подписей человек пишет руками.
+   */
+  signatures: z.array(signatureSchema).max(20).optional(),
+  /** Что клиент видел на экране: по этому списку решается, что удалять. */
+  knownSignatureIds: z.array(z.string().max(64)).max(50).optional(),
   defaultSignatureId: z.string().max(64).nullable().default(null),
   autoReply: z
     .object({
@@ -317,7 +325,7 @@ export async function settingsUserRoutes(
       session,
       'settings',
       `Изменены общие настройки; автоответчик ${dto.autoReply.enabled ? 'включён' : 'выключен'}` +
-        `, подписей: ${dto.signatures.length}`,
+        `, подписей: ${String(dto.signatures?.length ?? 'не менялись')}`,
     );
 
     // Автоответчик живёт в том же файле Sieve, что и правила.

@@ -87,7 +87,7 @@ test('общие настройки: внутреннее -> DTO интерфе�
   assert.equal(dto.notifications.browser, true);
   assert.equal(dto.notifications.tabCounter, true);
   assert.equal(dto.defaultSignatureId, '7');
-  assert.deepEqual(dto.signatures[0], { id: '7', name: 'Рабочая', text: 'С уважением' });
+  assert.deepEqual(dto.signatures?.[0], { id: '7', name: 'Рабочая', text: 'С уважением' });
   assert.deepEqual(dto.autoReply, {
     enabled: true,
     text: 'Меня нет',

@@ -115,12 +115,15 @@ type BulkBody = z.infer<typeof bulkSchema>;
 
 /** Снимок общих настроек для журнала аудита. */
 function generalSnapshot(dto: WebGeneralSettings): Record<string, unknown> {
-  const def = dto.signatures.find((s) => s.id === dto.defaultSignatureId) ?? null;
+  // Список подписей необязателен: запрос, который их не прислал, их и не
+  // меняет — в снимке для журнала тогда пусто, а не «стёрли все».
+  const signatures = dto.signatures ?? [];
+  const def = signatures.find((s) => s.id === dto.defaultSignatureId) ?? null;
   return {
     sender_name: dto.senderName,
     // В журнал кладём имена и тексты подписей: «изменены подписи» без
     // самих подписей не отвечает на вопрос «что именно сделали».
-    signatures: dto.signatures.map((s) => ({ name: s.name, text: s.text })),
+    signatures: signatures.map((s) => ({ name: s.name, text: s.text })),
     default_signature: def ? def.name : null,
     autoreply_enabled: dto.autoReply.enabled,
     autoreply_text: dto.autoReply.text,

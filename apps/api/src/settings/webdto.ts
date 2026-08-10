@@ -46,7 +46,19 @@ export type WebAfterDelete = 'next-message' | 'list';
 
 export interface WebGeneralSettings {
   senderName: string;
-  signatures: WebSignature[];
+  /**
+   * Список подписей. НЕОБЯЗАТЕЛЕН: форма, которая о подписях не знает,
+   * не должна их молча стирать — тексты человек пишет руками.
+   */
+  signatures?: WebSignature[];
+  /**
+   * Идентификаторы подписей, которые клиент видел на экране.
+   *
+   * Нужны, чтобы правило «чего нет в присланном списке — удаляем» не
+   * сносило подписи, заведённые уже после загрузки формы: вкладка,
+   * открытая час назад, иначе уносит чужую работу.
+   */
+  knownSignatureIds?: string[];
   defaultSignatureId: string | null;
   autoReply: {
     enabled: boolean;
