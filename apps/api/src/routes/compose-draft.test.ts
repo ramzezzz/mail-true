@@ -593,3 +593,42 @@ test('несуществующий черновик — это 404, а не пу
     await h.close();
   }
 });
+
+test('пропажа одной картинки не уносит за собой уцелевшие', async () => {
+  /*
+   * ЭТА ПРОВЕРКА СТОИТ ЗДЕСЬ ИЗ-ЗА РАЗМЕНА УТЕЧКИ НА ПОТЕРЮ.
+   *
+   * Набор считается негодным, когда пропала ХОТЬ ОДНА его часть. Здесь
+   * стояло удаление остальных — «чтобы не занимали место». Но остальные
+   * живы, и на них смотрит окно, которое человек открыл раньше и не
+   * закрывал: в его теле стоят ссылки на эти самые номера. Снеся их, мы
+   * превращали одну потерянную картинку в потерянные все.
+   */
+  const h = await buildHarness();
+  try {
+    const uid = await saveDraft(h.app, {
+      to: [{ name: null, address: 'irina@mail.local' }],
+      subject: 'Две картинки',
+      bodyHtml: `<p><img src="${PNG_DATA_URL}"> и <img src="${PNG_DATA_URL2}"></p>`,
+    });
+
+    const first = await readDraft(h.app, uid);
+    const ids = uploadIdsIn(first.bodyHtml);
+    assert.equal(ids.length, 2, 'ожидались две картинки');
+    const [gone, alive] = ids as [string, string];
+
+    // Уборщик унёс ОДНУ — набор стал негодным
+    await h.uploads.delete(gone);
+
+    await readDraft(h.app, uid);
+
+    // …а уцелевшая обязана остаться: на неё ссылается уже открытое окно
+    assert.notEqual(
+      await h.uploads.get(alive, 'test@mail.local'),
+      null,
+      'уцелевшую картинку унесли вместе с пропавшей',
+    );
+  } finally {
+    await h.close();
+  }
+});
