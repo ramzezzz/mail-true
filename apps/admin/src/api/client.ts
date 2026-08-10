@@ -83,6 +83,7 @@ import type {
   SpamListChange,
   SpamListsResponse,
   SpamOverview,
+  SpamErrors,
   SpamSettings,
   SpamThresholds,
   SignatureBulkPreview,
@@ -487,6 +488,15 @@ export const api = {
   spamLearn: (message: string, kind: 'spam' | 'ham') =>
     post<SpamLearnResult>('/spam/learn', { message, kind }),
   spamSettings: () => get<SpamSettings>('/spam/settings'),
+  /**
+   * Последние ошибки самого rspamd.
+   *
+   * Спрашивается только тогда, когда антиспам не отвечает: это и есть
+   * единственный момент, когда его собственный журнал что-то объясняет.
+   * Маршрут существовал с самого начала, но не вызывался ниоткуда — то
+   * есть разбор отказа лежал в коде и до человека не доходил.
+   */
+  spamErrors: () => get<SpamErrors>('/spam/errors'),
 
   /* --- наблюдение: исправность сервера ---
    *

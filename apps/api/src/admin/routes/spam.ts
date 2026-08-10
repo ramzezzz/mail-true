@@ -348,7 +348,15 @@ export async function adminSpamRoutes(app: FastifyInstance): Promise<void> {
           note:
             'История живёт в памяти процесса rspamd: она короткая и обнуляется при ' +
             'перезапуске. Долгую историю доставки ведёт раздел «Почтовый поток»',
-          total: rows.length,
+          /*
+           * Число ОТОБРАННЫХ, а не всех прочитанных.
+           *
+           * Здесь стояло `rows.length` — длина истории до отбора, — и
+           * рядом с двумя показанными письмами могло стоять «всего 200».
+           * Разница видна как раз при включённом «только спам», то есть
+           * в самом частом случае.
+           */
+          total: filtered.length,
           items: filtered.slice(0, q.limit).map((row) => ({
             at: row.at,
             action: row.action,

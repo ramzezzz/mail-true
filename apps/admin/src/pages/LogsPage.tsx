@@ -318,14 +318,37 @@ export function LogsPage() {
       setLoaded((prev) => {
         const grown = [...prev.lines, ...tail.items];
         const kept = keepWindow(grown, WINDOW_LINES) as LogLine[];
+        const trimmed = kept.length !== grown.length;
         // Единственный случай, когда прокрутку всё же надо поправить:
         // окно переполнилось и лишнее срезано СВЕРХУ. Тогда содержимое
         // над кромкой действительно уменьшилось.
         if (!stick) {
-          scrollPlan.current =
-            kept.length === grown.length ? null : { kind: 'keep', height: list?.scrollHeight ?? 0 };
+          scrollPlan.current = trimmed ? { kind: 'keep', height: list?.scrollHeight ?? 0 } : null;
         }
-        return { ...prev, lines: kept, after: tail.nextAfter, sizeBytes: tail.sizeBytes };
+        /*
+         * СРЕЗАННОЕ СВЕРХУ ОБЯЗАНО ОСТАВАТЬСЯ ДОСТИЖИМЫМ.
+         *
+         * Окно держит последние четыре тысячи строк, лишнее срезается. А
+         * курсор «читать старее» при этом не двигался: он показывал на
+         * место ПЕРЕД самой первой загруженной строкой — той, которую
+         * срезали час назад. Между верхней кромкой ленты и этим курсором
+         * образовывалась дыра: нажатие «Показать более старые» уводило
+         * человека мимо целого куска журнала, и куска этого он не видел
+         * уже никогда, хотя строки в файле есть и лента их только что
+         * показывала.
+         *
+         * Теперь курсор переставляется на смещение новой первой строки —
+         * дочитывание продолжается ровно оттуда, где обрывается видимое.
+         */
+        const olderBefore =
+          trimmed && kept.length > 0 ? (kept[0]?.offset ?? prev.olderBefore) : prev.olderBefore;
+        return {
+          ...prev,
+          lines: kept,
+          olderBefore,
+          after: tail.nextAfter,
+          sizeBytes: tail.sizeBytes,
+        };
       });
       if (!stick) setUnread((prev) => prev + tail.items.length);
     } catch (err) {
@@ -549,7 +572,7 @@ export function LogsPage() {
 
       <div className={styles.footer}>
         <span>Показано строк: {loaded.lines.length}</span>
-        {windowFull && <span>Держим последние {WINDOW_LINES}; старее — прокруткой вверх</span>}
+        {windowFull && <span>Держим последние {WINDOW_LINES}; старее — кнопкой над лентой</span>}
         {sourceInfo && (
           <span>
             Файл: {sourceInfo.fileName}, {formatBytes(sourceInfo.sizeBytes)}

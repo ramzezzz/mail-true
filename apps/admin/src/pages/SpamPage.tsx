@@ -702,6 +702,50 @@ function MessageTools() {
 /* Последние проверенные письма                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Разбор отказа антиспама: куда идти смотреть и что он сам пишет.
+ *
+ * ------------------------------------------------------------------
+ * ЗАЧЕМ ЭТО ЗДЕСЬ
+ * ------------------------------------------------------------------
+ * Два маршрута — адрес контроллера и последние ошибки самого rspamd —
+ * существовали с самого начала и не вызывались НИОТКУДА. То есть весь
+ * разбор отказа лежал готовым в коде сервера и до человека не доходил:
+ * он видел «контроллер не отвечает» и не знал ни какой адрес
+ * спрашивали, ни что при этом говорит сам фильтр.
+ *
+ * Спрашиваем только при отказе: в обычной жизни ни то, ни другое не
+ * нужно, а лишний опрос — это лишняя нагрузка на каждый заход в раздел.
+ */
+function AntispamTrouble() {
+  const settings = useQuery({ queryKey: ['spam-settings'], queryFn: () => api.spamSettings() });
+  const errors = useQuery({ queryKey: ['spam-errors'], queryFn: () => api.spamErrors() });
+
+  return (
+    <div className={styles.note}>
+      {settings.data && (
+        <p>
+          Контроллер: <code>{settings.data.controller}</code>
+          {settings.data.configured ? '' : ' (адрес не задан в настройках)'}. Резольвер:{' '}
+          <code>{settings.data.resolver}</code>.
+        </p>
+      )}
+      {errors.data?.available === true && errors.data.items.length > 0 && (
+        <>
+          <p>Последнее, что записал сам фильтр:</p>
+          <ul>
+            {errors.data.items.slice(0, 5).map((item, index) => (
+              <li key={`${String(index)}-${item.at}`}>
+                {formatDateTime(item.at)} · {item.type}: {item.message}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function HistoryTab() {
   const history = useQuery({
     queryKey: ['spam-history'],
@@ -712,7 +756,22 @@ function HistoryTab() {
   return (
     <Panel title="Последние проверенные письма">
       <ErrorNotice error={history.error} />
-      {data && <p className={styles.note}>{data.note}</p>}
+      {/*
+        ОТКАЗ — ПЛАШКОЙ, А НЕ СНОСКОЙ.
+
+        Когда rspamd не отвечает, сервер возвращает `available: false` и
+        кладёт причину в то же поле `note`, что и обычное пояснение. Оно
+        рисуется серым мелким текстом под заголовком — то есть отказ
+        выглядел подсказкой, и человек, не увидев ни одного письма,
+        решал, что писем просто не было.
+      */}
+      {data && !data.available && (
+        <>
+          <Notice tone="error">{data.note}</Notice>
+          <AntispamTrouble />
+        </>
+      )}
+      {data?.available === true && <p className={styles.note}>{data.note}</p>}
       {data?.available && (
         <TableWrap>
           <Table>
@@ -727,8 +786,15 @@ function HistoryTab() {
               </tr>
             </thead>
             <tbody>
-              {data.items.map((item) => (
-                <tr key={`${item.at}-${item.subject}-${item.sender}`}>
+              {/*
+                Ключ с порядковым номером. Прежний собирался из времени,
+                темы и отправителя — и совпадал у писем одной рассылки,
+                ушедших в одну секунду. React считал такие строки одной и
+                той же и при обновлении списка показывал старое содержимое
+                в новой строке.
+              */}
+              {data.items.map((item, index) => (
+                <tr key={`${String(index)}-${item.at}-${item.sender}`}>
                   <td className={tableStyles.nowrap}>{formatDateTime(item.at)}</td>
                   <td className={tableStyles.nowrap}>
                     <Badge

@@ -1547,6 +1547,19 @@ export interface SpamLearnResult {
   note: string;
 }
 
+/** Ошибка из журнала самого rspamd — GET /spam/errors. */
+export interface SpamErrorEntry {
+  at: string;
+  type: string;
+  message: string;
+}
+
+export interface SpamErrors {
+  available: boolean;
+  items: SpamErrorEntry[];
+  note: string;
+}
+
 export interface SpamSettings {
   controller: string;
   configured: boolean;
