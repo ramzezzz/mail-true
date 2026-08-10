@@ -953,6 +953,12 @@ export interface BackupRestoreResponse {
    */
   aliasWarning: string | null;
   /**
+   * Ящики, которые копия не завела: адрес занят перенаправлением.
+   * Причина зеркальная aliasWarning — Postfix разбирает алиасы раньше
+   * ящиков, и такой ящик стоял бы пустым.
+   */
+  mailboxWarning?: string | null;
+  /**
    * Что копия сделала с идущим переносом почты: в отключённый ящик
    * Dovecot не пускает даже служебным доступом, и перенос встанет.
    *
@@ -1716,6 +1722,20 @@ export interface DomainChangeOverview {
   /** Есть ли чем зашифровать приватный ключ DKIM. */
   canStoreKey?: boolean;
   live: DomainChangeJob | null;
+  /**
+   * Смена домена прошла, а обязательный шаг на сервере — ещё нет.
+   *
+   * Определяется расхождением: в базе домен уже новый, а сервер
+   * приложения читает MAIL_DOMAIN из окружения, и меняет его ровно тот
+   * самый скрипт. Совпали — плашка исчезает сама.
+   */
+  pendingManual?: {
+    jobId: number;
+    newDomain: string;
+    newHostname: string;
+    currentDomain: string;
+    finishedAt: string | null;
+  } | null;
   history: DomainChangeJob[];
 }
 

@@ -46,7 +46,7 @@
  * этом словами, а не умалчивает.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Logger } from 'pino';
 import type { AdminContext } from './types.js';
@@ -385,13 +385,53 @@ export class DomainChangeRunner {
    * два хранилища. Поэтому задание помечается сорвавшимся, и человек
    * получает не «висит вечно», а текст с указанием, где смотреть.
    */
+  /**
+   * Убирает копии от прежних смен домена, оставляя текущую.
+   *
+   * Ошибка уборки не должна отменять переезд: файл — вопрос гигиены, а
+   * не работоспособности. Пишем в журнал и идём дальше.
+   */
+  async #purgeOldBackups(currentJobId: number): Promise<void> {
+    try {
+      const names = await readdir(this.opts.backupDir);
+      for (const name of names) {
+        if (!name.startsWith('before-domain-change-')) continue;
+        if (name.startsWith(`before-domain-change-${String(currentJobId)}-`)) continue;
+        await unlink(join(this.opts.backupDir, name)).catch(() => undefined);
+      }
+    } catch (err) {
+      this.opts.logger.warn(
+        { err },
+        'Не удалось убрать прежние копии настроек перед сменой домена',
+      );
+    }
+  }
+
   async recoverAbandoned(): Promise<void> {
     const db = this.opts.ctx.db;
+    /*
+     * ПОЧЕМУ БЕЗ УСЛОВИЯ ПО ПУЛЬСУ.
+     *
+     * Здесь стояло «пульс пустой или старше пяти минут», и это отсекало
+     * ровно тот случай, ради которого разбор и написан: пульс бьётся раз
+     * в пять секунд, контейнер поднимается за секунды — значит на момент
+     * падения пульс СВЕЖИЙ, условие не выполняется, и задание остаётся
+     * `running` навсегда.
+     *
+     * Выхода из этого состояния в панели не было: план отказывался
+     * составляться («смена уже выполняется»), отмена работает только на
+     * состоянии `planned`, и раздел запирался до правки строки в базе
+     * руками.
+     *
+     * Пульс тут не нужен вовсе: разбор идёт ОДИН РАЗ при старте
+     * процесса, а работник живёт внутри этого же процесса. Если строка
+     * говорит «выполняется», а процесс только что поднялся — значит
+     * выполнять её больше некому, какой бы свежий пульс в ней ни стоял.
+     */
     const rows = await db.query<{ id: string; passed: boolean }>(
       `SELECT id::text AS id, point_of_no_return_at IS NOT NULL AS passed
          FROM domain_change_jobs
-        WHERE state = 'running'
-          AND (heartbeat_at IS NULL OR heartbeat_at < now() - interval '5 minutes')`,
+        WHERE state = 'running'`,
     );
     for (const row of rows) {
       await finishJob(db, Number(row.id), {
@@ -481,6 +521,21 @@ export class DomainChangeRunner {
         domain: job.oldDomain,
       });
       await mkdir(this.opts.backupDir, { recursive: true });
+      /*
+       * СТАРЫЕ КОПИИ УБИРАЕМ.
+       *
+       * В файле лежат хэши паролей ВСЕХ ящиков и администраторов, а
+       * копится он по одному на задание и не удалялся никогда: уборщик
+       * загрузок ходит по другому каталогу и сюда не заглядывает. Хуже
+       * того, каталог лежит в томе api-uploads, который install/backup.sh
+       * целиком кладёт в архив под подписью «незавершённые загрузки
+       * вложений» — то есть каждая резервная копия несёт внутри ещё одну
+       * копию всех хэшей, и по описи этого не видно.
+       *
+       * Держим только последнюю: она нужна ровно для разбора «что было
+       * до переезда», и старые для этого бесполезны.
+       */
+      await this.#purgeOldBackups(jobId);
       const backupPath = join(
         this.opts.backupDir,
         `before-domain-change-${String(jobId)}-${job.oldDomain}.json`,

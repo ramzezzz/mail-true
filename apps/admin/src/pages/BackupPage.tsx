@@ -80,7 +80,20 @@ export function BackupPage() {
       api.backupRestore(file, sections),
     onSuccess: (data) => {
       setResult(data);
-      setFlash('Настройки восстановлены.');
+      /*
+       * Зелёная строка — только когда сервер СЧИТАЕТ, что всё удалось.
+       *
+       * Поле `ok` он считает честно (правила Sieve переписаны, оформление
+       * применено), а экран показывал «Настройки восстановлены»
+       * безусловно: сверху зелёное, ниже красная плашка про файл правил,
+       * который не переписался, — и письма продолжают раскладываться
+       * по-старому.
+       */
+      setFlash(
+        data.ok
+          ? 'Настройки восстановлены.'
+          : 'Восстановлено не полностью — смотрите замечания ниже.',
+      );
     },
   });
 
@@ -106,7 +119,12 @@ export function BackupPage() {
         subtitle="Домены, ящики, алиасы, администраторы, правила пользователей и оформление входа"
       />
 
-      {flash && <Notice tone="success">{flash}</Notice>}
+      {/*
+        Тон плашки — по итогу, а не по факту «запрос прошёл». Зелёное
+        «восстановлено» над красным замечанием читается как «всё хорошо»,
+        и человек уходит со страницы, не разобравшись.
+      */}
+      {flash && <Notice tone={result && !result.ok ? 'error' : 'success'}>{flash}</Notice>}
       <ErrorNotice error={exportBackup.error ?? previewBackup.error ?? restore.error} />
 
       <Notice tone="info">
@@ -321,6 +339,7 @@ export function BackupPage() {
               через час, и связать одно с другим уже не с чем.
             */}
             {result.aliasWarning && <Notice tone="error">{result.aliasWarning}</Notice>}
+            {result.mailboxWarning && <Notice tone="error">{result.mailboxWarning}</Notice>}
             {result.migrationWarning && <Notice tone="error">{result.migrationWarning}</Notice>}
             {result.brandingError && (
               <Notice tone="error">

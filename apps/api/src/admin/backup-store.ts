@@ -364,6 +364,14 @@ export interface RestoreOutcome {
    */
   skippedAliases: string[];
   /**
+   * Ящики, которые не заведены: адрес занят перенаправлением.
+   *
+   * Postfix читает алиасы раньше ящиков, поэтому такой ящик был бы виден
+   * и пуст, а письма уходили бы мимо него. Молчать об этом нельзя: для
+   * человека это выглядит как «часть ящиков не восстановилась».
+   */
+  skippedMailboxes: string[];
+  /**
    * Ящики, которым копия переписала пароль и признак «включён»: у них
    * нужно ЗАКРЫТЬ доступ (делает вызывающий, см. mailbox-access.ts).
    *
@@ -514,6 +522,7 @@ export async function applyRestore(
   const applied: RestoreOutcome['applied'] = {};
   const resyncSieve: string[] = [];
   const skippedAliases: string[] = [];
+  const skippedMailboxes: string[] = [];
   const mailboxesToDrop: string[] = [];
   const adminsToRevoke: number[] = [];
   const note = (id: string, key: 'created' | 'updated'): void => {
@@ -554,6 +563,34 @@ export async function applyRestore(
           // Домен под ящик заводим молча только потому, что план уже
           // предупредил об этом человека (см. buildRestorePlan).
           const domainId = await ensureDomain(client, domainName);
+          /*
+           * ЯЩИК ПОВЕРХ ЖИВОГО АЛИАСА НЕ ЗАВОДИТСЯ — ДАЖЕ ИЗ КОПИИ.
+           *
+           * Postfix читает virtual_alias_maps РАНЬШЕ virtual_mailbox_maps:
+           * письмо на такой адрес уйдёт по перенаправлению, а ящик будет
+           * виден в панели, в него можно войти — и в нём никогда ничего
+           * не появится. Обычное заведение ящика это запрещает (см.
+           * routes/users.ts, aliasTargetOf) и объясняет теми же словами.
+           *
+           * Самый вероятный путь сюда — смена домена: после неё в базе
+           * лежат алиасы «логин@старый → логин@новый», в том числе от
+           * копии, которую снимает сам работник смены домена. Восстановив
+           * её, человек заводил ящики старого домена заново, получал
+           * зелёный отчёт — и пустые ящики, мимо которых идёт почта.
+           */
+          const aliased = await client.query<{ destination: string }>(
+            `SELECT destination FROM virtual_aliases WHERE lower(source) = lower($1) LIMIT 1`,
+            [box.email],
+          );
+          const aliasTarget = aliased.rows[0]?.destination;
+          if (aliasTarget !== undefined) {
+            skippedMailboxes.push(
+              `${box.email}: адрес занят перенаправлением на ${aliasTarget} — ящик не заведён, ` +
+                'иначе письма продолжали бы уходить по алиасу, а ящик остался бы пустым',
+            );
+            continue;
+          }
+
           const existing = await client.query<{ id: number }>(
             `SELECT id FROM virtual_users WHERE lower(email) = lower($1)`,
             [box.email],
@@ -676,8 +713,20 @@ export async function applyRestore(
         for (const entry of file.data.userSettings) {
           where.section = 'Настройки ящиков';
           where.label = entry.accountEmail;
+          /*
+           * «Создано» и «обновлено» считаются честно.
+           *
+           * Раньше здесь всегда стояло «обновлено», и на пустой
+           * установке отчёт утверждал, что перезаписал N ящиков,
+           * которых там не было. Это тот же счётчик, по которому сверяют
+           * полноту восстановления, — врать ему нельзя.
+           */
+          const had = await client.query(
+            `SELECT 1 FROM mail_user_settings WHERE lower(account_email) = lower($1)`,
+            [entry.accountEmail],
+          );
           await restoreUserSettings(client, entry);
-          note('userSettings', 'updated');
+          note('userSettings', (had.rowCount ?? 0) > 0 ? 'updated' : 'created');
           resyncSieve.push(entry.accountEmail);
         }
       }
@@ -771,7 +820,15 @@ export async function applyRestore(
     }
   }
 
-  return { applied, resyncSieve, brandingError, skippedAliases, mailboxesToDrop, adminsToRevoke };
+  return {
+    applied,
+    resyncSieve,
+    brandingError,
+    skippedAliases,
+    skippedMailboxes,
+    mailboxesToDrop,
+    adminsToRevoke,
+  };
 }
 
 /** Домен по имени; заводит, если его нет. Возвращает id. */

@@ -142,6 +142,43 @@ export async function adminDomainChangeRoutes(app: FastifyInstance): Promise<voi
        */
       canStoreKey: ctx.domainChangeBox != null,
       live: live ? toDto(live) : null,
+      /**
+       * Смена домена прошла, а обязательный шаг на сервере — нет.
+       *
+       * ------------------------------------------------------------------
+       * ЧТО БЫЛО
+       * ------------------------------------------------------------------
+       * Панель показывала «Осталось выполнить на сервере
+       * change-domain.sh» только внутри блока живого задания. А задание
+       * становится `done` ровно в тот момент, когда этот шаг и
+       * становится нужным, — и весь блок исчезал с экрана вместе с
+       * единственным упоминанием скрипта. Домен сменён, история зелёная,
+       * а MAIL_DOMAIN в infra/.env старый, ключа DKIM нового домена в
+       * rspamd нет, имя сервера у nginx прежнее: исходящая почта идёт
+       * без подписи, и узнать об этом человеку неоткуда.
+       *
+       * ------------------------------------------------------------------
+       * КАК ПОНИМАЕМ, ЧТО ШАГ ЕЩЁ НЕ СДЕЛАН
+       * ------------------------------------------------------------------
+       * По расхождению: в базе домен уже новый, а сервер приложения
+       * читает MAIL_DOMAIN из окружения, и оно меняется ровно тем самым
+       * скриптом (с перезапуском стека). Совпали — значит скрипт
+       * отработал, и плашка пропадает сама, без всяких отметок «я
+       * сделал».
+       */
+      pendingManual: (() => {
+        const done = history.find((job) => job.state === 'done');
+        if (!done) return null;
+        const current = normalizeDomain(ctx.config.MAIL_DOMAIN);
+        if (normalizeDomain(done.newDomain) === current) return null;
+        return {
+          jobId: done.id,
+          newDomain: done.newDomain,
+          newHostname: done.newHostname,
+          currentDomain: ctx.config.MAIL_DOMAIN,
+          finishedAt: done.finishedAt ?? null,
+        };
+      })(),
       history: history.map(toDto),
     };
   });
