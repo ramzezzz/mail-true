@@ -528,19 +528,51 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
           items: [],
         };
       }
-      // Квоты — одним запросом по всем ящикам: по одному это N обращений
-      // к базе ради таблицы, которую и так показывают целиком.
-      const users = await ctx.db.query<{ email: string; quota_bytes: string; active: boolean }>(
-        `SELECT email, quota_bytes::text, active FROM virtual_users`,
-      );
+      /*
+       * ПОРЯДОК СЧИТАЕМ ПО СНИМКУ, КВОТЫ БЕРЁМ ТОЛЬКО ДЛЯ ПОКАЗАННЫХ.
+       *
+       * Раньше здесь стоял `SELECT ... FROM virtual_users` без единого
+       * условия — то есть обход всей таблицы на каждое открытие раздела,
+       * ради двадцати строк. Оправдание «таблицу и так показывают
+       * целиком» перестало быть верным, когда список стали резать до
+       * двадцати.
+       *
+       * Сортируем по лимиту из снимка (его Dovecot пишет в maildirsize
+       * рядом с размером), а точную квоту из базы спрашиваем уже для
+       * показанной страницы — точечно, по списку адресов.
+       *
+       * Плата за это одна: если квоту только что изменили в панели, а
+       * Dovecot ещё не пересчитал файл, ящик может встать не на своё
+       * место в порядке. Показанный процент при этом верный — он считается
+       * по свежей квоте, — и следующий пересчёт вернёт порядок на место.
+       */
+      const ranked = snapshot.mailboxes.items
+        .map((box) => ({
+          box,
+          rank: box.limitBytes && box.limitBytes > 0 ? box.bytes / box.limitBytes : -1,
+        }))
+        // Сортируем по близости к квоте, а не по размеру: ящик на 900 МБ
+        // из гигабайта важнее ящика на 5 ГБ без ограничения — первый
+        // завтра перестанет принимать почту, а второй просто большой.
+        .sort((a, b) => b.rank - a.rank);
+
+      const page = ranked.slice(0, limit).map((entry) => entry.box);
       const quotas = new Map<string, { quota: number; active: boolean }>();
-      for (const user of users) {
-        quotas.set(user.email.toLowerCase(), {
-          quota: Number(user.quota_bytes),
-          active: user.active,
-        });
+      if (page.length > 0) {
+        const users = await ctx.db.query<{ email: string; quota_bytes: string; active: boolean }>(
+          `SELECT email, quota_bytes::text, active FROM virtual_users
+            WHERE lower(email) = ANY($1::text[])`,
+          [page.map((box) => box.email.toLowerCase())],
+        );
+        for (const user of users) {
+          quotas.set(user.email.toLowerCase(), {
+            quota: Number(user.quota_bytes),
+            active: user.active,
+          });
+        }
       }
-      const items = snapshot.mailboxes.items.map((box) => {
+
+      const items = page.map((box) => {
         const known = quotas.get(box.email.toLowerCase());
         // Квота из базы важнее записанной в maildirsize: в базе лежит то,
         // что администратор задал СЕЙЧАС, а в файле — то, что Dovecot
@@ -557,18 +589,20 @@ export async function adminOverviewRoutes(app: FastifyInstance): Promise<void> {
           known: known !== undefined,
         };
       });
-      // Сортируем по близости к квоте, а не по размеру: ящик на 900 МБ из
-      // гигабайта важнее ящика на 5 ГБ без ограничения — первый завтра
-      // перестанет принимать почту, а второй просто большой.
-      items.sort((a, b) => (b.usedPercent ?? -1) - (a.usedPercent ?? -1));
       return {
         available: snapshot.mailboxes.available,
         note: snapshot.mailboxes.note,
         takenAt: snapshot.takenAt,
         totalBytes: snapshot.mailboxes.totalBytes,
         withoutAccounting: snapshot.mailboxes.withoutAccounting,
-        total: items.length,
-        items: items.slice(0, limit),
+        /*
+         * Всего ящиков в снимке — а не длина показанной страницы.
+         * Раньше здесь стояла длина `items`, которая до нарезки совпадала
+         * с полным числом; теперь страница нарезается раньше, и «всего»
+         * пришлось бы равно двадцати при любом размере сервера.
+         */
+        total: snapshot.mailboxes.items.length,
+        items,
       };
     },
   );
