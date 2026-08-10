@@ -55,6 +55,15 @@ export interface SearchResult {
    * страницей, а подгрузки следующих у поиска пока нет.
    */
   total: number;
+  /**
+   * Сколько папок ответило отказом.
+   *
+   * Больше нуля — значит `total` заведомо занижен: он суммирует только
+   * ответившие папки, а упавшая даёт ноль. Молчать об этом нельзя —
+   * число читается как ответ на «сколько всего», и человек перестаёт
+   * искать.
+   */
+  failedFolders: number;
   /** Показана только часть найденного. */
   truncated: boolean;
   isPending: boolean;
@@ -143,6 +152,21 @@ export function useSearch(state: SearchState, folders: readonly Folder[]): Searc
     [results.map((r) => r.dataUpdatedAt).join(',')],
   );
 
+  /*
+   * Сколько папок ответило отказом.
+   *
+   * Число «Найдено» суммирует только успешные: упавшая папка даёт ноль, и
+   * итог занижается МОЛЧА. Рядом действительно стоит «Не удалось
+   * выполнить поиск», но число выглядит ответом на вопрос «сколько
+   * всего», а на деле часть ящика не опрошена вовсе — и человек,
+   * прочитавший «Найдено: 3», уверен, что искать больше негде.
+   */
+  const failedFolders = useMemo(
+    () => results.filter((r) => r.isError).length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [results.map((r) => (r.isError ? '1' : '0')).join('')],
+  );
+
   return {
     items,
     aggregates,
@@ -151,6 +175,11 @@ export function useSearch(state: SearchState, folders: readonly Folder[]): Searc
     plan,
     /** Всего подходит писем (по данным сервера) — может быть больше, чем items. */
     total,
+    /**
+     * Сколько папок не опрошено из-за отказа. Больше нуля — значит
+     * заведомо занижен, и говорить о нём как об итоге нельзя.
+     */
+    failedFolders,
     /** Показана только часть найденного: подгрузки у поиска пока нет. */
     truncated: total > items.length,
     isPending: !isEmptyQuery && results.some((r) => r.isPending),

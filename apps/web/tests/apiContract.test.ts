@@ -233,3 +233,48 @@ describe('общие настройки', () => {
     expect(saved.autoReply.to).toBe('2026-08-20T00:00:00.000Z');
   });
 });
+
+describe('быстрый список без начал писем', () => {
+  it('snippets=0 уезжает в строку запроса, а по умолчанию его нет', async () => {
+    /*
+     * ЧТО БЫЛО. Сервер понимает snippets=0 с самого начала, поле есть и в
+     * контракте — а клиент не передавал его НИКОГДА, то есть быстрый
+     * режим был мёртв со стороны браузера. Цена признака большая: начало
+     * письма читается ОТДЕЛЬНОЙ командой на каждое письмо,
+     * последовательно, по единственному соединению ящика — до сотни
+     * команд IMAP на страницу. Страница письма берёт из списка только
+     * порядок соседей, и текст ей не нужен вовсе.
+     */
+    const urls: string[] = [];
+    const fetchMock = vi.fn(async (input: unknown) => {
+      urls.push(String(input));
+      return new Response(JSON.stringify({ items: [], total: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      await httpApi.getMessages({
+        folderId: 'inbox',
+        offset: 0,
+        limit: 100,
+        threaded: false,
+        filter: 'all',
+        snippets: false,
+      });
+      await httpApi.getMessages({
+        folderId: 'inbox',
+        offset: 0,
+        limit: 100,
+        threaded: false,
+        filter: 'all',
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(urls[0]).toContain('snippets=0');
+    expect(urls[1]).not.toContain('snippets');
+  });
+});

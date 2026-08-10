@@ -12,6 +12,8 @@
  *   - видимый отказ мутации: «переместить» падало молча.
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -473,5 +475,52 @@ describe('строки уезжающих писем', () => {
     await waitFor(() => leaving().length === 2, 'обе строки погашены');
 
     expect(leaving()).toEqual(['/inbox/inbox%3A1', '/inbox/inbox%3A2']);
+  });
+});
+
+describe('выделение и смена отбора', () => {
+  /*
+   * ЧТО БЫЛО. Смена папки выделение сбрасывала, а смена отбора и метки —
+   * нет. Список после этого ДРУГОЙ, а выделенные идентификаторы
+   * оставались прежними: панель бодро показывала «1» и «Удалить».
+   *
+   * Дороже всего это обходилось перепискам. Выделена строка из шести
+   * писем, человек переключает «Непрочитанные», строки в новом списке
+   * нет — и разворот строки в письма не находит её, отдавая
+   * идентификатор как есть. В «Корзину» уезжает ОДНО последнее письмо
+   * разговора, пять остаются в папке, ответ {moved: 1}, ни звука.
+   *
+   * Проверяется по исходнику: сам сценарий требует раскрыть меню
+   * фильтра, выделить строку-переписку и нажать «Удалить» — три слоя
+   * разметки ради одного присваивания, и такая проверка ломалась бы от
+   * любой правки вёрстки, ничего не проверяя по существу.
+   */
+  /*
+   * Путь строится от каталога приложения, а не от import.meta.url: под
+   * vitest он не указывает на файл на диске. Рабочий каталог — корень
+   * репозитория, поэтому приставку пишем явно.
+   */
+  const SOURCE = (() => {
+    for (const candidate of [
+      resolve(process.cwd(), 'src/pages/FolderPage.tsx'),
+      resolve(process.cwd(), 'apps/web/src/pages/FolderPage.tsx'),
+    ]) {
+      if (existsSync(candidate)) return readFileSync(candidate, 'utf8');
+    }
+    throw new Error('не нашёлся FolderPage.tsx');
+  })();
+
+  it('смена отбора сбрасывает выделение', () => {
+    const handler = SOURCE.slice(
+      SOURCE.indexOf('onFilterChange={'),
+      SOURCE.indexOf('folders={otherFolders}'),
+    );
+    expect(handler).toContain('clearSelection()');
+    expect(handler).toContain('setFocusedId(null)');
+  });
+
+  it('смена метки сбрасывает выделение', () => {
+    const handler = SOURCE.slice(SOURCE.indexOf('onLabelFilterChange={'));
+    expect(handler.slice(0, 600)).toContain('clearSelection()');
   });
 });

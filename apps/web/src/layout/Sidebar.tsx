@@ -109,7 +109,22 @@ export function Sidebar() {
               <IconFolderRole role={f.role} size={20} />
             </span>
             <span className={styles.itemName}>{folderTitle(f)}</span>
-            {f.unreadCount > 0 && <span className={styles.counter}>{f.unreadCount}</span>}
+            {/*
+              «Счётчик не прочитался» — это не «писем нет».
+              Сервер намеренно не выдаёт ноль за правду: если STATUS не
+              прошёл (повреждён индекс, папку переименовывают прямо
+              сейчас, отказано в доступе), он помечает папку countUnknown
+              вместо того, чтобы поставить ноль. До интерфейса признак не
+              доезжал нигде — и папка с письмами выглядела пустой, то есть
+              ровно тот молчаливый обман, который на сервере починили.
+            */}
+            {f.countUnknown === true ? (
+              <span className={styles.counter} title="Счётчик писем прочитать не удалось">
+                ?
+              </span>
+            ) : (
+              f.unreadCount > 0 && <span className={styles.counter}>{f.unreadCount}</span>
+            )}
           </NavLink>
         ))}
         <button
