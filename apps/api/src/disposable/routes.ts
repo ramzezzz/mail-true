@@ -15,7 +15,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, UnauthorizedError } from '../errors.js';
 import type { MailSession } from '../types.js';
-import { isUniqueViolation, type DisposableRow, type DisposableStore } from './db.js';
+import {
+  DisposableLimitError,
+  isUniqueViolation,
+  type DisposableRow,
+  type DisposableStore,
+} from './db.js';
 import { checkLocalPart, domainOf, suggestLocalPart } from './name.js';
 import { readTraffic } from './traffic.js';
 import type { DisposableAlias, DisposableState } from './types.js';
@@ -114,12 +119,19 @@ export async function disposableRoutes(app: FastifyInstance, deps: DisposableDep
     const domain = domainOf(session.email);
 
     /*
-     * Предел на число адресов.
+     * Предел на число адресов считает ХРАНИЛИЩЕ — внутри той же
+     * транзакции, что и вставка (см. DisposableDb.create).
      *
-     * Проверяется ДО всего остального и считает ВЫКЛЮЧЕННЫЕ тоже. Иначе
-     * предела нет вовсе: выключил — завёл следующий, а имена в домене
-     * заняты все, потому что выключенный адрес имя не освобождает
-     * (и не должен, см. миграцию 0028).
+     * Здесь оставлена только ранняя проверка «уже некуда»: она даёт
+     * человеку внятный отказ до подбора имени и до похода в базу за
+     * доменом. Настоящий замок — в транзакции: проверка в маршруте это
+     * «посчитали, решили, вставили», и второй такой же запрос проходит
+     * её одновременно.
+     *
+     * Считаются и ВЫКЛЮЧЕННЫЕ адреса: иначе предела нет вовсе —
+     * выключил и завёл следующий, — а имена в домене заняты все, потому
+     * что выключенный адрес имя не освобождает и не должен (миграция
+     * 0028).
      */
     const used = await store.count(session.email);
     if (used >= deps.limit) {
@@ -163,6 +175,7 @@ export async function disposableRoutes(app: FastifyInstance, deps: DisposableDep
         address,
         ownerEmail: session.email,
         note: body.note,
+        limit: deps.limit,
       });
       reply.status(201);
       return toDto(row, null);
@@ -173,6 +186,12 @@ export async function disposableRoutes(app: FastifyInstance, deps: DisposableDep
        */
       if (isUniqueViolation(err)) {
         throw new BadRequestError(`Адрес «${address}» только что заняли. Попробуйте другое имя.`);
+      }
+      if (err instanceof DisposableLimitError) {
+        throw new BadRequestError(
+          `Больше ${String(err.limit)} одноразовых адресов на ящик заводить нельзя — ` +
+            `сейчас занято ${String(err.used)}. Удалите ненужные.`,
+        );
       }
       throw err;
     }

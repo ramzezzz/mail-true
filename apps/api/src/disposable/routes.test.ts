@@ -21,6 +21,7 @@ import test from 'node:test';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerErrorHandling } from '../http-errors.js';
 import type { AppDeps } from '../types.js';
+import { DisposableLimitError } from './db.js';
 import type { DisposableRow, DisposableStore } from './db.js';
 import { checkLocalPart, suggestLocalPart } from './name.js';
 import { disposableRoutes } from './routes.js';
@@ -91,7 +92,14 @@ class MemoryStore implements DisposableStore {
     address: string;
     ownerEmail: string;
     note: string;
+    limit: number;
   }): Promise<DisposableRow> {
+    /*
+     * Предел держит хранилище — как в настоящем: в маршруте проверка это
+     * «посчитали, решили, вставили», и два запроса проходят её оба.
+     */
+    const used = [...this.own.values()].filter((v) => v.ownerEmail === p.ownerEmail).length;
+    if (used >= p.limit) throw new DisposableLimitError(p.limit, used);
     const id = this.next++;
     this.aliases.push({ id, address: p.address, destination: p.ownerEmail, active: true });
     this.own.set(id, {
@@ -391,4 +399,43 @@ test('длинная пометка не даёт имени с двойным �
   // Обратный ход: приставка всё-таки узнаётся — она и есть ответ на
   // вопрос «кому я это выдал»
   assert.ok(name.startsWith('my-super-long-shop-name'), name);
+});
+
+test('предел числа адресов не обходится двумя одновременными запросами', async () => {
+  /*
+   * Проверка «посчитали, решили, вставили» в маршруте — гонка: два
+   * нажатия подряд или повтор при обрыве связи проходят её оба, и
+   * потолок пробивается. Держит его теперь хранилище, в той же
+   * транзакции, что и вставка.
+   */
+  const store = new MemoryStore();
+  const rig = await build({ store, limit: 2 });
+  const { app } = rig;
+  try {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/settings/aliases',
+      payload: { name: 'shop', note: 'магазин' },
+    });
+    assert.equal(first.statusCode, 201, first.body);
+
+    // Место осталось одно, а желающих двое — и оба проходят раннюю проверку.
+    const [a, b] = await Promise.all([
+      app.inject({
+        method: 'POST',
+        url: '/api/settings/aliases',
+        payload: { name: 'forum', note: '' },
+      }),
+      app.inject({
+        method: 'POST',
+        url: '/api/settings/aliases',
+        payload: { name: 'sale', note: '' },
+      }),
+    ]);
+    const created = [a, b].filter((res) => res.statusCode === 201).length;
+    assert.equal(created, 1, 'прошли оба — потолок пробит');
+    assert.equal(await store.count('test@mail.local'), 2);
+  } finally {
+    await rig.close();
+  }
 });

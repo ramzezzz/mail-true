@@ -36,6 +36,22 @@ import { errorInfo } from '../log.js';
  * Отдельная ошибка, а не общий отказ: человеку надо объяснить, почему
  * его собственный адрес вдруг «нельзя», — иначе это выглядит поломкой.
  */
+/**
+ * Одноразовых адресов у ящика уже столько, сколько разрешено.
+ *
+ * Отдельная ошибка, а не проверка в маршруте: считать до вставки —
+ * гонка, и два запроса проходят её оба.
+ */
+export class DisposableLimitError extends Error {
+  constructor(
+    readonly limit: number,
+    readonly used: number,
+  ) {
+    super(`Одноразовых адресов уже ${String(used)} из ${String(limit)}`);
+    this.name = 'DisposableLimitError';
+  }
+}
+
 export class DisposableAddressTakenError extends BadRequestError {
   constructor(message: string) {
     super(message);
@@ -73,6 +89,8 @@ export interface DisposableStore {
     address: string;
     ownerEmail: string;
     note: string;
+    /** Предел на число адресов: проверяется внутри той же транзакции. */
+    limit: number;
   }): Promise<DisposableRow>;
   /** Включить/выключить. Возвращает null, если адрес не этого ящика. */
   setActive(ownerEmail: string, id: number, active: boolean): Promise<DisposableRow | null>;
@@ -210,8 +228,32 @@ export class DisposableDb implements DisposableStore {
     address: string;
     ownerEmail: string;
     note: string;
+    /**
+     * Предел на число адресов у ящика. Проверяется ЗДЕСЬ, внутри той же
+     * транзакции, что и вставка.
+     *
+     * Проверка в маршруте — это «посчитали, решили, вставили», и второй
+     * такой же запрос проходит её одновременно: два нажатия подряд или
+     * повтор при обрыве связи пробивают потолок. Тот же довод уже
+     * записан у шаблонов и сохранённых запросов.
+     */
+    limit: number;
   }): Promise<DisposableRow> {
     return this.tx(async (client) => {
+      /*
+       * Блокировка по владельцу: считать и вставлять надо
+       * последовательно, а блокировать нечего — строки-владельца у ящика
+       * нет, а `count(*) ... FOR UPDATE` Postgres не разрешает.
+       * Советующая блокировка отпускается сама вместе с транзакцией.
+       */
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [params.ownerEmail]);
+      const counted = await client.query<{ n: string }>(
+        'SELECT count(*)::text AS n FROM disposable_aliases WHERE owner_email = $1',
+        [params.ownerEmail],
+      );
+      const used = Number(counted.rows[0]?.n ?? '0');
+      if (used >= params.limit) throw new DisposableLimitError(params.limit, used);
+
       const { rows } = await client.query<{ id: number }>(
         `INSERT INTO virtual_aliases (domain_id, source, destination, active)
          VALUES ($1, $2, $3, TRUE)
