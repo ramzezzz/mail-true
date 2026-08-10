@@ -34,7 +34,7 @@
  * почтовые сеансы в момент перезагрузки Postfix могут получить отказ —
  * об этом интерфейс предупреждает прямо, до нажатия.
  */
-import { readFile, writeFile, rename, rm, access } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm, access, link, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -194,18 +194,61 @@ export interface CertificateInstallResult {
   problem: string;
 }
 
-/** Снимок того, что лежало в каталоге до замены. null — файла не было. */
-interface CertificateSnapshot {
-  cert: Buffer | null;
-  key: Buffer | null;
-  source: Buffer | null;
+/**
+ * Прежний файл, отложенный на время замены.
+ *
+ * ------------------------------------------------------------------
+ * ПОЧЕМУ НЕ СНИМОК В ПАМЯТЬ
+ * ------------------------------------------------------------------
+ * Раньше прежние файлы читались в память (`readIfExists`), а `catch`
+ * возвращал `null` на ЛЮБОЙ отказ — и на «файла нет», и на «читать не
+ * дают». Второе на штатной установке не исключение, а ПРАВИЛО: сервер
+ * приложения работает под 5000:5000 (apps/api/Dockerfile), а закрытый
+ * ключ создаётся с правами 600 и владельцем root — так делают и
+ * install.sh, и renew-certs.sh, и посредник. То есть снимок ключа был
+ * пуст ВСЕГДА.
+ *
+ * Дальше откат понимал пустой снимок как «файла и не было» и выполнял
+ * `rm` — то есть на любом отказе последнего шага замены закрытый ключ
+ * УДАЛЯЛСЯ. После этого не поднимаются ни nginx, ни Postfix, ни Dovecot:
+ * ни HTTPS, ни IMAPS, ни submission, ни TLS на 25. А человеку при этом
+ * отвечали «Прежний сертификат и ключ возвращены на место — почта
+ * работает как раньше».
+ *
+ * Жёсткая ссылка решает обе беды разом: она не требует права ЧИТАТЬ
+ * файл (нужно только право писать в каталог, а оно у сервера есть — им
+ * же он кладёт новые файлы), и она не отбирает старые данные у
+ * работающих служб: ссылка и оригинал — один и тот же файл, пока его не
+ * заменит rename.
+ */
+interface Kept {
+  path: string;
+  /** Куда отложен прежний файл. null — отложить не удалось. */
+  backup: string | null;
+  /** Был ли файл на месте до замены. */
+  existed: boolean;
 }
 
-async function readIfExists(path: string): Promise<Buffer | null> {
+/**
+ * Откладывает прежний файл жёсткой ссылкой рядом.
+ *
+ * Отказ не останавливает замену: бывают тома, где жёстких ссылок нет.
+ * Но он запоминается — и если замена сорвётся, человек услышит правду о
+ * том, что вернуть прежний файл нечем, а не «всё на месте».
+ */
+async function keepPrevious(path: string): Promise<Kept> {
+  const backup = `${path}.prev`;
+  await rm(backup, { force: true }).catch(() => undefined);
   try {
-    return await readFile(path);
+    await stat(path);
   } catch {
-    return null;
+    return { path, backup: null, existed: false };
+  }
+  try {
+    await link(path, backup);
+    return { path, backup, existed: true };
+  } catch {
+    return { path, backup: null, existed: true };
   }
 }
 
@@ -244,8 +287,9 @@ async function writeAtomic(path: string, data: Buffer | string, mode: number): P
  * ------------------------------------------------------------------
  * КАК СДЕЛАНО
  * ------------------------------------------------------------------
- * 1. Снимок прежних файлов в память ДО первой записи. Сертификат с ключом
- *    — единицы килобайт, держать их в памяти на время замены дёшево.
+ * 1. Прежние файлы откладываются ЖЁСТКОЙ ССЫЛКОЙ рядом ДО первой записи
+ *    (см. keepPrevious). Не копией в память: закрытый ключ серверу
+ *    приложения не читается вовсе, и «снимок» его всегда был пуст.
  * 2. source пишется ПЕРВЫМ. Порядок выбран по тому, что останется после
  *    жёсткой смерти процесса (её никаким try/catch не поймать): «source
  *    говорит свой, а сертификат ещё старый» означает пропущенное
@@ -254,6 +298,10 @@ async function writeAtomic(path: string, data: Buffer | string, mode: number): P
  * 3. Ключ и сертификат — двумя переименованиями подряд. Данные к этому
  *    моменту уже на диске, поэтому между ними только два системных
  *    вызова: окно, в которое может попасть чтение служб, — микросекунды.
+ *    Само окно закрыто не порядком переименований (сторожа считают хеш по
+ *    ОБОИМ файлам, так что порядок им безразличен), а тем, что сторож
+ *    перечитывает пару только после двух одинаковых замеров подряд —
+ *    см. infra/nginx/watch-certs.sh и точки входа Postfix и Dovecot.
  * 4. Любой отказ — откат к снимку. И ответ говорит ровно то, что вышло:
  *    вернулись ли файлы на место. Если откат не удался, человек обязан
  *    узнать, что почта СЕЙЧАС не работает, а не искать права каталога.
@@ -263,10 +311,10 @@ export async function installCertificateFiles(
   input: { fullchainPem: string; privateKeyPem: string },
 ): Promise<CertificateInstallResult> {
   const { certPath, keyPath, sourcePath } = paths;
-  const previous: CertificateSnapshot = {
-    cert: await readIfExists(certPath),
-    key: await readIfExists(keyPath),
-    source: await readIfExists(sourcePath),
+  const kept = {
+    cert: await keepPrevious(certPath),
+    key: await keepPrevious(keyPath),
+    source: await keepPrevious(sourcePath),
   };
 
   /** Докуда дошли — по этому строится и откат, и объяснение. */
@@ -284,6 +332,10 @@ export async function installCertificateFiles(
     stage = 'key';
     await rename(`${certPath}.new`, certPath);
     stage = 'done';
+    // Замена удалась — отложенные копии больше не нужны.
+    for (const item of [kept.cert, kept.key, kept.source]) {
+      if (item.backup) await rm(item.backup, { force: true }).catch(() => undefined);
+    }
     return { ok: true, problem: '' };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -293,19 +345,37 @@ export async function installCertificateFiles(
     await rm(`${keyPath}.new`, { force: true }).catch(() => undefined);
 
     const notRestored: string[] = [];
-    const restore = async (path: string, data: Buffer | null, mode: number): Promise<void> => {
-      // Файла не было и до нас — возвращать нечего; но если мы успели
-      // его создать, оставлять его нельзя.
+    /*
+     * Возврат прежнего файла — ТОЛЬКО из отложенной копии.
+     *
+     * Удалять то, что лежало здесь до нас, нельзя ни при каких условиях:
+     * это и есть та ошибка, из-за которой закрытый ключ пропадал
+     * насовсем. `rm` остаётся ровно для одного случая — файла не было, а
+     * мы его создали.
+     */
+    const restore = async (item: Kept): Promise<void> => {
       try {
-        if (data === null) await rm(path, { force: true });
-        else await writeAtomic(path, data, mode);
+        if (!item.existed) {
+          await rm(item.path, { force: true });
+          return;
+        }
+        if (item.backup === null) {
+          notRestored.push(item.path);
+          return;
+        }
+        await rename(item.backup, item.path);
       } catch {
-        notRestored.push(path);
+        notRestored.push(item.path);
       }
     };
-    if (stage !== 'nothing') await restore(sourcePath, previous.source, 0o644);
-    if (stage === 'key' || stage === 'done') await restore(keyPath, previous.key, 0o600);
-    if (stage === 'done') await restore(certPath, previous.cert, 0o644);
+    if (stage !== 'nothing') await restore(kept.source);
+    if (stage === 'key' || stage === 'done') await restore(kept.key);
+    if (stage === 'done') await restore(kept.cert);
+    // Отложенные копии тех файлов, до которых замена не дошла, тоже
+    // убираем: каталог сторожат службы, и лишний .prev им ни к чему.
+    for (const item of [kept.cert, kept.key, kept.source]) {
+      if (item.backup) await rm(item.backup, { force: true }).catch(() => undefined);
+    }
 
     if (notRestored.length > 0) {
       return {

@@ -17,6 +17,8 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import { installCertificateFiles } from './routes/tls.js';
 
 const OLD_CERT = '-----BEGIN CERTIFICATE-----\nСТАРЫЙ-СЕРТИФИКАТ\n-----END CERTIFICATE-----\n';
@@ -99,4 +101,67 @@ test('сорвавшаяся замена не оставляет ключ от 
   assert.equal(existsSync(`${paths.keyPath}.new`), false, 'обрывки замены не должны пережить её');
   // И ответ говорит правду о состоянии диска, а не «ничего не произошло».
   assert.match(outcome.problem, /возвращены на место/iu);
+});
+
+test('прежний ключ возвращается, даже когда прочитать его сервер не может', () => {
+  /*
+   * ------------------------------------------------------------------
+   * ЧТО БЫЛО
+   * ------------------------------------------------------------------
+   * Прежние файлы читались в память, а `catch` возвращал null и на «файла
+   * нет», и на «читать не дают». Второе на штатной установке — ПРАВИЛО, а
+   * не исключение: сервер приложения работает под 5000:5000, а закрытый
+   * ключ создаётся с правами 600 и владельцем root (install.sh,
+   * renew-certs.sh, посредник). То есть снимок ключа был пуст ВСЕГДА.
+   *
+   * Дальше откат понимал пустой снимок как «файла и не было» и делал
+   * `rm`: на любом отказе последнего шага замены закрытый ключ УДАЛЯЛСЯ.
+   * После этого не поднимаются ни nginx, ни Postfix, ни Dovecot — ни
+   * HTTPS, ни IMAPS, ни submission, ни TLS на 25, — а человеку отвечали
+   * «Прежний сертификат и ключ возвращены на место».
+   *
+   * Права файлов в проверке не изобразить (она идёт и под Windows, и от
+   * root в контейнере сборки, где 600 никого не останавливает), поэтому
+   * сверяется само устройство: прежний файл откладывается ЖЁСТКОЙ
+   * ССЫЛКОЙ — она не требует права читать, — а откат умеет удалять
+   * только то, чего до нас не было.
+   */
+  const source = readFileSync(
+    fileURLToPath(new URL('./routes/tls.ts', import.meta.url).href.replace('/dist/', '/src/')),
+    'utf8',
+  );
+  const install = source.slice(
+    source.indexOf('interface Kept'),
+    source.indexOf('export async function adminTlsRoutes'),
+  );
+  assert.match(install, /await link\(path, backup\)/u, 'прежний файл откладывается ссылкой');
+  assert.doesNotMatch(
+    install,
+    /readIfExists/u,
+    'чтение прежнего файла в память вернуло бы ту же дыру: ключ серверу не читается',
+  );
+  // Единственный rm по пути отката — для файла, которого до нас не было.
+  const restore = install.slice(
+    install.indexOf('const restore ='),
+    install.indexOf('if (stage !=='),
+  );
+  assert.match(restore, /if \(!item\.existed\)\s*\{\s*await rm\(/u);
+  assert.match(restore, /await rename\(item\.backup, item\.path\)/u);
+});
+
+test('отложенные копии не остаются в каталоге ни при удаче, ни при отказе', async () => {
+  // За каталогом следят nginx, Postfix и Dovecot: лишний файл рядом с
+  // парой им ни к чему, а `.prev` со старым ключом — тем более.
+  const good = await certDir();
+  await installCertificateFiles(good, { fullchainPem: NEW_CERT, privateKeyPem: NEW_KEY });
+  for (const path of [good.certPath, good.keyPath, good.sourcePath]) {
+    assert.equal(existsSync(`${path}.prev`), false, `остался ${path}.prev после удачной замены`);
+  }
+
+  const bad = await certDir({ blockCert: true });
+  await installCertificateFiles(bad, { fullchainPem: NEW_CERT, privateKeyPem: NEW_KEY });
+  for (const path of [bad.keyPath, bad.sourcePath]) {
+    assert.equal(existsSync(`${path}.prev`), false, `остался ${path}.prev после отказа`);
+  }
+  assert.equal(await readFile(bad.keyPath, 'utf8'), OLD_KEY);
 });

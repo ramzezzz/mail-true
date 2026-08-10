@@ -136,14 +136,28 @@ tail -n 0 -F "$DOVELOG" &
 CERT_WATCH_INTERVAL="${CERT_WATCH_INTERVAL:-10}"
 if [ "$CERT_WATCH_INTERVAL" -gt 0 ] 2>/dev/null; then
     (
-        prev=''
+        applied=''
+        seen=''
         while true; do
             now=$(cat /certs/mail.crt /certs/mail.key 2>/dev/null | md5sum)
-            if [ -n "$prev" ] && [ "$now" != "$prev" ]; then
+            # Пара перечитывается, только когда она УСТОЯЛАСЬ.
+            #
+            # Хеш считается по сертификату И ключу вместе, а замена меняет
+            # их двумя переименованиями подряд. Опрос, попавший между ними,
+            # перечитал бы новый ключ со старым сертификатом. Комментарии в
+            # замене (routes/tls.ts, agent.pl) обещали, что сторож «следит
+            # за сертификатом», — на деле он следит за обоими файлами, и
+            # порядок переименований от этого не защищает.
+            #
+            # Два одинаковых замера подряд закрывают окно: между
+            # переименованиями микросекунды, между опросами — секунды.
+            if [ -n "$applied" ] && [ "$now" = "$seen" ] && [ "$now" != "$applied" ]; then
                 echo "Сертификат изменился — перечитываем (doveadm reload)"
                 doveadm reload >/dev/null 2>&1 || true
+                applied="$now"
             fi
-            prev="$now"
+            [ -n "$applied" ] || applied="$now"
+            seen="$now"
             sleep "$CERT_WATCH_INTERVAL"
         done
     ) &
