@@ -102,10 +102,20 @@ const AUTOSAVE_DELAY_MS = 3_000;
 /**
  * Сколько тихих записей подряд можно не заметить.
  *
- * После этого автосохранение перестаёт пробовать и говорит вслух: молчать
- * дальше значит обещать сохранность, которой нет.
+ * После этого автосохранение говорит вслух: молчать дальше значит
+ * обещать сохранность, которой нет.
  */
 const AUTOSAVE_MAX_FAILURES = 3;
+
+/**
+ * Как редко пробовать после этих трёх отказов.
+ *
+ * Не «никогда»: причина отваливается сама — вернулась сеть, человек
+ * вошёл заново в соседней вкладке, — а письмо всё это время лежит
+ * несохранённым. И не «каждые три секунды»: поток бесполезных запросов
+ * на каждое открытое окно и есть то, ради чего счётчик заводился.
+ */
+const AUTOSAVE_RETRY_MS = 60_000;
 
 interface ComposeWindowProps {
   win: ComposeWindowState;
@@ -203,7 +213,7 @@ export function visibleContent(html: string): string {
   for (const found of html.matchAll(EMBEDDED_URL)) {
     // Через visibleText: адрес тоже приезжает с `&amp;` — браузер
     // экранирует амперсанд в значении атрибута при чтении разметки.
-    out += ` ${visibleText(found[3] ?? '')}`;
+    out += ` ${visibleText(found[3] ?? '')}`;
   }
   return out;
 }
@@ -1382,6 +1392,80 @@ export function ComposeWindow({
    */
   const waitingForAttachments = uploading > 0 || draft.pendingAttachments > 0;
 
+  /**
+   * Вставка картинки из буфера (Ctrl+V со снимком экрана).
+   *
+   * ------------------------------------------------------------------
+   * ПОЧЕМУ КАРТИНКА НЕ ОСТАЁТСЯ В ТЕЛЕ
+   * ------------------------------------------------------------------
+   * Браузер вставляет снимок как `data:` — байты прямо в разметку. Своего
+   * обработчика не было вовсе, и эти байты уезжали на сервер при КАЖДОМ
+   * автосохранении: каждые три секунды набора, потолстев на треть от
+   * base64. А снимок крупнее полутора мегабайт вовсе переставал
+   * помещаться в предел тела запроса — и сохранение, и отправка отвечали
+   * «Запрос слишком большой», ни словом не поминая картинку. Тот же файл,
+   * прикреплённый кнопкой, при этом проходил: там предел на порядок выше.
+   *
+   * Поэтому картинка кладётся во временное хранилище тем же способом, что
+   * и обычное вложение, а в тело идёт ссылка по номеру загрузки. Дальше
+   * ею занимается сервер: при отправке подменяет встроенным вложением
+   * (mail/inline-uploads.ts), при чтении черновика ставит обратно.
+   *
+   * В списке вложений она не показывается: человек её не прикреплял.
+   */
+  const pasteImages = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const items = [...(event.clipboardData.items as unknown as DataTransferItem[])];
+    const images = items
+      .filter((item) => item.kind === 'file' && /^image\//i.test(item.type))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null);
+    // Обычной вставке текста не мешаем — она идёт своим ходом
+    if (images.length === 0) return;
+    event.preventDefault();
+
+    /*
+     * Куда вставлять, запоминаем СЕЙЧАС: загрузка занимает время, за
+     * которое человек успевает и щёлкнуть в другом месте, и переключить
+     * вкладку — а выделение к этому моменту уже не то или его нет вовсе.
+     */
+    const selection = window.getSelection();
+    const at = selection && selection.rangeCount > 0 ? selection.getRangeAt(0).cloneRange() : null;
+
+    for (const file of images) {
+      void (async () => {
+        setUploading((n) => n + 1);
+        try {
+          const uploaded = await api.uploadAttachment(file);
+          insertImage(`/api/uploads/${encodeURIComponent(uploaded.id)}/content`, at);
+        } catch (err) {
+          // Отказ должен быть виден: молча пропавшая картинка хуже отказа
+          setError(actionErrorText('Не удалось вставить картинку', err));
+        } finally {
+          setUploading((n) => Math.max(0, n - 1));
+        }
+      })();
+    }
+  };
+
+  /** Ставит картинку в запомненное место, а если его уже нет — в конец. */
+  const insertImage = (url: string, at: Range | null) => {
+    const box = editorRef.current;
+    if (!box) return;
+    const image = document.createElement('img');
+    image.setAttribute('src', url);
+    if (at && box.contains(at.commonAncestorContainer)) {
+      at.deleteContents();
+      at.insertNode(image);
+      at.setStartAfter(image);
+      at.collapse(true);
+    } else {
+      box.append(image);
+    }
+    // Тем же событием, что и набор с клавиатуры: на нём висит и
+    // автосохранение, и слепок тела письма
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
   const attachFile = async (file: File | undefined) => {
     if (!file) return;
     setUploading((n) => n + 1);
@@ -1423,13 +1507,29 @@ export function ComposeWindow({
     if (draft.pending) return;
     if (waitingForAttachments) return;
     if (savingRef.current) return;
-    if (failuresRef.current >= AUTOSAVE_MAX_FAILURES) return;
     if (saveDraft.isPending || sendMessage.isPending || sendAsExternal.isPending) return;
     if (!hasContent()) return;
     if (savedShotRef.current === fingerprint()) return;
-    const timer = window.setTimeout(() => {
-      void save({ silent: true });
-    }, AUTOSAVE_DELAY_MS);
+    /*
+     * После трёх отказов подряд пробуем РЕЖЕ, а не перестаём совсем.
+     *
+     * Перестать совсем — значит списать письмо навсегда из-за девяти
+     * секунд без сети: причина отваливается сама (вернулась связь,
+     * человек вошёл заново в соседней вкладке), а автосохранение уже не
+     * вернётся, пока не нажать «Сохранить» руками. О таком человек
+     * узнаёт через час, когда разворачивает свёрнутое окно.
+     *
+     * Раз в минуту — это и не поток бесполезных запросов (ради которого
+     * счётчик заводился: три секунды на окно, вечно), и не приговор.
+     * Первая же удачная запись обнуляет счётчик и убирает полосу.
+     */
+    const failing = failuresRef.current >= AUTOSAVE_MAX_FAILURES;
+    const timer = window.setTimeout(
+      () => {
+        void save({ silent: true });
+      },
+      failing ? AUTOSAVE_RETRY_MS : AUTOSAVE_DELAY_MS,
+    );
     return () => {
       window.clearTimeout(timer);
     };
@@ -1742,7 +1842,15 @@ export function ComposeWindow({
             onChange={(next) => patch({ to: next })}
             placeholder="Введите адрес"
             label="Кому"
-            autoFocus
+            /*
+             * У ДОПИСЫВАЕМОГО черновика фокус здесь не нужен.
+             *
+             * Человек открыл своё неотправленное письмо, чтобы дописать
+             * текст, — и первые набранные буквы уходили в конец списка
+             * адресов. Адресат в таком письме обычно уже указан; там, где
+             * его нет (новое письмо, «Написать»), поле по-прежнему первое.
+             */
+            autoFocus={win.init.draftUid === undefined}
           />
           <span className={styles.fieldLinks}>
             {!showCc && (
@@ -2182,6 +2290,8 @@ export function ComposeWindow({
           // иначе сворачивание окна стирало бы тело письма.
           onInput={rememberBody}
           onBlur={rememberBody}
+          // Снимок из буфера уезжает загрузкой, а не байтами в теле
+          onPaste={pasteImages}
           dangerouslySetInnerHTML={{ __html: initialHtml }}
         />
 

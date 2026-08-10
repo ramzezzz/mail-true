@@ -140,6 +140,67 @@ describe('картинка — это содержимое письма', () => 
     expect(visibleContent(fromServer)).toBe(visibleContent(fromBrowser));
   });
 
+  it('снимок из буфера уезжает загрузкой, а не байтами в теле письма', async () => {
+    /*
+     * Своего обработчика вставки не было вовсе, и браузер клал снимок в
+     * тело как `data:`. Эти байты уезжали на сервер при КАЖДОМ
+     * автосохранении — каждые три секунды набора, потолстев на треть от
+     * base64, — а снимок крупнее полутора мегабайт вовсе переставал
+     * помещаться в предел тела запроса: и сохранение, и отправка
+     * отвечали «Запрос слишком большой», ни словом не поминая картинку.
+     */
+    const upload = vi
+      .spyOn(api, 'uploadAttachment')
+      .mockResolvedValue({
+        id: 'a1b2c3d4-0000-4000-8000-000000000001',
+        filename: 'снимок.png',
+        size: 70,
+      });
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'irina@mail.local' }));
+
+    const box = editor();
+    if (!box) throw new Error('нет тела письма');
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'снимок.png', { type: 'image/png' });
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & {
+      clipboardData: unknown;
+    };
+    event.clipboardData = {
+      items: [{ kind: 'file', type: 'image/png', getAsFile: () => file }],
+    };
+    act(() => {
+      box.dispatchEvent(event);
+    });
+    await settle();
+
+    expect(upload).toHaveBeenCalledOnce();
+    // Байтов в теле нет — только ссылка на загрузку
+    expect(box.innerHTML).not.toContain('data:image');
+    expect(box.innerHTML).toContain('/api/uploads/a1b2c3d4-0000-4000-8000-000000000001/content');
+    // И браузеру вставлять своё уже нечего
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('обычной вставке текста обработчик не мешает', () => {
+    render();
+    act(() => useUiStore.getState().openCompose({ to: 'irina@mail.local' }));
+
+    const box = editor();
+    if (!box) throw new Error('нет тела письма');
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & {
+      clipboardData: unknown;
+    };
+    event.clipboardData = {
+      items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }],
+    };
+    act(() => {
+      box.dispatchEvent(event);
+    });
+
+    // Не перехвачено — текст вставит сам браузер, как и раньше
+    expect(event.defaultPrevented).toBe(false);
+  });
+
   it('амперсанд в адресе картинки не делает письмо изменившимся', () => {
     // Браузер экранирует `&` в значении атрибута при чтении разметки —
     // без разворота сущностей два одинаковых тела оказались бы разными.
