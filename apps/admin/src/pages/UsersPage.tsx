@@ -2,7 +2,7 @@
  * Пользователи: список с поиском и фильтрами, создание, изменение,
  * блокировка, смена пароля, квота, массовые операции.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button, Checkbox } from '@web/components';
@@ -946,11 +946,42 @@ function BulkModal({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   /** Первые причины отказов: без них «не удалось — 7» ничего не объясняет. */
   const [reasons, setReasons] = useState<string[]>([]);
+  /**
+   * Итог, когда он ПЛОХОЙ.
+   *
+   * Хороший итог уходит наружу (onDone) и закрывает окно. Плохой остаётся
+   * здесь: закрывать окно на неудаче нельзя — вместе с ним пропадут и
+   * причины отказов, и выбор ящиков, а повторить будет нечего.
+   */
+  const [summary, setSummary] = useState<string | null>(null);
+
+  /**
+   * Человек попросил остановиться.
+   *
+   * Ссылка, а не состояние: цикл идёт внутри одного вызова и обновления
+   * состояния не увидит. Проверяется между частями и между ящиками —
+   * прервать уже отправленный запрос нельзя, но не начинать следующий
+   * можно, и для массовой блокировки это разница между «заблокировал
+   * четыреста» и «заблокировал всю тысячу не того домена».
+   */
+  const stopRef = useRef(false);
 
   const run = useMutation({
     mutationFn: async () => {
       setProgress({ done: 0, total: ids.length });
       setReasons([]);
+      setSummary(null);
+      stopRef.current = false;
+      /*
+       * Режим запоминаем ЗДЕСЬ, а не читаем при выводе итога.
+       *
+       * Список «Что сделать» не заперт на время работы, а onSuccess
+       * берётся из последней отрисовки — то есть уже с новым значением.
+       * Человек запускал смену квоты, от нечего делать переключал список
+       * на «Удалить» и по завершении читал «Удалено 1000 ящиков» при
+       * нуле удалённых.
+       */
+      const runMode = mode;
       const failures: string[] = [];
       const noteFailure = (id: number, err: unknown): void => {
         /*
@@ -979,6 +1010,7 @@ function BulkModal({
         let removed = 0;
         let failed = 0;
         for (const id of ids) {
+          if (stopRef.current) break;
           try {
             await api.deleteUser(id, reason.trim() || undefined);
             removed += 1;
@@ -989,7 +1021,7 @@ function BulkModal({
           setProgress({ done: removed + failed, total: ids.length });
         }
         setReasons(failures);
-        return { changed: removed, failed };
+        return { mode: runMode, changed: removed, failed, stopped: stopRef.current };
       }
 
       /*
@@ -1005,6 +1037,7 @@ function BulkModal({
       let changed = 0;
       let failed = 0;
       for (let from = 0; from < ids.length; from += BULK_CHUNK) {
+        if (stopRef.current) break;
         const part = ids.slice(from, from + BULK_CHUNK);
         try {
           const result = await api.bulkUsers({
@@ -1022,12 +1055,32 @@ function BulkModal({
         setProgress({ done: Math.min(from + part.length, ids.length), total: ids.length });
       }
       setReasons(failures);
-      return { changed, failed };
+      return { mode: runMode, changed, failed, stopped: stopRef.current };
     },
     onSuccess: (result) => {
-      const what = mode === 'delete' ? 'Удалено' : 'Изменено';
-      const tail = result.failed > 0 ? `, не удалось — ${result.failed}` : '';
-      onDone(`${what} ${pluralize(result.changed, 'ящик', 'ящика', 'ящиков')}${tail}`);
+      const what = result.mode === 'delete' ? 'Удалено' : 'Изменено';
+      const done = `${what} ${pluralize(result.changed, 'ящик', 'ящика', 'ящиков')}`;
+      const stopped = result.stopped ? ' Остановлено по вашей команде.' : '';
+      /*
+       * НЕУДАЧА НЕ ЗАКРЫВАЕТ ОКНО И НЕ КРАСИТСЯ ЗЕЛЁНЫМ.
+       *
+       * Все отказы ловятся внутрь, поэтому запрос всегда завершается
+       * «успешно», onError не срабатывает никогда, а прежний код звал
+       * onDone безусловно. Выходило вот что: истёкшая сессия или
+       * перезапуск сервера — все части отвечают отказом — и человек
+       * читает ЗЕЛЁНУЮ плашку «Изменено 0 ящиков, не удалось — 1000»,
+       * окно закрывается, выбор из тысячи ящиков, собранный по
+       * страницам, стирается. Ни понять причину, ни повторить.
+       *
+       * Теперь при любой неудаче окно остаётся: в нём итог, причины и
+       * та же кнопка, чтобы повторить. Выбор при этом цел — его чистит
+       * onDone, а мы его не зовём.
+       */
+      if (result.failed > 0) {
+        setSummary(`${done}, не удалось — ${String(result.failed)}.${stopped}`);
+        return;
+      }
+      onDone(`${done}${stopped}`);
     },
   });
 
@@ -1036,15 +1089,45 @@ function BulkModal({
     (mode === 'quota' && quotaBytes === null) ||
     (mode === 'delete' && !deleteReady);
 
+  /*
+   * ПОКА ИДЁТ РАБОТА, ОКНО НЕ ЗАКРЫВАЕТСЯ.
+   *
+   * Раньше «Отмена», Esc и щелчок по фону просто убирали окно, а цикл
+   * продолжал слать запросы: человек, увидевший на четырёхсотом ящике,
+   * что выбрал не тот домен, нажимал «Отмена» — и остальные шестьсот
+   * блокировались всё равно. Хуже того, завершившийся прогон закрывал
+   * заново открытое окно и стирал новый выбор.
+   *
+   * Теперь закрыть можно только не работающее окно, а остановить —
+   * отдельной кнопкой, которая честно называется «Остановить».
+   */
+  const closeIfIdle = (): void => {
+    if (run.isPending) return;
+    onClose();
+  };
+
   return (
     <Modal
       title={`Массовая операция над ${pluralize(ids.length, 'ящиком', 'ящиками', 'ящиками')}`}
-      onClose={onClose}
+      onClose={closeIfIdle}
       footer={
         <>
-          <Button mode="secondary" onClick={onClose}>
-            Отмена
-          </Button>
+          {run.isPending ? (
+            <Button
+              mode="secondary"
+              disabled={stopRef.current}
+              onClick={() => {
+                stopRef.current = true;
+                setSummary('Останавливаем: текущий запрос доработает, следующие не пойдут.');
+              }}
+            >
+              Остановить
+            </Button>
+          ) : (
+            <Button mode="secondary" onClick={onClose}>
+              Закрыть
+            </Button>
+          )}
           <Button disabled={blocked} onClick={() => run.mutate()}>
             {run.isPending
               ? mode === 'delete'
@@ -1063,11 +1146,23 @@ function BulkModal({
         этой строки окно выглядело бы зависшим ровно столько, сколько
         занимает вся работа.
       */}
-      {run.isPending && progress !== null && progress.total > BULK_CHUNK && (
-        <Notice tone="info">
-          Обработано {progress.done} из {progress.total}. Не закрывайте окно.
-        </Notice>
-      )}
+      {/*
+        Порог показа — по числу ЗАПРОСОВ, а не ящиков.
+
+        Частями по двести идут только квота и блокировка; удаление шлёт по
+        запросу на каждый ящик, и каждый из них тяжёлый — карантин
+        каталога, чистка Dovecot, запись об удалении. Полтораста удалений
+        занимают минуты, и всё это время на экране было только «Удаляем…»,
+        хотя ход уже считался.
+      */}
+      {run.isPending &&
+        progress !== null &&
+        (mode === 'delete' ? progress.total > 1 : progress.total > BULK_CHUNK) && (
+          <Notice tone="info">
+            Обработано {progress.done} из {progress.total}. Окно закроется само.
+          </Notice>
+        )}
+      {summary !== null && <Notice tone="error">{summary}</Notice>}
       {reasons.length > 0 && (
         <Notice tone="error">
           Не удалось изменить часть ящиков. Причины (первые {reasons.length}):
