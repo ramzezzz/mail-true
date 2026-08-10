@@ -44,8 +44,20 @@ async function certDir(
     sourcePath: path.join(dir, 'source'),
   };
   if (options.blockCert === true) {
+    /*
+     * Отказ ровно на ПОСЛЕДНЕМ шаге замены.
+     *
+     * На месте сертификата — непустой каталог: переименовать файл поверх
+     * него не даёт ни одна система. Второй каталог, «mail.crt.prev»,
+     * закрывает и путь отодвигания: непустой каталог не переименовать
+     * поверх непустого каталога и не удалить обычным rm. То есть замена
+     * доходит до сертификата и спотыкается там, уже подменив ключ, —
+     * единственный случай, ради которого написан весь откат.
+     */
     await mkdir(paths.certPath, { recursive: true });
     await writeFile(path.join(paths.certPath, 'zanyato'), 'не файл');
+    await mkdir(`${paths.certPath}.prev`, { recursive: true });
+    await writeFile(path.join(`${paths.certPath}.prev`, 'zanyato'), 'не файл');
   } else {
     await writeFile(paths.certPath, OLD_CERT);
   }
@@ -134,7 +146,11 @@ test('прежний ключ возвращается, даже когда пр
     source.indexOf('interface Kept'),
     source.indexOf('export async function adminTlsRoutes'),
   );
-  assert.match(install, /await link\(path, backup\)/u, 'прежний файл откладывается ссылкой');
+  assert.match(
+    install,
+    /await rename\(path, backup\)/u,
+    'прежний файл отодвигается переименованием',
+  );
   assert.doesNotMatch(
     install,
     /readIfExists/u,

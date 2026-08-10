@@ -34,7 +34,7 @@
  * почтовые сеансы в момент перезагрузки Postfix могут получить отказ —
  * об этом интерфейс предупреждает прямо, до нажатия.
  */
-import { readFile, writeFile, rename, rm, access, link, stat } from 'node:fs/promises';
+import { readFile, writeFile, rename, rm, access, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -215,11 +215,20 @@ export interface CertificateInstallResult {
  * отвечали «Прежний сертификат и ключ возвращены на место — почта
  * работает как раньше».
  *
- * Жёсткая ссылка решает обе беды разом: она не требует права ЧИТАТЬ
- * файл (нужно только право писать в каталог, а оно у сервера есть — им
- * же он кладёт новые файлы), и она не отбирает старые данные у
- * работающих служб: ссылка и оригинал — один и тот же файл, пока его не
- * заменит rename.
+ * Прежний файл ОТОДВИГАЕТСЯ ПЕРЕИМЕНОВАНИЕМ — этого достаточно и это
+ * работает всегда: переименование внутри каталога не спрашивает никаких
+ * прав на сам файл, только право писать в каталог. А оно у сервера есть,
+ * им же он кладёт новые файлы.
+ *
+ * Жёсткая ссылка (первая попытка) не годится: на обычном ядре Linux с
+ * fs.protected_hardlinks=1 создать ссылку на файл, которым не владеешь и
+ * в который не можешь писать, НЕЛЬЗЯ. Проверено живьём на стенде: link()
+ * отвечал EPERM ровно для того файла, ради которого всё и затевалось.
+ *
+ * Цена переименования — микросекунда, в течение которой файла нет на
+ * месте. Она безопасна: сторожа перечитывают пару только после двух
+ * одинаковых замеров подряд (infra/nginx/watch-certs.sh и точки входа
+ * Postfix и Dovecot), а между замерами секунды.
  */
 interface Kept {
   path: string;
@@ -230,13 +239,13 @@ interface Kept {
 }
 
 /**
- * Откладывает прежний файл жёсткой ссылкой рядом.
+ * Отодвигает прежний файл в сторону, освобождая место новому.
  *
- * Отказ не останавливает замену: бывают тома, где жёстких ссылок нет.
- * Но он запоминается — и если замена сорвётся, человек услышит правду о
- * том, что вернуть прежний файл нечем, а не «всё на месте».
+ * Отказ не останавливает замену, но запоминается: если она сорвётся,
+ * человек услышит правду о том, что вернуть прежний файл нечем, а не
+ * «всё на месте».
  */
-async function keepPrevious(path: string): Promise<Kept> {
+async function moveAside(path: string): Promise<Kept> {
   const backup = `${path}.prev`;
   await rm(backup, { force: true }).catch(() => undefined);
   try {
@@ -245,7 +254,7 @@ async function keepPrevious(path: string): Promise<Kept> {
     return { path, backup: null, existed: false };
   }
   try {
-    await link(path, backup);
+    await rename(path, backup);
     return { path, backup, existed: true };
   } catch {
     return { path, backup: null, existed: true };
@@ -287,9 +296,11 @@ async function writeAtomic(path: string, data: Buffer | string, mode: number): P
  * ------------------------------------------------------------------
  * КАК СДЕЛАНО
  * ------------------------------------------------------------------
- * 1. Прежние файлы откладываются ЖЁСТКОЙ ССЫЛКОЙ рядом ДО первой записи
- *    (см. keepPrevious). Не копией в память: закрытый ключ серверу
- *    приложения не читается вовсе, и «снимок» его всегда был пуст.
+ * 1. Все три новых файла пишутся рядом (`.new`) ДО первой подмены: с
+ *    этого момента данные на диске, и дальше идут только переименования.
+ *    Прежний файл отодвигается в `.prev` переименованием — не копией в
+ *    память: закрытый ключ серверу приложения не читается вовсе, и
+ *    «снимок» его всегда был пуст (см. Kept).
  * 2. source пишется ПЕРВЫМ. Порядок выбран по тому, что останется после
  *    жёсткой смерти процесса (её никаким try/catch не поймать): «source
  *    говорит свой, а сертификат ещё старый» означает пропущенное
@@ -311,25 +322,30 @@ export async function installCertificateFiles(
   input: { fullchainPem: string; privateKeyPem: string },
 ): Promise<CertificateInstallResult> {
   const { certPath, keyPath, sourcePath } = paths;
-  const kept = {
-    cert: await keepPrevious(certPath),
-    key: await keepPrevious(keyPath),
-    source: await keepPrevious(sourcePath),
+  const kept: { cert: Kept; key: Kept; source: Kept } = {
+    cert: { path: certPath, backup: null, existed: false },
+    key: { path: keyPath, backup: null, existed: false },
+    source: { path: sourcePath, backup: null, existed: false },
   };
 
   /** Докуда дошли — по этому строится и откат, и объяснение. */
   let stage: 'nothing' | 'source' | 'key' | 'done' = 'nothing';
   try {
-    await writeAtomic(sourcePath, 'custom\n', 0o644);
-    stage = 'source';
     // Права задаются при СОЗДАНИИ файла; отдельного chmod поверх своего
     // же файла здесь нет намеренно. Он выглядит безобидно, но на каталоге,
     // примонтированном не с обычной файловой системы, отвечает EPERM — и
     // замена падала на нём, уже записав файл. Поймано живым прогоном.
+    await writeFile(`${sourcePath}.new`, 'custom\n', { mode: 0o644 });
     await writeFile(`${certPath}.new`, input.fullchainPem, { mode: 0o644 });
     await writeFile(`${keyPath}.new`, `${input.privateKeyPem}\n`, { mode: 0o600 });
+
+    kept.source = await moveAside(sourcePath);
+    await rename(`${sourcePath}.new`, sourcePath);
+    stage = 'source';
+    kept.key = await moveAside(keyPath);
     await rename(`${keyPath}.new`, keyPath);
     stage = 'key';
+    kept.cert = await moveAside(certPath);
     await rename(`${certPath}.new`, certPath);
     stage = 'done';
     // Замена удалась — отложенные копии больше не нужны.
@@ -343,6 +359,7 @@ export async function installCertificateFiles(
     // каталогом, и половина сертификата в нём — худший из исходов.
     await rm(`${certPath}.new`, { force: true }).catch(() => undefined);
     await rm(`${keyPath}.new`, { force: true }).catch(() => undefined);
+    await rm(`${sourcePath}.new`, { force: true }).catch(() => undefined);
 
     const notRestored: string[] = [];
     /*
