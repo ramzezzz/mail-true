@@ -17,6 +17,7 @@ import {
   PROPAGATION_NOTE,
   VERDICT_LABEL,
   answerStamp,
+  buildZoneText,
   formatActual,
   groupChecks,
   needsAttention,
@@ -288,6 +289,18 @@ export function DnsDialog({
             {PROPAGATION_NOTE} Время ответа показано у каждой записи отдельно — её можно
             перепроверить одну, не дожидаясь остальных.
           </p>
+
+          {/*
+            Все записи одним куском — для тех, кто заполняет панель
+            регистратора подряд, а не по одной строке. Сборка была написана
+            и покрыта тестом (lib/dns.ts, buildZoneText), но в окно её
+            забыли вывести: человек копировал записи по одной.
+          */}
+          <ValueBlock
+            label="Все записи одним куском"
+            value={buildZoneText(report)}
+            copy={{ name: `DNS домена ${domainName}` }}
+          />
 
           {groups.map((group) => (
             <section key={group.group}>

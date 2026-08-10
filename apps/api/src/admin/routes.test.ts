@@ -143,9 +143,11 @@ class FakeDb {
     this.#note('listExportFiles', email);
     return [];
   }
-  async purgeMailboxData(email: string): Promise<number> {
+  async purgeMailboxData(email: string): Promise<{ rows: number; aliases: string[] }> {
     this.#note('purgeMailboxData', email);
-    return 7;
+    // Уничтоженные пересылки теперь называются поимённо — их пишет в
+    // журнал аудита маршрут удаления ящика.
+    return { rows: 7, aliases: ['info@x.local -> gone@x.local'] };
   }
   async findAliasById(id: number): Promise<Record<string, unknown> | null> {
     return this.aliases.find((a) => a.id === id) ?? null;

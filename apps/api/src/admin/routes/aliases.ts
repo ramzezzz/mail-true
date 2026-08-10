@@ -5,6 +5,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { addressProblem } from '@mail-true/shared';
 import { checkAlias } from '../alias-check.js';
 import { BadRequestError, NotFoundError } from '../../errors.js';
 import { ConflictError } from '../errors.js';
@@ -19,9 +20,17 @@ const listQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+/**
+ * Форму адреса здесь НЕ проверяем — этим занимается addressProblem, и он
+ * объясняет отказ словами. У zod на всё про всё одна фраза «Некорректные
+ * данные запроса»: из неё не видно ни что не так, ни где. Тот же довод
+ * записан у ящиков (routes/users.ts), где это уже исправлено; здесь
+ * оставалась прежняя проверка, и опечатка в кириллице — самая частая —
+ * давала человеку бессмысленный ответ.
+ */
 const createSchema = z.object({
-  source: z.string().trim().toLowerCase().email().max(255),
-  destination: z.string().trim().toLowerCase().email().max(255),
+  source: z.string().trim().toLowerCase().min(1).max(1024),
+  destination: z.string().trim().toLowerCase().min(1).max(1024),
 });
 
 const patchSchema = z.object({ active: z.boolean() });
@@ -58,6 +67,10 @@ export async function adminAliasRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAdmin(app, 'aliases.write') },
     async (request, reply) => {
       const body = createSchema.parse(request.body);
+      // Разбор адреса словами: «в адресе есть буквы не латинского
+      // алфавита», а не общее «некорректные данные».
+      const addressBad = addressProblem(body.source) ?? addressProblem(body.destination);
+      if (addressBad) throw new BadRequestError(addressBad);
       /*
        * Связность проверяется ДО создания. Раньше проверялось ровно одно —
        * что адрес не указывает сам на себя, — а самая тяжёлая беда пропускалась

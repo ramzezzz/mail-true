@@ -15,12 +15,14 @@
  *  - каждый сеанс требует причину и попадает в admin_mailbox_access.
  */
 import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import type { Logger } from 'pino';
 import type { Folder } from '@mail-true/shared';
 import { AuthFailedError, UpstreamUnavailableError } from '../errors.js';
 import { AdminUnavailableError } from './errors.js';
 import { listFolders as listMailFoldersOf } from '../imap/service.js';
 import { errorInfo } from '../log.js';
+import { htmlToText } from '../mail/text.js';
 
 export interface MasterAccessOptions {
   host: string;
@@ -242,10 +244,30 @@ export class MailboxMasterAccess {
         );
         if (!msg || typeof msg === 'boolean') return null;
         const env = msg.envelope;
-        const source = msg.source ? msg.source.toString('utf8') : '';
-        // Отделяем заголовки от тела и отдаём тело как простой текст
-        const splitAt = source.search(/\r?\n\r?\n/);
-        const body = splitAt >= 0 ? source.slice(splitAt).replace(/^\r?\n\r?\n/, '') : source;
+        const source = msg.source ?? Buffer.alloc(0);
+        /*
+         * ПИСЬМО РАЗБИРАЕТСЯ, А НЕ РЕЖЕТСЯ ПО ПУСТОЙ СТРОКЕ.
+         *
+         * Раньше исходник делился по первой пустой строке, и всё
+         * остальное отдавалось как «текст». Для русскоязычной почты это
+         * отказ почти в каждом письме: простое письмо на кириллице едет в
+         * base64, типовое — multipart/alternative с границами и двумя
+         * закодированными частями. То есть главный сценарий раздела
+         * («обращение №1234: письмо не пришло, смотрим») давал
+         * нечитаемую простыню, а поле называлось `text` и подавалось
+         * интерфейсом как текст письма.
+         *
+         * HTML администратору по-прежнему не показывается (см. шапку
+         * файла): берётся текстовая часть, а если её нет — текст,
+         * вытопленный из HTML. Разборщик тот же, что и в самой почте.
+         */
+        const parsed = await simpleParser(source, { skipImageLinks: true });
+        const body =
+          parsed.text && parsed.text.trim() !== ''
+            ? parsed.text
+            : parsed.html
+              ? htmlToText(parsed.html)
+              : '';
         return {
           uid: msg.uid,
           subject: env?.subject ?? '(без темы)',

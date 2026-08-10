@@ -219,8 +219,20 @@ async function askOne(
   timeoutMs: number,
 ): Promise<DnsAnswer> {
   const resolver = new Resolver({ timeout: timeoutMs, tries: 1 });
-  resolver.setServers([server]);
   try {
+    /*
+     * setServers ВНУТРИ try — и это не косметика.
+     *
+     * Он бросает синхронно (ERR_INVALID_IP_ADDRESS), если элемент не
+     * похож на IP-адрес, а адреса резольверов приходят из настроек
+     * сервера (DNS_CHECK_RESOLVERS), где их набирает человек. Описание
+     * настройки прямо приглашает вписать «у кого спрашивать DNS», так что
+     * `dns.google` или опечатка `8.8.8` — обычное дело. Исключение шло
+     * мимо этого catch, мимо всей проверки домена и превращалось в
+     * «Внутренняя ошибка сервера» на весь раздел «Домены и DNS» — при том
+     * что шапка checkDomainDns обещает «никогда не бросает».
+     */
+    resolver.setServers([server]);
     let values: string[];
     switch (type) {
       case 'A':
@@ -1491,7 +1503,23 @@ export async function checkDomainDns(domain: string, options: DnsCheckOptions): 
     apexAnswer.kind === 'absent' &&
     mxAnswer.kind === 'absent' &&
     spfAnswer.kind === 'absent';
-  const zoneMissing = only === undefined && (reserved || nothingAtAll);
+  /*
+   * ЗАРЕЗЕРВИРОВАННАЯ ЗОНА ВИДНА И ПРИ ТОЧЕЧНОЙ ПЕРЕПРОВЕРКЕ.
+   *
+   * Раньше признак целиком отключался, когда проверяют одну запись
+   * (`only`), — и стендовый домен вроде `home.local` после единственного
+   * нажатия «Перепроверить» краснел: запись возвращалась как `missing`,
+   * общая оценка пересчитывалась по смешанному набору, и в таблице
+   * появлялась красная плашка. Ровно того, чего добивались избежать:
+   * десяток красных строк, которые невозможно починить, приучает не
+   * смотреть на раздел вообще.
+   *
+   * Про «зона не делегирована» (nothingAtAll) при точечной проверке
+   * судить по-прежнему нельзя: там смотрят одну запись, а вывод делается
+   * по отсутствию ВСЕХ сразу. А вот `.local` зарезервирован независимо от
+   * того, сколько записей мы спросили.
+   */
+  const zoneMissing = reserved || (only === undefined && nothingAtAll);
 
   if (zoneMissing) {
     const why = reserved

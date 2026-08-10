@@ -3,11 +3,41 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Button, Spinner } from '@web/components';
 import { cx } from '@web/lib/cx';
-import { visibleNavGroups, type NavGroup } from '../lib/access';
+import { canAny, requiredForPath, visibleNavGroups, type NavGroup } from '../lib/access';
+import type { Permission } from '../api/types';
 import { breadcrumbsFor } from '../lib/breadcrumbs';
 import { useSession } from './session';
 import { ThemeMenu } from './ThemeMenu';
 import styles from './AdminLayout.module.css';
+
+/**
+ * Раздел, на который у роли нет прав, — словами, а не набором 403.
+ *
+ * Шапка этого файла обещала, что доступность разделов дублирует серверные
+ * права, но проверялось только меню: пункта не видно, а страница по
+ * закладке открывалась и осыпалась отказами на каждом запросе. Дыры в
+ * безопасности тут нет — сервер проверяет каждый запрос, — но человек
+ * видел набор ошибок вместо простого «этот раздел вам не доступен».
+ *
+ * Список прав тот же, по которому рисуется меню (requiredForPath), чтобы
+ * «пункта не видно» и «страница закрыта» не разошлись между собой.
+ */
+function RouteGuard({ permissions }: { permissions: readonly Permission[] | undefined }) {
+  const location = useLocation();
+  const required = requiredForPath(location.pathname);
+  if (required.length > 0 && !canAny(permissions, required)) {
+    return (
+      <div className="mt-card" style={{ padding: 24 }}>
+        <h2 style={{ margin: '0 0 8px' }}>Раздел вам не доступен</h2>
+        <p style={{ margin: 0 }}>
+          У вашей роли нет прав на этот раздел. Откройте меню слева — там перечислено то, что
+          доступно, — или попросите владельца сервера расширить права.
+        </p>
+      </div>
+    );
+  }
+  return <Outlet />;
+}
 
 export function AdminLayout() {
   const { session, logout } = useSession();
@@ -52,7 +82,7 @@ export function AdminLayout() {
 
       <main className={styles.content}>
         <Breadcrumbs />
-        <Outlet />
+        <RouteGuard permissions={session?.permissions} />
       </main>
     </div>
   );

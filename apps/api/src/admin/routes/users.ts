@@ -36,8 +36,16 @@ const emailSchema = z.string().trim().toLowerCase().min(1).max(1024);
 const listQuerySchema = z.object({
   search: z.string().trim().max(200).optional(),
   domainId: z.coerce.number().int().positive().optional(),
-  /** all | active | blocked | overquota */
-  status: z.enum(['all', 'active', 'blocked']).default('all'),
+  /**
+   * all | active | blocked | overquota
+   *
+   * `overquota` — «ящик вот-вот перестанет принимать почту». Занятости в
+   * базе нет, она приходит снимком показателей (metrics-collector), где
+   * Dovecot пишет размер и лимит рядом. Раньше это значение было названо
+   * в комментарии и в спецификации панели, а схема его не принимала —
+   * фильтра не существовало ни на сервере, ни в интерфейсе.
+   */
+  status: z.enum(['all', 'active', 'blocked', 'overquota']).default('all'),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -118,10 +126,32 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
   /* --- список ------------------------------------------------------ */
   app.get('/users', { preHandler: requireAdmin(app, 'users.read') }, async (request) => {
     const q = listQuerySchema.parse(request.query);
+    /*
+     * «Превысившие квоту» — отбор по СНИМКУ показателей, а не по базе.
+     *
+     * Занятости ящика в базе нет вовсе: её измеряет Dovecot и пишет рядом
+     * с письмами, а к нам она приезжает снимком (metrics-collector). Порог
+     * — девять десятых: ящик, забитый под завязку, перестанет принимать
+     * почту завтра, и именно его ищут в этом фильтре, а не тот, который
+     * уже отбивает письма.
+     *
+     * Снимка может не быть (сбор показателей выключен настройкой) — тогда
+     * фильтр честно отдаёт пусто, а не делает вид, что превысивших нет.
+     */
+    const overquota =
+      q.status === 'overquota'
+        ? ((ctx.metrics?.latest?.mailboxes.items ?? [])
+            .filter(
+              (box) => box.limitBytes && box.limitBytes > 0 && box.bytes / box.limitBytes >= 0.9,
+            )
+            .map((box) => box.email.toLowerCase()) as string[])
+        : undefined;
+
     const { rows, total } = await ctx.db.listMailUsers({
       search: q.search,
       domainId: q.domainId,
-      active: q.status === 'all' ? undefined : q.status === 'active',
+      active: q.status === 'all' || q.status === 'overquota' ? undefined : q.status === 'active',
+      ...(overquota ? { emails: overquota } : {}),
       limit: q.limit,
       offset: q.offset,
     });
@@ -473,7 +503,8 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
       }
 
       // 4. Всё, что принадлежит ящику в базе.
-      const dbRowsRemoved = await ctx.db.purgeMailboxData(row.email);
+      const purged = await ctx.db.purgeMailboxData(row.email);
+      const dbRowsRemoved = purged.rows;
       await ctx.db.deleteMailUser(id);
 
       // 5. Каталог — в карантин.
@@ -551,6 +582,16 @@ export async function adminUserRoutes(app: FastifyInstance): Promise<void> {
           deletion_id: deletionId,
           imap_purged: imapPurged,
           db_rows_removed: dbRowsRemoved,
+          /*
+           * Пересылки, ведшие в этот ящик, — поимённо.
+           *
+           * Общее число строк их не показывало: они шли вперемешку с
+           * одноразовыми адресами и настройками. То есть годами
+           * работавшая пересылка «info@ -> ivan@» умирала вместе с ящиком
+           * молча, и восстановить её было неоткуда — в панели она больше
+           * нигде не показана. У удаления домена такой список есть давно.
+           */
+          aliases_removed: purged.aliases,
           maildir_quarantined: quarantine.quarantinePath !== null,
           /** Отсрочка: письма лежат в карантине целыми, их ещё можно вернуть. */
           mail_kept_minutes: keepMailForUndo ? purgeDelayMinutes : 0,

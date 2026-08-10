@@ -753,3 +753,20 @@ void test('все настройки перечня отдаются одним 
   assert.equal(all.length, SETTING_SPECS.length);
   assert.equal(all.find((i) => i.spec.key === 'ADMIN_LOCKOUT_MINUTES')?.raw, '45');
 });
+
+void test('резольверы DNS принимаются только адресами', () => {
+  /*
+   * Дальше это значение получает dns.Resolver, а он на имени бросает
+   * синхронно — и весь раздел «Домены и DNS» отвечал 500 для всех
+   * доменов сразу. Опечатку надо ловить в тот момент, когда её вводят.
+   */
+  const spec = findSetting('DNS_CHECK_RESOLVERS')!;
+  assert.equal(parseSettingValue(spec, '1.1.1.1, 8.8.8.8'), '1.1.1.1, 8.8.8.8');
+  assert.equal(parseSettingValue(spec, '2606:4700:4700::1111'), '2606:4700:4700::1111');
+  // Пусто — законное значение: означает «резольверы по умолчанию».
+  assert.equal(parseSettingValue(spec, ''), '');
+
+  assert.throws(() => parseSettingValue(spec, '8.8.8'), /не IP-адреса/u);
+  assert.throws(() => parseSettingValue(spec, 'dns.google'), /не IP-адреса/u);
+  assert.throws(() => parseSettingValue(spec, '1.1.1.1, ns1.provider.ru'), /ns1\.provider\.ru/u);
+});

@@ -197,7 +197,8 @@ void test('удаление ящика убирает его строки из �
       [MAILBOX],
     );
 
-    const removed = await admin.purgeMailboxData(MAILBOX);
+    const purged = await admin.purgeMailboxData(MAILBOX);
+    const removed = purged.rows;
     await admin.deleteMailUser(user.id);
 
     assert.ok(removed >= 11, `должно уйти не меньше одиннадцати строк, ушло ${String(removed)}`);

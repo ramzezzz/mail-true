@@ -226,3 +226,29 @@ export function visibleNavGroups(permissions: readonly Permission[] | undefined)
 export function visibleNav(permissions: readonly Permission[] | undefined): NavItem[] {
   return NAV_ITEMS.filter((item) => canAny(permissions, item.requires));
 }
+
+/**
+ * Права, нужные для страницы по её адресу.
+ *
+ * Берутся из того же списка, по которому рисуется меню, — чтобы «пункта
+ * не видно» и «страница недоступна» никогда не разошлись. Адрес
+ * сравнивается по началу пути: у раздела «Ящики» есть вложенные страницы
+ * (`/users/import`, `/users/:id/settings`), и права у них те же.
+ *
+ * Неизвестный адрес прав не требует: это либо страница без раздела, либо
+ * промах в никуда — им занимается сам маршрутизатор.
+ */
+export function requiredForPath(pathname: string): readonly Permission[] {
+  const path = pathname.replace(/^\/+|\/+$/g, '');
+  if (path === '') return [];
+  let best: NavItem | null = null;
+  for (const item of NAV_ITEMS) {
+    const to = item.to.replace(/^\/+|\/+$/g, '');
+    if (to === '') continue;
+    if (path === to || path.startsWith(`${to}/`)) {
+      // Самый длинный совпавший адрес: `users/import` точнее, чем `users`.
+      if (!best || to.length > best.to.replace(/^\/+|\/+$/g, '').length) best = item;
+    }
+  }
+  return best?.requires ?? [];
+}

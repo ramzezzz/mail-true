@@ -44,7 +44,7 @@ export function UsersPage() {
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<'all' | 'active' | 'blocked'>('all');
+  const [status, setStatus] = useState<'all' | 'active' | 'blocked' | 'overquota'>('all');
   const [domainId, setDomainId] = useState<number | undefined>(undefined);
   const [offset, setOffset] = useState(0);
   /*
@@ -150,13 +150,20 @@ export function UsersPage() {
           style={{ width: 170 }}
           value={status}
           onChange={(e) => {
-            setStatus(e.target.value as 'all' | 'active' | 'blocked');
+            setStatus(e.target.value as 'all' | 'active' | 'blocked' | 'overquota');
             setOffset(0);
           }}
         >
           <option value="all">Все ящики</option>
           <option value="active">Только активные</option>
           <option value="blocked">Только заблокированные</option>
+          {/*
+            «Почти заполненные» — ящики, занятые на девять десятых и
+            больше. Значение приходит из снимка показателей: занятости
+            ящика в базе нет. Фильтр был назван в спецификации панели и в
+            комментарии сервера, а на деле его не существовало нигде.
+          */}
+          <option value="overquota">Почти заполненные</option>
         </select>
         <select
           className="mt-select"
@@ -463,12 +470,35 @@ function CreateUserModal({
   const [passwordShown, setPasswordShown] = useState(false);
   const [quotaAmount, setQuotaAmount] = useState('1');
   const [quotaUnit, setQuotaUnit] = useState<QuotaUnit>(DEFAULT_QUOTA_UNIT);
+  /**
+   * Трогал ли человек поле квоты.
+   *
+   * Пока не трогал, значение НЕ отправляется, и ящик получает квоту из
+   * настроек сервера (ADMIN_DEFAULT_QUOTA_BYTES). Раньше форма всегда
+   * слала своё «1 ГБ», и настройка «Квота нового ящика по умолчанию»
+   * не значила ничего: владелец ставил в настройках десять гигабайт, а
+   * каждый ящик, заведённый кнопкой «Создать ящик», получал один. Соседний
+   * раздел того же интерфейса — импорт — сделан именно так и спрашивает
+   * серверное значение (ImportPage.tsx).
+   */
+  const [quotaTouched, setQuotaTouched] = useState(false);
   const [generated, setGenerated] = useState<{ email: string; password: string } | null>(null);
 
   // Домены для подстановки. Запрос тот же, что на странице, — react-query
   // отдаёт его из кеша, второго обращения к серверу не будет.
   const domainsQuery = useQuery({ queryKey: ['domains'], queryFn: () => api.domains() });
   const domainNames = (domainsQuery.data?.items ?? []).map((d) => d.name);
+
+  /*
+   * Квота из настроек сервера — чтобы показать её ДО того, как человек
+   * тронет поле. Тот же запрос, что на странице импорта: react-query
+   * отдаст его из кеша, второго обращения к серверу не будет.
+   */
+  const defaultsQuery = useQuery({
+    queryKey: ['import-defaults'],
+    queryFn: () => api.importDefaults(),
+  });
+  const serverDefaultQuota = defaultsQuery.data?.defaultQuotaBytes ?? null;
 
   const quotaBytes = quotaToBytes(quotaAmount, quotaUnit);
   const emailProblem = addressProblemWhileTyping(email);
@@ -493,7 +523,7 @@ function CreateUserModal({
         email: email.trim().toLowerCase(),
         ...(password ? { password } : {}),
         ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-        ...(quotaBytes !== null ? { quotaBytes } : {}),
+        ...(quotaTouched && quotaBytes !== null ? { quotaBytes } : {}),
       }),
     onSuccess: (user) => {
       if (user.generatedPassword) {
@@ -624,16 +654,26 @@ function CreateUserModal({
       <Field
         label="Квота"
         hint={
-          quotaBytes === null
-            ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
-            : `Будет ${formatBytes(quotaBytes)}`
+          !quotaTouched
+            ? serverDefaultQuota === null
+              ? 'Как настроено на сервере'
+              : `Как настроено на сервере: ${formatBytes(serverDefaultQuota)}`
+            : quotaBytes === null
+              ? 'Введите число, а единицу выберите рядом. 0 — без ограничения.'
+              : `Будет ${formatBytes(quotaBytes)}`
         }
       >
         <QuotaInput
           amount={quotaAmount}
           unit={quotaUnit}
-          onAmount={setQuotaAmount}
-          onUnit={setQuotaUnit}
+          onAmount={(value) => {
+            setQuotaTouched(true);
+            setQuotaAmount(value);
+          }}
+          onUnit={(value) => {
+            setQuotaTouched(true);
+            setQuotaUnit(value);
+          }}
         />
       </Field>
     </Modal>

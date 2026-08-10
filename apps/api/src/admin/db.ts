@@ -509,6 +509,17 @@ export class AdminDb {
     return { audit, ai, knownIps };
   }
 
+  /*
+   * КОЛОНКА «АЛИАСОВ» СЧИТАЕТ ПЕРЕСЫЛКИ В ЯЩИК, А НЕ ИЗ НЕГО.
+   *
+   * Раньше считались алиасы, чей ИСХОДНЫЙ адрес совпадает с адресом
+   * ящика, — а такая пара запрещена в обе стороны: алиас поверх живого
+   * ящика отклоняет alias-check.ts, ящик на адресе действующего алиаса —
+   * маршрут создания. То есть колонка почти всегда показывала ноль.
+   *
+   * Настоящий вопрос, ради которого в неё смотрят, — «сколько пересылок
+   * ведёт В этот ящик»: их и уничтожает удаление ящика (purgeMailboxData).
+   */
   /** Увеличивает счётчик неудач и при переполнении ставит блокировку. */
   async markAdminLoginFailure(
     id: number,
@@ -536,6 +547,15 @@ export class AdminDb {
     search?: string | undefined;
     domainId?: number | undefined;
     active?: boolean | undefined;
+    /**
+     * Отбор по списку адресов — для фильтра «превысившие квоту».
+     *
+     * Занятость ящика живёт не в базе, а в снимке показателей, поэтому
+     * сам список считает маршрут, а сюда приходит уже готовым. Пустой
+     * список означает «никто не подходит», а не «фильтра нет»: иначе
+     * человек увидел бы все ящики там, где ждал ни одного.
+     */
+    emails?: string[] | undefined;
     limit: number;
     offset: number;
   }): Promise<{ rows: MailUserRow[]; total: number }> {
@@ -555,6 +575,10 @@ export class AdminDb {
       values.push(filters.active);
       where.push(`u.active = $${values.length}`);
     }
+    if (filters.emails !== undefined) {
+      values.push(filters.emails);
+      where.push(`lower(u.email) = ANY($${values.length}::text[])`);
+    }
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
 
     const totalRow = await this.one<{ count: string }>(
@@ -565,7 +589,7 @@ export class AdminDb {
     const rows = await this.query<MailUserRow>(
       `SELECT u.id, u.domain_id, u.email, u.display_name, u.quota_bytes, u.active,
               u.created_at, u.updated_at, d.name AS domain,
-              (SELECT count(*) FROM virtual_aliases a WHERE a.source = u.email)::text AS alias_count
+              (SELECT count(*) FROM virtual_aliases a WHERE lower(a.destination) = lower(u.email))::text AS alias_count
          FROM virtual_users u
          JOIN virtual_domains d ON d.id = u.domain_id
          ${whereSql}
@@ -580,7 +604,7 @@ export class AdminDb {
     return this.one<MailUserRow>(
       `SELECT u.id, u.domain_id, u.email, u.display_name, u.quota_bytes, u.active,
               u.created_at, u.updated_at, d.name AS domain,
-              (SELECT count(*) FROM virtual_aliases a WHERE a.source = u.email)::text AS alias_count
+              (SELECT count(*) FROM virtual_aliases a WHERE lower(a.destination) = lower(u.email))::text AS alias_count
          FROM virtual_users u JOIN virtual_domains d ON d.id = u.domain_id
         WHERE u.id = $1`,
       [id],
@@ -591,7 +615,7 @@ export class AdminDb {
     return this.one<MailUserRow>(
       `SELECT u.id, u.domain_id, u.email, u.display_name, u.quota_bytes, u.active,
               u.created_at, u.updated_at, d.name AS domain,
-              (SELECT count(*) FROM virtual_aliases a WHERE a.source = u.email)::text AS alias_count
+              (SELECT count(*) FROM virtual_aliases a WHERE lower(a.destination) = lower(u.email))::text AS alias_count
          FROM virtual_users u JOIN virtual_domains d ON d.id = u.domain_id
         WHERE lower(u.email) = lower($1)`,
       [email],
@@ -759,7 +783,7 @@ export class AdminDb {
     }
   }
 
-  async purgeMailboxData(email: string): Promise<number> {
+  async purgeMailboxData(email: string): Promise<{ rows: number; aliases: string[] }> {
     /*
      * ОДНОРАЗОВЫЙ АДРЕС — ЭТО ДВЕ СТРОКИ, И УДАЛЯТЬ НАДО ОБЕ.
      *
@@ -783,6 +807,8 @@ export class AdminDb {
      * ни одной строки, нормально: он и не должен знать про эту связь.
      */
     let removed = 0;
+    /** Уничтоженные пересылки — поимённо, для журнала аудита. */
+    const removedAliases: string[] = [];
     try {
       const routes = await this.pool.query(
         `DELETE FROM virtual_aliases
@@ -811,11 +837,21 @@ export class AdminDb {
      * «Алиасов» в списке ящиков считает только направление `source`.
      */
     try {
-      const inbound = await this.pool.query(
-        `DELETE FROM virtual_aliases WHERE lower(destination) = lower($1)`,
+      /*
+       * RETURNING, а не просто число: уничтоженные пересылки надо назвать
+       * поимённо в журнале аудита. Раньше здесь оставалось только общее
+       * `db_rows_removed` вперемешку с одноразовыми адресами — то есть
+       * пересылка, работавшая годами, умирала молча и восстановить её было
+       * неоткуда. У удаления домена ровно это уже починено: там полный
+       * список уходит в before.aliases_removed (routes/domains.ts).
+       */
+      const inbound = await this.pool.query<{ source: string; destination: string }>(
+        `DELETE FROM virtual_aliases WHERE lower(destination) = lower($1)
+         RETURNING source, destination`,
         [email],
       );
       removed += inbound.rowCount ?? 0;
+      for (const row of inbound.rows) removedAliases.push(`${row.source} -> ${row.destination}`);
     } catch (err) {
       if (!isUndefinedTable(err)) throw err;
     }
@@ -838,7 +874,7 @@ export class AdminDb {
         if (!isUndefinedTable(err)) throw err;
       }
     }
-    return removed;
+    return { rows: removed, aliases: removedAliases };
   }
 
   /* ---------------------------------------------------------------- */

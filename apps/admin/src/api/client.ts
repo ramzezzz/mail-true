@@ -252,7 +252,7 @@ export const api = {
   users: (params: {
     search?: string | undefined;
     domainId?: number | undefined;
-    status?: 'all' | 'active' | 'blocked' | undefined;
+    status?: 'all' | 'active' | 'blocked' | 'overquota' | undefined;
     limit?: number | undefined;
     offset?: number | undefined;
   }) => get<MailUserPage>(`/users${query(params)}`),
