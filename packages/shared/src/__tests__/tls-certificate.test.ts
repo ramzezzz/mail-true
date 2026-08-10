@@ -110,10 +110,18 @@ test('имена, которых нет, называются поимённо �
   const issue = result.issues.find((i) => i.id === 'names');
   assert.ok(issue, 'должна быть претензия к именам');
   assert.match(issue.detail, /admin\.mtweb\.test/);
-  assert.match(issue.detail, /autoconfig\.mtweb\.test/);
+  /*
+   * autoconfig теперь желательный, а не обязательный: его отсутствие —
+   * отдельное предупреждение, а не отказ. Претензии должны быть обе, и
+   * каждая в своей строгости.
+   */
+  const optionalIssue = result.issues.find((i) => i.id === 'names-optional');
+  assert.ok(optionalIssue, 'должно быть предупреждение про желательные имена');
+  assert.equal(optionalIssue.level, 'warn');
+  assert.match(optionalIssue.detail, /autoconfig\.mtweb\.test/);
   // Не просто «не хватает», а что именно перестанет работать.
   assert.match(issue.detail, /панель управления/);
-  assert.match(issue.detail, /автонастройка/);
+  assert.match(optionalIssue.detail, /автонастройка/);
   assert.ok(result.missingNames.includes('admin.mtweb.test'));
 });
 
@@ -176,13 +184,21 @@ test('подстановочное имя покрывает один урове
   assert.equal(nameMatches('MAIL.EXAMPLE.RU', 'mail.example.ru'), true);
 });
 
-test('список обязательных имён — все три службы плюс имя сервера', () => {
+test('обязательны почта, панель и имя сервера; автонастройка — желательна', () => {
+  /*
+   * autoconfig переехал в желательные. Без него почтовые программы не
+   * заберут настройки сами, и человек введёт адреса руками — это
+   * неудобство, а не неработающая почта. Пока он был обязательным,
+   * панель отказывалась ставить рабочий коммерческий сертификат на
+   * mail. + admin. + имя сервера: любой «отказ» закрывает применение
+   * целиком, и человек уходил копировать файлы по ssh мимо всех
+   * проверок.
+   */
   const names = expectedCertificateNames('example.ru', 'mx1.example.ru');
-  assert.deepEqual(names.required, [
-    'mx1.example.ru',
-    'mail.example.ru',
-    'admin.example.ru',
+  assert.deepEqual(names.required, ['mx1.example.ru', 'mail.example.ru', 'admin.example.ru']);
+  assert.deepEqual(names.optional, [
+    'example.ru',
     'autoconfig.example.ru',
+    'autodiscover.example.ru',
   ]);
-  assert.deepEqual(names.optional, ['example.ru', 'autodiscover.example.ru']);
 });

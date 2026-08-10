@@ -349,13 +349,31 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
     let current: TlsValidationResult | null = null;
     let unreadable = '';
     try {
-      const [certificatePem, privateKeyPem] = await Promise.all([
-        readFile(certPath, 'utf8'),
-        readFile(keyPath, 'utf8'),
-      ]);
+      /*
+       * СЕРТИФИКАТ И КЛЮЧ ЧИТАЮТСЯ РАЗДЕЛЬНО.
+       *
+       * Раньше их брал один Promise.all в одном try, и любая ошибка гасила
+       * весь разбор. А ключ на штатной установке недоступен: и установщик,
+       * и продление Let's Encrypt кладут его с правами только для
+       * владельца-root, тогда как сервер приложения работает под другим
+       * пользователем. То есть на настоящем сервере раздел «Сертификат»
+       * не показывал НИЧЕГО — ни срока, ни имён, ни разбора, — а вместо
+       * этого писал «EACCES: permission denied».
+       *
+       * Проверено живой проверкой на стенде: ответ содержал ровно
+       * `unreadable: EACCES … mail.key` и `current: null`.
+       *
+       * В разработке это не видно: там сертификат обычно ставили ИЗ
+       * панели, и файл создавал сам сервер.
+       *
+       * Ключ нужен ровно одной проверке — «пара сходится». Нет ключа —
+       * будет предупреждение об этом, остальное покажем.
+       */
+      const certificatePem = await readFile(certPath, 'utf8');
+      const privateKeyPem = await readFile(keyPath, 'utf8').catch(() => undefined);
       current = validateCertificateBundle({
         certificatePem,
-        privateKeyPem,
+        ...(privateKeyPem === undefined ? {} : { privateKeyPem }),
         expectedNames: expected.required,
         optionalNames: expected.optional,
         ...(((await trustedRootSubjects()) ?? undefined) === undefined
@@ -387,7 +405,12 @@ export async function adminTlsRoutes(app: FastifyInstance): Promise<void> {
       renewal: {
         report: renewal.report,
         problem: renewal.problem,
-        verdict: gradeRenewal(renewal, source),
+        /*
+         * Срок фактического сертификата передаётся оценке: у своего
+         * сертификата автопродления нет, и «в порядке» на кончившемся
+         * вчера — это зелёная строка о неработающем TLS.
+         */
+        verdict: gradeRenewal(renewal, source, Date.now(), current?.certificate?.daysLeft ?? null),
         /*
          * Команды отдаются сервером, а не зашиты в интерфейс: путь к
          * скрипту знает сервер, и расхождение здесь означало бы

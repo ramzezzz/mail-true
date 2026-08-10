@@ -33,7 +33,17 @@ test('сертификат: истёкший — отказ, истекающи�
   assert.equal(gradeCertificate(90, 21), 'ok');
   assert.equal(gradeCertificate(21, 21), 'warn');
   assert.equal(gradeCertificate(1, 21), 'warn');
-  assert.equal(gradeCertificate(0, 21), 'fail');
+  /*
+   * Ноль — это ПОСЛЕДНИЙ ДЕНЬ, а не «истёк».
+   *
+   * Остаток округляется вниз (metrics-tls.ts), поэтому у сертификата с
+   * двадцатью часами жизни daysLeft === 0. С прежним «fail» раздел
+   * «Наблюдение» показывал красное «Истёк 0 суток назад» на работающем
+   * сертификате — и расходился с разбором в packages/shared, где порог
+   * всегда был «меньше нуля».
+   */
+  assert.equal(gradeCertificate(0, 21), 'warn');
+  assert.equal(gradeCertificate(-1, 21), 'fail');
   assert.equal(gradeCertificate(-3, 21), 'fail');
 });
 

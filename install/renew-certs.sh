@@ -120,11 +120,35 @@ deploy() {
         RENEW_MESSAGE="Сертификата Let's Encrypt на машине нет ($LE_DIR/fullchain.pem). Выпустить: sudo bash install/renew-certs.sh --force"
         die "нет сертификата $LE_DIR/fullchain.pem"
     fi
-    mkdir -p "$CERT_DIR"
+    #
+    # РАСКЛАДКА — ЭТО ТОЖЕ ЧАСТЬ ПРОДЛЕНИЯ.
+    #
+    # Отметка «продлён» ставилась ДО этого места, а любой отказ здесь
+    # (нет места, права на каталог, том не примонтирован) обрывал скрипт
+    # по set -e. Сторож дописывал в отчёт «Сертификат продлён, теперь
+    # действует до …», панель показывала зелёное «Включено», а службы
+    # продолжали отдавать старый файл. Ровно тот молчаливый отказ, ради
+    # которого отчёт и заведён.
+    #
+    # Поэтому каждый шаг раскладки сам объявляет провал.
+    #
+    if ! mkdir -p "$CERT_DIR"; then
+        RENEW_OUTCOME=failed
+        RENEW_MESSAGE="Не удалось создать каталог сертификатов $CERT_DIR"
+        die "не создаётся $CERT_DIR"
+    fi
     # Именно копия, а не ссылка: контейнеры видят только каталог certs,
     # символическая ссылка наружу внутри контейнера никуда не ведёт.
-    install -m 644 "$LE_DIR/fullchain.pem" "$CERT_DIR/mail.crt"
-    install -m 600 "$LE_DIR/privkey.pem"   "$CERT_DIR/mail.key"
+    if ! install -m 644 "$LE_DIR/fullchain.pem" "$CERT_DIR/mail.crt"; then
+        RENEW_OUTCOME=failed
+        RENEW_MESSAGE="Сертификат продлён, но разложить его по стеку не удалось: не записывается $CERT_DIR/mail.crt"
+        die "не записывается $CERT_DIR/mail.crt"
+    fi
+    if ! install -m 600 "$LE_DIR/privkey.pem" "$CERT_DIR/mail.key"; then
+        RENEW_OUTCOME=failed
+        RENEW_MESSAGE="Сертификат продлён, но разложить ключ по стеку не удалось: не записывается $CERT_DIR/mail.key"
+        die "не записывается $CERT_DIR/mail.key"
+    fi
     # Отметка «откуда сертификат» — её читают панель и сам этот скрипт.
     printf 'letsencrypt\n' > "$CERT_DIR/source"
     chmod 644 "$CERT_DIR/source" 2>/dev/null || true

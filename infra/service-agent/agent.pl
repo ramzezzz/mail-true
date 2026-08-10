@@ -1479,7 +1479,14 @@ sub do_certbot {
             "set -e; cp -L /le/live/$cert_name/fullchain.pem /certs/mail.crt.tmp; "
               . "cp -L /le/live/$cert_name/privkey.pem /certs/mail.key.tmp; "
               . 'chmod 644 /certs/mail.crt.tmp; chmod 600 /certs/mail.key.tmp; '
-              . 'mv /certs/mail.crt.tmp /certs/mail.crt; mv /certs/mail.key.tmp /certs/mail.key; '
+              # Сначала КЛЮЧ, потом сертификат — порядок обратный тому,
+              # что был, и выбран он не случайно: сторож (watch-certs.sh)
+              # следит за сертификатом и перечитывает пару, увидев его
+              # новым. Переименуй мы сертификат первым — в это окно он
+              # прочитал бы новый сертификат со СТАРЫМ ключом, то есть
+              # заведомо несовпадающую пару. Ровно этот порядок выбран в
+              # панели (installCertificateFiles), и объяснение там же.
+              . 'mv /certs/mail.key.tmp /certs/mail.key; mv /certs/mail.crt.tmp /certs/mail.crt; '
               . "printf 'letsencrypt\\n' > /certs/source",
         );
         my ($crc, $cout, $cerr) = run('docker', @copy);

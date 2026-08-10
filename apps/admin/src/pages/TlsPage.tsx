@@ -298,7 +298,17 @@ function LetsEncryptPanel({
         email: email.trim(),
         staging,
         includeOptional,
-        ...(overwritesCustom ? { replaceCustom: true } : {}),
+        /*
+         * Подтверждение уходит ТО, что человек поставил, а не «да» из
+         * самого факта «сейчас стоит свой сертификат».
+         *
+         * Раньше сюда подставлялось `overwritesCustom`, то есть клиент
+         * всегда отвечал «подтверждаю». Серверная защита при этом
+         * описана как осознанное подтверждение — а держалась ровно на
+         * том, что кнопка в этой же странице недоступна без галочки.
+         * Любой другой клиент (или правка формы) обходил её целиком.
+         */
+        ...(overwritesCustom && confirmReplace ? { replaceCustom: true } : {}),
       }),
     onSuccess: (result) => {
       setOutput(result.output);

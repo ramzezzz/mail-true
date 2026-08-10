@@ -66,7 +66,23 @@ export interface CertificateInfo {
 export interface TlsBundleInput {
   /** Сертификат сервера. Допускается файл, где за ним сразу идёт цепочка. */
   readonly certificatePem: string;
-  readonly privateKeyPem: string;
+  /**
+   * Приватный ключ. НЕОБЯЗАТЕЛЕН.
+   *
+   * Он нужен ровно одной проверке — «ключ и сертификат одна пара». Всё
+   * остальное (срок, имена, издатель, цепочка) читается из самого
+   * сертификата.
+   *
+   * Без этого послабления раздел «Сертификат» на штатной установке не
+   * показывал НИЧЕГО: ключ лежит с правами 600 и владельцем root (так
+   * его кладут и установщик, и продление Let's Encrypt), а сервер
+   * приложения работает под другим пользователем. Одна ошибка чтения
+   * гасила весь разбор, и вместо срока и имён человек видел
+   * «EACCES: permission denied». Заметно это только на настоящем
+   * сервере: после замены сертификата ИЗ панели файл создаёт уже сам
+   * сервер, и в разработке дефекта не видно.
+   */
+  readonly privateKeyPem?: string;
   /** Промежуточные сертификаты отдельным файлом, если они пришли так. */
   readonly chainPem?: string;
   /** Имена, которые сертификат обязан покрывать. */
@@ -128,10 +144,24 @@ export function expectedCertificateNames(
   domain: string,
   hostname: string,
 ): { required: string[]; optional: string[] } {
-  const required = [hostname, `mail.${domain}`, `admin.${domain}`, `autoconfig.${domain}`];
-  // Корневой домен: почта открывается и по нему, но без него она всё же
-  // работает — по mail.<домен>. Поэтому предупреждение, а не отказ.
-  const optional = [domain, `autodiscover.${domain}`];
+  const required = [hostname, `mail.${domain}`, `admin.${domain}`];
+  /*
+   * ПРЕДУПРЕЖДЕНИЕ, А НЕ ОТКАЗ.
+   *
+   * Корневой домен: почта открывается и по нему, но работает и без — по
+   * mail.<домен>.
+   *
+   * autoconfig и autodiscover: без них почтовые программы не заберут
+   * настройки сами, и человек введёт адреса руками. Это неудобство, а не
+   * неработающая почта.
+   *
+   * Раньше autoconfig стоял в обязательных, а панель отказывает на любом
+   * отказе — то есть рабочий коммерческий сертификат на mail. + admin. +
+   * имя сервера поставить через панель было НЕЛЬЗЯ ВООБЩЕ, только
+   * копированием файлов по ssh, мимо всех этих проверок. Проверка,
+   * которая запрещает рабочую настройку, выталкивает человека мимо себя.
+   */
+  const optional = [domain, `autoconfig.${domain}`, `autodiscover.${domain}`];
   return {
     required: [...new Set(required.filter((n) => n !== ''))],
     optional: [...new Set(optional.filter((n) => n !== '' && !required.includes(n)))],
@@ -305,12 +335,27 @@ export function validateCertificateBundle(input: TlsBundleInput): TlsValidationR
   const leafInfo = describe(leaf, now);
 
   // --- 2. Ключ подходит к сертификату -------------------------------
-  const keyBlocks = splitPem(input.privateKeyPem).filter((b) => b.label.includes('PRIVATE KEY'));
-  if (keyBlocks.length === 0) {
+  /*
+   * Ключа может не быть вовсе — тогда пару сверить нечем, и это
+   * ПРЕДУПРЕЖДЕНИЕ, а не отказ: остальное о сертификате мы знаем и
+   * показать обязаны.
+   */
+  const keyPem = input.privateKeyPem;
+  if (keyPem === undefined) {
+    warn(
+      'key-unavailable',
+      'Пару «ключ и сертификат» проверить нечем',
+      'Приватный ключ недоступен для чтения — обычно так и должно быть: его кладут с правами ' +
+        'только для владельца. Всё остальное в сертификате проверено.',
+    );
+  }
+  const keyBlocks =
+    keyPem === undefined ? [] : splitPem(keyPem).filter((b) => b.label.includes('PRIVATE KEY'));
+  if (keyPem !== undefined && keyBlocks.length === 0) {
     fail(
       'key-format',
       'Это не приватный ключ в PEM',
-      looksBinary(input.privateKeyPem)
+      looksBinary(keyPem ?? '')
         ? 'Файл ключа двоичный — похоже на DER или PKCS#12.'
         : 'В файле ключа нет блока «-----BEGIN PRIVATE KEY-----» (или RSA/EC PRIVATE KEY).',
       'Если ключ внутри .pfx:  openssl pkcs12 -in cert.pfx -nocerts -nodes -out key.pem',
@@ -320,8 +365,12 @@ export function validateCertificateBundle(input: TlsBundleInput): TlsValidationR
 
   let keyOk = false;
   try {
-    const key = createPrivateKey(keyBlocks[0]?.pem ?? '');
-    keyOk = leaf.checkPrivateKey(key);
+    // Ключа нет — пару не сверяем вовсе, предупреждение уже записано выше.
+    if (keyPem === undefined) keyOk = true;
+    else {
+      const key = createPrivateKey(keyBlocks[0]?.pem ?? '');
+      keyOk = leaf.checkPrivateKey(key);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     fail(
@@ -350,7 +399,7 @@ export function validateCertificateBundle(input: TlsBundleInput): TlsValidationR
     );
     return { ...empty, certificate: leafInfo };
   }
-  ok('key-match', 'Ключ подходит к сертификату', 'Пара сходится.');
+  if (keyPem !== undefined) ok('key-match', 'Ключ подходит к сертификату', 'Пара сходится.');
 
   // --- 3. Срок ------------------------------------------------------
   const startsAt = new Date(leafInfo.validFrom);

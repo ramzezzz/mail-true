@@ -736,10 +736,16 @@ export async function adminMonitoringRoutes(app: FastifyInstance): Promise<void>
           ? (cert.error ?? 'Сертификат не прочитан')
           : cert.daysLeft === null
             ? 'Срок действия прочитать не удалось'
-            : cert.daysLeft <= 0
+            : cert.daysLeft < 0
               ? `Истёк ${String(-cert.daysLeft)} суток назад`
-              : `Действует ещё ${String(cert.daysLeft)} суток, до ${dayOf(cert.validTo)}` +
-                (cert.selfSigned ? '; самоподписанный' : ''),
+              : cert.daysLeft === 0
+                ? // Остаток округляется вниз: ноль — это «сегодня последний
+                  // день», а не «истёк». Прежний текст «Истёк 0 суток
+                  // назад» и врал, и читался как бессмыслица.
+                  `Истекает сегодня, ${dayOf(cert.validTo)}` +
+                  (cert.selfSigned ? '; самоподписанный' : '')
+                : `Действует ещё ${String(cert.daysLeft)} суток, до ${dayOf(cert.validTo)}` +
+                  (cert.selfSigned ? '; самоподписанный' : ''),
         ...(state === 'ok' ? {} : { hint: `Продление: ${RENEW_COMMAND} (при отказе — с --force)` }),
       };
     });

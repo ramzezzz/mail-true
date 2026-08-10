@@ -90,7 +90,17 @@ export function gradeDisk(usedPercent: number): CheckState {
  */
 export function gradeCertificate(daysLeft: number | null, warnDays: number): CheckState {
   if (daysLeft === null) return 'unknown';
-  if (daysLeft <= 0) return 'fail';
+  /*
+   * Истёкшим считается ОТРИЦАТЕЛЬНЫЙ остаток, а не нулевой.
+   *
+   * Остаток округляется вниз (metrics-tls.ts), поэтому у сертификата,
+   * которому жить ещё двадцать часов, `daysLeft === 0`. С прежним
+   * условием раздел «Наблюдение» показывал красное «Истёк 0 суток
+   * назад» на действующем сертификате — и это же расходилось с разбором
+   * в packages/shared, где порог всегда был `< 0`. Два места одного
+   * продукта отвечали по-разному на вопрос «истёк ли».
+   */
+  if (daysLeft < 0) return 'fail';
   if (daysLeft <= warnDays) return 'warn';
   return 'ok';
 }
