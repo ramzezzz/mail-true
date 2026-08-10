@@ -49,6 +49,11 @@ import {
 import { parseMessageHeaders } from '../mail/parse.js';
 import { buildReadReceipt, readReceiptRequest } from '../mail/read-receipt.js';
 import { classifySmtpError, readSendOutcome, type RejectedRecipient } from '../mail/send-result.js';
+import {
+  imapPartSource,
+  inlineQuotedImages,
+  type InlineImageSource,
+} from '../mail/inline-images.js';
 import { htmlToText } from '../mail/text.js';
 import { sanitizeEmailHtml } from '../mail/sanitize.js';
 import { ENCODING_OVERHEAD } from '../config.js';
@@ -159,6 +164,17 @@ async function composeRaw(
      * получатель не спросит, почему письма приходят «от ivan.petrov@».
      */
     fromName?: string;
+    /**
+     * Откуда брать встроенные картинки цитируемого письма.
+     *
+     * В теле, которое цитирует окно написания, они стоят ссылками на наш
+     * же маршрут (`/api/messages/…/parts/…`) — так письмо готовится для
+     * ЧТЕНИЯ. Отправить такую ссылку нельзя: санитайзер снимает адрес
+     * целиком, и у получателя остаётся `<img>` без картинки. Здесь части
+     * скачиваются из ящика и прикладываются встроенными вложениями —
+     * см. mail/inline-images.ts.
+     */
+    inlineSource?: InlineImageSource;
   },
 ): Promise<Buffer> {
   const attachments: Mail.Attachment[] = [];
@@ -217,7 +233,29 @@ async function composeRaw(
 
   // Пользовательский HTML тоже прогоняем через санитайзер:
   // composer не должен рассылать скрипты даже по ошибке фронтенда
-  const cleanHtml = sanitizeEmailHtml(payload.bodyHtml, { allowRemote: true }).html;
+  let cleanHtml = sanitizeEmailHtml(payload.bodyHtml, { allowRemote: true }).html;
+
+  /*
+   * Встроенные картинки цитаты — во вложения письма.
+   *
+   * Делается ДО подсчёта размера ниже: картинки из чужого письма весят
+   * ровно столько же, сколько весили там, и человек должен упереться в
+   * предел письма здесь, а не получить отказ от SMTP.
+   */
+  if (settings?.inlineSource) {
+    const inlined = await inlineQuotedImages(
+      cleanHtml,
+      settings.inlineSource,
+      // Остаток предела в ИСХОДНЫХ байтах: письмо кодируется base64, и
+      // тот же запас, что у обычных вложений, нужен и здесь.
+      Math.max(0, Math.floor(messageMaxBytes / ENCODING_OVERHEAD) - attachedBytes),
+    );
+    cleanHtml = inlined.html;
+    for (const item of inlined.attachments) {
+      attachedBytes += Buffer.isBuffer(item.content) ? item.content.length : 0;
+      attachments.push(item);
+    }
+  }
 
   const options: Mail.Options = {
     // Имя ставится объектом, а не строкой: экранирование кавычек и
@@ -1147,15 +1185,17 @@ export async function composeRoutes(app: FastifyInstance): Promise<void> {
 
     const forwarded = await loadForwardedMessages(session, payload.attachMessageIds ?? []);
     const fromName = await senderDisplayName(session.email);
-    const raw = await composeRaw(
-      payload,
-      session.email,
-      uploads,
-      config.MESSAGE_MAX_BYTES,
-      forwarded,
-      {
+    const raw = await pool.withClient(session.email, session.password, (client) =>
+      composeRaw(payload, session.email, uploads, config.MESSAGE_MAX_BYTES, forwarded, {
         ...(fromName ? { fromName } : {}),
-      },
+        /*
+         * Соединение с ящиком нужно только ради встроенных картинок
+         * цитаты: их части лежат в том письме, которое человек пересылает.
+         * Без таких картинок в теле сюда никто не ходит —
+         * inlineQuotedImages выходит сразу, не открывая ни одной папки.
+         */
+        inlineSource: imapPartSource(client, requireFolder, splitMessageId),
+      }),
     );
 
     // Предел письма известен заранее — незачем узнавать его от SMTP отказом

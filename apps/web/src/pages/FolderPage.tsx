@@ -408,9 +408,20 @@ export function FolderPage() {
       const id = focusedId ?? [...selectedIds][0];
       if (!id) return;
       try {
+        /*
+         * Тело для цитаты берётся С КАРТИНКАМИ, а не в режиме чтения.
+         *
+         * В режиме чтения внешние картинки заменены прозрачным пикселем, а
+         * настоящий адрес убран в data-mt-src — который при отправке
+         * вырезается вместе со всеми data-атрибутами. То есть переслать
+         * рассылку или письмо с картинками в подписи значило переслать
+         * письмо, где вместо каждой картинки пустой пиксель 1×1, и притом
+         * молча. Здесь адреса нужны настоящие: письмо уходит дальше, а не
+         * показывается на экране.
+         */
         const message = await queryClient.fetchQuery({
-          queryKey: queryKeys.message(id, false),
-          queryFn: () => api.getMessage(id, { images: false }),
+          queryKey: queryKeys.message(id, true),
+          queryFn: () => api.getMessage(id, { images: true }),
         });
         const windowId = openCompose(
           kind === 'reply'

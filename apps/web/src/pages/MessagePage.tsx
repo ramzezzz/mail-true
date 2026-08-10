@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MAIL_BODY_CLASS, type Message, type MessageListQuery } from '@mail-true/shared';
 import {
@@ -17,6 +18,7 @@ import {
   useMessageAi,
 } from '../ai/MessageAi';
 import {
+  fetchMessageForQuote,
   useFolders,
   useMessage,
   useMessages,
@@ -140,6 +142,9 @@ function formatSize(bytes: number): string {
 export function MessagePage() {
   const { folderId = 'inbox', messageId } = useParams();
   const navigate = useNavigate();
+  // Нужен, чтобы взять тело письма с настоящими адресами картинок при
+  // ответе и пересылке — см. fetchMessageForQuote.
+  const queryClient = useQueryClient();
   // Адрес открытого ящика: по нему решается, писали ли письмо «вам».
   const myAddress = useAccountAddress();
   const id = messageId ? decodeURIComponent(messageId) : undefined;
@@ -485,7 +490,17 @@ export function MessagePage() {
   // зовёт ровно то же, что кнопки панели, — иначе R и «Ответить» разошлись бы.
   const reply = () => {
     if (!message) return;
-    openCompose(replyInit(message, preferences.quoteOriginalOnReply));
+    /*
+     * Цитата берётся отдельным запросом — с настоящими адресами картинок.
+     * То, что на экране, приготовлено для чтения: внешние картинки там
+     * заменены пустым пикселем, и отправить такое письмо значит отправить
+     * его без картинок. Пока запрос идёт, окно уже открыто с прежним
+     * телом: письмо человек всё равно дописывает, а подмена тела на месте
+     * заняла бы у него курсор.
+     */
+    void fetchMessageForQuote(queryClient, message.id)
+      .then((full) => openCompose(replyInit(full, preferences.quoteOriginalOnReply)))
+      .catch(() => openCompose(replyInit(message, preferences.quoteOriginalOnReply)));
   };
 
   /**
@@ -524,8 +539,17 @@ export function MessagePage() {
 
   const forward = () => {
     if (!message) return;
-    const windowId = openCompose(forwardInit(message));
-    void bringAttachments(message, windowId);
+    // Тот же довод, что и у ответа: пересылать нужно тело с настоящими
+    // адресами картинок, а не заготовку для чтения.
+    void fetchMessageForQuote(queryClient, message.id)
+      .then((full) => {
+        const windowId = openCompose(forwardInit(full));
+        void bringAttachments(full, windowId);
+      })
+      .catch(() => {
+        const windowId = openCompose(forwardInit(message));
+        void bringAttachments(message, windowId);
+      });
   };
 
   /**

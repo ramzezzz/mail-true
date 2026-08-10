@@ -162,6 +162,12 @@ describe('цитата исходного письма в ответе', () => {
     await openMessage(serverSettings({ quoteOriginalOnReply: true }));
     act(() => button('Ответить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
+    /*
+     * Окно открывается после запроса тела С КАРТИНКАМИ: цитировать надо
+     * настоящие адреса, а не заготовку для чтения, где вместо картинок
+     * прозрачные пиксели (см. fetchMessageForQuote).
+     */
+    await waitFor(() => useUiStore.getState().composeWindows.length > 0, 'окно ответа');
     const init = useUiStore.getState().composeWindows[0]?.init;
     expect(init?.bodyHtml).toContain('blockquote');
     expect(init?.bodyHtml).toContain('Текст письма 209');
@@ -171,6 +177,7 @@ describe('цитата исходного письма в ответе', () => {
     await openMessage(serverSettings({ quoteOriginalOnReply: false }));
     act(() => button('Ответить')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
+    await waitFor(() => useUiStore.getState().composeWindows.length > 0, 'окно ответа');
     // Раньше цитата вставлялась всегда: переключатель ничего не значил
     const init = useUiStore.getState().composeWindows[0]?.init;
     expect(init?.bodyHtml).toBeUndefined();
@@ -181,6 +188,7 @@ describe('цитата исходного письма в ответе', () => {
     await openMessage(serverSettings({ quoteOriginalOnReply: false }));
     act(() => button('Переслать')!.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
+    await waitFor(() => useUiStore.getState().composeWindows.length > 0, 'окно пересылки');
     expect(useUiStore.getState().composeWindows[0]?.init.bodyHtml).toContain('Текст письма 209');
   });
 });

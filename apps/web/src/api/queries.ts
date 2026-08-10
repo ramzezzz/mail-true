@@ -6,6 +6,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
@@ -249,6 +250,23 @@ export function sameMessage(
 ): boolean {
   if (!previous) return false;
   return previous[0] === next[0] && previous[1] === next[1];
+}
+
+/**
+ * Тело письма С НАСТОЯЩИМИ адресами картинок — для цитаты.
+ *
+ * В режиме чтения внешние картинки заменены прозрачным пикселем, а их
+ * адреса лежат в data-атрибуте, который при отправке вырезается. Значит
+ * пересылать или цитировать нужно другое тело — то, где адреса на месте.
+ * Отдельный хук, а не флаг у useMessage: цитата берётся ОДИН раз, в
+ * момент нажатия, и не должна ни менять того, что человек видит на
+ * экране, ни разблокировать ему картинки задним числом.
+ */
+export function fetchMessageForQuote(client: QueryClient, id: string): Promise<MessageFull> {
+  return client.fetchQuery({
+    queryKey: queryKeys.message(id, true),
+    queryFn: () => api.getMessage(id, { images: true }),
+  });
 }
 
 export function useMessage(
