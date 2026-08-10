@@ -251,19 +251,29 @@ export function copyHint(check: DnsCheck): string | null {
  * склеивает сам — это и есть штатный способ записать длинный TXT.
  */
 export function zoneTxtValue(value: string): string {
-  const escaped = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const encoder = new TextEncoder();
   const chunks: string[] = [];
   let current = '';
   let bytes = 0;
-  for (const char of escaped) {
-    const size = encoder.encode(char).length;
+  /*
+   * Режем по ИСХОДНЫМ знакам, а не по уже экранированной строке.
+   *
+   * Экранирование превращает один знак в два (обратная косая плюс сам
+   * знак), и нарезка по экранированному тексту могла разложить эту пару
+   * по разным кускам: первый заканчивался обратной косой, второй
+   * начинался кавычкой — и запись становилась синтаксически битой.
+   * Здесь каждый исходный знак переводится целиком и целиком же попадает
+   * в один кусок.
+   */
+  for (const char of value) {
+    const piece = char === '\\' || char === '"' ? `\\${char}` : char;
+    const size = encoder.encode(piece).length;
     if (bytes + size > 255) {
       chunks.push(current);
       current = '';
       bytes = 0;
     }
-    current += char;
+    current += piece;
     bytes += size;
   }
   chunks.push(current);
