@@ -417,7 +417,25 @@ export async function aiUserRoutes(app: FastifyInstance, service: AiService): Pr
    */
   app.post(
     '/chat/stream',
-    { preHandler: app.requireSession, config: { rateLimit: { max: 20, timeWindow: 60_000 } } },
+    {
+      preHandler: app.requireSession,
+      /*
+       * Свой предел, потому что разговор дороже остальных возможностей:
+       * с каждым вопросом наружу уезжает вся история. Ключ — по ЯЩИКУ,
+       * как и у прочих маршрутов помощника (см. AI_RATE_LIMIT): по
+       * умолчанию считался бы адрес клиента, и контора за одним внешним
+       * адресом делила бы двадцать разговоров в минуту на всех.
+       */
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: 60_000,
+          hook: 'preHandler' as const,
+          keyGenerator: (request: { mailSession?: MailSession | null; ip: string }): string =>
+            request.mailSession?.email ?? request.ip,
+        },
+      },
+    },
     async (request, reply) => {
       const mail = session(request);
       const body = chatSchema.parse(request.body);
